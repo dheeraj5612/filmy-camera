@@ -44,6 +44,7 @@ targets:
       gatherCoverageData: false
       testTargets:
         - FilmyCameraTests
+        - FilmyCameraUITests
 
   FilmyCameraTests:
     type: bundle.unit-test
@@ -55,4 +56,16 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.dheeraj.filmycamera.tests
+        TARGETED_DEVICE_FAMILY: "1"
+
+  FilmyCameraUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: FilmyCameraUITests
+    dependencies:
+      - target: FilmyCamera
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dheeraj.filmycamera.uitests
         TARGETED_DEVICE_FAMILY: "1"
