@@ -4,7 +4,7 @@
 
 - [x] Verify the production Swift app target is present under `FilmyCamera/`.
 - [x] Exercise the production `FilmRecipe.builtIns` and `FilmRenderer.render` APIs from XCTest.
-- [x] Confirm the generated Xcode project exposes the `FilmyCamera` scheme and `FilmyCameraTests` target.
+- [x] Confirm the generated Xcode project exposes the `FilmyCamera` scheme, unit tests, and UI tests.
 - [x] Verify the simulator camera shell, editable recipe controls, accessibility labels, and empty-state recovery surface.
 
 ## Product and device QA
@@ -21,7 +21,7 @@
 ## Build and release artifacts
 
 - [x] Run `xcodegen generate` from a clean checkout.
-- [x] Run the iPhone Simulator build and XCTest workflow in `.github/workflows/ios-build.yml`.
+- [x] Run the iPhone Simulator build and XCTest workflow in `.github/workflows/ios-build.yml` (9 unit/renderer tests plus 2 UI tests).
 - [ ] Run a Release archive on a physical-device destination.
 - [x] Validate `Info.plist`, launch behavior, app icon, version `1.0.0`, and build number `1`.
 - [ ] Run App Store Connect upload validation and retain the archive plus dSYM/ symbol artifacts.
@@ -54,10 +54,10 @@ Do not commit certificates, provisioning profiles, API keys, or App Store Connec
 
 ## Verified evidence
 
-- Main release commit: `063899eef40fb39d2597f52935b340fc5f02d9a0`
-- GitHub Actions run: [31579510158](https://github.com/dheeraj5612/filmy-camera/actions/runs/31579510158) — post-merge simulator build and 9 XCTest cases passed.
-- Local simulator: iPhone 17, iOS 26.5 — camera shell, recipe editor, accessibility tree, and simulator capture fallback verified.
-- Local archive: `/tmp/filmycamera-rc-20260812-v4.xcarchive` — current unsigned validation archive with dSYM and privacy manifest present.
-- The merged release includes Provia Standard, camera-session interruption/restart recovery, and automatic signing configuration for team `AQW5C8DEEG`.
+- Main release commit: `d33d8894b2f6f639420b9028a8b8c4ee6070555e`
+- GitHub Actions run: [31588894919](https://github.com/dheeraj5612/filmy-camera/actions/runs/31588894919) — post-merge simulator build and all 11 XCTest cases passed.
+- Local simulator: iPhone 17, iOS 26.5 — camera shell, recipe editor, Gallery/Settings navigation, accessibility tree, screenshots, and simulator capture fallback verified.
+- Local archive: `/tmp/filmycamera-rc-20260812-ui-deterministic.xcarchive` — unsigned validation archive with dSYM and a valid `CA92.1` privacy-manifest reason present.
+- The merged release includes Provia Standard, camera-session interruption/restart recovery, deterministic UI test mode, and automatic signing configuration for team `AQW5C8DEEG`.
 - Signing follow-up: [PR #4](https://github.com/dheeraj5612/filmy-camera/pull/4) and [PR #5](https://github.com/dheeraj5612/filmy-camera/pull/5) merged with green simulator/XCTest checks.
 - Physical QA and App Store Connect submission remain open until device and Apple account access are available.
