@@ -1,0 +1,54 @@
+name: FilmyCamera
+
+options:
+  bundleIdPrefix: com.dheeraj
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: minimal
+    TARGETED_DEVICE_FAMILY: "1"
+    PRODUCT_BUNDLE_IDENTIFIER: com.dheeraj.filmycamera
+    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "1.0.0"
+    SUPPORTS_MACCATALYST: NO
+
+targets:
+  FilmyCamera:
+    type: application
+    platform: iOS
+    sources:
+      - path: FilmyCamera
+    settings:
+      base:
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_EMIT_LOC_STRINGS: YES
+    info:
+      path: FilmyCamera/Info.plist
+      properties:
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        NSCameraUsageDescription: Filmy Camera uses the camera to preview and capture photos with your selected film recipe.
+        NSPhotoLibraryAddUsageDescription: Filmy Camera saves finished photos to your Photos library when you capture.
+        NSPhotoLibraryUsageDescription: Filmy Camera reads your recent photos so you can review them in the in-app gallery.
+    scheme:
+      gatherCoverageData: false
+      testTargets:
+        - FilmyCameraTests
+
+  FilmyCameraTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: FilmyCameraTests
+    dependencies:
+      - target: FilmyCamera
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dheeraj.filmycamera.tests
+        TARGETED_DEVICE_FAMILY: "1"

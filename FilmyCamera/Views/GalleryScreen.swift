@@ -1,0 +1,161 @@
+import Photos
+import SwiftUI
+import UIKit
+
+struct GalleryScreen: View {
+    @ObservedObject var photoLibrary: PhotoLibraryService
+
+    @State private var isShowingPhoto = false
+    @State private var selectedAsset: PHAsset?
+
+    private let columns = [
+        GridItem(.flexible(), spacing: 8),
+        GridItem(.flexible(), spacing: 8),
+        GridItem(.flexible(), spacing: 8)
+    ]
+
+    var body: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 22) {
+                    SectionHeading(
+                        eyebrow: "Your frames",
+                        title: "Gallery",
+                        trailing: photoLibrary.assets.isEmpty ? nil : "\(photoLibrary.assets.count) recent"
+                    )
+
+                    galleryContent
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 18)
+                .padding(.bottom, 28)
+            }
+            .background(FilmyTheme.background.ignoresSafeArea())
+            .toolbar(.hidden, for: .navigationBar)
+            .refreshable {
+                photoLibrary.refresh()
+            }
+        }
+        .task {
+            _ = await photoLibrary.requestAccessIfNeeded()
+        }
+        .sheet(isPresented: $isShowingPhoto) {
+            if let selectedAsset {
+                GalleryDetailView(asset: selectedAsset, photoLibrary: photoLibrary)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var galleryContent: some View {
+        switch photoLibrary.authorizationStatus {
+        case .authorized, .limited:
+            if photoLibrary.assets.isEmpty {
+                EmptyStateCard(
+                    systemName: "photo.on.rectangle.angled",
+                    title: "Your frames will live here",
+                    message: "Capture a moment with a recipe and it will appear in this quiet little roll."
+                )
+            } else {
+                LazyVGrid(columns: columns, spacing: 8) {
+                    ForEach(photoLibrary.assets, id: \.localIdentifier) { asset in
+                        Button {
+                            selectedAsset = asset
+                            isShowingPhoto = true
+                        } label: {
+                            GalleryThumbnail(asset: asset, photoLibrary: photoLibrary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Photo in your gallery")
+                    }
+                }
+            }
+        case .notDetermined:
+            EmptyStateCard(
+                systemName: "photo.badge.plus",
+                title: "Give your roll a home",
+                message: "Allow photo access to show the frames you have made with Filmy Camera."
+            )
+        case .denied, .restricted:
+            EmptyStateCard(
+                systemName: "lock.slash",
+                title: "Photo access is off",
+                message: "Enable Photos access in Settings to see your saved frames.",
+                actionTitle: "Open Settings",
+                action: openSystemSettings
+            )
+        @unknown default:
+            EmptyStateCard(
+                systemName: "photo",
+                title: "Gallery unavailable",
+                message: "Filmy Camera could not read the photo library right now."
+            )
+        }
+    }
+
+    private func openSystemSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
+    }
+}
+
+private struct GalleryThumbnail: View {
+    let asset: PHAsset
+    @ObservedObject var photoLibrary: PhotoLibraryService
+
+    @State private var image: UIImage?
+
+    var body: some View {
+        ZStack {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Rectangle()
+                    .fill(FilmyTheme.panel)
+                    .overlay {
+                        ProgressView().tint(FilmyTheme.accent)
+                    }
+            }
+        }
+        .aspectRatio(0.82, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+        }
+        .task(id: asset.localIdentifier) {
+            image = await photoLibrary.image(for: asset, targetSize: CGSize(width: 360, height: 440))
+        }
+    }
+}
+
+private struct GalleryDetailView: View {
+    let asset: PHAsset
+    @ObservedObject var photoLibrary: PhotoLibraryService
+
+    @State private var image: UIImage?
+
+    var body: some View {
+        ZStack {
+            FilmyTheme.background.ignoresSafeArea()
+
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(16)
+            } else {
+                ProgressView().tint(FilmyTheme.accent)
+            }
+        }
+        .task {
+            image = await photoLibrary.image(for: asset, targetSize: CGSize(width: 1600, height: 2200))
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Selected gallery photo")
+    }
+}

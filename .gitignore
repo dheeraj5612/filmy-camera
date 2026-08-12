@@ -1,0 +1,28 @@
+.DS_Store
+
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.moved-aside
+
+# Swift Package Manager / tooling
+.build/
+.swiftpm/
+Packages/
+
+# Local release credentials and archives
+*.p12
+*.mobileprovision
+*.cer
+*.ipa
+*.xcarchive
+fastlane/report.xml
+fastlane/README.md
+fastlane/screenshots/
+fastlane/test_output/
+
+# Generated Xcode project is reproducible from project.yml
+FilmyCamera.xcodeproj/project.xcworkspace/xcuserdata/
+FilmyCamera.xcodeproj/xcuserdata/
