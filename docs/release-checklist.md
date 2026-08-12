@@ -25,7 +25,7 @@
 - [ ] Run a Release archive on a physical-device destination.
 - [x] Validate `Info.plist`, launch behavior, app icon, version `1.0.0`, and build number `1`.
 - [ ] Run App Store Connect upload validation and retain the archive plus dSYM/ symbol artifacts.
-- [x] Complete the App Store metadata draft in `docs/app-store/metadata-en-US.md`.
+- [x] App Store metadata draft prepared; final App Store Connect pricing, availability, screenshots, legal copy, and support contact remain open.
 - [ ] Produce required device screenshots and an optional preview video.
 - [x] Confirm the privacy policy, GitHub support URL, and marketing URL are live.
 
@@ -54,10 +54,10 @@ Do not commit certificates, provisioning profiles, API keys, or App Store Connec
 
 ## Verified evidence
 
-- Main release commit: `36db658724b584863b17540036bab22211d7fe56`
-- GitHub Actions run: [31589400115](https://github.com/dheeraj5612/filmy-camera/actions/runs/31589400115) — main-branch simulator build and all 11 XCTest cases passed.
+- Current main commit: `36db658724b584863b17540036bab22211d7fe56`
+- GitHub Actions run: [31589400115](https://github.com/dheeraj5612/filmy-camera/actions/runs/31589400115) — green simulator build; 9 unit/renderer tests plus 2 UI tests (11 total) passed.
 - Local simulator: iPhone 17, iOS 26.5 — camera shell, recipe editor, Gallery/Settings navigation, accessibility tree, screenshots, and simulator capture fallback verified.
-- Local archive: `/tmp/filmycamera-rc-20260812-ui-deterministic.xcarchive` — unsigned validation archive with dSYM and a valid `CA92.1` privacy-manifest reason present.
-- The merged release includes Provia Standard, camera-session interruption/restart recovery, deterministic UI test mode, and automatic signing configuration for team `AQW5C8DEEG`.
+- Historical unsigned archive: `/tmp/filmycamera-rc-20260812-ui-deterministic.xcarchive` — contains dSYM and `PrivacyInfo.xcprivacy`, but predates current main; rebuild and pin a current archive before release use.
+- Current product evidence covers Provia Standard, camera-session recovery, and deterministic UI-test mode. Signing is only declared in project settings for team `AQW5C8DEEG`; CI remains simulator-only and unsigned, with no signed device archive or App Store submission proven.
 - Signing follow-up: [PR #4](https://github.com/dheeraj5612/filmy-camera/pull/4) and [PR #5](https://github.com/dheeraj5612/filmy-camera/pull/5) merged with green simulator/XCTest checks.
 - Physical QA and App Store Connect submission remain open until device and Apple account access are available.
