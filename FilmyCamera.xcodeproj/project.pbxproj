@@ -25,6 +25,7 @@
 		C70373098CEE45627237523A /* FilmyCameraUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61617C6B4DB09D291F5DEA10 /* FilmyCameraUITests.swift */; };
 		C8D2AB628B416941BA34D460 /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED28FA298007EE9E0D94A12B /* Components.swift */; };
 		D28FC5CE68D1A36040EFD9B0 /* PhotoLibraryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8433ABA6CF2F34E7F51023B6 /* PhotoLibraryService.swift */; };
+		E9619C95C6EF4EC86F964D60 /* PhotoLibraryMetadataTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB68FCDDC4EB7CE97CF2AD4F /* PhotoLibraryMetadataTests.swift */; };
 		EC2F24E354BEA00F79F85586 /* RecipeInvariantsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33F33B6C5BE2B0CAE0ECA261 /* RecipeInvariantsTests.swift */; };
 		F84D685F791EF68BD232EC02 /* FilmRecipe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2742A27161237B210E4D8A3C /* FilmRecipe.swift */; };
 /* End PBXBuildFile section */
@@ -66,6 +67,7 @@
 		C34BB7CBA412A194086446CD /* FilmyCameraTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = FilmyCameraTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D59729E8AC667A9120C460CB /* FilmyCameraApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmyCameraApp.swift; sourceTree = "<group>"; };
 		DC1520CC0C54A1860FEB034D /* CameraService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraService.swift; sourceTree = "<group>"; };
+		EB68FCDDC4EB7CE97CF2AD4F /* PhotoLibraryMetadataTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibraryMetadataTests.swift; sourceTree = "<group>"; };
 		EC05E47E4FDF736EC43A42AB /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		ED28FA298007EE9E0D94A12B /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
 		F48EF3C63EAF05BFADF4D9C3 /* FilmyCameraUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = FilmyCameraUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -87,6 +89,7 @@
 		2B5AB398864BBC150E221C4B /* FilmyCameraTests */ = {
 			isa = PBXGroup;
 			children = (
+				EB68FCDDC4EB7CE97CF2AD4F /* PhotoLibraryMetadataTests.swift */,
 				33F33B6C5BE2B0CAE0ECA261 /* RecipeInvariantsTests.swift */,
 				C2F0913587D09FEB4D0E8E14 /* RendererOutputBoundsTests.swift */,
 			);
@@ -296,6 +299,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E9619C95C6EF4EC86F964D60 /* PhotoLibraryMetadataTests.swift in Sources */,
 				EC2F24E354BEA00F79F85586 /* RecipeInvariantsTests.swift in Sources */,
 				589A5A125A91DA3228E84E06 /* RendererOutputBoundsTests.swift in Sources */,
 			);

@@ -97,7 +97,11 @@ struct GalleryScreen: View {
                             GalleryThumbnail(asset: asset, photoLibrary: photoLibrary)
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("Photo in your gallery")
+                        .accessibilityLabel(
+                            photoLibrary.metadata(for: asset).map {
+                                "Photo in your gallery, \($0.recipe.name)"
+                            } ?? "Photo in your gallery"
+                        )
                     }
                 }
             }
@@ -199,7 +203,12 @@ private struct GalleryDetailView: View {
     let asset: PHAsset
     @ObservedObject var photoLibrary: PhotoLibraryService
 
+    @Environment(\.dismiss) private var dismiss
     @State private var image: UIImage?
+    @State private var isShowingShareSheet = false
+    @State private var isShowingDeleteConfirmation = false
+    @State private var isDeleting = false
+    @State private var actionErrorMessage: String?
 
     var body: some View {
         ZStack {
@@ -221,6 +230,9 @@ private struct GalleryDetailView: View {
             if status != .authorized && status != .limited {
                 image = nil
             }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            detailToolbar
         }
         .overlay(alignment: .bottom) {
             if let metadata = photoLibrary.metadata(for: asset) {
@@ -248,5 +260,99 @@ private struct GalleryDetailView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(photoLibrary.metadata(for: asset).map { "Selected gallery photo, \($0.recipe.name)" } ?? "Selected gallery photo")
+        .sheet(isPresented: $isShowingShareSheet) {
+            if let image {
+                ShareSheet(items: [image])
+                    .presentationDetents([.medium, .large])
+            }
+        }
+        .confirmationDialog(
+            "Delete this frame?",
+            isPresented: $isShowingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Frame", role: .destructive) {
+                deleteFrame()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the frame from Photos and from your Filmy Camera roll.")
+        }
+        .alert(
+            "Couldn’t update frame",
+            isPresented: Binding(
+                get: { actionErrorMessage != nil },
+                set: { if !$0 { actionErrorMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(actionErrorMessage ?? "Try again in a moment.")
+        }
     }
+
+    private var detailToolbar: some View {
+        HStack(spacing: 10) {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .bold))
+                    .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+                    .background(FilmyTheme.panel, in: Circle())
+            }
+            .accessibilityLabel("Close frame")
+
+            Spacer()
+
+            Button {
+                isShowingShareSheet = true
+            } label: {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 14, weight: .bold))
+                    .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+                    .background(FilmyTheme.panel, in: Circle())
+            }
+            .accessibilityLabel("Share frame")
+            .disabled(image == nil || isDeleting)
+
+            Button {
+                isShowingDeleteConfirmation = true
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 14, weight: .bold))
+                    .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+                    .background(FilmyTheme.panel, in: Circle())
+            }
+            .accessibilityLabel("Delete frame")
+            .disabled(isDeleting)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 6)
+        .background(.ultraThinMaterial)
+    }
+
+    private func deleteFrame() {
+        isDeleting = true
+        photoLibrary.delete(asset: asset) { result in
+            isDeleting = false
+            switch result {
+            case .success:
+                dismiss()
+            case .failure(let error):
+                actionErrorMessage = error.localizedDescription
+            }
+        }
+    }
+}
+
+private struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }

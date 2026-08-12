@@ -258,6 +258,7 @@ struct CaptureButton: View {
             }
         }
         .buttonStyle(.plain)
+        .disabled(isCapturing)
         .accessibilityLabel(isCapturing ? "Saving photo" : "Capture photo")
         .accessibilityHint("Captures the current frame using the selected recipe")
     }
@@ -416,6 +417,7 @@ struct PermissionBadge: View {
 struct PreviewPlaceholder: View {
     let isSimulator: Bool
     let recipe: FilmRecipe
+    var message: String? = nil
     var actionTitle: String?
     var action: (() -> Void)?
 
@@ -439,7 +441,7 @@ struct PreviewPlaceholder: View {
                     Text(isSimulator ? "Preview mode" : "Camera unavailable")
                         .font(.system(size: 19, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
-                    Text(isSimulator ? "Run Filmy Camera on an iPhone to shoot with \(recipe.name)." : "Check camera access in Settings, then try again.")
+                    Text(message ?? (isSimulator ? "Run Filmy Camera on an iPhone to shoot with \(recipe.name)." : "Check camera access in Settings, then try again."))
                         .font(.system(size: 13, weight: .medium, design: .rounded))
                         .foregroundStyle(.white.opacity(0.72))
                         .multilineTextAlignment(.center)
@@ -453,7 +455,7 @@ struct PreviewPlaceholder: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)
                         .background(FilmyTheme.accent, in: Capsule())
-                        .accessibilityHint("Opens Filmy Camera permissions")
+                        .accessibilityHint(actionTitle == "Open Settings" ? "Opens Filmy Camera permissions" : "Attempts to resume the camera")
                 }
             }
             // Keep the explanation above the camera action plate so the
