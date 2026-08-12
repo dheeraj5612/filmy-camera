@@ -20,14 +20,14 @@
 
 ## Build and release artifacts
 
-- [ ] Run `xcodegen generate` from a clean checkout.
-- [ ] Run the iPhone Simulator build and XCTest workflow in `.github/workflows/ios-build.yml`.
+- [x] Run `xcodegen generate` from a clean checkout.
+- [x] Run the iPhone Simulator build and XCTest workflow in `.github/workflows/ios-build.yml`.
 - [ ] Run a Release archive on a physical-device destination.
-- [ ] Validate `Info.plist`, launch behavior, app icon, version `1.0.0`, and build number `1`.
+- [x] Validate `Info.plist`, launch behavior, app icon, version `1.0.0`, and build number `1`.
 - [ ] Run App Store Connect upload validation and retain the archive plus dSYM/ symbol artifacts.
-- [ ] Complete the App Store metadata draft in `docs/app-store/metadata-en-US.md`.
+- [x] Complete the App Store metadata draft in `docs/app-store/metadata-en-US.md`.
 - [ ] Produce required device screenshots and an optional preview video.
-- [ ] Confirm crash reporting, support inbox, privacy policy, and marketing URLs are live.
+- [x] Confirm the privacy policy, GitHub support URL, and marketing URL are live.
 
 ## App Store Connect and Apple requirements
 
@@ -51,3 +51,12 @@ The simulator build/test workflow intentionally uses no Apple Developer credenti
 - Live privacy/support/marketing URLs and support email
 
 Do not commit certificates, provisioning profiles, API keys, or App Store Connect credentials to this repository or GitHub Actions logs.
+
+## Verified evidence
+
+- Main release commit: `fe05608715d5a4acd670086f65861b499abee522`
+- GitHub Actions run: [31574353149](https://github.com/dheeraj5612/filmy-camera/actions/runs/31574353149) — simulator build and 9 XCTest cases passed.
+- Local simulator: iPhone 17, iOS 26.5 — camera shell, recipe editor, accessibility tree, and simulator capture fallback verified.
+- Local archive: `/tmp/filmycamera-rc-20260812-v3.xcarchive` — current unsigned validation archive with dSYM and privacy manifest present.
+- Current working-tree hardening adds Provia Standard and camera-session interruption/restart recovery; it still needs the next merged CI run.
+- Physical QA and App Store Connect submission remain open until device and Apple account access are available.
