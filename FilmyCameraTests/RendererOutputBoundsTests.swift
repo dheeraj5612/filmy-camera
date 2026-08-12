@@ -56,6 +56,78 @@ final class RendererOutputBoundsTests: XCTestCase {
         XCTAssertTrue(output.extent.isEmpty)
     }
 
+    func testRendererMaterializesSinglePixelForEveryQualityTier() {
+        let extent = CGRect(x: 7, y: -3, width: 1, height: 1)
+        let input = CIImage(color: CIColor(red: 0.95, green: 0.18, blue: 0.72, alpha: 0.35))
+            .cropped(to: extent)
+        let recipe = FilmRecipe.builtIns[1]
+        let context = CIContext(options: [
+            .useSoftwareRenderer: true,
+            .cacheIntermediates: false
+        ])
+
+        for quality in [FilmRenderer.Quality.preview, .photo, .export] {
+            let output = FilmRenderer.render(input, recipe: recipe, quality: quality)
+            let pixels = renderFloatPixels(output, extent: extent, context: context)
+
+            XCTAssertEqual(output.extent, extent, "Extent changed at " + String(describing: quality))
+            XCTAssertEqual(pixels.count, 4, "Unexpected pixel count at " + String(describing: quality))
+            XCTAssertTrue(pixels.allSatisfy(\.isFinite), "Non-finite output at " + String(describing: quality))
+            XCTAssertTrue(
+                pixels.allSatisfy { (-0.0005...1.0005).contains(Double($0)) },
+                "Output escaped normalized bounds at " + String(describing: quality) + ": " + String(describing: pixels)
+            )
+        }
+    }
+
+    func testRendererKeepsExtremeFiniteRecipeControlsBounded() {
+        var recipe = FilmRecipe.builtIns[0]
+        recipe.exposure = 4
+        recipe.tone = FilmRecipe.Tone(highlight: 8, shadow: -8)
+        recipe.saturation = -4
+        recipe.contrast = 8
+        recipe.whiteBalance = FilmRecipe.WhiteBalanceShift(temperature: 5, tint: -5)
+        recipe.colorChrome = 4
+        recipe.blueResponse = -4
+        recipe.fxBlue = 4
+        recipe.sharpness = 4
+        recipe.noiseReduction = 4
+        recipe.clarity = -4
+        recipe.grain = 4
+        recipe.grainSize = 0
+        recipe.vignette = 4
+        recipe.halation = 4
+        recipe.palette = FilmRecipe.Palette(
+            redBias: 4,
+            greenBias: -4,
+            blueBias: 4,
+            redGreenMix: -4,
+            greenBlueMix: 4,
+            blueRedMix: -4,
+            saturation: 4
+        )
+
+        let extent = CGRect(x: 0, y: 0, width: 4, height: 4)
+        let input = CIImage(color: CIColor(red: 1, green: 0.03, blue: 0.92, alpha: 1))
+            .cropped(to: extent)
+        let context = CIContext(options: [
+            .useSoftwareRenderer: true,
+            .cacheIntermediates: false
+        ])
+
+        for quality in [FilmRenderer.Quality.preview, .photo, .export] {
+            let output = FilmRenderer.render(input, recipe: recipe, quality: quality)
+            let pixels = renderFloatPixels(output, extent: extent, context: context)
+
+            XCTAssertEqual(output.extent, extent, "Extent changed at " + String(describing: quality))
+            XCTAssertTrue(pixels.allSatisfy(\.isFinite), "Non-finite output at " + String(describing: quality))
+            XCTAssertTrue(
+                pixels.allSatisfy { (-0.0005...1.0005).contains(Double($0)) },
+                "Extreme controls escaped normalized bounds at " + String(describing: quality)
+            )
+        }
+    }
+
     func testFilmBaseChangesRenderedColorEvenWithSharedNumericControls() {
         let extent = CGRect(x: 0, y: 0, width: 16, height: 16)
         let input = CIImage(color: CIColor(red: 0.88, green: 0.42, blue: 0.16, alpha: 1))

@@ -31,7 +31,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      source_changed: ${{ steps.scope.outputs.source_changed }}
+      ios_changed: ${{ steps.scope.outputs.ios_changed }}
+      release_scripts_changed: ${{ steps.scope.outputs.release_scripts_changed }}
 
     steps:
       - name: Check out pull request metadata
@@ -50,20 +51,28 @@ jobs:
           set -euo pipefail
 
           if [[ "${EVENT_NAME}" != "pull_request" ]]; then
-            echo "source_changed=true" >> "${GITHUB_OUTPUT}"
+            echo "ios_changed=true" >> "${GITHUB_OUTPUT}"
+            echo "release_scripts_changed=true" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
 
           changed_files="$(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}")"
-          if grep -Eq '^(FilmyCamera/|FilmyCameraTests/|FilmyCameraUITests/|FilmyCamera\.xcodeproj/|scripts/release/|project\.yml$|\.github/workflows/ios-build\.yml$)' <<<"${changed_files}"; then
-            echo "source_changed=true" >> "${GITHUB_OUTPUT}"
-          else
-            echo "source_changed=false" >> "${GITHUB_OUTPUT}"
+          ios_changed=false
+          release_scripts_changed=false
+
+          if grep -Eq '^(FilmyCamera/|FilmyCameraTests/|FilmyCameraUITests/|FilmyCamera\.xcodeproj/|project\.yml$|\.github/workflows/ios-build\.yml$)' <<<"${changed_files}"; then
+            ios_changed=true
           fi
+          if grep -Eq '^scripts/release/' <<<"${changed_files}"; then
+            release_scripts_changed=true
+          fi
+
+          echo "ios_changed=${ios_changed}" >> "${GITHUB_OUTPUT}"
+          echo "release_scripts_changed=${release_scripts_changed}" >> "${GITHUB_OUTPUT}"
 
   build-and-test:
     needs: change-scope
-    if: needs.change-scope.outputs.source_changed == 'true'
+    if: needs.change-scope.outputs.ios_changed == 'true'
     runs-on: macos-15
     timeout-minutes: 30
 
@@ -164,3 +173,38 @@ jobs:
         env:
           DEVICE_ID: ${{ steps.simulator.outputs.device_id }}
         run: xcrun simctl shutdown "${DEVICE_ID}" 2>/dev/null || true
+
+  release-scripts:
+    needs: change-scope
+    if: needs.change-scope.outputs.release_scripts_changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Validate release script syntax and safety
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          bash -n scripts/release/*.sh
+          shellcheck --severity=warning scripts/release/*.sh
+
+          if git grep -n -I -E -e '-----BEGIN (OPENSSH|RSA|EC|PRIVATE) KEY-----|AuthKey_[A-Za-z0-9]{10,}\.p8|FILMY_ASC_KEY_ID=[A-Za-z0-9]{10}|FILMY_ASC_ISSUER_ID=[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}' -- \
+            ':!scripts/release/prepare-upload.sh' ':!.github/workflows/ios-build.yml'; then
+            echo "Potential credential material found in tracked release files." >&2
+            exit 1
+          fi
+
+          help_output="$(scripts/release/prepare-upload.sh --help)"
+          grep -Fq -- '--check' <<<"${help_output}"
+          grep -Fq -- '--upload' <<<"${help_output}"
+
+          set +e
+          check_output="$(env -u FILMY_ASC_KEY_ID -u FILMY_ASC_ISSUER_ID -u FILMY_ASC_KEY_PATH scripts/release/prepare-upload.sh --check 2>&1)"
+          check_status="$?"
+          set -e
+          [[ "${check_status}" -ne 0 ]]
+          grep -Fq 'no export or upload was attempted' <<<"${check_output}"

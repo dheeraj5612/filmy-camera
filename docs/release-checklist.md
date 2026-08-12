@@ -23,6 +23,7 @@
 - [x] Run `xcodegen generate` from a clean checkout.
 - [x] Run the credential-free release project preflight (`scripts/release/validate-project.sh`).
 - [x] Run the iPhone Simulator build and XCTest workflow in `.github/workflows/ios-build.yml` (9 unit/renderer tests plus 2 UI tests).
+- [x] Keep release-script syntax, ShellCheck, and fail-closed upload-preparation checks in CI.
 - [ ] Run a Release archive on a physical-device destination.
 - [x] Validate `Info.plist`, launch behavior, app icon, version `1.0.0`, and build number `1`.
 - [ ] Run App Store Connect upload validation and retain the archive plus dSYM/ symbol artifacts.
@@ -60,17 +61,21 @@ After the physical device and Apple Distribution signing are available:
 ```sh
 scripts/release/archive-device.sh
 scripts/release/validate-archive.sh build/FilmyCamera.xcarchive
+scripts/release/prepare-upload.sh --check
+scripts/release/prepare-upload.sh --export
+scripts/release/prepare-upload.sh --upload
 ```
 
-The wrapper generates the project, creates a Release archive for a generic iOS device, and fails closed unless the archive has the expected bundle/version, distribution signature, provisioning profile, dSYM, and privacy manifest. It does not upload or store credentials.
+The archive wrapper generates the project and creates a Release archive for a generic iOS device. The upload-preparation wrapper is read-only by default, validates the archive and local signing material before export, requires explicit `--export` or `--upload` modes, and keeps App Store Connect keys outside the repository. It fails closed unless the archive and exported IPA have the expected bundle/version, distribution signature, provisioning profile, dSYM, and privacy manifest. It never stores credentials in the repository or CI logs.
 
 ## Verified evidence
 
-- Last verified main baseline: `9315ea8cd77d65681434abd80e49ce3e07b862bd`
-- GitHub Actions run: [31609484402](https://github.com/dheeraj5612/filmy-camera/actions/runs/31609484402) — green Xcode 16.4 simulator build; 9 unit/renderer tests plus 2 UI tests (11 total) passed.
+- Last verified main baseline: `d163339dd86930066aecde6143673b7617f6a05a`
+- GitHub Actions run: [31610155414](https://github.com/dheeraj5612/filmy-camera/actions/runs/31610155414) — green Xcode 16.4 simulator build; 9 unit/renderer tests plus 2 UI tests (11 total) passed on the verified main baseline.
+- Local branch verification: 15 unit/renderer tests passed; the gallery/settings UI flow passed when run in isolation after the gallery provenance changes.
 - Local release project preflight: `scripts/release/validate-project.sh` passed for bundle `com.dheeraj.filmycamera`, version `1.0.0 (1)`, the privacy manifest, the 1024×1024 icon, and all expected schemes/tests.
 - Local simulator: iPhone 17, iOS 26.5 — camera shell, recipe editor, Gallery/Settings navigation, accessibility tree, screenshots, and simulator capture fallback verified.
 - Historical unsigned archive: `/tmp/filmycamera-rc-20260812-ui-deterministic.xcarchive` — contains dSYM and `PrivacyInfo.xcprivacy`, but predates current main; rebuild and pin a current archive before release use.
-- Current product evidence covers Provia Standard, camera-session recovery, and deterministic UI-test mode. The archive validator now fails closed on a missing profile, mismatched team/bundle, enabled `get-task-allow`, missing dSYM/privacy manifest, or non-distribution signature. Signing is only declared in project settings for team `AQW5C8DEEG`; CI remains simulator-only and unsigned, with no signed device archive or App Store submission proven.
+- Current product evidence covers Provia Standard, camera-session recovery, deterministic UI-test mode, saved recipe/date provenance in Gallery, and release-script fail-closed behavior. The archive validator now fails closed on a missing profile, mismatched team/bundle, enabled `get-task-allow`, missing dSYM/privacy manifest, or non-distribution signature. Signing is only declared in project settings for team `AQW5C8DEEG`; CI remains simulator-only and unsigned, with no signed device archive or App Store submission proven.
 - Signing follow-up: [PR #4](https://github.com/dheeraj5612/filmy-camera/pull/4) and [PR #5](https://github.com/dheeraj5612/filmy-camera/pull/5) merged with green simulator/XCTest checks.
 - Physical QA and App Store Connect submission remain open until device and Apple account access are available.

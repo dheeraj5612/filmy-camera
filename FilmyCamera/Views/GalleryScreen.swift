@@ -159,6 +159,29 @@ private struct GalleryThumbnail: View {
             RoundedRectangle(cornerRadius: 13, style: .continuous)
                 .stroke(Color.white.opacity(0.1), lineWidth: 1)
         }
+        .overlay(alignment: .bottomLeading) {
+            if let metadata = photoLibrary.metadata(for: asset) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(metadata.recipe.name)
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .lineLimit(1)
+                    Text(metadata.capturedAt, format: .dateTime.month(.abbreviated).day().hour().minute())
+                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.72))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background {
+                    LinearGradient(
+                        colors: [.clear, Color.black.opacity(0.72)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                }
+            }
+        }
         .task(id: asset.localIdentifier) {
             image = await photoLibrary.image(for: asset, targetSize: CGSize(width: 360, height: 440))
         }
@@ -199,7 +222,31 @@ private struct GalleryDetailView: View {
                 image = nil
             }
         }
+        .overlay(alignment: .bottom) {
+            if let metadata = photoLibrary.metadata(for: asset) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(metadata.recipe.name)
+                        .font(.system(.headline, design: .rounded).weight(.bold))
+                    Text(metadata.recipe.subtitle)
+                        .font(.system(.subheadline, design: .rounded).weight(.medium))
+                        .foregroundStyle(.white.opacity(0.72))
+                    Text(metadata.capturedAt, format: .dateTime.weekday(.wide).month(.abbreviated).day().hour().minute())
+                        .font(.system(.caption, design: .rounded).weight(.medium))
+                        .foregroundStyle(.white.opacity(0.58))
+                }
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(18)
+                .background {
+                    LinearGradient(
+                        colors: [.clear, FilmyTheme.background.opacity(0.96)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                }
+            }
+        }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Selected gallery photo")
+        .accessibilityLabel(photoLibrary.metadata(for: asset).map { "Selected gallery photo, \($0.recipe.name)" } ?? "Selected gallery photo")
     }
 }

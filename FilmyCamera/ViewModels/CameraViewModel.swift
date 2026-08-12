@@ -178,7 +178,7 @@ final class CameraViewModel: ObservableObject {
 
         isSaving = true
         saveErrorMessage = nil
-        photoLibrary.save(image: reviewImage) { [weak self] saved in
+        photoLibrary.save(image: reviewImage, recipe: reviewRecipe) { [weak self] saved in
             guard let self else { return }
             self.isSaving = false
             if saved {

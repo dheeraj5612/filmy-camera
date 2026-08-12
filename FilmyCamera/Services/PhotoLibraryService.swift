@@ -2,6 +2,11 @@ import Combine
 @preconcurrency import Photos
 import UIKit
 
+struct SavedFrameMetadata: Codable, Hashable, Sendable {
+    let recipe: FilmRecipe
+    let capturedAt: Date
+}
+
 @MainActor
 final class PhotoLibraryService: ObservableObject {
     private final class IdentifierBox: @unchecked Sendable {
@@ -14,10 +19,14 @@ final class PhotoLibraryService: ObservableObject {
 
     private let albumTitle = "Filmy Camera"
     private let savedAssetIdentifiersKey = "filmyCamera.savedAssetIdentifiers"
+    private let savedFrameMetadataKey = "filmyCamera.savedFrameMetadata"
     private let isUITesting: Bool
+
+    private(set) var metadataByAssetIdentifier: [String: SavedFrameMetadata]
 
     init() {
         isUITesting = ProcessInfo.processInfo.arguments.contains("-ui-testing")
+        metadataByAssetIdentifier = Self.loadMetadata(forKey: savedFrameMetadataKey)
         authorizationStatus = isUITesting
             ? .denied
             : PHPhotoLibrary.authorizationStatus(for: .readWrite)
@@ -71,7 +80,11 @@ final class PhotoLibraryService: ObservableObject {
         }
     }
 
-    func save(image: UIImage, completion: @escaping @MainActor (Bool) -> Void) {
+    func save(
+        image: UIImage,
+        recipe: FilmRecipe,
+        completion: @escaping @MainActor (Bool) -> Void
+    ) {
         Task { @MainActor in
             let status = PHPhotoLibrary.authorizationStatus(for: .addOnly)
             let canSave: Bool
@@ -91,6 +104,7 @@ final class PhotoLibraryService: ObservableObject {
             // newly created asset is still available to the app under limited access.
             let canManageAppAlbum = PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized
             let assetIdentifierBox = IdentifierBox()
+            let metadata = SavedFrameMetadata(recipe: recipe, capturedAt: Date())
 
             PHPhotoLibrary.shared().performChanges {
                 let request = PHAssetChangeRequest.creationRequestForAsset(from: image)
@@ -103,7 +117,7 @@ final class PhotoLibraryService: ObservableObject {
                         return
                     }
 
-                    self.rememberSavedAsset(assetIdentifier)
+                    self.rememberSavedAsset(assetIdentifier, metadata: metadata)
                     guard canManageAppAlbum else {
                         self.refresh()
                         completion(true)
@@ -112,11 +126,19 @@ final class PhotoLibraryService: ObservableObject {
 
                     self.addToAppAlbum(assetIdentifier: assetIdentifier) { albumSaved in
                         self.refresh()
-                        completion(albumSaved)
+                        // The image is already safely in Photos if album organization
+                        // fails. Do not report a false save failure or ask the user to
+                        // retry and create a duplicate asset.
+                        _ = albumSaved
+                        completion(true)
                     }
                 }
             }
         }
+    }
+
+    func metadata(for asset: PHAsset) -> SavedFrameMetadata? {
+        metadataByAssetIdentifier[asset.localIdentifier]
     }
 
     private func appAlbum() -> PHAssetCollection? {
@@ -134,8 +156,13 @@ final class PhotoLibraryService: ObservableObject {
         set { UserDefaults.standard.set(Array(newValue.prefix(120)), forKey: savedAssetIdentifiersKey) }
     }
 
-    private func rememberSavedAsset(_ identifier: String) {
-        savedAssetIdentifiers = [identifier] + savedAssetIdentifiers.filter { $0 != identifier }
+    private func rememberSavedAsset(_ identifier: String, metadata: SavedFrameMetadata) {
+        let identifiers = [identifier] + savedAssetIdentifiers.filter { $0 != identifier }
+        savedAssetIdentifiers = Array(identifiers.prefix(120))
+        metadataByAssetIdentifier[identifier] = metadata
+        let retainedIdentifiers = Set(savedAssetIdentifiers)
+        metadataByAssetIdentifier = metadataByAssetIdentifier.filter { retainedIdentifiers.contains($0.key) }
+        persistMetadata()
     }
 
     private func fetchSavedAssets(options: PHFetchOptions) -> [PHAsset] {
@@ -148,8 +175,30 @@ final class PhotoLibraryService: ObservableObject {
         let accessibleIdentifiers = identifiers.filter { assetsByIdentifier[$0] != nil }
         if accessibleIdentifiers != identifiers {
             savedAssetIdentifiers = accessibleIdentifiers
+            pruneMetadata(keeping: accessibleIdentifiers)
         }
         return accessibleIdentifiers.compactMap { assetsByIdentifier[$0] }
+    }
+
+    private func persistMetadata() {
+        guard let data = try? JSONEncoder().encode(metadataByAssetIdentifier) else { return }
+        UserDefaults.standard.set(data, forKey: savedFrameMetadataKey)
+    }
+
+    private func pruneMetadata(keeping identifiers: [String]) {
+        let allowed = Set(identifiers)
+        let pruned = metadataByAssetIdentifier.filter { allowed.contains($0.key) }
+        guard pruned.count != metadataByAssetIdentifier.count else { return }
+        metadataByAssetIdentifier = pruned
+        persistMetadata()
+    }
+
+    private static func loadMetadata(forKey key: String) -> [String: SavedFrameMetadata] {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let metadata = try? JSONDecoder().decode([String: SavedFrameMetadata].self, from: data) else {
+            return [:]
+        }
+        return metadata
     }
 
     private func addToAppAlbum(
