@@ -9,6 +9,7 @@ on:
     paths:
       - "FilmyCamera/**"
       - "FilmyCameraTests/**"
+      - "FilmyCameraUITests/**"
       - "FilmyCamera.xcodeproj/**"
       - "project.yml"
       - ".github/workflows/ios-build.yml"
