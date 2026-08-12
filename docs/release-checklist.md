@@ -52,6 +52,17 @@ The simulator build/test workflow intentionally uses no Apple Developer credenti
 
 Do not commit certificates, provisioning profiles, API keys, or App Store Connect credentials to this repository or GitHub Actions logs.
 
+## Release automation
+
+After the physical device and Apple Distribution signing are available:
+
+```sh
+scripts/release/archive-device.sh
+scripts/release/validate-archive.sh build/FilmyCamera.xcarchive
+```
+
+The wrapper generates the project, creates a Release archive for a generic iOS device, and fails closed unless the archive has the expected bundle/version, distribution signature, provisioning profile, dSYM, and privacy manifest. It does not upload or store credentials.
+
 ## Verified evidence
 
 - Current main commit: `36db658724b584863b17540036bab22211d7fe56`

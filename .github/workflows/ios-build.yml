@@ -11,6 +11,7 @@ on:
       - "FilmyCameraTests/**"
       - "FilmyCameraUITests/**"
       - "FilmyCamera.xcodeproj/**"
+      - "scripts/release/**"
       - "project.yml"
       - ".github/workflows/ios-build.yml"
   workflow_dispatch:
