@@ -238,7 +238,14 @@ final class RecipeInvariantsTests: XCTestCase {
         let reloadedRecipe = await reloadedModel.selectedRecipe
         let isCustomizedBeforeReset = await reloadedModel.isCustomized(original)
 
-        XCTAssertEqual(reloadedRecipe, customized)
+        XCTAssertEqual(reloadedRecipe.exposure, customized.exposure)
+        XCTAssertEqual(reloadedRecipe.tone, customized.tone)
+        XCTAssertEqual(reloadedRecipe.grain, customized.grain)
+        XCTAssertEqual(reloadedRecipe.palette, customized.palette)
+        XCTAssertEqual(reloadedRecipe.provenance.source, .userModified)
+        XCTAssertEqual(reloadedRecipe.provenance.parentRecipeID, original.id)
+        XCTAssertEqual(reloadedRecipe.provenance.rendererVersion, FilmRecipe.rendererVersion)
+        XCTAssertTrue(reloadedRecipe.provenance.isComplete)
         XCTAssertTrue(isCustomizedBeforeReset)
 
         await reloadedModel.reset(recipeID: original.id)

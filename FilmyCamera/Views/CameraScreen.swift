@@ -181,6 +181,13 @@ struct CameraScreen: View {
         .onDisappear { camera.stop() }
         .onChange(of: scenePhase) { _, _ in updateCameraActivity() }
         .onChange(of: isCameraTabActive) { _, _ in updateCameraActivity() }
+        .onChange(of: viewModel.reviewImage != nil) { _, hasReview in
+            if hasReview {
+                camera.stop()
+            } else {
+                updateCameraActivity()
+            }
+        }
     }
 
     private var header: some View {

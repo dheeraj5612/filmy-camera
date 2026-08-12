@@ -328,6 +328,83 @@ final class RendererOutputBoundsTests: XCTestCase {
         XCTAssertGreaterThan(blueDistance, warmDistance + 0.001)
     }
 
+    func testPositiveToneValuesHardenTheCorrespondingCurveRegions() {
+        let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
+        let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+        let base = FilmRecipe(
+            id: "tone-direction",
+            name: "Tone direction",
+            subtitle: "Test",
+            grain: 0,
+            vignette: 0,
+            halation: 0
+        )
+
+        func luma(for color: CIColor, recipe: FilmRecipe) -> Double {
+            let input = CIImage(color: color).cropped(to: extent)
+            let pixel = renderFloatPixels(
+                FilmRenderer.render(input, recipe: recipe, quality: .photo),
+                extent: extent,
+                context: context
+            )
+            return 0.2126 * Double(pixel[0])
+                + 0.7152 * Double(pixel[1])
+                + 0.0722 * Double(pixel[2])
+        }
+
+        var harderShadows = base
+        harderShadows.tone.shadow = 1
+        var liftedShadows = base
+        liftedShadows.tone.shadow = -1
+        XCTAssertLessThan(
+            luma(for: CIColor(red: 0.20, green: 0.20, blue: 0.20, alpha: 1), recipe: harderShadows),
+            luma(for: CIColor(red: 0.20, green: 0.20, blue: 0.20, alpha: 1), recipe: liftedShadows)
+        )
+
+        var harderHighlights = base
+        harderHighlights.tone.highlight = 1
+        var liftedHighlights = base
+        liftedHighlights.tone.highlight = -1
+        XCTAssertLessThan(
+            luma(for: CIColor(red: 0.80, green: 0.80, blue: 0.80, alpha: 1), recipe: harderHighlights),
+            luma(for: CIColor(red: 0.80, green: 0.80, blue: 0.80, alpha: 1), recipe: liftedHighlights)
+        )
+    }
+
+    func testPositiveTintMovesOutputTowardMagenta() {
+        let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
+        let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+        let base = FilmRecipe(
+            id: "tint-direction",
+            name: "Tint direction",
+            subtitle: "Test",
+            grain: 0,
+            vignette: 0,
+            halation: 0
+        )
+        var magenta = base
+        magenta.whiteBalance.tint = 1
+        var green = base
+        green.whiteBalance.tint = -1
+        let input = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 1))
+            .cropped(to: extent)
+        let magentaPixel = renderFloatPixels(
+            FilmRenderer.render(input, recipe: magenta, quality: .photo),
+            extent: extent,
+            context: context
+        )
+        let greenPixel = renderFloatPixels(
+            FilmRenderer.render(input, recipe: green, quality: .photo),
+            extent: extent,
+            context: context
+        )
+
+        XCTAssertGreaterThan(
+            Double(magentaPixel[0]) - Double(magentaPixel[1]),
+            Double(greenPixel[0]) - Double(greenPixel[1])
+        )
+    }
+
     func testRecipeLookRemainsStableAcrossPreviewPhotoAndExportQuality() {
         let extent = CGRect(x: 0, y: 0, width: 64, height: 48)
         let input = CIImage(color: CIColor(red: 0.76, green: 0.34, blue: 0.16, alpha: 1))

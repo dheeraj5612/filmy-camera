@@ -17,20 +17,20 @@ final class FilmyCameraUITests: XCTestCase {
 
     func testCameraShellAndRecipeDetails() throws {
         XCTAssertTrue(app.staticTexts["FILMY CAMERA"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.staticTexts["Provia Standard"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Natural Standard"].waitForExistence(timeout: 5))
 
         let classicChrome = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH 'Classic Chrome'")
+            NSPredicate(format: "label BEGINSWITH 'Muted Color'")
         ).firstMatch
         XCTAssertTrue(classicChrome.waitForExistence(timeout: 5))
         classicChrome.tap()
 
-        let details = app.buttons["Tune Classic Chrome"]
+        let details = app.buttons["Tune Muted Color"]
         XCTAssertTrue(details.waitForExistence(timeout: 5))
         details.tap()
 
         XCTAssertTrue(app.staticTexts["Recipe controls"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["Classic Chrome is selected"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Muted Color is selected"].waitForExistence(timeout: 5))
         attachScreenshot(named: "recipe-details")
     }
 

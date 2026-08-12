@@ -8,8 +8,10 @@ import SwiftUI
 /// the renderer and the UI can both inspect the look.
 public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     /// Version of the persisted recipe envelope. Version 1 was the implicit
-    /// pre-provenance format; version 2 records provenance explicitly.
-    public static let currentSchemaVersion = 2
+    /// pre-provenance format; version 2 records provenance explicitly; version
+    /// 3 records user edits and renderer compatibility metadata.
+    public static let currentSchemaVersion = 3
+    public static let rendererVersion = "core-image-parametric-v1"
 
     /// The product-level disclosure that accompanies every current recipe.
     /// It intentionally rules out an exact-output or hardware-calibration
@@ -44,22 +46,22 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
 
         public var displayName: String {
             switch self {
-            case .standard, .provia: return "Provia / Standard"
-            case .classicChrome: return "Classic Chrome"
-            case .velvia: return "Velvia / Vivid"
-            case .astia: return "Astia / Soft"
-            case .proNegative: return "Pro Neg. High"
-            case .proNegStandard: return "Pro Neg. Standard"
-            case .eterna: return "Eterna / Cinema"
-            case .eternaBleachBypass: return "Eterna Bleach Bypass"
-            case .acros: return "Acros"
-            case .acrosYellow: return "Acros + Ye Filter"
-            case .acrosRed: return "Acros + R Filter"
-            case .acrosGreen: return "Acros + G Filter"
-            case .classicNegative: return "Classic Negative"
-            case .nostalgicNegative: return "Nostalgic Negative"
-            case .realaAce: return "Reala Ace"
-            case .monochrome: return "Acros Monochrome"
+            case .standard, .provia: return "Natural Standard"
+            case .classicChrome: return "Muted Color"
+            case .velvia: return "Vivid Slide"
+            case .astia: return "Soft Portrait"
+            case .proNegative: return "Defined Negative"
+            case .proNegStandard: return "Neutral Portrait"
+            case .eterna: return "Cinema Soft"
+            case .eternaBleachBypass: return "Silver Cinema"
+            case .acros: return "Neutral Monochrome"
+            case .acrosYellow: return "Yellow Monochrome"
+            case .acrosRed: return "Red Monochrome"
+            case .acrosGreen: return "Green Monochrome"
+            case .classicNegative: return "Warm Negative"
+            case .nostalgicNegative: return "Memory Negative"
+            case .realaAce: return "Natural Negative"
+            case .monochrome: return "Fine Monochrome"
             }
         }
 
@@ -167,6 +169,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     public struct Provenance: Codable, Hashable, Sendable {
         public enum Source: String, CaseIterable, Codable, Hashable, Sendable {
             case publicOfficialDocumentation
+            case userModified
             case legacyRecordWithoutProvenance
         }
 
@@ -184,17 +187,43 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         public let implementation: Implementation
         public let calibration: Calibration
         public let references: [PublicReference]
+        public let parentRecipeID: String?
+        public let rendererVersion: String
 
         public init(
             source: Source,
             implementation: Implementation,
             calibration: Calibration,
-            references: [PublicReference]
+            references: [PublicReference],
+            parentRecipeID: String? = nil,
+            rendererVersion: String = FilmRecipe.rendererVersion
         ) {
             self.source = source
             self.implementation = implementation
             self.calibration = calibration
             self.references = references
+            self.parentRecipeID = parentRecipeID
+            self.rendererVersion = rendererVersion
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case source
+            case implementation
+            case calibration
+            case references
+            case parentRecipeID
+            case rendererVersion
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            source = try container.decode(Source.self, forKey: .source)
+            implementation = try container.decode(Implementation.self, forKey: .implementation)
+            calibration = try container.decode(Calibration.self, forKey: .calibration)
+            references = try container.decode([PublicReference].self, forKey: .references)
+            parentRecipeID = try container.decodeIfPresent(String.self, forKey: .parentRecipeID)
+            rendererVersion = try container.decodeIfPresent(String.self, forKey: .rendererVersion)
+                ?? FilmRecipe.rendererVersion
         }
 
         public var disclaimer: String {
@@ -209,10 +238,11 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         /// A complete record has the expected source, implementation status,
         /// calibration disclosure, and the complete official reference set.
         public var isComplete: Bool {
-            source == .publicOfficialDocumentation
+            (source == .publicOfficialDocumentation || source == .userModified)
                 && implementation == .originalParametricApproximation
                 && calibration == .notCalibratedToFujifilmHardware
                 && references == PublicReference.allCases
+                && rendererVersion == FilmRecipe.rendererVersion
         }
     }
 
@@ -516,7 +546,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     }
 
     public let schemaVersion: Int
-    public let provenance: Provenance
+    public private(set) var provenance: Provenance
     public let id: String
     public let name: String
     public let subtitle: String
@@ -585,6 +615,20 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         self.vignette = vignette
         self.halation = halation
         self.palette = palette
+    }
+
+    /// Records that a user changed one of the public recipe controls. The
+    /// source references remain useful for the parent look, but the edited
+    /// record is no longer presented as an untouched built-in recipe.
+    public mutating func markUserModified(parentRecipeID: String) {
+        provenance = Provenance(
+            source: .userModified,
+            implementation: .originalParametricApproximation,
+            calibration: .notCalibratedToFujifilmHardware,
+            references: Self.currentProvenance.references,
+            parentRecipeID: parentRecipeID,
+            rendererVersion: Self.rendererVersion
+        )
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -741,7 +785,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     public static let builtIns: [FilmRecipe] = [
         FilmRecipe(
             id: "provia-standard",
-            name: "Provia Standard",
+            name: "Natural Standard",
             subtitle: "Natural color / clean daylight",
             filmBase: .provia,
             tone: Tone(highlight: 0.02, shadow: 0.00),
@@ -771,7 +815,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         ),
         FilmRecipe(
             id: "classic-chrome",
-            name: "Classic Chrome",
+            name: "Muted Color",
             subtitle: "Muted color / hard light",
             filmBase: .classicChrome,
             tone: Tone(highlight: -0.18, shadow: 0.10),
@@ -801,7 +845,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         ),
         FilmRecipe(
             id: "velvia-vivid",
-            name: "Velvia Vivid",
+            name: "Vivid Slide",
             subtitle: "Deep color / rich contrast",
             filmBase: .velvia,
             tone: Tone(highlight: -0.08, shadow: -0.14),
@@ -831,7 +875,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         ),
         FilmRecipe(
             id: "astia-soft",
-            name: "Astia Soft",
+            name: "Soft Portrait",
             subtitle: "Portrait color / gentle rolloff",
             filmBase: .astia,
             tone: Tone(highlight: 0.10, shadow: 0.08),
@@ -861,7 +905,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         ),
         FilmRecipe(
             id: "pro-neg-high",
-            name: "Pro Neg. High",
+            name: "Defined Negative",
             subtitle: "Neutral color / defined edges",
             filmBase: .proNegative,
             tone: Tone(highlight: -0.06, shadow: -0.02),
@@ -891,7 +935,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         ),
         FilmRecipe(
             id: "eterna-cinema",
-            name: "Eterna Cinema",
+            name: "Cinema Soft",
             subtitle: "Low saturation / soft shadows",
             filmBase: .eterna,
             tone: Tone(highlight: 0.16, shadow: 0.18),
@@ -921,7 +965,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         ),
         FilmRecipe(
             id: "acros-monochrome",
-            name: "Acros Monochrome",
+            name: "Fine Monochrome",
             subtitle: "Fine grain / tonal depth",
             filmBase: .monochrome,
             tone: Tone(highlight: -0.04, shadow: -0.12),
@@ -951,7 +995,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         ),
         FilmRecipe(
             id: "acros-neutral-filter",
-            name: "Acros Neutral",
+            name: "Neutral Monochrome",
             subtitle: "Neutral filter / tonal depth",
             filmBase: .acros,
             tone: Tone(highlight: -0.03, shadow: -0.10),
@@ -969,7 +1013,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         ),
         FilmRecipe(
             id: "acros-yellow-filter",
-            name: "Acros + Ye Filter",
+            name: "Yellow Monochrome",
             subtitle: "Yellow filter / open skies",
             filmBase: .acrosYellow,
             tone: Tone(highlight: -0.02, shadow: -0.08),
@@ -987,7 +1031,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         ),
         FilmRecipe(
             id: "acros-red-filter",
-            name: "Acros + R Filter",
+            name: "Red Monochrome",
             subtitle: "Red filter / graphic contrast",
             filmBase: .acrosRed,
             tone: Tone(highlight: -0.08, shadow: -0.16),
@@ -1005,7 +1049,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         ),
         FilmRecipe(
             id: "acros-green-filter",
-            name: "Acros + G Filter",
+            name: "Green Monochrome",
             subtitle: "Green filter / gentle skin tones",
             filmBase: .acrosGreen,
             tone: Tone(highlight: 0.02, shadow: -0.04),
@@ -1023,7 +1067,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         ),
         FilmRecipe(
             id: "classic-negative",
-            name: "Classic Negative",
+            name: "Warm Negative",
             subtitle: "Cyan shadows / warm highlights",
             filmBase: .classicNegative,
             tone: Tone(highlight: -0.06, shadow: 0.18),
@@ -1053,7 +1097,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         ),
         FilmRecipe(
             id: "nostalgic-negative",
-            name: "Nostalgic Negative",
+            name: "Memory Negative",
             subtitle: "Amber light / cool shadows",
             filmBase: .nostalgicNegative,
             tone: Tone(highlight: -0.08, shadow: 0.16),
@@ -1083,7 +1127,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         ),
         FilmRecipe(
             id: "eterna-bleach-bypass",
-            name: "Eterna Bleach Bypass",
+            name: "Silver Cinema",
             subtitle: "Desaturated / high contrast cinema",
             filmBase: .eternaBleachBypass,
             tone: Tone(highlight: -0.12, shadow: -0.16),
@@ -1113,7 +1157,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         ),
         FilmRecipe(
             id: "pro-neg-standard",
-            name: "Pro Neg. Standard",
+            name: "Neutral Portrait",
             subtitle: "Soft portrait / natural gradation",
             filmBase: .proNegStandard,
             tone: Tone(highlight: 0.08, shadow: 0.10),
@@ -1143,7 +1187,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         ),
         FilmRecipe(
             id: "reala-ace",
-            name: "Reala Ace",
+            name: "Natural Negative",
             subtitle: "Natural color / gentle cyan",
             filmBase: .realaAce,
             tone: Tone(highlight: 0.02, shadow: 0.03),

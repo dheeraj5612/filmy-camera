@@ -3,6 +3,8 @@
 # Xcode
 build/
 DerivedData/
+.derived-hardening/
+.derived-hardening26/
 .ci/
 *.xcuserstate
 xcuserdata/

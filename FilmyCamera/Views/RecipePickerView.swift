@@ -157,7 +157,7 @@ struct RecipeDetailView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel(isSelected ? "\(recipe.name) is selected" : "Use \(recipe.name) recipe")
 
-                    Text("Public Fujifilm-style vocabulary, interpreted for Filmy Camera. Results vary with light, exposure, and the iPhone sensor.")
+                    Text("Original camera-inspired looks, interpreted for Filmy Camera. Results vary with light, exposure, and the iPhone sensor.")
                         .font(.system(size: 11, weight: .medium, design: .rounded))
                         .foregroundStyle(FilmyTheme.tertiary)
                         .fixedSize(horizontal: false, vertical: true)

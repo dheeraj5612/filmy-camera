@@ -134,7 +134,9 @@ final class CameraViewModel: ObservableObject {
     }
 
     func update(recipe: FilmRecipe) {
-        recipeOverrides[recipe.id] = recipe
+        var customizedRecipe = recipe
+        customizedRecipe.markUserModified(parentRecipeID: originalRecipe(for: recipe.id).id)
+        recipeOverrides[recipe.id] = customizedRecipe
         persistRecipeOverrides()
     }
 
@@ -172,6 +174,11 @@ final class CameraViewModel: ObservableObject {
                     }
                     return
                 }
+
+                // The review sheet is a deliberate pause in the camera flow.
+                // Stop the capture session as soon as the still is safely in
+                // memory; it will be restarted after save or retake.
+                camera.stop()
 
                 DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                     let renderedPhoto = autoreleasepool {

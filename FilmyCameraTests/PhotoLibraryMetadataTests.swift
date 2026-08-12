@@ -17,6 +17,7 @@ final class PhotoLibraryMetadataTests: XCTestCase {
 
     func testPhotoLibraryMutationErrorsExplainRecovery() {
         XCTAssertTrue(PhotoLibraryServiceError.accessDenied.localizedDescription.contains("Settings"))
+        XCTAssertTrue(PhotoLibraryServiceError.notOwned.localizedDescription.contains("created"))
         XCTAssertTrue(PhotoLibraryServiceError.changeFailed.localizedDescription.contains("Try again"))
     }
 
