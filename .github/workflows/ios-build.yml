@@ -242,6 +242,9 @@ jobs:
             exit 1
           }
 
+      - name: Install ShellCheck
+        run: brew install shellcheck
+
       - name: Validate release script syntax and safety
         shell: bash
         run: |
