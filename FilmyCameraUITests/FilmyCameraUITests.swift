@@ -2,13 +2,17 @@ import XCTest
 
 @MainActor
 final class FilmyCameraUITests: XCTestCase {
-    private var app: XCUIApplication!
+    private nonisolated(unsafe) var app: XCUIApplication!
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        app = XCUIApplication()
-        app.launchArguments = ["-ui-testing"]
-        app.launch()
+        let launchedApp = MainActor.assumeIsolated {
+            let launchedApp = XCUIApplication()
+            launchedApp.launchArguments = ["-ui-testing"]
+            launchedApp.launch()
+            return launchedApp
+        }
+        app = launchedApp
     }
 
     func testCameraShellAndRecipeDetails() throws {
