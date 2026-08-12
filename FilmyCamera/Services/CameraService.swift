@@ -55,6 +55,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     @Published public private(set) var isRunning = false
     @Published public private(set) var statusMessage = "Camera is ready"
     @Published public private(set) var zoomFactor: CGFloat = 1
+    @Published public private(set) var previewFrameSize: CGSize = .zero
 
     /// Receives unfiltered live frames on the main queue.
     public var onFrame: FrameHandler?
@@ -78,6 +79,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private var authorizationRequestInFlight = false
     private var pendingPhotoCompletion: PhotoCompletion?
     private var sessionObservers: [NSObjectProtocol] = []
+    private var rotationAngle: CGFloat = 90
+    private var lastDeliveredFrameSize: CGSize = .zero
 
     private final class PhotoCompletionBox: @unchecked Sendable {
         let completion: PhotoCompletion
@@ -131,6 +134,20 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             }
             self.publishRunning(false)
             self.publishStatus("Camera paused")
+        }
+    }
+
+    /// Keeps the preview and still output aligned with the current camera
+    /// surface when the phone rotates or enters a split-screen layout.
+    public func updateOrientation(for viewSize: CGSize) {
+        guard viewSize.width > 0, viewSize.height > 0 else { return }
+        let nextAngle: CGFloat = viewSize.width > viewSize.height ? 0 : 90
+
+        sessionQueue.async { [weak self] in
+            guard let self, self.rotationAngle != nextAngle else { return }
+            self.rotationAngle = nextAngle
+            guard self.isConfigured else { return }
+            self.configureOrientation()
         }
     }
 
@@ -393,9 +410,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func configureOrientation() {
-        let portraitAngle: CGFloat = 90
-        configureRotation(videoOutput.connection(with: .video), angle: portraitAngle)
-        configureRotation(photoOutput.connection(with: .video), angle: portraitAngle)
+        configureRotation(videoOutput.connection(with: .video), angle: rotationAngle)
+        configureRotation(photoOutput.connection(with: .video), angle: rotationAngle)
     }
 
     private func configurePreviewFrameRate(for device: AVCaptureDevice) {
@@ -476,6 +492,12 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
     }
 
+    private func publishPreviewFrameSize(_ size: CGSize) {
+        publishOnMain { [weak self] in
+            self?.previewFrameSize = size
+        }
+    }
+
     private func publishStatus(_ message: String) {
         publishOnMain { [weak self] in
             self?.statusMessage = message
@@ -509,6 +531,15 @@ extension CameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
         guard output === videoOutput,
               let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
             return
+        }
+
+        let frameSize = CGSize(
+            width: CVPixelBufferGetWidth(pixelBuffer),
+            height: CVPixelBufferGetHeight(pixelBuffer)
+        )
+        if frameSize != lastDeliveredFrameSize {
+            lastDeliveredFrameSize = frameSize
+            publishPreviewFrameSize(frameSize)
         }
 
         let image: CIImage

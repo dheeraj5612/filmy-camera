@@ -205,6 +205,6 @@ final class RecipeInvariantsTests: XCTestCase {
         XCTAssertFalse(isCapturing)
         XCTAssertNil(reviewImage)
         XCTAssertNil(reviewRecipe)
-        XCTAssertEqual(toastMessage, "Capture is available on a physical iPhone")
+        XCTAssertEqual(toastMessage, "Capture could not be completed. Resume the camera and try again.")
     }
 }

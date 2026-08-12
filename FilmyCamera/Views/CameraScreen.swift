@@ -5,6 +5,7 @@ struct CameraScreen: View {
     @ObservedObject var camera: CameraService
     @ObservedObject var viewModel: CameraViewModel
     @ObservedObject var photoLibrary: PhotoLibraryService
+    let isCameraTabActive: Bool
     let onOpenGallery: () -> Void
 
     @Environment(\.scenePhase) private var scenePhase
@@ -23,9 +24,9 @@ struct CameraScreen: View {
                     .contentShape(Rectangle())
                     .gesture(
                         SpatialTapGesture().onEnded { value in
-                            let normalizedPoint = CGPoint(
-                                x: value.location.x / max(proxy.size.width, 1),
-                                y: value.location.y / max(proxy.size.height, 1)
+                            let normalizedPoint = normalizedFocusPoint(
+                                for: value.location,
+                                in: proxy.size
                             )
                             camera.focus(at: normalizedPoint)
                             withAnimation(reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.72)) {
@@ -33,6 +34,10 @@ struct CameraScreen: View {
                             }
                         }
                     )
+                    .onAppear { camera.updateOrientation(for: proxy.size) }
+                    .onChange(of: proxy.size) { _, size in
+                        camera.updateOrientation(for: size)
+                    }
                     .simultaneousGesture(
                         MagnificationGesture()
                             .onChanged { scale in
@@ -140,21 +145,14 @@ struct CameraScreen: View {
                     onRetake: viewModel.discardReview
                 )
                 .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
+                .presentationDragIndicator(.hidden)
+                .interactiveDismissDisabled(viewModel.reviewImage != nil && !viewModel.isSaving)
             }
         }
-        .onAppear { camera.start() }
+        .onAppear { updateCameraActivity() }
         .onDisappear { camera.stop() }
-        .onChange(of: scenePhase) { _, phase in
-            switch phase {
-            case .active:
-                camera.start()
-            case .background, .inactive:
-                camera.stop()
-            @unknown default:
-                break
-            }
-        }
+        .onChange(of: scenePhase) { _, _ in updateCameraActivity() }
+        .onChange(of: isCameraTabActive) { _, _ in updateCameraActivity() }
     }
 
     private var header: some View {
@@ -179,13 +177,7 @@ struct CameraScreen: View {
     }
 
     private var shouldShowCameraEmptyState: Bool {
-        guard !camera.isRunning else { return false }
-        let message = camera.statusMessage.lowercased()
-        return message.contains("simulator")
-            || message.contains("disabled")
-            || message.contains("required")
-            || message.contains("unavailable")
-            || message.contains("could not")
+        !camera.isRunning
     }
 
     private var reviewPresentation: Binding<Bool> {
@@ -201,22 +193,86 @@ struct CameraScreen: View {
 
     @ViewBuilder
     private var cameraPlaceholder: some View {
-        let isSimulator = camera.statusMessage.localizedCaseInsensitiveContains("Simulator")
-        let needsSettings = !isSimulator && camera.statusMessage.localizedCaseInsensitiveContains("access")
+        let status = camera.statusMessage.lowercased()
+        let isSimulator = status.contains("simulator")
+        let needsSettings = status.contains("access") || status.contains("permission")
+        let needsResume = status.contains("reopened")
+            || status.contains("temporarily")
+            || status.contains("could not start")
 
-        if needsSettings {
+        if needsResume {
+            PreviewPlaceholder(
+                isSimulator: false,
+                recipe: viewModel.selectedRecipe,
+                message: "The camera was interrupted. Resume when you are ready.",
+                actionTitle: "Resume Camera",
+                action: camera.start
+            )
+        } else if needsSettings {
             PreviewPlaceholder(
                 isSimulator: false,
                 recipe: viewModel.selectedRecipe,
                 actionTitle: "Open Settings",
                 action: openSystemSettings
             )
-        } else {
+        } else if isSimulator {
             PreviewPlaceholder(
-                isSimulator: isSimulator,
+                isSimulator: true,
                 recipe: viewModel.selectedRecipe
             )
+        } else {
+            PreviewPlaceholder(
+                isSimulator: false,
+                recipe: viewModel.selectedRecipe,
+                message: "Starting the camera…"
+            )
         }
+    }
+
+    private func updateCameraActivity() {
+        if scenePhase == .active && isCameraTabActive {
+            camera.start()
+        } else {
+            camera.stop()
+        }
+    }
+
+    private func normalizedFocusPoint(
+        for location: CGPoint,
+        in viewSize: CGSize
+    ) -> CGPoint {
+        guard viewSize.width > 0,
+              viewSize.height > 0,
+              camera.previewFrameSize.width > 0,
+              camera.previewFrameSize.height > 0 else {
+            return CGPoint(
+                x: min(max(location.x / max(viewSize.width, 1), 0), 1),
+                y: min(max(location.y / max(viewSize.height, 1), 0), 1)
+            )
+        }
+
+        let sourceSize = camera.previewFrameSize
+        let scale = max(
+            viewSize.width / sourceSize.width,
+            viewSize.height / sourceSize.height
+        )
+        let displayedSize = CGSize(
+            width: sourceSize.width * scale,
+            height: sourceSize.height * scale
+        )
+        let cropOffset = CGPoint(
+            x: (viewSize.width - displayedSize.width) / 2,
+            y: (viewSize.height - displayedSize.height) / 2
+        )
+
+        // The Metal preview uses Core Image's bottom-left coordinate space,
+        // while SwiftUI touch locations start at the top-left.
+        let imageX = (location.x - cropOffset.x) / scale
+        let imageY = (viewSize.height - location.y - cropOffset.y) / scale
+        return CGPoint(
+            x: min(max(imageX / sourceSize.width, 0), 1),
+            y: min(max(1 - imageY / sourceSize.height, 0), 1)
+        )
     }
 
     private func openSystemSettings() {

@@ -7,6 +7,20 @@ struct SavedFrameMetadata: Codable, Hashable, Sendable {
     let capturedAt: Date
 }
 
+enum PhotoLibraryServiceError: LocalizedError, Sendable {
+    case accessDenied
+    case changeFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .accessDenied:
+            return "Photos access is needed to manage this frame. Enable it in Settings, then try again."
+        case .changeFailed:
+            return "Photos could not update this frame. Try again in a moment."
+        }
+    }
+}
+
 @MainActor
 final class PhotoLibraryService: ObservableObject {
     private final class IdentifierBox: @unchecked Sendable {
@@ -141,6 +155,34 @@ final class PhotoLibraryService: ObservableObject {
         metadataByAssetIdentifier[asset.localIdentifier]
     }
 
+    func delete(
+        asset: PHAsset,
+        completion: @escaping @MainActor (Result<Void, PhotoLibraryServiceError>) -> Void
+    ) {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard status == .authorized || status == .limited else {
+            completion(.failure(.accessDenied))
+            return
+        }
+
+        let assetIdentifier = asset.localIdentifier
+        PHPhotoLibrary.shared().performChanges {
+            PHAssetChangeRequest.deleteAssets([asset] as NSArray)
+        } completionHandler: { [weak self] success, _ in
+            Task { @MainActor in
+                guard let self else { return }
+                guard success else {
+                    completion(.failure(.changeFailed))
+                    return
+                }
+
+                self.forgetSavedAsset(assetIdentifier)
+                self.refresh()
+                completion(.success(()))
+            }
+        }
+    }
+
     private func appAlbum() -> PHAssetCollection? {
         let options = PHFetchOptions()
         options.predicate = NSPredicate(format: "localizedTitle == %@", albumTitle)
@@ -162,6 +204,12 @@ final class PhotoLibraryService: ObservableObject {
         metadataByAssetIdentifier[identifier] = metadata
         let retainedIdentifiers = Set(savedAssetIdentifiers)
         metadataByAssetIdentifier = metadataByAssetIdentifier.filter { retainedIdentifiers.contains($0.key) }
+        persistMetadata()
+    }
+
+    private func forgetSavedAsset(_ identifier: String) {
+        savedAssetIdentifiers = savedAssetIdentifiers.filter { $0 != identifier }
+        metadataByAssetIdentifier.removeValue(forKey: identifier)
         persistMetadata()
     }
 

@@ -25,6 +25,9 @@ The analog character comes from tone, color, grain, and halation. The interface 
 - Added semantic slider values and larger control rows for VoiceOver and motor accessibility.
 - Centralized camera hit-target, typography, control radius, and action-plate tokens in `FilmyTheme`.
 - Reframed Gallery as `Roll`, moved to a two-column contact-sheet feel, and preserved each asset’s aspect ratio.
+- Added recipe/date provenance plus share, delete, and destructive-confirmation actions to the Gallery detail flow.
+- Tied camera start/stop to the active tab and scene phase, with a recoverable interruption state instead of frozen capture controls.
+- Corrected tap-to-focus for the preview's aspect-fill crop and aligned camera connections with portrait/landscape layouts.
 - Reframed capture confirmation around `Keep Frame` and added a recipe metadata chip.
 - Corrected simulator Settings permission states so denied camera access is not shown as `READY`.
 - Updated UI tests to cover the new `Roll` and `Tune` language.
@@ -33,11 +36,11 @@ The analog character comes from tone, color, grain, and halation. The interface 
 
 - Bundled photographic recipe thumbnails: the current implementation has no licensed neutral stills or capture sample set. The next asset pass should add original/licensed reference images and run them through the existing preview renderer.
 - Accessible focus/exposure lock controls: the camera service currently supports tap focus/exposure and pinch zoom, but not an explicit lock state. The UI should not imply controls the service cannot honor.
-- Gallery metadata/share/delete: the current Photos service does not yet persist recipe metadata with each saved asset.
 
 ## Verification
 
 - Simulator build succeeded for the iOS 18.5 `FilmyCamera iPhone` runtime.
-- Unit tests: 9 passed.
+- Unit/renderer tests: 17 passed.
 - UI tests: 2 passed.
+- Full simulator suite: 19 tests passed with 0 failures.
 - Final simulator review confirmed the unavailable-camera state and compact offline action plate remain legible.
