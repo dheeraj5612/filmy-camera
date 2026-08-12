@@ -165,7 +165,7 @@ final class CameraViewModel: ObservableObject {
 
                 guard let capturedPhoto else {
                     self.isCapturing = false
-                    if camera.statusMessage.localizedCaseInsensitiveContains("Simulator") {
+                    if camera.availability == .simulator {
                         self.showToast("Capture is available on a physical iPhone")
                     } else {
                         self.showToast("Capture could not be completed. Resume the camera and try again.")
