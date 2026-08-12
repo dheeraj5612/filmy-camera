@@ -13,12 +13,22 @@ final class PhotoLibraryService: ObservableObject {
     @Published private(set) var isLoading = false
 
     private let albumTitle = "Filmy Camera"
+    private let isUITesting: Bool
 
     init() {
-        authorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        isUITesting = ProcessInfo.processInfo.arguments.contains("-ui-testing")
+        authorizationStatus = isUITesting
+            ? .denied
+            : PHPhotoLibrary.authorizationStatus(for: .readWrite)
     }
 
     func requestAccessIfNeeded() async -> Bool {
+        if isUITesting {
+            authorizationStatus = .denied
+            assets = []
+            return false
+        }
+
         let currentStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         if currentStatus == .notDetermined {
             authorizationStatus = await requestAuthorization(for: .readWrite)
@@ -34,6 +44,12 @@ final class PhotoLibraryService: ObservableObject {
     }
 
     func refresh() {
+        if isUITesting {
+            authorizationStatus = .denied
+            assets = []
+            return
+        }
+
         authorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         guard authorizationStatus == .authorized || authorizationStatus == .limited else {
             assets = []

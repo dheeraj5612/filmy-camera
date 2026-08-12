@@ -38,7 +38,6 @@ final class FilmyCameraUITests: XCTestCase {
         let gallery = app.buttons["Gallery"]
         XCTAssertTrue(gallery.waitForExistence(timeout: 5))
         gallery.tap()
-        dismissPhotosPermissionIfNeeded()
 
         XCTAssertTrue(app.staticTexts["Photo access is off"].waitForExistence(timeout: 5))
         attachScreenshot(named: "gallery-empty-state")
@@ -48,33 +47,6 @@ final class FilmyCameraUITests: XCTestCase {
         settings.tap()
         XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5))
         attachScreenshot(named: "settings")
-    }
-
-    private func dismissPhotosPermissionIfNeeded() {
-        let monitor = addUIInterruptionMonitor(withDescription: "Photos permission") { alert in
-            self.tapPhotosPermissionButton(in: alert)
-        }
-
-        let springBoard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        let systemAlert = springBoard.alerts.firstMatch
-        if systemAlert.waitForExistence(timeout: 5) {
-            _ = tapPhotosPermissionButton(in: systemAlert)
-        }
-        XCTAssertFalse(
-            springBoard.alerts.firstMatch.exists,
-            "Photos permission prompt remained on screen"
-        )
-        removeUIInterruptionMonitor(monitor)
-    }
-
-    private func tapPhotosPermissionButton(in alert: XCUIElement) -> Bool {
-        for label in ["Don’t Allow", "Allow Full Access", "Allow Limited Access", "Allow"] {
-            if alert.buttons[label].exists {
-                alert.buttons[label].tap()
-                return true
-            }
-        }
-        return false
     }
 
     private func attachScreenshot(named name: String) {
