@@ -100,8 +100,28 @@ public struct FilteredCameraPreview: UIViewRepresentable {
         fileprivate func receive(_ image: CIImage) {
             // CameraService documents onFrame as main-queue delivery. Avoid
             // adding another async hop to every captured frame.
-            previewView?.display(image: image)
+            if Thread.isMainThread {
+                MainActor.assumeIsolated { [weak self] in
+                    self?.previewView?.display(image: image)
+                }
+            } else {
+                let imageBox = CIImageBox(image)
+                DispatchQueue.main.async { [weak self] in
+                    self?.previewView?.display(image: imageBox.image)
+                }
+            }
         }
+    }
+}
+
+/// CIImage is immutable for this use, but its SDK declaration is not Sendable
+/// on older Swift 6 toolchains. Boxing is limited to the exceptional off-main
+/// fallback so the normal camera path stays synchronous.
+private final class CIImageBox: @unchecked Sendable {
+    let image: CIImage
+
+    init(_ image: CIImage) {
+        self.image = image
     }
 }
 

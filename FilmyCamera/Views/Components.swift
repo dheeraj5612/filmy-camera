@@ -137,7 +137,7 @@ struct CameraStatusPill: View {
                 .fill(isRunning ? FilmyTheme.mint : FilmyTheme.accent)
                 .frame(width: 7, height: 7)
 
-            Text(message)
+            Text(condensedMessage)
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .lineLimit(1)
                 .foregroundStyle(FilmyTheme.primary)
@@ -148,6 +148,23 @@ struct CameraStatusPill: View {
         .overlay { Capsule().stroke(Color.white.opacity(0.14), lineWidth: 1) }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(isRunning ? "Camera status: live preview" : "Camera status: \(message)")
+    }
+
+    private var condensedMessage: String {
+        let normalized = message.lowercased()
+        if normalized.contains("simulator") {
+            return "Preview only"
+        }
+        if normalized.contains("disabled") {
+            return "Access off"
+        }
+        if normalized.contains("required") {
+            return "Access needed"
+        }
+        if normalized.contains("unavailable") || normalized.contains("could not") {
+            return "Unavailable"
+        }
+        return message
     }
 }
 
