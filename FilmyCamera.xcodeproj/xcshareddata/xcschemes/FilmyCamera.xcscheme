@@ -50,6 +50,17 @@
                ReferencedContainer = "container:FilmyCamera.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "B6003FE00E73C488BD6EA7D0"
+               BuildableName = "FilmyCameraUITests.xctest"
+               BlueprintName = "FilmyCameraUITests"
+               ReferencedContainer = "container:FilmyCamera.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
       <CommandLineArguments>
       </CommandLineArguments>

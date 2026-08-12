@@ -22,6 +22,7 @@
 		AF1962852DF723AD8B04E986 /* CameraScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57D96867146ACDDA4F134F19 /* CameraScreen.swift */; };
 		B0CAE865F8D5D837818DF498 /* RecipePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E85F3412BBC965E4A33B9EB /* RecipePickerView.swift */; };
 		C39D65C13BF730F85F01A8B9 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F84BD1235DF873E06F8C6282 /* ContentView.swift */; };
+		C70373098CEE45627237523A /* FilmyCameraUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61617C6B4DB09D291F5DEA10 /* FilmyCameraUITests.swift */; };
 		C8D2AB628B416941BA34D460 /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED28FA298007EE9E0D94A12B /* Components.swift */; };
 		D28FC5CE68D1A36040EFD9B0 /* PhotoLibraryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8433ABA6CF2F34E7F51023B6 /* PhotoLibraryService.swift */; };
 		EC2F24E354BEA00F79F85586 /* RecipeInvariantsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33F33B6C5BE2B0CAE0ECA261 /* RecipeInvariantsTests.swift */; };
@@ -30,6 +31,13 @@
 
 /* Begin PBXContainerItemProxy section */
 		0C828F6271E6F744A87DB96C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0D5E40C8EAE5449A7D12FA1D /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 3963BB26D55C8B026C4ECC93;
+			remoteInfo = FilmyCamera;
+		};
+		831E916F09B4F0CEB66E6933 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 0D5E40C8EAE5449A7D12FA1D /* Project object */;
 			proxyType = 1;
@@ -47,6 +55,7 @@
 		432F02B03418EEADA550733F /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		53925B09E478B6CD4AF36BE1 /* CaptureReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureReviewView.swift; sourceTree = "<group>"; };
 		57D96867146ACDDA4F134F19 /* CameraScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraScreen.swift; sourceTree = "<group>"; };
+		61617C6B4DB09D291F5DEA10 /* FilmyCameraUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmyCameraUITests.swift; sourceTree = "<group>"; };
 		6A9AFC52D1FB5ECED33CB2DA /* CameraViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraViewModel.swift; sourceTree = "<group>"; };
 		8433ABA6CF2F34E7F51023B6 /* PhotoLibraryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibraryService.swift; sourceTree = "<group>"; };
 		8F580BECA95D881DF1EB3789 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -59,6 +68,7 @@
 		DC1520CC0C54A1860FEB034D /* CameraService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraService.swift; sourceTree = "<group>"; };
 		EC05E47E4FDF736EC43A42AB /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		ED28FA298007EE9E0D94A12B /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
+		F48EF3C63EAF05BFADF4D9C3 /* FilmyCameraUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = FilmyCameraUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F56BE8EB7D6BDB867CFD8C3A /* FilmRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmRenderer.swift; sourceTree = "<group>"; };
 		F84BD1235DF873E06F8C6282 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -116,6 +126,14 @@
 			path = FilmyCamera;
 			sourceTree = "<group>";
 		};
+		422ACC7B39302C2548143BD0 /* FilmyCameraUITests */ = {
+			isa = PBXGroup;
+			children = (
+				61617C6B4DB09D291F5DEA10 /* FilmyCameraUITests.swift */,
+			);
+			path = FilmyCameraUITests;
+			sourceTree = "<group>";
+		};
 		8001ED3E67EA6235B02CFA09 /* Views */ = {
 			isa = PBXGroup;
 			children = (
@@ -135,6 +153,7 @@
 			children = (
 				A657E128117A2C10BAD8B761 /* FilmyCamera.app */,
 				C34BB7CBA412A194086446CD /* FilmyCameraTests.xctest */,
+				F48EF3C63EAF05BFADF4D9C3 /* FilmyCameraUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -152,6 +171,7 @@
 			children = (
 				34646B6202BC62CFB649FA76 /* FilmyCamera */,
 				2B5AB398864BBC150E221C4B /* FilmyCameraTests */,
+				422ACC7B39302C2548143BD0 /* FilmyCameraUITests */,
 				9ECC50BA839283E3B8C2040E /* Products */,
 			);
 			sourceTree = "<group>";
@@ -195,6 +215,24 @@
 			productReference = C34BB7CBA412A194086446CD /* FilmyCameraTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		B6003FE00E73C488BD6EA7D0 /* FilmyCameraUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1D6FBF0C49597DBF2BE52274 /* Build configuration list for PBXNativeTarget "FilmyCameraUITests" */;
+			buildPhases = (
+				90EF71E8EDB3D9A676C9AAB0 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				30D336083BBA88B616B5F6A4 /* PBXTargetDependency */,
+			);
+			name = FilmyCameraUITests;
+			packageProductDependencies = (
+			);
+			productName = FilmyCameraUITests;
+			productReference = F48EF3C63EAF05BFADF4D9C3 /* FilmyCameraUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -211,6 +249,11 @@
 					64015BF6987C10DDD121B37C = {
 						DevelopmentTeam = AQW5C8DEEG;
 						ProvisioningStyle = Automatic;
+					};
+					B6003FE00E73C488BD6EA7D0 = {
+						DevelopmentTeam = AQW5C8DEEG;
+						ProvisioningStyle = Automatic;
+						TestTargetID = 3963BB26D55C8B026C4ECC93;
 					};
 				};
 			};
@@ -230,6 +273,7 @@
 			targets = (
 				3963BB26D55C8B026C4ECC93 /* FilmyCamera */,
 				64015BF6987C10DDD121B37C /* FilmyCameraTests */,
+				B6003FE00E73C488BD6EA7D0 /* FilmyCameraUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -278,6 +322,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		90EF71E8EDB3D9A676C9AAB0 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C70373098CEE45627237523A /* FilmyCameraUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -285,6 +337,11 @@
 			isa = PBXTargetDependency;
 			target = 3963BB26D55C8B026C4ECC93 /* FilmyCamera */;
 			targetProxy = 0C828F6271E6F744A87DB96C /* PBXContainerItemProxy */;
+		};
+		30D336083BBA88B616B5F6A4 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 3963BB26D55C8B026C4ECC93 /* FilmyCamera */;
+			targetProxy = 831E916F09B4F0CEB66E6933 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -336,6 +393,22 @@
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FilmyCamera.app/FilmyCamera";
 			};
 			name = Debug;
+		};
+		C325D286E972CA2065D5B4E7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.dheeraj.filmycamera.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = FilmyCamera;
+			};
+			name = Release;
 		};
 		D8D580DB79D97987B100D360 /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -490,9 +563,34 @@
 			};
 			name = Release;
 		};
+		F05AF31F0A0711D1BCBE1A69 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.dheeraj.filmycamera.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = FilmyCamera;
+			};
+			name = Debug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		1D6FBF0C49597DBF2BE52274 /* Build configuration list for PBXNativeTarget "FilmyCameraUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F05AF31F0A0711D1BCBE1A69 /* Debug */,
+				C325D286E972CA2065D5B4E7 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		3DEDFD5A432220F9B7FAE2CC /* Build configuration list for PBXNativeTarget "FilmyCamera" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
