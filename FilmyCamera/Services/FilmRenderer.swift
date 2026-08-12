@@ -36,12 +36,12 @@ public final class FilmRenderer {
         }
     }
 
-    public nonisolated(unsafe) static let metalDevice: MTLDevice? = MTLCreateSystemDefaultDevice()
+    public static let metalDevice: MTLDevice? = MTLCreateSystemDefaultDevice()
 
     /// A reusable GPU-backed context for callers that need to materialize the
     /// rendered CIImage. It falls back to Core Image's software renderer on a
     /// simulator or Mac without a Metal device.
-    public nonisolated(unsafe) static let sharedContext: CIContext = {
+    public static let sharedContext: CIContext = {
         if let metalDevice {
             return CIContext(
                 mtlDevice: metalDevice,

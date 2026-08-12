@@ -14,6 +14,7 @@ extension FilmRecipe {
 
     var detail: String {
         switch id {
+        case "provia-standard": return "Natural color, open whites, and a clean daylight finish for scenes that should feel close to the way you remember them."
         case "classic-chrome": return "Muted color, hard light, and restrained saturation for a frame that feels considered without feeling polished."
         case "velvia-vivid": return "Dense color and rich contrast for foliage, travel, and the scenes that deserve a little more pulse."
         case "astia-soft": return "Gentle portrait color with an easy highlight rolloff and a soft, natural finish."
@@ -43,6 +44,8 @@ extension FilmRecipe {
 
     var previewColors: [Color] {
         switch id {
+        case "provia-standard":
+            return [Color(red: 0.15, green: 0.24, blue: 0.28), Color(red: 0.58, green: 0.50, blue: 0.39), Color(red: 0.91, green: 0.78, blue: 0.59)]
         case "classic-chrome":
             return [Color(red: 0.20, green: 0.27, blue: 0.30), Color(red: 0.76, green: 0.49, blue: 0.33), Color(red: 0.90, green: 0.76, blue: 0.55)]
         case "velvia-vivid":

@@ -42,7 +42,6 @@ Keep the final keyword field at or below Apple's 100-character limit after local
 - **Support URL:** `https://github.com/dheeraj5612/filmy-camera/issues`
 - **Marketing URL:** `https://github.com/dheeraj5612/filmy-camera` (optional)
 - **Privacy policy URL:** `https://dheeraj5612.github.io/filmycam-legal/privacy-policy.html`
-- **Support email:** `support@filmycam.app`
 
 ## What's New — version 1.0
 

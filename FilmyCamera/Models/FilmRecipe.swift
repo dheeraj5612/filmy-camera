@@ -208,6 +208,36 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     /// conventions; the app is not affiliated with or calibrated by Fujifilm.
     public static let builtIns: [FilmRecipe] = [
         FilmRecipe(
+            id: "provia-standard",
+            name: "Provia Standard",
+            subtitle: "Natural color / clean daylight",
+            filmBase: .provia,
+            tone: Tone(highlight: 0.02, shadow: 0.00),
+            saturation: 1.00,
+            contrast: 1.00,
+            dynamicRange: .dr100,
+            whiteBalance: WhiteBalanceShift(),
+            colorChrome: 0.18,
+            blueResponse: 0.02,
+            fxBlue: 0.00,
+            sharpness: 0.02,
+            noiseReduction: 0.01,
+            clarity: 0.02,
+            grain: 0.08,
+            grainSize: 0.78,
+            vignette: 0.04,
+            halation: 0.01,
+            palette: Palette(
+                redBias: 0.006,
+                greenBias: 0.004,
+                blueBias: 0.004,
+                redGreenMix: 0.004,
+                greenBlueMix: 0.002,
+                blueRedMix: 0.004,
+                saturation: 1.00
+            )
+        ),
+        FilmRecipe(
             id: "classic-chrome",
             name: "Classic Chrome",
             subtitle: "Muted color / hard light",

@@ -40,6 +40,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private var isConfigured = false
     private var authorizationRequestInFlight = false
     private var pendingPhotoCompletion: PhotoCompletion?
+    private var sessionObservers: [NSObjectProtocol] = []
 
     private final class PhotoCompletionBox: @unchecked Sendable {
         let completion: PhotoCompletion
@@ -66,9 +67,11 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
         ]
         videoOutput.setSampleBufferDelegate(self, queue: videoQueue)
+        installSessionObservers()
     }
 
     deinit {
+        sessionObservers.forEach(NotificationCenter.default.removeObserver)
         videoOutput.setSampleBufferDelegate(nil, queue: nil)
         session.stopRunning()
     }
@@ -211,6 +214,18 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             return
         }
 
+        // A stopped session keeps its inputs and outputs. Reuse the existing
+        // graph when returning from background or another tab instead of
+        // trying to add duplicate AVFoundation objects.
+        if isConfigured {
+            configureOrientation()
+            session.startRunning()
+            let running = session.isRunning
+            publishRunning(running)
+            publishStatus(running ? "Camera ready" : "Camera could not start.")
+            return
+        }
+
         guard let device = defaultCameraDevice() else {
             publishRunning(false)
             publishStatus("Camera unavailable in Simulator. Use an iPhone to preview and capture.")
@@ -266,6 +281,64 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         let running = session.isRunning
         publishRunning(running)
         publishStatus(running ? "Camera ready" : "Camera could not start.")
+    }
+
+    private func installSessionObservers() {
+        let notificationCenter = NotificationCenter.default
+        sessionObservers = [
+            notificationCenter.addObserver(
+                forName: AVCaptureSession.runtimeErrorNotification,
+                object: session,
+                queue: nil
+            ) { [weak self] notification in
+                let errorCode = (notification.userInfo?[AVCaptureSessionErrorKey] as? AVError)?.code.rawValue
+                self?.sessionQueue.async { [weak self] in
+                    self?.handleRuntimeError(codeRawValue: errorCode)
+                }
+            },
+            notificationCenter.addObserver(
+                forName: AVCaptureSession.wasInterruptedNotification,
+                object: session,
+                queue: nil
+            ) { [weak self] _ in
+                self?.sessionQueue.async { [weak self] in
+                    self?.publishRunning(false)
+                    self?.publishStatus("Camera temporarily unavailable.")
+                }
+            },
+            notificationCenter.addObserver(
+                forName: AVCaptureSession.interruptionEndedNotification,
+                object: session,
+                queue: nil
+            ) { [weak self] _ in
+                self?.sessionQueue.async { [weak self] in
+                    guard let self,
+                          AVCaptureDevice.authorizationStatus(for: .video) == .authorized else {
+                        return
+                    }
+                    self.session.startRunning()
+                    let running = self.session.isRunning
+                    self.publishRunning(running)
+                    self.publishStatus(running ? "Camera ready" : "Camera could not start.")
+                }
+            }
+        ]
+    }
+
+    private func handleRuntimeError(codeRawValue: Int?) {
+        // Apple recommends restarting after media services reset. Other
+        // runtime errors remain visible so the UI can explain the recovery
+        // path instead of silently presenting a frozen preview.
+        if codeRawValue == AVError.Code.mediaServicesWereReset.rawValue, isConfigured {
+            session.startRunning()
+            let running = session.isRunning
+            publishRunning(running)
+            publishStatus(running ? "Camera ready" : "Camera needs to be reopened.")
+            return
+        }
+
+        publishRunning(false)
+        publishStatus("Camera needs to be reopened.")
     }
 
     private func defaultCameraDevice() -> AVCaptureDevice? {
