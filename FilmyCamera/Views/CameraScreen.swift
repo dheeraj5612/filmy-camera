@@ -11,17 +11,44 @@ struct CameraScreen: View {
     @AppStorage("showGrid") private var showGrid = true
     @AppStorage("hapticsEnabled") private var hapticsEnabled = true
     @State private var recipeForDetail: FilmRecipe?
+    @State private var focusPoint: CGPoint?
+    @State private var pinchStartZoom: CGFloat = 1
 
     var body: some View {
         ZStack {
-            FilteredCameraPreview(camera: camera, recipe: viewModel.selectedRecipe)
-                .ignoresSafeArea()
+            GeometryReader { proxy in
+                FilteredCameraPreview(camera: camera, recipe: viewModel.selectedRecipe)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        SpatialTapGesture().onEnded { value in
+                            let normalizedPoint = CGPoint(
+                                x: value.location.x / max(proxy.size.width, 1),
+                                y: value.location.y / max(proxy.size.height, 1)
+                            )
+                            camera.focus(at: normalizedPoint)
+                            withAnimation(.spring(response: 0.24, dampingFraction: 0.72)) {
+                                focusPoint = value.location
+                            }
+                        }
+                    )
+                    .simultaneousGesture(
+                        MagnificationGesture()
+                            .onChanged { scale in
+                                if abs(scale - 1) < 0.001 {
+                                    pinchStartZoom = camera.zoomFactor
+                                }
+                                camera.setZoom(pinchStartZoom * scale)
+                            }
+                            .onEnded { _ in
+                                pinchStartZoom = camera.zoomFactor
+                            }
+                    )
+            }
+            .ignoresSafeArea()
 
             if shouldShowCameraEmptyState {
-                PreviewPlaceholder(
-                    isSimulator: camera.statusMessage.localizedCaseInsensitiveContains("Simulator"),
-                    recipe: viewModel.selectedRecipe
-                )
+                cameraPlaceholder
                 .ignoresSafeArea()
             }
 
@@ -39,6 +66,19 @@ struct CameraScreen: View {
             }
 
             FocusReticle()
+                .position(focusPoint ?? CGPoint(x: UIScreen.main.bounds.midX, y: UIScreen.main.bounds.midY))
+
+            if camera.zoomFactor > 1.01 {
+                Text("\(camera.zoomFactor, specifier: "%.1f")×")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(Color.black.opacity(0.46), in: Capsule())
+                    .overlay { Capsule().stroke(Color.white.opacity(0.16), lineWidth: 1) }
+                    .padding(.top, 76)
+                    .accessibilityLabel("Zoom \(camera.zoomFactor, specifier: "%.1f") times")
+            }
 
             VStack(spacing: 0) {
                 header
@@ -59,14 +99,32 @@ struct CameraScreen: View {
         .sheet(item: $recipeForDetail) { recipe in
             RecipeDetailView(
                 recipe: recipe,
+                originalRecipe: viewModel.originalRecipe(for: recipe.id),
                 isSelected: viewModel.selectedRecipeID == recipe.id,
                 onSelect: {
                     viewModel.select(recipe: recipe)
                     recipeForDetail = nil
+                },
+                onUpdate: viewModel.update,
+                onReset: {
+                    viewModel.reset(recipeID: recipe.id)
+                    recipeForDetail = viewModel.originalRecipe(for: recipe.id)
                 }
             )
-            .presentationDetents([.medium, .large])
+            .presentationDetents([.large])
             .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: reviewPresentation) {
+            if let image = viewModel.reviewImage, let recipe = viewModel.reviewRecipe {
+                CaptureReviewView(
+                    image: image,
+                    recipe: recipe,
+                    onSave: { viewModel.saveReview(photoLibrary: photoLibrary) },
+                    onRetake: viewModel.discardReview
+                )
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+            }
         }
         .onAppear { camera.start() }
         .onDisappear { camera.stop() }
@@ -113,6 +171,42 @@ struct CameraScreen: View {
             || message.contains("could not")
     }
 
+    private var reviewPresentation: Binding<Bool> {
+        Binding(
+            get: { viewModel.reviewImage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    viewModel.discardReview()
+                }
+            }
+        )
+    }
+
+    @ViewBuilder
+    private var cameraPlaceholder: some View {
+        let isSimulator = camera.statusMessage.localizedCaseInsensitiveContains("Simulator")
+        let needsSettings = !isSimulator && camera.statusMessage.localizedCaseInsensitiveContains("access")
+
+        if needsSettings {
+            PreviewPlaceholder(
+                isSimulator: false,
+                recipe: viewModel.selectedRecipe,
+                actionTitle: "Open Settings",
+                action: openSystemSettings
+            )
+        } else {
+            PreviewPlaceholder(
+                isSimulator: isSimulator,
+                recipe: viewModel.selectedRecipe
+            )
+        }
+    }
+
+    private func openSystemSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
+    }
+
     private var controls: some View {
         VStack(spacing: 16) {
             HStack(alignment: .bottom) {
@@ -121,8 +215,19 @@ struct CameraScreen: View {
                         .font(.system(size: 9, weight: .bold, design: .rounded))
                         .tracking(1.2)
                         .foregroundStyle(.white.opacity(0.55))
-                    Text(viewModel.selectedRecipe.name)
-                        .font(.system(size: 21, weight: .bold, design: .rounded))
+                    HStack(spacing: 7) {
+                        Text(viewModel.selectedRecipe.name)
+                        if viewModel.isCustomized(viewModel.selectedRecipe) {
+                            Text("TUNED")
+                                .font(.system(size: 8, weight: .black, design: .rounded))
+                                .tracking(0.7)
+                                .foregroundStyle(FilmyTheme.background)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 4)
+                                .background(FilmyTheme.accent, in: Capsule())
+                        }
+                    }
+                    .font(.system(size: 21, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                 }
 
@@ -161,7 +266,7 @@ struct CameraScreen: View {
                     if hapticsEnabled {
                         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     }
-                    viewModel.capture(camera: camera, photoLibrary: photoLibrary)
+                    viewModel.capture(camera: camera)
                 }
 
                 Spacer()

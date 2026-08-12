@@ -338,6 +338,8 @@ struct PermissionBadge: View {
 struct PreviewPlaceholder: View {
     let isSimulator: Bool
     let recipe: FilmRecipe
+    var actionTitle: String?
+    var action: (() -> Void)?
 
     var body: some View {
         ZStack {
@@ -364,6 +366,16 @@ struct PreviewPlaceholder: View {
                         .foregroundStyle(.white.opacity(0.72))
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 28)
+                }
+
+                if let actionTitle, let action {
+                    Button(actionTitle, action: action)
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(FilmyTheme.background)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(FilmyTheme.accent, in: Capsule())
+                        .accessibilityHint("Opens Filmy Camera permissions")
                 }
             }
         }

@@ -1,12 +1,18 @@
 import Combine
-import Photos
+@preconcurrency import Photos
 import UIKit
 
 @MainActor
 final class PhotoLibraryService: ObservableObject {
+    private final class IdentifierBox: @unchecked Sendable {
+        var value: String?
+    }
+
     @Published private(set) var assets: [PHAsset] = []
     @Published private(set) var authorizationStatus: PHAuthorizationStatus
     @Published private(set) var isLoading = false
+
+    private let albumTitle = "Filmy Camera"
 
     init() {
         authorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
@@ -37,7 +43,12 @@ final class PhotoLibraryService: ObservableObject {
         let options = PHFetchOptions()
         options.fetchLimit = 60
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-        let result = PHAsset.fetchAssets(with: .image, options: options)
+        guard let album = appAlbum() else {
+            assets = []
+            return
+        }
+
+        let result = PHAsset.fetchAssets(in: album, options: options)
         assets = result.objects(at: IndexSet(integersIn: 0..<result.count))
     }
 
@@ -57,15 +68,82 @@ final class PhotoLibraryService: ObservableObject {
                 return
             }
 
+            let assetIdentifierBox = IdentifierBox()
             PHPhotoLibrary.shared().performChanges {
-                PHAssetChangeRequest.creationRequestForAsset(from: image)
+                let request = PHAssetChangeRequest.creationRequestForAsset(from: image)
+                assetIdentifierBox.value = request.placeholderForCreatedAsset?.localIdentifier
             } completionHandler: { [weak self] success, _ in
+                guard let self else { return }
                 Task { @MainActor in
-                    if success {
-                        self?.refresh()
+                    guard success, let assetIdentifier = assetIdentifierBox.value else {
+                        completion(false)
+                        return
                     }
-                    completion(success)
+
+                    self.addToAppAlbum(assetIdentifier: assetIdentifier) {
+                        self.refresh()
+                        completion(true)
+                    }
                 }
+            }
+        }
+    }
+
+    private func appAlbum() -> PHAssetCollection? {
+        let options = PHFetchOptions()
+        options.predicate = NSPredicate(format: "localizedTitle == %@", albumTitle)
+        return PHAssetCollection.fetchAssetCollections(
+            with: .album,
+            subtype: .albumRegular,
+            options: options
+        ).firstObject
+    }
+
+    private func addToAppAlbum(assetIdentifier: String, completion: @escaping @MainActor () -> Void) {
+        if let album = appAlbum() {
+            addAsset(assetIdentifier, to: album, completion: completion)
+            return
+        }
+
+        let albumIdentifierBox = IdentifierBox()
+        PHPhotoLibrary.shared().performChanges {
+            let request = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: self.albumTitle)
+            albumIdentifierBox.value = request.placeholderForCreatedAssetCollection.localIdentifier
+        } completionHandler: { [weak self] success, _ in
+            guard let self else { return }
+            Task { @MainActor in
+                guard success,
+                      let albumIdentifier = albumIdentifierBox.value,
+                      let album = PHAssetCollection.fetchAssetCollections(
+                          withLocalIdentifiers: [albumIdentifier],
+                          options: nil
+                      ).firstObject else {
+                    completion()
+                    return
+                }
+                self.addAsset(assetIdentifier, to: album, completion: completion)
+            }
+        }
+    }
+
+    private func addAsset(
+        _ assetIdentifier: String,
+        to album: PHAssetCollection,
+        completion: @escaping @MainActor () -> Void
+    ) {
+        guard let asset = PHAsset.fetchAssets(
+            withLocalIdentifiers: [assetIdentifier],
+            options: nil
+        ).firstObject else {
+            completion()
+            return
+        }
+
+        PHPhotoLibrary.shared().performChanges {
+            PHAssetCollectionChangeRequest(for: album)?.addAssets([asset] as NSArray)
+        } completionHandler: { _ , _ in
+            Task { @MainActor in
+                completion()
             }
         }
     }
