@@ -72,15 +72,11 @@ final class FilmyCameraUITests: XCTestCase {
     }
 
     private func tapPhotosPermissionButton(in alert: XCUIElement) -> Bool {
-        for label in ["Allow Full Access", "Allow Limited Access", "Allow"] {
+        for label in ["Don’t Allow", "Allow Full Access", "Allow Limited Access", "Allow"] {
             if alert.buttons[label].exists {
                 alert.buttons[label].tap()
                 return true
             }
-        }
-        if alert.buttons["Don’t Allow"].exists {
-            alert.buttons["Don’t Allow"].tap()
-            return true
         }
         return false
     }
