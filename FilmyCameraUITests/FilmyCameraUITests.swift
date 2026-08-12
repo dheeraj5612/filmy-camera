@@ -60,10 +60,6 @@ final class FilmyCameraUITests: XCTestCase {
         if systemAlert.waitForExistence(timeout: 5) {
             _ = tapPhotosPermissionButton(in: systemAlert)
         }
-        app.tap()
-        if systemAlert.exists {
-            _ = tapPhotosPermissionButton(in: systemAlert)
-        }
         XCTAssertFalse(
             springBoard.alerts.firstMatch.exists,
             "Photos permission prompt remained on screen"
