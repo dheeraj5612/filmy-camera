@@ -7,7 +7,7 @@ struct GalleryScreen: View {
 
     @Environment(\.scenePhase) private var scenePhase
     @State private var isShowingPhoto = false
-    @State private var selectedAsset: PHAsset?
+    @State private var selectedAsset: PhotoLibraryGalleryAsset?
 
     private let columns = [
         GridItem(.flexible(), spacing: 8),
@@ -21,7 +21,7 @@ struct GalleryScreen: View {
                     SectionHeading(
                         eyebrow: "Your roll",
                         title: "Roll",
-                        trailing: photoLibrary.assets.isEmpty ? nil : "\(photoLibrary.assets.count) recent"
+                        trailing: photoLibrary.galleryAssets.isEmpty ? nil : "\(photoLibrary.galleryAssets.count) recent"
                     )
 
                     galleryContent
@@ -37,36 +37,24 @@ struct GalleryScreen: View {
             }
         }
         .task {
-            _ = await photoLibrary.requestAccessIfNeeded()
+            // Keep the Roll useful without prompting for broad Photos read
+            // access. Filmy Camera can display its own locally cached frames;
+            // browsing other Photos is an explicit user choice below.
+            photoLibrary.refresh()
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             photoLibrary.refresh()
-            guard photoLibrary.authorizationStatus == .authorized
-                    || photoLibrary.authorizationStatus == .limited else {
-                selectedAsset = nil
-                isShowingPhoto = false
-                return
-            }
-
-            if let selectedAsset,
-               !photoLibrary.assets.contains(where: { $0.localIdentifier == selectedAsset.localIdentifier }) {
-                self.selectedAsset = nil
-                isShowingPhoto = false
-            }
+            clearSelectionIfUnavailable()
         }
-        .onChange(of: photoLibrary.authorizationStatus) { _, status in
-            guard status == .authorized || status == .limited else {
-                selectedAsset = nil
-                isShowingPhoto = false
-                return
-            }
-
-            if let selectedAsset,
-               !photoLibrary.assets.contains(where: { $0.localIdentifier == selectedAsset.localIdentifier }) {
-                self.selectedAsset = nil
-                isShowingPhoto = false
-            }
+        .onChange(of: photoLibrary.authorizationStatus) { _, _ in
+            clearSelectionIfUnavailable()
+        }
+        .onChange(of: photoLibrary.assets.map(\.localIdentifier)) { _, _ in
+            clearSelectionIfUnavailable()
+        }
+        .onChange(of: photoLibrary.localSavedFrames.map(\.assetIdentifier)) { _, _ in
+            clearSelectionIfUnavailable()
         }
         .sheet(isPresented: $isShowingPhoto) {
             if let selectedAsset {
@@ -77,48 +65,69 @@ struct GalleryScreen: View {
         }
     }
 
+    private func clearSelectionIfUnavailable() {
+        guard let selectedAsset,
+              !photoLibrary.galleryAssets.contains(where: { $0.id == selectedAsset.id }) else {
+            return
+        }
+        self.selectedAsset = nil
+        isShowingPhoto = false
+    }
+
     @ViewBuilder
     private var galleryContent: some View {
         switch photoLibrary.authorizationStatus {
-        case .authorized, .limited:
-            if photoLibrary.assets.isEmpty {
+        case .authorized, .notDetermined:
+            if photoLibrary.galleryAssets.isEmpty {
+                if photoLibrary.authorizationStatus == .notDetermined {
+                    EmptyStateCard(
+                        systemName: "photo.badge.plus",
+                        title: "Give your roll a home",
+                        message: "Allow photo access to show the frames you have made with Filmy Camera.",
+                        actionTitle: "Browse Photos",
+                        action: requestReadAccess
+                    )
+                } else {
+                    EmptyStateCard(
+                        systemName: "photo.on.rectangle.angled",
+                        title: "Your frames will live here",
+                        message: "Capture a moment with a recipe and it will appear in this quiet little roll."
+                    )
+                }
+            } else {
+                galleryGrid
+            }
+        case .limited:
+            VStack(alignment: .leading, spacing: 14) {
+                if photoLibrary.galleryAssets.isEmpty {
+                    EmptyStateCard(
+                        systemName: "photo.on.rectangle.angled",
+                        title: "Your selected roll is empty",
+                        message: "Filmy Camera can only show the photos you selected for it."
+                    )
+                } else {
+                    galleryGrid
+                }
+                manageLimitedAccessButton
+            }
+        case .denied, .restricted:
+            if photoLibrary.galleryAssets.isEmpty {
                 EmptyStateCard(
-                    systemName: "photo.on.rectangle.angled",
-                    title: "Your frames will live here",
-                    message: "Capture a moment with a recipe and it will appear in this quiet little roll."
+                    systemName: "lock.slash",
+                    title: "Photo access is off",
+                    message: "Enable Photos access in Settings to see your saved frames.",
+                    actionTitle: "Open Settings",
+                    action: openSystemSettings
                 )
             } else {
-                LazyVGrid(columns: columns, spacing: 8) {
-                    ForEach(photoLibrary.assets, id: \.localIdentifier) { asset in
-                        Button {
-                            selectedAsset = asset
-                            isShowingPhoto = true
-                        } label: {
-                            GalleryThumbnail(asset: asset, photoLibrary: photoLibrary)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(
-                            photoLibrary.metadata(for: asset).map {
-                                "Photo in your gallery, \($0.recipe.name)"
-                            } ?? "Photo in your gallery"
-                        )
-                    }
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Showing frames saved by Filmy Camera. Enable Photos read access to browse other library assets.")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(FilmyTheme.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    galleryGrid
                 }
             }
-        case .notDetermined:
-            EmptyStateCard(
-                systemName: "photo.badge.plus",
-                title: "Give your roll a home",
-                message: "Allow photo access to show the frames you have made with Filmy Camera."
-            )
-        case .denied, .restricted:
-            EmptyStateCard(
-                systemName: "lock.slash",
-                title: "Photo access is off",
-                message: "Enable Photos access in Settings to see your saved frames.",
-                actionTitle: "Open Settings",
-                action: openSystemSettings
-            )
         @unknown default:
             EmptyStateCard(
                 systemName: "photo",
@@ -128,14 +137,49 @@ struct GalleryScreen: View {
         }
     }
 
+    private var manageLimitedAccessButton: some View {
+        Button {
+            photoLibrary.presentLimitedLibraryPicker()
+        } label: {
+            Label("Manage selected photos", systemImage: "checkmark.circle")
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(FilmyTheme.accent)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityHint("Choose which photos Filmy Camera can view")
+    }
+
+    private var galleryGrid: some View {
+        LazyVGrid(columns: columns, spacing: 8) {
+            ForEach(photoLibrary.galleryAssets) { asset in
+                Button {
+                    selectedAsset = asset
+                    isShowingPhoto = true
+                } label: {
+                    GalleryThumbnail(asset: asset, photoLibrary: photoLibrary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(
+                    photoLibrary.metadata(for: asset).map {
+                        "Photo in your gallery, \($0.recipe.name)"
+                    } ?? "Photo in your gallery"
+                )
+            }
+        }
+    }
+
     private func openSystemSettings() {
         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
         UIApplication.shared.open(url)
     }
+
+    private func requestReadAccess() {
+        Task { _ = await photoLibrary.requestAccessIfNeeded() }
+    }
 }
 
 private struct GalleryThumbnail: View {
-    let asset: PHAsset
+    let asset: PhotoLibraryGalleryAsset
     @ObservedObject var photoLibrary: PhotoLibraryService
 
     @State private var image: UIImage?
@@ -186,12 +230,13 @@ private struct GalleryThumbnail: View {
                 }
             }
         }
-        .task(id: asset.localIdentifier) {
+        .task(id: asset.id) {
             image = await photoLibrary.image(for: asset, targetSize: CGSize(width: 360, height: 440))
         }
         .onChange(of: photoLibrary.authorizationStatus) { _, status in
-            guard status == .authorized || status == .limited else {
-                image = nil
+            guard asset.isPhotosAsset,
+                  status == .authorized || status == .limited else {
+                if asset.isPhotosAsset { image = nil }
                 return
             }
             image = nil
@@ -200,7 +245,7 @@ private struct GalleryThumbnail: View {
 }
 
 private struct GalleryDetailView: View {
-    let asset: PHAsset
+    let asset: PhotoLibraryGalleryAsset
     @ObservedObject var photoLibrary: PhotoLibraryService
 
     @Environment(\.dismiss) private var dismiss
@@ -227,6 +272,7 @@ private struct GalleryDetailView: View {
             image = await photoLibrary.image(for: asset, targetSize: CGSize(width: 1600, height: 2200))
         }
         .onChange(of: photoLibrary.authorizationStatus) { _, status in
+            guard asset.isPhotosAsset else { return }
             if status != .authorized && status != .limited {
                 image = nil
             }
@@ -316,16 +362,18 @@ private struct GalleryDetailView: View {
             .accessibilityLabel("Share frame")
             .disabled(image == nil || isDeleting)
 
-            Button {
-                isShowingDeleteConfirmation = true
-            } label: {
-                Image(systemName: "trash")
-                    .font(.system(size: 14, weight: .bold))
-                    .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
-                    .background(FilmyTheme.panel, in: Circle())
+            if asset.isPhotosAsset && photoLibrary.canDeletePhotos {
+                Button {
+                    isShowingDeleteConfirmation = true
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 14, weight: .bold))
+                        .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+                        .background(FilmyTheme.panel, in: Circle())
+                }
+                .accessibilityLabel("Delete frame")
+                .disabled(isDeleting)
             }
-            .accessibilityLabel("Delete frame")
-            .disabled(isDeleting)
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 18)

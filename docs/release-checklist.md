@@ -22,7 +22,8 @@
 
 - [x] Run `xcodegen generate` from a clean checkout.
 - [x] Run the credential-free release project preflight (`scripts/release/validate-project.sh`).
-- [x] Run the iPhone Simulator build and XCTest workflow in `.github/workflows/ios-build.yml` (29 unit/renderer tests plus 2 UI tests, 31 total, on verified mainline).
+- [x] Run the iPhone Simulator build and XCTest workflow locally (39 unit/renderer tests plus 2 UI tests, 41 total, on iOS 18.5 and iOS 26.5 runtimes).
+- [ ] Re-run the hosted Xcode 16.4 workflow for this production-hardening pass and verify the exact merged SHA.
 - [x] Keep release-script syntax, ShellCheck, and fail-closed upload-preparation checks in CI.
 - [ ] Run a Release archive on a physical-device destination.
 - [x] Validate `Info.plist`, launch behavior, app icon, version `1.0.0`, and build number `1`.
@@ -71,8 +72,8 @@ The archive wrapper generates the project and creates a Release archive for a ge
 ## Verified evidence
 
 - Last verified app-code mainline: `33d664775a8324c1fb325e7d3e71da2990fc4a80`
-- GitHub Actions run: [31646888876](https://github.com/dheeraj5612/filmy-camera/actions/runs/31646888876) — green Xcode 16.4 simulator build; 29 unit/renderer tests plus 2 UI tests (31 total) passed, with generated-project reproducibility, release preflight, artifact upload, ShellCheck, and the fail-closed upload-preparation lane.
-- Local simulator verification: 29 unit/renderer tests plus 2 UI tests passed on iPhone 16 Pro, iOS 18.5; the gallery/settings UI flow, renderer-backed recipe thumbnails, Tune flow, capture-review handoff, typed camera availability states, VoiceOver focus action, privacy/support links, and accessibility tree were verified.
+- Previous mainline baseline: [31647529461](https://github.com/dheeraj5612/filmy-camera/actions/runs/31647529461) — green Xcode 16.4 simulator build before this production-hardening pass.
+- Current local simulator verification: 39 unit/renderer tests plus 2 UI tests passed on iOS 18.5 and iOS 26.5; the gallery/settings UI flow, renderer-backed recipe thumbnails, Tune flow, capture-review handoff, typed camera availability states, flash availability contract, Photos authorization policy, VoiceOver focus action, privacy/support links, and accessibility tree were verified.
 - Local release project preflight: `scripts/release/validate-project.sh` passed for bundle `com.dheeraj.filmycamera`, version `1.0.0 (1)`, the privacy manifest, the 1024×1024 icon, and all expected schemes/tests.
 - Current local simulator: iPhone 16 Pro, iOS 18.5 — camera shell, recipe editor, Gallery/Settings navigation, accessibility tree, screenshots, and simulator capture fallback verified.
 - Historical unsigned archive: `/tmp/filmycamera-rc-20260812-ui-deterministic.xcarchive` — contains dSYM and `PrivacyInfo.xcprivacy`, but predates current main; rebuild and pin a current archive before release use.

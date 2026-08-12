@@ -108,8 +108,12 @@ struct CameraActionButton: View {
                 Image(systemName: systemName)
                     .font(.system(size: 15, weight: .bold))
                 Text(title)
-                    .font(.system(.caption2, design: .rounded).weight(.bold))
-                    .lineLimit(1)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.68)
+                    .allowsTightening(true)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .foregroundStyle(isProminent ? FilmyTheme.background : FilmyTheme.primary)
             .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
@@ -125,6 +129,39 @@ struct CameraActionButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+struct FlashControl: View {
+    let mode: CameraService.FlashMode
+    let availability: CameraService.FlashAvailability
+    let action: () -> Void
+
+    private var isTemporarilyUnavailable: Bool {
+        availability == .temporarilyUnavailable
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Label(mode.title, systemImage: mode.systemImageName)
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(Color.black.opacity(0.46), in: Capsule())
+                .overlay { Capsule().stroke(Color.white.opacity(0.16), lineWidth: 1) }
+        }
+        .buttonStyle(.plain)
+        .disabled(isTemporarilyUnavailable)
+        .opacity(isTemporarilyUnavailable ? 0.58 : 1)
+        .accessibilityIdentifier("flash-control")
+        .accessibilityLabel(isTemporarilyUnavailable ? "Flash temporarily unavailable" : "Flash")
+        .accessibilityValue(mode.title)
+        .accessibilityHint(
+            isTemporarilyUnavailable
+                ? "The flash is temporarily unavailable. Try again after the camera cools down."
+                : "Cycles between flash off, automatic low-light flash, and flash on."
+        )
     }
 }
 
@@ -222,6 +259,7 @@ struct RecipeSwatch: View {
     var isSelected = false
     var compact = false
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var thumbnailData: Data?
 
     var body: some View {
@@ -251,13 +289,18 @@ struct RecipeSwatch: View {
                 Text(recipe.name)
                     .font(.system(size: compact ? 12 : 13, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
-                    .lineLimit(1)
+                    .lineLimit(compact ? 1 : 2)
+                    .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 0.72 : 0.84)
+                    .allowsTightening(true)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 if !compact {
                     Text(recipe.descriptor)
                         .font(.system(size: 9, weight: .medium, design: .rounded))
                         .foregroundStyle(.white.opacity(0.7))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                        .allowsTightening(true)
                 }
             }
             .padding(compact ? 10 : 12)
@@ -506,7 +549,7 @@ struct PreviewPlaceholder: View {
                     Text(isSimulator ? "Preview mode" : "Camera unavailable")
                         .font(.system(size: 19, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
-                    Text(message ?? (isSimulator ? "Run Filmy Camera on an iPhone to shoot with \(recipe.name)." : "Check camera access in Settings, then try again."))
+                    Text(message ?? (isSimulator ? "Shoot this look on an iPhone." : "Check camera access in Settings, then try again."))
                         .font(.system(size: 13, weight: .medium, design: .rounded))
                         .foregroundStyle(.white.opacity(0.72))
                         .multilineTextAlignment(.center)

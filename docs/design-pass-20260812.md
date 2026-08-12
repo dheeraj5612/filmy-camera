@@ -49,7 +49,29 @@ The analog character comes from tone, color, grain, and halation. The interface 
 ## Verification
 
 - Simulator build succeeded for the iOS 18.5 `FilmyCamera iPhone` runtime.
-- Unit/renderer tests: 28 passed.
+- Unit/renderer tests: 39 passed on iOS 18.5 and iOS 26.5 simulator runtimes.
 - UI tests: 2 passed.
-- Full simulator suite: 30 tests passed with 0 failures.
-- Final simulator review confirmed the unavailable-camera state and compact offline action plate remain legible.
+- Full local simulator suite: 41 tests passed with 0 failures.
+- Final simulator review confirmed the unavailable-camera state and compact offline action plate remain legible at the tested large-text setting.
+
+## Recipe provenance and trust surface — 2026-08-12
+
+The bounded recipe pass makes the look contract auditable without changing the
+requested Fujifilm-style names. Every current `FilmRecipe` carries schema
+version 2 and serialized provenance that identifies the first-party public
+terminology references, the implementation as an original parametric
+approximation, and the absence of Fujifilm hardware calibration. Its
+disclaimer explicitly says the output is not pixel-identical and does not use
+proprietary LUTs, firmware, or calibration data.
+
+Numeric recipe controls now have one stable semantic catalog: each control
+declares its unit, app-defined normalized editor range, and meaning. Validation
+is read-only, so exploratory slider drafts are not silently rewritten; a
+renderer may still clamp them at the image boundary. A recipe imported from
+the pre-provenance JSON shape remains readable but is labeled legacy and does
+not pass the complete provenance audit.
+
+This keeps the camera experience honest: the names communicate the public
+camera vocabulary the product is emulating, while the persisted record makes
+clear that the rendering is an independent approximation rather than a claim
+of Fujifilm output identity.

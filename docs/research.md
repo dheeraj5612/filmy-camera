@@ -51,3 +51,40 @@ The open-source look research also found reusable LUT/profile assets, but none a
 - [JanLohse/spectral_film_lut](https://github.com/JanLohse/spectral_film_lut) demonstrates a datasheet-driven route to film-emulation LUTs. A future calibration pass should use original measurements or assets with commercial redistribution rights, then add reference images and device/sensor validation before changing the product's approximation disclaimer.
 
 The current renderer therefore remains an original, inspectable Core Image/Metal model. It does not claim exact Fujifilm output, and the app does not ship firmware, proprietary profiles, or third-party LUT files.
+
+## Bounded recipe fidelity and provenance pass — 2026-08-12
+
+The recipe model now treats the public terminology boundary as an explicit
+product contract. The first-party X-T5 manual uses the following control
+groups: Film Simulation, Grain Effect (roughness and size), Color Chrome Effect,
+Color Chrome FX Blue, White Balance, Dynamic Range, Tone Curve, Color,
+Sharpness, High ISO NR, and Clarity. It also documents ACROS and monochrome
+yellow, red, and green filter options. Filmy Camera uses those names as
+interoperable vocabulary, while its numeric values remain app-defined
+normalized parameters.
+
+`FilmRecipe.Control` is the single semantic catalog for those numeric
+parameters. Each entry states its unit, meaning, and app editor range. The
+range is not presented as a Fujifilm hardware scale, and validation reports
+out-of-range drafts without rewriting them. The renderer remains defensive and
+clamps at its own output boundary.
+
+`FilmRecipe` persistence is versioned. Current records use schema version 2
+and serialize `Provenance` with the two first-party references above. The
+record states `originalParametricApproximation` and
+`notCalibratedToFujifilmHardware`; there is intentionally no exact-match,
+hardware-calibrated, or proprietary-LUT state. Records from the old unversioned
+shape remain decodable, but are labeled as legacy and fail the complete audit
+until they are rewritten by the current model.
+
+The product disclosure is therefore narrow and testable: the looks are
+original approximations inspired by public controls, not pixel-identical
+Fujifilm camera output; the app is not affiliated with or endorsed by
+Fujifilm; and no proprietary LUT, firmware, or camera calibration data is
+included. The user-facing Fujifilm-style names remain unchanged for the
+requested compatibility vocabulary.
+
+First-party references:
+
+- [FUJIFILM X-T5 Image Quality Setting](https://fujifilm-dsc.com/en/manual/x-t5/menu_shooting/image_quality_setting/)
+- [FUJIFILM Film Simulation overview](https://www.fujifilm-x.com/en-us/products/film-simulation/)

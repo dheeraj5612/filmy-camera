@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 /// A film-inspired set of camera and finishing controls.
@@ -6,6 +7,22 @@ import SwiftUI
 /// cameras. They are data, rather than a collection of opaque filter names, so
 /// the renderer and the UI can both inspect the look.
 public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
+    /// Version of the persisted recipe envelope. Version 1 was the implicit
+    /// pre-provenance format; version 2 records provenance explicitly.
+    public static let currentSchemaVersion = 2
+
+    /// The product-level disclosure that accompanies every current recipe.
+    /// It intentionally rules out an exact-output or hardware-calibration
+    /// claim.
+    public static let independentApproximationDisclaimer =
+        "Filmy Camera is an independent implementation inspired by public Fujifilm terminology and controls. Its renders are original approximations, not pixel-identical Fujifilm camera output. It is not affiliated with, endorsed by, or calibrated to Fujifilm, and it contains no proprietary LUTs, firmware, or calibration data."
+
+    /// Disclosure for recipes decoded from the pre-provenance persistence
+    /// format. The old record is retained for compatibility, but its origin
+    /// cannot be reconstructed from the stored bytes alone.
+    public static let legacyProvenanceDisclaimer =
+        "This recipe predates provenance metadata. Its source and calibration history cannot be verified from the stored record; do not present it as an exact hardware match."
+
     public enum FilmBase: String, CaseIterable, Codable, Hashable, Sendable {
         case standard
         case provia
@@ -109,6 +126,345 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         }
     }
 
+    /// First-party public references used for terminology and control scope.
+    /// These references document vocabulary and behavior, not transferable
+    /// LUT values, sensor calibration, or proprietary implementation data.
+    public enum PublicReference: String, CaseIterable, Codable, Hashable, Sendable {
+        case xt5ImageQualitySetting
+        case filmSimulationOverview
+
+        public var title: String {
+            switch self {
+            case .xt5ImageQualitySetting:
+                return "FUJIFILM X-T5 Image Quality Setting"
+            case .filmSimulationOverview:
+                return "FUJIFILM Film Simulation overview"
+            }
+        }
+
+        public var url: String {
+            switch self {
+            case .xt5ImageQualitySetting:
+                return "https://fujifilm-dsc.com/en/manual/x-t5/menu_shooting/image_quality_setting/"
+            case .filmSimulationOverview:
+                return "https://www.fujifilm-x.com/en-us/products/film-simulation/"
+            }
+        }
+
+        public var scope: String {
+            switch self {
+            case .xt5ImageQualitySetting:
+                return "Public names, option descriptions, and control groupings"
+            case .filmSimulationOverview:
+                return "Public film-simulation names and subject-oriented descriptions"
+            }
+        }
+    }
+
+    /// Machine-readable provenance attached to a recipe and persisted with
+    /// saved-frame metadata. The enum surface contains no exact-match or
+    /// hardware-calibrated state by design.
+    public struct Provenance: Codable, Hashable, Sendable {
+        public enum Source: String, CaseIterable, Codable, Hashable, Sendable {
+            case publicOfficialDocumentation
+            case legacyRecordWithoutProvenance
+        }
+
+        public enum Implementation: String, CaseIterable, Codable, Hashable, Sendable {
+            case originalParametricApproximation
+            case unknownLegacyRecord
+        }
+
+        public enum Calibration: String, CaseIterable, Codable, Hashable, Sendable {
+            case notCalibratedToFujifilmHardware
+            case unknownLegacyRecord
+        }
+
+        public let source: Source
+        public let implementation: Implementation
+        public let calibration: Calibration
+        public let references: [PublicReference]
+
+        public init(
+            source: Source,
+            implementation: Implementation,
+            calibration: Calibration,
+            references: [PublicReference]
+        ) {
+            self.source = source
+            self.implementation = implementation
+            self.calibration = calibration
+            self.references = references
+        }
+
+        public var disclaimer: String {
+            switch implementation {
+            case .originalParametricApproximation:
+                return FilmRecipe.independentApproximationDisclaimer
+            case .unknownLegacyRecord:
+                return FilmRecipe.legacyProvenanceDisclaimer
+            }
+        }
+
+        /// A complete record has the expected source, implementation status,
+        /// calibration disclosure, and the complete official reference set.
+        public var isComplete: Bool {
+            source == .publicOfficialDocumentation
+                && implementation == .originalParametricApproximation
+                && calibration == .notCalibratedToFujifilmHardware
+                && references == PublicReference.allCases
+        }
+    }
+
+    public static let currentProvenance = Provenance(
+        source: .publicOfficialDocumentation,
+        implementation: .originalParametricApproximation,
+        calibration: .notCalibratedToFujifilmHardware,
+        references: PublicReference.allCases
+    )
+
+    /// Used only when decoding the old JSON shape that had no provenance
+    /// fields. It keeps old user data readable without laundering uncertainty
+    /// into the current provenance claim.
+    public static let legacyProvenance = Provenance(
+        source: .legacyRecordWithoutProvenance,
+        implementation: .unknownLegacyRecord,
+        calibration: .unknownLegacyRecord,
+        references: []
+    )
+
+    /// Units used by the stable numeric control contract.
+    public enum ControlUnit: String, CaseIterable, Codable, Hashable, Sendable {
+        case exposureEV
+        case toneOffset
+        case multiplier
+        case normalizedStrength
+        case normalizedOffset
+        case normalizedSize
+    }
+
+    /// Public semantics for every numeric field that participates in a
+    /// recipe. `editorRange` is the app's normalized editing contract; the
+    /// renderer may still receive an out-of-range draft and clamp at its
+    /// rendering boundary for resilience.
+    public enum Control: String, CaseIterable, Codable, Hashable, Sendable {
+        case exposure
+        case highlights
+        case shadows
+        case color
+        case contrast
+        case colorChrome
+        case blueResponse
+        case fxBlue
+        case temperature
+        case tint
+        case sharpness
+        case noiseReduction
+        case clarity
+        case grain
+        case grainSize
+        case vignette
+        case halation
+        case paletteRedBias
+        case paletteGreenBias
+        case paletteBlueBias
+        case paletteRedGreenMix
+        case paletteGreenBlueMix
+        case paletteBlueRedMix
+        case paletteSaturation
+
+        public var displayName: String {
+            switch self {
+            case .exposure: return "Exposure"
+            case .highlights: return "Highlights"
+            case .shadows: return "Shadows"
+            case .color: return "Color"
+            case .contrast: return "Contrast"
+            case .colorChrome: return "Color Chrome"
+            case .blueResponse: return "Blue response"
+            case .fxBlue: return "Color Chrome FX Blue"
+            case .temperature: return "White balance temperature shift"
+            case .tint: return "White balance tint shift"
+            case .sharpness: return "Sharpness"
+            case .noiseReduction: return "High ISO noise reduction"
+            case .clarity: return "Clarity"
+            case .grain: return "Grain roughness"
+            case .grainSize: return "Grain size"
+            case .vignette: return "Vignette"
+            case .halation: return "Halation"
+            case .paletteRedBias: return "Palette red bias"
+            case .paletteGreenBias: return "Palette green bias"
+            case .paletteBlueBias: return "Palette blue bias"
+            case .paletteRedGreenMix: return "Palette red-green mix"
+            case .paletteGreenBlueMix: return "Palette green-blue mix"
+            case .paletteBlueRedMix: return "Palette blue-red mix"
+            case .paletteSaturation: return "Palette saturation"
+            }
+        }
+
+        public var unit: ControlUnit {
+            switch self {
+            case .exposure:
+                return .exposureEV
+            case .highlights, .shadows:
+                return .toneOffset
+            case .color, .contrast, .paletteSaturation:
+                return .multiplier
+            case .colorChrome, .blueResponse, .fxBlue, .noiseReduction, .grain, .vignette, .halation:
+                return .normalizedStrength
+            case .temperature, .tint, .sharpness, .clarity, .paletteRedBias, .paletteGreenBias,
+                 .paletteBlueBias, .paletteRedGreenMix, .paletteGreenBlueMix, .paletteBlueRedMix:
+                return .normalizedOffset
+            case .grainSize:
+                return .normalizedSize
+            }
+        }
+
+        /// These ranges are intentionally app-level normalized semantics, not
+        /// claims that Fujifilm hardware uses the same numeric scale.
+        public var editorRange: ClosedRange<Double> {
+            switch self {
+            case .exposure: return -2.0...2.0
+            case .highlights, .shadows: return -1.0...1.0
+            case .color: return 0.0...2.0
+            case .contrast: return 0.5...1.7
+            case .colorChrome: return 0.0...1.0
+            case .blueResponse, .fxBlue: return -1.0...1.0
+            case .temperature, .tint: return -1.0...1.0
+            case .sharpness, .clarity: return -1.0...1.0
+            case .noiseReduction: return 0.0...1.0
+            case .grain: return 0.0...1.0
+            case .grainSize: return 0.35...2.5
+            case .vignette, .halation: return 0.0...1.0
+            case .paletteRedBias, .paletteGreenBias, .paletteBlueBias,
+                 .paletteRedGreenMix, .paletteGreenBlueMix, .paletteBlueRedMix:
+                return -1.0...1.0
+            case .paletteSaturation: return 0.0...2.0
+            }
+        }
+
+        public var semanticDescription: String {
+            switch self {
+            case .exposure:
+                return "Exposure compensation in EV; zero is neutral."
+            case .highlights, .shadows:
+                return "Signed tone-curve offset; zero is neutral and the sign is preserved."
+            case .color:
+                return "Color-density multiplier; 1.0 is neutral."
+            case .contrast:
+                return "Contrast multiplier; 1.0 is neutral."
+            case .colorChrome:
+                return "Normalized strength of the original saturated-color tone-compression approximation."
+            case .blueResponse:
+                return "Signed normalized blue-channel response used by the original approximation."
+            case .fxBlue:
+                return "Signed normalized strength of the original blue-response approximation."
+            case .temperature:
+                return "Normalized white-balance temperature shift; positive values warm the image."
+            case .tint:
+                return "Normalized white-balance tint shift; positive values move toward magenta."
+            case .sharpness:
+                return "Signed normalized edge-definition adjustment."
+            case .noiseReduction:
+                return "Normalized smoothing amount; zero leaves this stage off."
+            case .clarity:
+                return "Signed normalized local-definition adjustment."
+            case .grain:
+                return "Normalized grain roughness amount; zero leaves this stage off."
+            case .grainSize:
+                return "Normalized relative grain scale; 1.0 is the reference size."
+            case .vignette:
+                return "Normalized edge-darkening amount."
+            case .halation:
+                return "Normalized highlight-spread amount."
+            case .paletteRedBias, .paletteGreenBias, .paletteBlueBias:
+                return "Signed normalized channel bias in the original palette transform."
+            case .paletteRedGreenMix, .paletteGreenBlueMix, .paletteBlueRedMix:
+                return "Signed normalized cross-channel mix in the original palette transform."
+            case .paletteSaturation:
+                return "Palette-stage saturation multiplier; 1.0 is neutral."
+            }
+        }
+
+        public func value(in recipe: FilmRecipe) -> Double {
+            switch self {
+            case .exposure: return recipe.exposure
+            case .highlights: return recipe.tone.highlight
+            case .shadows: return recipe.tone.shadow
+            case .color: return recipe.saturation
+            case .contrast: return recipe.contrast
+            case .colorChrome: return recipe.colorChrome
+            case .blueResponse: return recipe.blueResponse
+            case .fxBlue: return recipe.fxBlue
+            case .temperature: return recipe.whiteBalance.temperature
+            case .tint: return recipe.whiteBalance.tint
+            case .sharpness: return recipe.sharpness
+            case .noiseReduction: return recipe.noiseReduction
+            case .clarity: return recipe.clarity
+            case .grain: return recipe.grain
+            case .grainSize: return recipe.grainSize
+            case .vignette: return recipe.vignette
+            case .halation: return recipe.halation
+            case .paletteRedBias: return recipe.palette.redBias
+            case .paletteGreenBias: return recipe.palette.greenBias
+            case .paletteBlueBias: return recipe.palette.blueBias
+            case .paletteRedGreenMix: return recipe.palette.redGreenMix
+            case .paletteGreenBlueMix: return recipe.palette.greenBlueMix
+            case .paletteBlueRedMix: return recipe.palette.blueRedMix
+            case .paletteSaturation: return recipe.palette.saturation
+            }
+        }
+    }
+
+    /// Stable, machine-readable findings returned by `validationIssues`.
+    /// Validation reports problems without mutating a user's draft.
+    public struct ValidationIssue: Codable, Hashable, Sendable, Identifiable {
+        public enum Code: String, CaseIterable, Codable, Hashable, Sendable {
+            case emptyID
+            case emptyName
+            case emptySubtitle
+            case unsupportedSchemaVersion
+            case nonFiniteControl
+            case controlOutsideEditorRange
+            case monochromeColorMustBeZero
+            case monochromePaletteSaturationMustBeZero
+            case provenanceUnavailable
+        }
+
+        public let code: Code
+        public let control: Control?
+
+        public init(code: Code, control: Control? = nil) {
+            self.code = code
+            self.control = control
+        }
+
+        public var id: String {
+            [code.rawValue, control?.rawValue].compactMap { $0 }.joined(separator: ".")
+        }
+
+        public var message: String {
+            switch code {
+            case .emptyID: return "Recipe id must not be empty."
+            case .emptyName: return "Recipe name must not be empty."
+            case .emptySubtitle: return "Recipe subtitle must not be empty."
+            case .unsupportedSchemaVersion: return "Recipe schema version is not supported."
+            case .nonFiniteControl:
+                let controlName = control?.displayName ?? "Recipe"
+                return controlName + " contains a non-finite value."
+            case .controlOutsideEditorRange:
+                let controlName = control?.displayName ?? "Recipe control"
+                return controlName + " is outside the declared editor range."
+            case .monochromeColorMustBeZero:
+                return "Monochrome film bases must have zero Color."
+            case .monochromePaletteSaturationMustBeZero:
+                return "Monochrome film bases must have zero palette saturation."
+            case .provenanceUnavailable:
+                return "Recipe provenance is incomplete and cannot support a current audit claim."
+            }
+        }
+    }
+
     public struct Palette: Codable, Hashable, Sendable {
         public var redBias: Double
         public var greenBias: Double
@@ -159,6 +515,8 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         }
     }
 
+    public let schemaVersion: Int
+    public let provenance: Provenance
     public let id: String
     public let name: String
     public let subtitle: String
@@ -204,6 +562,8 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         halation: Double = 0,
         palette: Palette = Palette()
     ) {
+        self.schemaVersion = Self.currentSchemaVersion
+        self.provenance = Self.currentProvenance
         self.id = id
         self.name = name
         self.subtitle = subtitle
@@ -226,6 +586,135 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         self.halation = halation
         self.palette = palette
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion
+        case provenance
+        case id
+        case name
+        case subtitle
+        case filmBase
+        case exposure
+        case tone
+        case saturation
+        case contrast
+        case dynamicRange
+        case whiteBalance
+        case colorChrome
+        case blueResponse
+        case fxBlue
+        case sharpness
+        case noiseReduction
+        case clarity
+        case grain
+        case grainSize
+        case vignette
+        case halation
+        case palette
+    }
+
+    /// Decode both the current envelope and the original pre-provenance
+    /// envelope. Missing metadata is deliberately marked as legacy rather
+    /// than silently receiving the current provenance claim.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        provenance = try container.decodeIfPresent(Provenance.self, forKey: .provenance)
+            ?? Self.legacyProvenance
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        subtitle = try container.decode(String.self, forKey: .subtitle)
+        filmBase = try container.decode(FilmBase.self, forKey: .filmBase)
+        exposure = try container.decode(Double.self, forKey: .exposure)
+        tone = try container.decode(Tone.self, forKey: .tone)
+        saturation = try container.decode(Double.self, forKey: .saturation)
+        contrast = try container.decode(Double.self, forKey: .contrast)
+        dynamicRange = try container.decode(DynamicRange.self, forKey: .dynamicRange)
+        whiteBalance = try container.decode(WhiteBalanceShift.self, forKey: .whiteBalance)
+        colorChrome = try container.decode(Double.self, forKey: .colorChrome)
+        blueResponse = try container.decode(Double.self, forKey: .blueResponse)
+        fxBlue = try container.decode(Double.self, forKey: .fxBlue)
+        sharpness = try container.decode(Double.self, forKey: .sharpness)
+        noiseReduction = try container.decode(Double.self, forKey: .noiseReduction)
+        clarity = try container.decode(Double.self, forKey: .clarity)
+        grain = try container.decode(Double.self, forKey: .grain)
+        grainSize = try container.decode(Double.self, forKey: .grainSize)
+        vignette = try container.decode(Double.self, forKey: .vignette)
+        halation = try container.decode(Double.self, forKey: .halation)
+        palette = try container.decode(Palette.self, forKey: .palette)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(schemaVersion, forKey: .schemaVersion)
+        try container.encode(provenance, forKey: .provenance)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(subtitle, forKey: .subtitle)
+        try container.encode(filmBase, forKey: .filmBase)
+        try container.encode(exposure, forKey: .exposure)
+        try container.encode(tone, forKey: .tone)
+        try container.encode(saturation, forKey: .saturation)
+        try container.encode(contrast, forKey: .contrast)
+        try container.encode(dynamicRange, forKey: .dynamicRange)
+        try container.encode(whiteBalance, forKey: .whiteBalance)
+        try container.encode(colorChrome, forKey: .colorChrome)
+        try container.encode(blueResponse, forKey: .blueResponse)
+        try container.encode(fxBlue, forKey: .fxBlue)
+        try container.encode(sharpness, forKey: .sharpness)
+        try container.encode(noiseReduction, forKey: .noiseReduction)
+        try container.encode(clarity, forKey: .clarity)
+        try container.encode(grain, forKey: .grain)
+        try container.encode(grainSize, forKey: .grainSize)
+        try container.encode(vignette, forKey: .vignette)
+        try container.encode(halation, forKey: .halation)
+        try container.encode(palette, forKey: .palette)
+    }
+
+    /// Returns deterministic, non-mutating findings for the persisted recipe
+    /// contract. The renderer remains defensive for exploratory drafts that
+    /// intentionally exceed these editor bounds.
+    public var validationIssues: [ValidationIssue] {
+        var issues: [ValidationIssue] = []
+
+        if id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            issues.append(ValidationIssue(code: .emptyID))
+        }
+        if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            issues.append(ValidationIssue(code: .emptyName))
+        }
+        if subtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            issues.append(ValidationIssue(code: .emptySubtitle))
+        }
+        if !(1...Self.currentSchemaVersion).contains(schemaVersion) {
+            issues.append(ValidationIssue(code: .unsupportedSchemaVersion))
+        }
+
+        for control in Control.allCases {
+            let value = control.value(in: self)
+            if !value.isFinite {
+                issues.append(ValidationIssue(code: .nonFiniteControl, control: control))
+            } else if !control.editorRange.contains(value) {
+                issues.append(ValidationIssue(code: .controlOutsideEditorRange, control: control))
+            }
+        }
+
+        if filmBase.monochromeFilter != nil && abs(saturation) > 0.000001 {
+            issues.append(ValidationIssue(code: .monochromeColorMustBeZero))
+        }
+        if filmBase.monochromeFilter != nil && abs(palette.saturation) > 0.000001 {
+            issues.append(ValidationIssue(code: .monochromePaletteSaturationMustBeZero))
+        }
+        if !provenance.isComplete {
+            issues.append(ValidationIssue(code: .provenanceUnavailable))
+        }
+
+        return issues
+    }
+
+    /// A recipe is valid only when its controls satisfy the app contract and
+    /// its provenance is complete. This does not claim hardware equivalence.
+    public var isValid: Bool { validationIssues.isEmpty }
 
     // These aliases keep the model convenient for controls that use the same
     // terms as the camera UI.

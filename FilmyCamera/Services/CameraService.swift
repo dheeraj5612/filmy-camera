@@ -29,6 +29,40 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         case unavailable
     }
 
+    /// The still-photo flash request. `off` is intentionally the default so
+    /// opening the camera never fires the flash without an explicit choice.
+    public enum FlashMode: Int, CaseIterable, Equatable, Sendable {
+        case off = 0
+        case auto = 2
+        case on = 1
+
+        public var title: String {
+            switch self {
+            case .off: "Off"
+            case .auto: "Auto"
+            case .on: "On"
+            }
+        }
+
+        public var systemImageName: String {
+            switch self {
+            case .off: "bolt.slash"
+            case .auto: "bolt"
+            case .on: "bolt.fill"
+            }
+        }
+    }
+
+    /// Flash support is separate from camera lifecycle availability. A
+    /// Simulator or a camera without a flash is `.unsupported`; a supported
+    /// flash that is temporarily unavailable (for example, due to thermal
+    /// protection) is surfaced as `.temporarilyUnavailable`.
+    public enum FlashAvailability: String, Equatable, Sendable {
+        case unsupported
+        case available
+        case temporarilyUnavailable
+    }
+
     public struct CapturedPhoto: @unchecked Sendable {
         public let fileData: Data
         public let capturedAt: Date
@@ -88,6 +122,10 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     @Published public private(set) var isRunning = false
     @Published public private(set) var statusMessage = "Camera is ready"
     @Published public private(set) var availability: Availability = .idle
+    @Published public private(set) var flashMode: FlashMode = .off
+    @Published public private(set) var flashAvailability: FlashAvailability = .unsupported
+    @Published public private(set) var lowLightBoostSupported = false
+    @Published public private(set) var isLowLightBoostEnabled = false
     @Published public private(set) var zoomFactor: CGFloat = 1
     @Published public private(set) var isFocusExposureLocked = false
     @Published public private(set) var previewFrameSize: CGSize = .zero
@@ -121,6 +159,9 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private var pendingPhotoCapturedAt: Date?
     private var configuredPhotoDimensions = CMVideoDimensions(width: 0, height: 0)
     private var focusExposureLocked = false
+    private var selectedFlashMode: FlashMode = .off
+    private var flashAvailabilityState: FlashAvailability = .unsupported
+    private var pendingPhotoFlashFallback = false
     private var sessionObservers: [NSObjectProtocol] = []
     private var rotationAngle: CGFloat = 90
     private var lastDeliveredFrameSize: CGSize = .zero
@@ -168,6 +209,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             pendingCompletion = self.pendingPhotoCompletion
             self.pendingPhotoCompletion = nil
             self.pendingPhotoCapturedAt = nil
+            self.pendingPhotoFlashFallback = false
         }
         if DispatchQueue.getSpecific(key: sessionQueueKey) == nil {
             sessionQueue.sync(execute: stopSession)
@@ -249,6 +291,40 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         sessionQueue.async { [weak self] in
             guard let self else { return }
             self.capturePhotoOnQueue(completion: completionBox.completion)
+        }
+    }
+
+    /// Selects the flash mode used for the next still capture. Unsupported
+    /// modes are rejected on the session queue instead of being passed to
+    /// AVCapturePhotoOutput, which would otherwise raise an exception.
+    public func setFlashMode(_ mode: FlashMode) {
+        sessionQueue.async { [weak self] in
+            self?.setFlashModeOnQueue(mode)
+        }
+    }
+
+    /// Cycles through only the flash modes supported by the active photo
+    /// output. The control is a no-op on Simulator and on cameras without a
+    /// flash, while the safe `.off` mode remains available during thermal
+    /// unavailability.
+    public func cycleFlashMode() {
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            guard self.flashAvailabilityState == .available else {
+                if self.flashAvailabilityState == .temporarilyUnavailable {
+                    self.publishStatus("Flash is temporarily unavailable.")
+                }
+                return
+            }
+
+            let supported = self.supportedFlashModeRawValuesOnQueue()
+            let modes = FlashMode.allCases.filter { supported.contains($0.rawValue) }
+            guard let currentIndex = modes.firstIndex(of: self.selectedFlashMode), !modes.isEmpty else {
+                self.setFlashModeOnQueue(.off)
+                return
+            }
+            let nextMode = modes[(currentIndex + 1) % modes.count]
+            self.setFlashModeOnQueue(nextMode)
         }
     }
 
@@ -368,6 +444,11 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private func requestAuthorizationAndStartOnQueue() {
         guard wantsToRun else { return }
         guard !session.isRunning else {
+            if let device = activeDevice() {
+                refreshCaptureCapabilitiesOnQueue(for: device)
+            } else {
+                resetCaptureCapabilitiesOnQueue()
+            }
             publishRunning(true)
             publishAvailability(.running)
             publishStatus("Camera ready")
@@ -378,6 +459,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         // camera device. Checking before requesting access avoids presenting a
         // permission prompt for hardware that cannot exist in this process.
         guard defaultCameraDevice() != nil else {
+            resetCaptureCapabilitiesOnQueue()
             publishRunning(false)
             publishAvailability(.simulator)
             publishStatus("Camera unavailable in Simulator. Use an iPhone to preview and capture.")
@@ -426,6 +508,11 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private func configureAndStartOnQueue() {
         guard wantsToRun else { return }
         guard !session.isRunning else {
+            if let device = activeDevice() {
+                refreshCaptureCapabilitiesOnQueue(for: device)
+            } else {
+                resetCaptureCapabilitiesOnQueue()
+            }
             publishRunning(true)
             publishAvailability(.running)
             publishStatus("Camera ready")
@@ -436,6 +523,14 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         // graph when returning from background or another tab instead of
         // trying to add duplicate AVFoundation objects.
         if isConfigured {
+            guard let device = activeDevice() else {
+                resetCaptureCapabilitiesOnQueue()
+                publishRunning(false)
+                publishAvailability(.needsRecovery)
+                publishStatus("Camera needs to be reopened.")
+                return
+            }
+            refreshCaptureCapabilitiesOnQueue(for: device)
             configureOrientation()
             session.startRunning()
             let running = session.isRunning
@@ -446,6 +541,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
 
         guard let device = defaultCameraDevice() else {
+            resetCaptureCapabilitiesOnQueue()
             publishRunning(false)
             publishAvailability(.simulator)
             publishStatus("Camera unavailable in Simulator. Use an iPhone to preview and capture.")
@@ -502,6 +598,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         configurePhotoDimensions(for: device)
         session.commitConfiguration()
 
+        configureCaptureCapabilitiesOnQueue(for: device)
         configurePreviewFrameRate(for: device)
         configureOrientation()
         isConfigured = true
@@ -629,6 +726,146 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         configuredPhotoDimensions = maximum
     }
 
+    /// Resolves flash support from the two independent AVFoundation signals:
+    /// physical flash hardware and the photo output's current configuration.
+    /// Keeping this pure makes the Simulator/unsupported path deterministic
+    /// and prevents an unsupported setting from reaching capturePhoto.
+    static func resolveFlashAvailability(
+        hasFlash: Bool,
+        supportedModeRawValues: Set<Int>,
+        flashAvailable: Bool
+    ) -> FlashAvailability {
+        guard hasFlash,
+              supportedModeRawValues.contains(FlashMode.on.rawValue)
+                || supportedModeRawValues.contains(FlashMode.auto.rawValue) else {
+            return .unsupported
+        }
+        return flashAvailable ? .available : .temporarilyUnavailable
+    }
+
+    private func configureCaptureCapabilitiesOnQueue(for device: AVCaptureDevice) {
+        refreshFlashCapabilitiesOnQueue(for: device)
+        configureLowLightBoostOnQueue(for: device)
+    }
+
+    private func refreshCaptureCapabilitiesOnQueue(for device: AVCaptureDevice) {
+        refreshFlashCapabilitiesOnQueue(for: device)
+        publishLowLightBoostState(
+            supported: device.isLowLightBoostSupported,
+            enabled: device.isLowLightBoostEnabled
+        )
+    }
+
+    private func refreshFlashCapabilitiesOnQueue(for device: AVCaptureDevice) {
+        let supportedModes = supportedFlashModeRawValuesOnQueue()
+        let availability = Self.resolveFlashAvailability(
+            hasFlash: device.hasFlash,
+            supportedModeRawValues: supportedModes,
+            flashAvailable: device.isFlashAvailable
+        )
+        flashAvailabilityState = availability
+        publishFlashAvailability(availability)
+
+        if availability == .unsupported {
+            selectedFlashMode = .off
+            publishFlashMode(.off)
+            photoOutput.photoSettingsForSceneMonitoring = nil
+            return
+        }
+
+        if !supportedModes.contains(selectedFlashMode.rawValue) {
+            selectedFlashMode = .off
+            publishFlashMode(.off)
+        }
+        configureFlashSceneMonitoringOnQueue(supportedModes: supportedModes)
+    }
+
+    private func supportedFlashModeRawValuesOnQueue() -> Set<Int> {
+        Set(photoOutput.supportedFlashModes.map(\.rawValue))
+    }
+
+    private func configureFlashSceneMonitoringOnQueue(supportedModes: Set<Int>) {
+        guard flashAvailabilityState != .unsupported else {
+            photoOutput.photoSettingsForSceneMonitoring = nil
+            return
+        }
+
+        let monitoringMode: FlashMode
+        if selectedFlashMode == .off {
+            monitoringMode = .off
+        } else if supportedModes.contains(selectedFlashMode.rawValue) {
+            monitoringMode = selectedFlashMode
+        } else if supportedModes.contains(FlashMode.auto.rawValue) {
+            monitoringMode = .auto
+        } else {
+            monitoringMode = .on
+        }
+
+        let settings = AVCapturePhotoSettings()
+        switch monitoringMode {
+        case .off:
+            settings.flashMode = .off
+        case .auto:
+            settings.flashMode = .auto
+        case .on:
+            settings.flashMode = .on
+        }
+        settings.photoQualityPrioritization = .balanced
+        photoOutput.photoSettingsForSceneMonitoring = settings
+    }
+
+    private func configureLowLightBoostOnQueue(for device: AVCaptureDevice) {
+        guard device.isLowLightBoostSupported else {
+            publishLowLightBoostState(supported: false, enabled: false)
+            return
+        }
+
+        do {
+            try device.lockForConfiguration()
+            device.automaticallyEnablesLowLightBoostWhenAvailable = true
+            let enabled = device.isLowLightBoostEnabled
+            device.unlockForConfiguration()
+            publishLowLightBoostState(supported: true, enabled: enabled)
+        } catch {
+            publishLowLightBoostState(
+                supported: true,
+                enabled: device.isLowLightBoostEnabled
+            )
+        }
+    }
+
+    private func setFlashModeOnQueue(_ mode: FlashMode) {
+        if mode != .off, flashAvailabilityState != .available {
+            if flashAvailabilityState == .temporarilyUnavailable {
+                publishStatus("Flash is temporarily unavailable.")
+            } else {
+                publishStatus("Flash is unavailable on this camera.")
+            }
+            return
+        }
+
+        let supportedModes = supportedFlashModeRawValuesOnQueue()
+        guard mode == .off || supportedModes.contains(mode.rawValue) else {
+            publishStatus("That flash mode is unavailable on this camera.")
+            return
+        }
+
+        selectedFlashMode = mode
+        publishFlashMode(mode)
+        if isConfigured {
+            configureFlashSceneMonitoringOnQueue(supportedModes: supportedModes)
+        }
+    }
+
+    private func resetCaptureCapabilitiesOnQueue() {
+        flashAvailabilityState = .unsupported
+        selectedFlashMode = .off
+        publishFlashAvailability(.unsupported)
+        publishFlashMode(.off)
+        publishLowLightBoostState(supported: false, enabled: false)
+        photoOutput.photoSettingsForSceneMonitoring = nil
+    }
+
     private func configureRotation(
         _ connection: AVCaptureConnection?,
         angle: CGFloat
@@ -653,10 +890,37 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             return
         }
 
+        guard let device = activeDevice() else {
+            publishStatus("The camera is unavailable right now.")
+            publishPhoto(nil, completion: completion)
+            return
+        }
+
+        refreshCaptureCapabilitiesOnQueue(for: device)
+        let requestedFlashMode = selectedFlashMode
+        let effectiveFlashMode: FlashMode
+        if requestedFlashMode == .off || flashAvailabilityState == .available {
+            effectiveFlashMode = requestedFlashMode
+        } else {
+            // A flash can become unavailable after configuration (most
+            // commonly from thermal protection). Falling back to off keeps
+            // capture safe and avoids asking AVCapturePhotoOutput for a mode
+            // that cannot currently fire.
+            effectiveFlashMode = .off
+        }
+
         pendingPhotoCompletion = completion
         pendingPhotoCapturedAt = Date()
+        pendingPhotoFlashFallback = requestedFlashMode != .off && effectiveFlashMode == .off
         let settings = AVCapturePhotoSettings()
-        settings.flashMode = .off
+        switch effectiveFlashMode {
+        case .off:
+            settings.flashMode = .off
+        case .auto:
+            settings.flashMode = .auto
+        case .on:
+            settings.flashMode = .on
+        }
         settings.photoQualityPrioritization = .quality
         if configuredPhotoDimensions.width > 0, configuredPhotoDimensions.height > 0 {
             settings.maxPhotoDimensions = configuredPhotoDimensions
@@ -666,12 +930,16 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
     private func finishPhotoOnQueue(_ photo: CapturedPhoto?) {
         let completion = pendingPhotoCompletion
+        let flashFallback = pendingPhotoFlashFallback
         pendingPhotoCompletion = nil
         pendingPhotoCapturedAt = nil
+        pendingPhotoFlashFallback = false
         guard let completion else { return }
 
         if photo == nil {
             publishStatus("The photo could not be processed.")
+        } else if flashFallback {
+            publishStatus("Photo captured without flash — flash is temporarily unavailable.")
         } else {
             publishStatus("Photo captured")
         }
@@ -682,6 +950,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         guard let completion = pendingPhotoCompletion else { return }
         pendingPhotoCompletion = nil
         pendingPhotoCapturedAt = nil
+        pendingPhotoFlashFallback = false
         publishStatus(status)
         publishPhoto(nil, completion: completion)
     }
@@ -695,6 +964,25 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private func publishAvailability(_ availability: Availability) {
         publishOnMain { [weak self] in
             self?.availability = availability
+        }
+    }
+
+    private func publishFlashMode(_ mode: FlashMode) {
+        publishOnMain { [weak self] in
+            self?.flashMode = mode
+        }
+    }
+
+    private func publishFlashAvailability(_ availability: FlashAvailability) {
+        publishOnMain { [weak self] in
+            self?.flashAvailability = availability
+        }
+    }
+
+    private func publishLowLightBoostState(supported: Bool, enabled: Bool) {
+        publishOnMain { [weak self] in
+            self?.lowLightBoostSupported = supported
+            self?.isLowLightBoostEnabled = enabled
         }
     }
 
