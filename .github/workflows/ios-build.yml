@@ -12,15 +12,7 @@ on:
       - "scripts/release/**"
       - "project.yml"
       - ".github/workflows/ios-build.yml"
-  pull_request:
-    paths:
-      - "FilmyCamera/**"
-      - "FilmyCameraTests/**"
-      - "FilmyCameraUITests/**"
-      - "FilmyCamera.xcodeproj/**"
-      - "scripts/release/**"
-      - "project.yml"
-      - ".github/workflows/ios-build.yml"
+  pull_request: {}
   workflow_dispatch:
 
 concurrency:
@@ -35,7 +27,43 @@ env:
   XCODEGEN_SHA256: 090ec29491aad50aec10631bf6e62253fed733c50f3aab0f5ffc86bc170bdbef
 
 jobs:
+  change-scope:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      source_changed: ${{ steps.scope.outputs.source_changed }}
+
+    steps:
+      - name: Check out pull request metadata
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+
+      - name: Determine whether the iOS gate is needed
+        id: scope
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${EVENT_NAME}" != "pull_request" ]]; then
+            echo "source_changed=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          changed_files="$(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}")"
+          if grep -Eq '^(FilmyCamera/|FilmyCameraTests/|FilmyCameraUITests/|FilmyCamera\.xcodeproj/|scripts/release/|project\.yml$|\.github/workflows/ios-build\.yml$)' <<<"${changed_files}"; then
+            echo "source_changed=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "source_changed=false" >> "${GITHUB_OUTPUT}"
+          fi
+
   build-and-test:
+    needs: change-scope
+    if: needs.change-scope.outputs.source_changed == 'true'
     runs-on: macos-15
     timeout-minutes: 30
 
@@ -74,6 +102,9 @@ jobs:
 
       - name: Generate Xcode project
         run: xcodegen generate --spec project.yml
+
+      - name: Validate release project configuration
+        run: scripts/release/validate-project.sh
 
       - name: Select an available iPhone simulator
         id: simulator

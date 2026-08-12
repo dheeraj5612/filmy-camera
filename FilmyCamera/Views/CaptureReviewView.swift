@@ -4,6 +4,8 @@ import UIKit
 struct CaptureReviewView: View {
     let image: UIImage
     let recipe: FilmRecipe
+    let isSaving: Bool
+    let saveErrorMessage: String?
     let onSave: () -> Void
     let onRetake: () -> Void
 
@@ -39,6 +41,7 @@ struct CaptureReviewView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Discard frame")
+                    .disabled(isSaving)
                 }
 
                 Image(uiImage: image)
@@ -66,6 +69,14 @@ struct CaptureReviewView: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("Recipe \(recipe.name)")
 
+                if let saveErrorMessage {
+                    Label(saveErrorMessage, systemImage: "exclamationmark.triangle.fill")
+                        .font(.system(.footnote, design: .rounded).weight(.medium))
+                        .foregroundStyle(FilmyTheme.accent)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isStaticText)
+                }
+
                 HStack(spacing: 10) {
                     Button {
                         onRetake()
@@ -79,18 +90,28 @@ struct CaptureReviewView: View {
                             .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                     }
                     .buttonStyle(.plain)
+                    .disabled(isSaving)
 
                     Button {
                         onSave()
                     } label: {
-                        Label("Keep Frame", systemImage: "checkmark")
-                            .font(.system(.body, design: .rounded).weight(.bold))
+                        Group {
+                            if isSaving {
+                                ProgressView()
+                                    .tint(FilmyTheme.background)
+                            } else {
+                                Label("Keep Frame", systemImage: "checkmark")
+                            }
+                        }
+                        .font(.system(.body, design: .rounded).weight(.bold))
                             .foregroundStyle(FilmyTheme.background)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 15)
                             .background(FilmyTheme.accent, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                     }
                     .buttonStyle(.plain)
+                    .disabled(isSaving)
+                    .accessibilityLabel(isSaving ? "Saving frame" : "Keep frame")
                     .accessibilityHint("Saves the finished frame to your Photos library")
                 }
             }

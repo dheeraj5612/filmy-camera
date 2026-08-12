@@ -13,6 +13,7 @@ final class PhotoLibraryService: ObservableObject {
     @Published private(set) var isLoading = false
 
     private let albumTitle = "Filmy Camera"
+    private let savedAssetIdentifiersKey = "filmyCamera.savedAssetIdentifiers"
     private let isUITesting: Bool
 
     init() {
@@ -59,13 +60,12 @@ final class PhotoLibraryService: ObservableObject {
         let options = PHFetchOptions()
         options.fetchLimit = 60
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-        guard let album = appAlbum() else {
-            assets = []
-            return
+        if authorizationStatus == .authorized, let album = appAlbum() {
+            let result = PHAsset.fetchAssets(in: album, options: options)
+            assets = result.objects(at: IndexSet(integersIn: 0..<result.count))
+        } else {
+            assets = fetchSavedAssets(options: options)
         }
-
-        let result = PHAsset.fetchAssets(in: album, options: options)
-        assets = result.objects(at: IndexSet(integersIn: 0..<result.count))
     }
 
     func save(image: UIImage, completion: @escaping @MainActor (Bool) -> Void) {
@@ -84,24 +84,41 @@ final class PhotoLibraryService: ObservableObject {
                 return
             }
 
+            // Limited and add-only access cannot create or fetch user albums. The
+            // newly created asset is still available to the app under limited access.
+            let canManageAppAlbum = PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized
+            let existingAlbum = canManageAppAlbum ? appAlbum() : nil
+            let albumTitle = self.albumTitle
             let assetIdentifierBox = IdentifierBox()
-            PHPhotoLibrary.shared().performChanges {
-                let request = PHAssetChangeRequest.creationRequestForAsset(from: image)
-                assetIdentifierBox.value = request.placeholderForCreatedAsset?.localIdentifier
-            } completionHandler: { [weak self] success, _ in
-                guard let self else { return }
-                Task { @MainActor in
-                    guard success, let assetIdentifier = assetIdentifierBox.value else {
-                        completion(false)
-                        return
-                    }
 
-                    self.addToAppAlbum(assetIdentifier: assetIdentifier) {
-                        self.refresh()
-                        completion(true)
+            do {
+                try await PHPhotoLibrary.shared().performChanges {
+                    let request = PHAssetChangeRequest.creationRequestForAsset(from: image)
+                    guard let placeholder = request.placeholderForCreatedAsset else { return }
+                    assetIdentifierBox.value = placeholder.localIdentifier
+
+                    if let existingAlbum {
+                        PHAssetCollectionChangeRequest(for: existingAlbum)?.addAssets([placeholder] as NSArray)
+                    } else if canManageAppAlbum {
+                        let albumRequest = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(
+                            withTitle: albumTitle
+                        )
+                        albumRequest.addAssets([placeholder] as NSArray)
                     }
                 }
+            } catch {
+                completion(false)
+                return
             }
+
+            guard let assetIdentifier = assetIdentifierBox.value else {
+                completion(false)
+                return
+            }
+
+            rememberSavedAsset(assetIdentifier)
+            self.refresh()
+            completion(true)
         }
     }
 
@@ -115,53 +132,27 @@ final class PhotoLibraryService: ObservableObject {
         ).firstObject
     }
 
-    private func addToAppAlbum(assetIdentifier: String, completion: @escaping @MainActor () -> Void) {
-        if let album = appAlbum() {
-            addAsset(assetIdentifier, to: album, completion: completion)
-            return
-        }
-
-        let albumIdentifierBox = IdentifierBox()
-        PHPhotoLibrary.shared().performChanges {
-            let request = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: self.albumTitle)
-            albumIdentifierBox.value = request.placeholderForCreatedAssetCollection.localIdentifier
-        } completionHandler: { [weak self] success, _ in
-            guard let self else { return }
-            Task { @MainActor in
-                guard success,
-                      let albumIdentifier = albumIdentifierBox.value,
-                      let album = PHAssetCollection.fetchAssetCollections(
-                          withLocalIdentifiers: [albumIdentifier],
-                          options: nil
-                      ).firstObject else {
-                    completion()
-                    return
-                }
-                self.addAsset(assetIdentifier, to: album, completion: completion)
-            }
-        }
+    private var savedAssetIdentifiers: [String] {
+        get { UserDefaults.standard.stringArray(forKey: savedAssetIdentifiersKey) ?? [] }
+        set { UserDefaults.standard.set(Array(newValue.prefix(120)), forKey: savedAssetIdentifiersKey) }
     }
 
-    private func addAsset(
-        _ assetIdentifier: String,
-        to album: PHAssetCollection,
-        completion: @escaping @MainActor () -> Void
-    ) {
-        guard let asset = PHAsset.fetchAssets(
-            withLocalIdentifiers: [assetIdentifier],
-            options: nil
-        ).firstObject else {
-            completion()
-            return
-        }
+    private func rememberSavedAsset(_ identifier: String) {
+        savedAssetIdentifiers = [identifier] + savedAssetIdentifiers.filter { $0 != identifier }
+    }
 
-        PHPhotoLibrary.shared().performChanges {
-            PHAssetCollectionChangeRequest(for: album)?.addAssets([asset] as NSArray)
-        } completionHandler: { _ , _ in
-            Task { @MainActor in
-                completion()
-            }
+    private func fetchSavedAssets(options: PHFetchOptions) -> [PHAsset] {
+        let identifiers = savedAssetIdentifiers
+        guard !identifiers.isEmpty else { return [] }
+
+        let result = PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: options)
+        let fetched = result.objects(at: IndexSet(integersIn: 0..<result.count))
+        let assetsByIdentifier = Dictionary(uniqueKeysWithValues: fetched.map { ($0.localIdentifier, $0) })
+        let accessibleIdentifiers = identifiers.filter { assetsByIdentifier[$0] != nil }
+        if accessibleIdentifiers != identifiers {
+            savedAssetIdentifiers = accessibleIdentifiers
         }
+        return accessibleIdentifiers.compactMap { assetsByIdentifier[$0] }
     }
 
     func image(for asset: PHAsset, targetSize: CGSize) async -> UIImage? {
