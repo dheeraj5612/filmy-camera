@@ -70,8 +70,8 @@ The archive wrapper generates the project and creates a Release archive for a ge
 
 ## Verified evidence
 
-- Last verified app-code mainline: `425d15d3d0a841745e7fc9b0ed359fa932c40741`
-- GitHub Actions run: [31615041557](https://github.com/dheeraj5612/filmy-camera/actions/runs/31615041557) — green Xcode 16.4 simulator build; 15 unit/renderer tests plus 2 UI tests (17 total) passed, alongside the release-script safety lane.
+- Last verified app-code mainline: `eb5ce8bfe3b30b0e7811484b5869e21a8d27c0eb`
+- GitHub Actions run: [31618665172](https://github.com/dheeraj5612/filmy-camera/actions/runs/31618665172) — green Xcode 16.4 simulator build; 17 unit/renderer tests plus 2 UI tests (19 total) passed, alongside the release-script safety lane.
 - Local simulator verification: 19 tests passed; the gallery/settings UI flow passed in the full suite after the gallery provenance and camera lifecycle changes.
 - Local release project preflight: `scripts/release/validate-project.sh` passed for bundle `com.dheeraj.filmycamera`, version `1.0.0 (1)`, the privacy manifest, the 1024×1024 icon, and all expected schemes/tests.
 - Local simulator: iPhone 17, iOS 26.5 — camera shell, recipe editor, Gallery/Settings navigation, accessibility tree, screenshots, and simulator capture fallback verified.
