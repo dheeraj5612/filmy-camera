@@ -100,12 +100,12 @@ public struct FilteredCameraPreview: UIViewRepresentable {
         fileprivate func receive(_ image: CIImage) {
             // CameraService documents onFrame as main-queue delivery. Avoid
             // adding another async hop to every captured frame.
+            let imageBox = CIImageBox(image)
             if Thread.isMainThread {
                 MainActor.assumeIsolated { [weak self] in
-                    self?.previewView?.display(image: image)
+                    self?.previewView?.display(image: imageBox.image)
                 }
             } else {
-                let imageBox = CIImageBox(image)
                 DispatchQueue.main.async { [weak self] in
                     self?.previewView?.display(image: imageBox.image)
                 }
