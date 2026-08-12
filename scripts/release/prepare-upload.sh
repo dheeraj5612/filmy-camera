@@ -183,7 +183,7 @@ has_installed_app_store_profile() {
   [[ -d "${profile_dir}" ]] || return 1
   decoded_profile="$(new_temp_file)"
 
-  for profile_path in "${profile_dir}"/*.mobileprovision; do
+  for profile_path in "${profile_dir}"/*.mobileprovision "${profile_dir}"/*.provisionprofile; do
     [[ -f "${profile_path}" ]] || continue
     if ! security cms -D -i "${profile_path}" -o "${decoded_profile}" 2>/dev/null; then
       continue

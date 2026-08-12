@@ -14,18 +14,15 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     public typealias FrameHandler = (CIImage) -> Void
 
     public struct CapturedPhoto: @unchecked Sendable {
-        public let image: UIImage
         public let fileData: Data
         public let capturedAt: Date
         public let dimensions: CMVideoDimensions
 
         public init(
-            image: UIImage,
             fileData: Data,
             capturedAt: Date,
             dimensions: CMVideoDimensions
         ) {
-            self.image = image
             self.fileData = fileData
             self.capturedAt = capturedAt
             self.dimensions = dimensions
@@ -75,6 +72,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     @Published public private(set) var isRunning = false
     @Published public private(set) var statusMessage = "Camera is ready"
     @Published public private(set) var zoomFactor: CGFloat = 1
+    @Published public private(set) var isFocusExposureLocked = false
     @Published public private(set) var previewFrameSize: CGSize = .zero
     @Published public private(set) var previewViewportSize: CGSize = .zero
 
@@ -102,6 +100,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private var pendingPhotoCompletion: PhotoCompletion?
     private var pendingPhotoCapturedAt: Date?
     private var configuredPhotoDimensions = CMVideoDimensions(width: 0, height: 0)
+    private var focusExposureLocked = false
     private var sessionObservers: [NSObjectProtocol] = []
     private var rotationAngle: CGFloat = 90
     private var lastDeliveredFrameSize: CGSize = .zero
@@ -159,6 +158,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 self.session.stopRunning()
             }
             self.cancelPendingPhotoOnQueue(status: "Capture canceled.")
+            self.focusExposureLocked = false
+            self.publishFocusExposureLocked(false)
             self.publishRunning(false)
             self.publishStatus("Camera paused")
         }
@@ -194,14 +195,13 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// The point uses the camera's metadata coordinate system: (0, 0) is the
     /// top-left and (1, 1) is the bottom-right of the displayed preview.
     public func focus(at normalizedPoint: CGPoint) {
-        let point = CGPoint(
-            x: min(max(normalizedPoint.x, 0), 1),
-            y: min(max(normalizedPoint.y, 0), 1)
-        )
+        let point = clampedNormalizedPoint(normalizedPoint)
 
         sessionQueue.async { [weak self] in
             guard let self, let device = self.activeDevice() else { return }
             do {
+                self.focusExposureLocked = false
+                self.publishFocusExposureLocked(false)
                 try device.lockForConfiguration()
                 defer { device.unlockForConfiguration() }
 
@@ -222,6 +222,64 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 }
             } catch {
                 self.publishStatus("Focus is unavailable right now.")
+            }
+        }
+    }
+
+    /// Locks focus and exposure at the selected preview point. The explicit
+    /// control keeps the camera usable with VoiceOver and avoids making a
+    /// long-press gesture the only way to create a lock.
+    public func toggleFocusExposureLock(at normalizedPoint: CGPoint) {
+        let point = clampedNormalizedPoint(normalizedPoint)
+        sessionQueue.async { [weak self] in
+            guard let self, let device = self.activeDevice() else { return }
+
+            do {
+                try device.lockForConfiguration()
+                defer { device.unlockForConfiguration() }
+
+                if self.focusExposureLocked {
+                    if device.isFocusModeSupported(.continuousAutoFocus) {
+                        device.focusMode = .continuousAutoFocus
+                    } else if device.isFocusModeSupported(.autoFocus) {
+                        device.focusMode = .autoFocus
+                    }
+                    if device.isExposureModeSupported(.continuousAutoExposure) {
+                        device.exposureMode = .continuousAutoExposure
+                    } else if device.isExposureModeSupported(.autoExpose) {
+                        device.exposureMode = .autoExpose
+                    }
+                    self.focusExposureLocked = false
+                    self.publishFocusExposureLocked(false)
+                    self.publishStatus("Focus and exposure unlocked")
+                    return
+                }
+
+                if device.isFocusPointOfInterestSupported {
+                    device.focusPointOfInterest = point
+                }
+                if device.isExposurePointOfInterestSupported {
+                    device.exposurePointOfInterest = point
+                }
+
+                let canLockFocus = device.isFocusModeSupported(.locked)
+                let canLockExposure = device.isExposureModeSupported(.locked)
+                guard canLockFocus || canLockExposure else {
+                    self.publishStatus("Focus lock is unavailable right now.")
+                    return
+                }
+
+                if canLockFocus {
+                    device.focusMode = .locked
+                }
+                if canLockExposure {
+                    device.exposureMode = .locked
+                }
+                self.focusExposureLocked = true
+                self.publishFocusExposureLocked(true)
+                self.publishStatus("Focus and exposure locked")
+            } catch {
+                self.publishStatus("Focus lock is unavailable right now.")
             }
         }
     }
@@ -554,6 +612,12 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
     }
 
+    private func publishFocusExposureLocked(_ locked: Bool) {
+        publishOnMain { [weak self] in
+            self?.isFocusExposureLocked = locked
+        }
+    }
+
     private func publishPreviewFrameSize(_ size: CGSize) {
         publishOnMain { [weak self] in
             self?.previewFrameSize = size
@@ -587,6 +651,13 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 workBox.work()
             }
         }
+    }
+
+    private func clampedNormalizedPoint(_ point: CGPoint) -> CGPoint {
+        CGPoint(
+            x: min(max(point.x, 0), 1),
+            y: min(max(point.y, 0), 1)
+        )
     }
 }
 
@@ -644,14 +715,11 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
         sessionQueue.async { [weak self] in
             guard let self else { return }
             let capturedPhoto = data.flatMap { fileData in
-                UIImage(data: fileData).map {
-                    CapturedPhoto(
-                        image: $0,
-                        fileData: fileData,
-                        capturedAt: self.pendingPhotoCapturedAt ?? Date(),
-                        dimensions: dimensions
-                    )
-                }
+                CapturedPhoto(
+                    fileData: fileData,
+                    capturedAt: self.pendingPhotoCapturedAt ?? Date(),
+                    dimensions: dimensions
+                )
             }
             self.finishPhotoOnQueue(capturedPhoto)
         }

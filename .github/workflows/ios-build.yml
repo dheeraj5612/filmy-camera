@@ -63,7 +63,7 @@ jobs:
           if grep -Eq '^(FilmyCamera/|FilmyCameraTests/|FilmyCameraUITests/|FilmyCamera\.xcodeproj/|project\.yml$|\.github/workflows/ios-build\.yml$)' <<<"${changed_files}"; then
             ios_changed=true
           fi
-          if grep -Eq '^scripts/release/' <<<"${changed_files}"; then
+          if grep -Eq '^(scripts/release/|project\.yml$|FilmyCamera/Info\.plist$|FilmyCamera/Resources/PrivacyInfo\.xcprivacy$|docs/app-store/)' <<<"${changed_files}"; then
             release_scripts_changed=true
           fi
 
@@ -111,6 +111,15 @@ jobs:
 
       - name: Generate Xcode project
         run: xcodegen generate --spec project.yml
+
+      - name: Verify generated project is reproducible
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! git diff --exit-code -- FilmyCamera.xcodeproj; then
+            echo "XcodeGen changed the committed project; update it intentionally and rerun the gate." >&2
+            exit 1
+          fi
 
       - name: Validate release project configuration
         run: scripts/release/validate-project.sh
@@ -183,10 +192,10 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload XCTest result bundle on failure
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: filmycamera-xcresult
+          name: filmycamera-xcresult-${{ github.run_id }}
           path: "${{ runner.temp }}/FilmyCamera*.xcresult"
           if-no-files-found: warn
 

@@ -263,6 +263,35 @@ final class RendererOutputBoundsTests: XCTestCase {
         XCTAssertLessThan(difference, 0.0001)
     }
 
+    func testGrainSeedChangesSpatialPatternWithoutChangingRecipe() {
+        let extent = CGRect(x: 0, y: 0, width: 32, height: 24)
+        let input = CIImage(color: CIColor(red: 0.68, green: 0.36, blue: 0.18, alpha: 1))
+            .cropped(to: extent)
+        let recipe = FilmRecipe(
+            id: "seeded-grain",
+            name: "Seeded Grain",
+            subtitle: "Test",
+            grain: 0.72,
+            grainSize: 1.1
+        )
+        let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+        let first = renderFloatPixels(
+            FilmRenderer.render(input, recipe: recipe, quality: .photo, grainSeed: 1),
+            extent: extent,
+            context: context
+        )
+        let second = renderFloatPixels(
+            FilmRenderer.render(input, recipe: recipe, quality: .photo, grainSeed: 2),
+            extent: extent,
+            context: context
+        )
+
+        let difference = zip(first, second)
+            .map { abs(Double($0.0) - Double($0.1)) }
+            .reduce(0, +)
+        XCTAssertGreaterThan(difference, 0.0001)
+    }
+
     func testFXBlueRespondsMoreToBlueHuesThanWarmHues() {
         let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
         let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])

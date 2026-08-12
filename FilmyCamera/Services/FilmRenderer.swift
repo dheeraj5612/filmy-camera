@@ -22,7 +22,9 @@ public final class FilmRenderer {
         /// paths can evolve independently without changing a recipe's look.
         fileprivate var cubeDimension: Int {
             switch self {
-            case .preview, .photo, .export:
+            case .preview:
+                return 16
+            case .photo, .export:
                 return 32
             }
         }
@@ -217,7 +219,8 @@ public final class FilmRenderer {
     public static func render(
         _ image: CIImage,
         recipe: FilmRecipe,
-        quality: Quality = .preview
+        quality: Quality = .preview,
+        grainSeed: UInt32 = 0
     ) -> CIImage {
         guard !image.extent.isEmpty else { return image }
 
@@ -232,7 +235,7 @@ public final class FilmRenderer {
         output = applyColorCube(to: output, recipe: recipe, quality: quality)
         output = applyDetailControls(to: output, recipe: recipe)
         output = applyClarity(to: output, recipe: recipe)
-        output = applyGrain(to: output, recipe: recipe, quality: quality)
+        output = applyGrain(to: output, recipe: recipe, quality: quality, seed: grainSeed)
         output = applyVignette(to: output, recipe: recipe)
         output = applyHalation(to: output, recipe: recipe, quality: quality)
         output = clampOutput(toNormalizedRange: output)
@@ -450,7 +453,8 @@ public final class FilmRenderer {
     private static func applyGrain(
         to image: CIImage,
         recipe: FilmRecipe,
-        quality _: Quality
+        quality: Quality,
+        seed: UInt32
     ) -> CIImage {
         // Grain is part of the look, not a preview-only effect. Normalize the
         // procedural frequency to a reference image size so the same recipe
@@ -471,8 +475,15 @@ public final class FilmRenderer {
             0.35,
             min(recipe.grainSize * resolutionScale, 8.0)
         )
+        let phaseX = CGFloat(seed & 0x1FF)
+        let phaseY = CGFloat((seed >> 9) & 0x1FF)
+        let qualityScale: CGFloat = quality == .preview ? 0.88 : 1
         let noise = grainTexture
-            .transformed(by: CGAffineTransform(scaleX: 1 / grainSize, y: 1 / grainSize))
+            .transformed(by: CGAffineTransform(
+                scaleX: qualityScale / grainSize,
+                y: qualityScale / grainSize
+            ))
+            .transformed(by: CGAffineTransform(translationX: phaseX, y: phaseY))
             .applyingFilter("CIAffineTile")
             .cropped(to: extent)
             .applyingFilter("CIColorControls", parameters: [

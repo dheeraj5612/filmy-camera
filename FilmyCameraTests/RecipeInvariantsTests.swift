@@ -54,6 +54,15 @@ final class RecipeInvariantsTests: XCTestCase {
         }
     }
 
+    func testEverySelectableMonochromeFilterHasABuiltInRecipe() {
+        let builtInBases = Set(FilmRecipe.builtIns.map(\.filmBase))
+        XCTAssertTrue(builtInBases.contains(.acros))
+        XCTAssertTrue(builtInBases.contains(.acrosYellow))
+        XCTAssertTrue(builtInBases.contains(.acrosRed))
+        XCTAssertTrue(builtInBases.contains(.acrosGreen))
+        XCTAssertTrue(builtInBases.contains(.monochrome))
+    }
+
     func testBuiltInRecipeControlsStayWithinNormalizedEditorBounds() {
         for recipe in FilmRecipe.builtIns {
             XCTAssertTrue((-2.0...2.0).contains(recipe.exposure), recipe.id)

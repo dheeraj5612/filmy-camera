@@ -55,6 +55,10 @@ final class PhotoOutputEncoderTests: XCTestCase {
 
         XCTAssertEqual(tiff[kCGImagePropertyTIFFSoftware as String] as? String, "Filmy Camera")
         XCTAssertEqual(exif[kCGImagePropertyExifDateTimeOriginal as String] as? String, "2026:08:12 18:00:00")
+        XCTAssertEqual((exif[kCGImagePropertyExifPixelXDimension as String] as? NSNumber)?.intValue, 4)
+        XCTAssertEqual((exif[kCGImagePropertyExifPixelYDimension as String] as? NSNumber)?.intValue, 3)
+        XCTAssertEqual((properties[kCGImagePropertyPixelWidth as String] as? NSNumber)?.intValue, 4)
+        XCTAssertEqual((properties[kCGImagePropertyPixelHeight as String] as? NSNumber)?.intValue, 3)
         XCTAssertEqual((properties[kCGImagePropertyOrientation as String] as? NSNumber)?.intValue, 1)
         XCTAssertNil(properties[kCGImagePropertyGPSDictionary as String])
         XCTAssertEqual(CGImageSourceGetType(outputSource) as String?, UTType.jpeg.identifier)

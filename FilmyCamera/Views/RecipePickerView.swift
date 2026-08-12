@@ -4,13 +4,14 @@ struct RecipePickerView: View {
     let recipes: [FilmRecipe]
     @Binding var selectedRecipeID: String
     let onOpenDetail: (FilmRecipe) -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(spacing: 10) {
                 ForEach(recipes) { recipe in
                     Button {
-                        withAnimation(.snappy(duration: 0.22)) {
+                        withAnimation(reduceMotion ? nil : .snappy(duration: 0.22)) {
                             selectedRecipeID = recipe.id
                         }
                     } label: {

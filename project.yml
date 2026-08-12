@@ -35,6 +35,7 @@ targets:
     info:
       path: FilmyCamera/Info.plist
       properties:
+        CFBundleDisplayName: Filmy Camera
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         NSCameraUsageDescription: Filmy Camera uses the camera to preview and capture photos with your selected film recipe.

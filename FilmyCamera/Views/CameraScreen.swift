@@ -14,6 +14,7 @@ struct CameraScreen: View {
     @AppStorage("hapticsEnabled") private var hapticsEnabled = true
     @State private var recipeForDetail: FilmRecipe?
     @State private var focusPoint: CGPoint?
+    @State private var focusNormalizedPoint: CGPoint?
     @State private var pinchStartZoom: CGFloat = 1
 
     var body: some View {
@@ -22,6 +23,11 @@ struct CameraScreen: View {
                 FilteredCameraPreview(camera: camera, recipe: viewModel.selectedRecipe)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .contentShape(Rectangle())
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Live camera preview")
+                    .accessibilityValue(camera.isRunning ? "Showing the \(viewModel.selectedRecipe.name) look" : camera.statusMessage)
+                    .accessibilityHint("Tap the preview to focus and expose the frame")
+                    .accessibilityIdentifier("camera-preview")
                     .gesture(
                         SpatialTapGesture().onEnded { value in
                             let normalizedPoint = normalizedFocusPoint(
@@ -29,6 +35,7 @@ struct CameraScreen: View {
                                 in: proxy.size
                             )
                             camera.focus(at: normalizedPoint)
+                            focusNormalizedPoint = normalizedPoint
                             withAnimation(reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.72)) {
                                 focusPoint = value.location
                             }
@@ -84,16 +91,20 @@ struct CameraScreen: View {
                     }
             }
 
-            if camera.zoomFactor > 1.01 {
-                Text("\(camera.zoomFactor, specifier: "%.1f")×")
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(Color.black.opacity(0.46), in: Capsule())
-                    .overlay { Capsule().stroke(Color.white.opacity(0.16), lineWidth: 1) }
-                    .padding(.top, 76)
-                    .accessibilityLabel("Zoom \(camera.zoomFactor, specifier: "%.1f") times")
+            if !shouldShowCameraEmptyState {
+                VStack(spacing: 8) {
+                    ZoomControl(value: camera.zoomFactor) { direction in
+                        let delta: CGFloat = direction == .increment ? 0.5 : -0.5
+                        camera.setZoom(camera.zoomFactor + delta)
+                    }
+
+                    if (focusPoint != nil || camera.isFocusExposureLocked), let focusNormalizedPoint {
+                        FocusLockControl(isLocked: camera.isFocusExposureLocked) {
+                            camera.toggleFocusExposureLock(at: focusNormalizedPoint)
+                        }
+                    }
+                }
+                .padding(.top, 76)
             }
 
             VStack(spacing: 0) {
@@ -115,7 +126,7 @@ struct CameraScreen: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .animation(.easeOut(duration: 0.22), value: viewModel.toastMessage)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: viewModel.toastMessage)
         .sheet(item: $recipeForDetail) { recipe in
             RecipeDetailView(
                 recipe: recipe,
@@ -142,7 +153,8 @@ struct CameraScreen: View {
                     isSaving: viewModel.isSaving,
                     saveErrorMessage: viewModel.saveErrorMessage,
                     onSave: { viewModel.saveReview(photoLibrary: photoLibrary) },
-                    onRetake: viewModel.discardReview
+                    onRetake: viewModel.discardReview,
+                    onOpenSettings: openSystemSettings
                 )
                 .presentationDetents([.large])
                 .presentationDragIndicator(.hidden)

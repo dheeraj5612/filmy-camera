@@ -35,18 +35,21 @@ The analog character comes from tone, color, grain, and halation. The interface 
 - Updated UI tests to cover the new `Roll` and `Tune` language.
 - Replaced recipe-rail gradient placeholders with deterministic synthetic scenes rendered through the real FilmRenderer, and made preview/photo/export share one canonical color cube.
 - Made the Core Image working/output color space explicit sRGB and normalized grain/halation scale across output resolutions.
+- Added selectable original Acros neutral/yellow/red/green filter starting points so every exposed monochrome filter mode is reachable from the recipe rail.
+- Added a lower-cost preview cube, capture-derived grain phase, preview-before-render framing, EXIF orientation normalization, truthful output dimensions, and a downsampled review image to keep the live and saved frame contracts aligned without retaining two full-resolution decoded images.
+- Added VoiceOver routes for live preview, adjustable zoom, and focus/exposure lock; added an explicit Photos-settings recovery action on failed save; and disabled picker/toast motion when Reduce Motion is enabled.
+- Hardened release automation with a display-name assertion, `.provisionprofile` support, reproducible XcodeGen output checks, successful-run XCTest artifact retention, and broader metadata/privacy change triggering.
 
 ## Deliberately deferred
 
 - Bundled photographic recipe thumbnails: the current implementation still has no licensed neutral stills or capture sample set. The rail now uses original synthetic reference scenes rendered by the production pipeline; a photographic asset pass should add only original/licensed images and run them through the same renderer.
 - Accessible focus/exposure lock controls: the camera service currently supports tap focus/exposure and pinch zoom, but not an explicit lock state. The UI should not imply controls the service cannot honor.
 - Physical-device color calibration and signed release validation: simulator and hosted gates prove the render contract and UI shell, but cannot prove sensor-specific color, capture metadata, memory pressure, or Apple distribution access.
-- Capture/output fidelity pass: monochrome filters now use typed channel mixes, hue-sector response keeps Color Chrome and FX Blue selective, grain is deterministic across render tiers, still capture keeps encoded source data through rendering, and Photos writes the filtered JPEG with capture-time metadata while excluding GPS by default.
 
 ## Verification
 
 - Simulator build succeeded for the iOS 18.5 `FilmyCamera iPhone` runtime.
-- Unit/renderer tests: 20 passed.
+- Unit/renderer tests: 26 passed.
 - UI tests: 2 passed.
-- Full simulator suite: 22 tests passed with 0 failures.
+- Full simulator suite: 28 tests passed with 0 failures.
 - Final simulator review confirmed the unavailable-camera state and compact offline action plate remain legible.
