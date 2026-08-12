@@ -82,22 +82,62 @@ extension FilmRecipe {
 
 @MainActor
 final class CameraViewModel: ObservableObject {
-    @Published var selectedRecipeID: String = FilmRecipe.builtIns[0].id
+    @Published var selectedRecipeID: String = UserDefaults.standard.string(forKey: "selectedRecipeID") ?? FilmRecipe.builtIns[0].id {
+        didSet {
+            UserDefaults.standard.set(selectedRecipeID, forKey: "selectedRecipeID")
+        }
+    }
     @Published private(set) var isCapturing = false
     @Published private(set) var toastMessage: String?
     @Published private(set) var lastCaptureDate: Date?
+    @Published private(set) var reviewImage: UIImage?
+    @Published private(set) var reviewRecipe: FilmRecipe?
+    @Published private var recipeOverrides: [String: FilmRecipe] = [:]
 
     private var toastTask: Task<Void, Never>?
 
+    init() {
+        guard let data = UserDefaults.standard.data(forKey: "recipeOverrides"),
+              let savedRecipes = try? JSONDecoder().decode([String: FilmRecipe].self, from: data) else {
+            return
+        }
+        recipeOverrides = savedRecipes
+    }
+
     var selectedRecipe: FilmRecipe {
-        FilmRecipe.builtIns.first(where: { $0.id == selectedRecipeID }) ?? FilmRecipe.builtIns[0]
+        recipeOverrides[selectedRecipeID]
+            ?? FilmRecipe.builtIns.first(where: { $0.id == selectedRecipeID })
+            ?? FilmRecipe.builtIns[0]
     }
 
     func select(recipe: FilmRecipe) {
         selectedRecipeID = recipe.id
     }
 
-    func capture(camera: CameraService, photoLibrary: PhotoLibraryService) {
+    func originalRecipe(for id: String) -> FilmRecipe {
+        FilmRecipe.builtIns.first(where: { $0.id == id }) ?? FilmRecipe.builtIns[0]
+    }
+
+    func update(recipe: FilmRecipe) {
+        recipeOverrides[recipe.id] = recipe
+        persistRecipeOverrides()
+    }
+
+    func reset(recipeID: String) {
+        recipeOverrides.removeValue(forKey: recipeID)
+        persistRecipeOverrides()
+    }
+
+    func isCustomized(_ recipe: FilmRecipe) -> Bool {
+        recipeOverrides[recipe.id] != nil
+    }
+
+    private func persistRecipeOverrides() {
+        guard let data = try? JSONEncoder().encode(recipeOverrides) else { return }
+        UserDefaults.standard.set(data, forKey: "recipeOverrides")
+    }
+
+    func capture(camera: CameraService) {
         guard !isCapturing else { return }
         isCapturing = true
         let recipe = selectedRecipe
@@ -117,20 +157,34 @@ final class CameraViewModel: ObservableObject {
 
                     DispatchQueue.main.async {
                         guard let self else { return }
-                        photoLibrary.save(image: finishedImage) { [weak self] saved in
-                            guard let self else { return }
-                            self.isCapturing = false
-                            if saved {
-                                self.lastCaptureDate = Date()
-                                self.showToast("Saved with \(recipe.name)")
-                            } else {
-                                self.showToast("Photo access is needed to save")
-                            }
-                        }
+                        self.isCapturing = false
+                        self.reviewImage = finishedImage
+                        self.reviewRecipe = recipe
                     }
                 }
             }
         }
+    }
+
+    func saveReview(photoLibrary: PhotoLibraryService) {
+        guard let reviewImage, let reviewRecipe else { return }
+
+        photoLibrary.save(image: reviewImage) { [weak self] saved in
+            guard let self else { return }
+            if saved {
+                self.lastCaptureDate = Date()
+                self.reviewImage = nil
+                self.reviewRecipe = nil
+                self.showToast("Saved with \(reviewRecipe.name)")
+            } else {
+                self.showToast("Photo access is needed to save")
+            }
+        }
+    }
+
+    func discardReview() {
+        reviewImage = nil
+        reviewRecipe = nil
     }
 
     private func showToast(_ message: String) {

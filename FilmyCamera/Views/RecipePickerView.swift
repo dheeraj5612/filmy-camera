@@ -39,10 +39,31 @@ struct RecipePickerView: View {
 
 struct RecipeDetailView: View {
     let recipe: FilmRecipe
+    let originalRecipe: FilmRecipe
     let isSelected: Bool
     let onSelect: () -> Void
+    let onUpdate: ((FilmRecipe) -> Void)?
+    let onReset: (() -> Void)?
 
     @Environment(\.dismiss) private var dismiss
+    @State private var draft: FilmRecipe
+
+    init(
+        recipe: FilmRecipe,
+        originalRecipe: FilmRecipe,
+        isSelected: Bool,
+        onSelect: @escaping () -> Void,
+        onUpdate: ((FilmRecipe) -> Void)? = nil,
+        onReset: (() -> Void)? = nil
+    ) {
+        self.recipe = recipe
+        self.originalRecipe = originalRecipe
+        self.isSelected = isSelected
+        self.onSelect = onSelect
+        self.onUpdate = onUpdate
+        self.onReset = onReset
+        _draft = State(initialValue: recipe)
+    }
 
     var body: some View {
         ZStack {
@@ -50,7 +71,7 @@ struct RecipeDetailView: View {
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 22) {
-                    RecipeSwatch(recipe: recipe, compact: false)
+                    RecipeSwatch(recipe: draft, compact: false)
                         .frame(height: 180)
 
                     VStack(alignment: .leading, spacing: 8) {
@@ -63,14 +84,14 @@ struct RecipeDetailView: View {
                             .font(.system(size: 31, weight: .black, design: .rounded))
                             .foregroundStyle(FilmyTheme.primary)
 
-                        Text(recipe.detail)
+                        Text(draft.detail)
                             .font(.system(size: 15, weight: .medium, design: .rounded))
                             .foregroundStyle(FilmyTheme.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
                     HStack(spacing: 10) {
-                        ForEach(recipe.controlSummary, id: \.0) { control in
+                        ForEach(draft.controlSummary, id: \.0) { control in
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(control.0.uppercased())
                                     .font(.system(size: 9, weight: .bold, design: .rounded))
@@ -86,6 +107,10 @@ struct RecipeDetailView: View {
                     .padding(14)
                     .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
                     .overlay { RoundedRectangle(cornerRadius: 17, style: .continuous).stroke(FilmyTheme.line, lineWidth: 1) }
+
+                    if onUpdate != nil {
+                        editor
+                    }
 
                     Button {
                         onSelect()
@@ -114,6 +139,124 @@ struct RecipeDetailView: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Recipe details for \(recipe.name)")
+    }
+
+    private var editor: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .lastTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("MAKE IT YOURS")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .tracking(1.3)
+                        .foregroundStyle(FilmyTheme.accent)
+                    Text("Recipe controls")
+                        .font(.system(size: 19, weight: .bold, design: .rounded))
+                        .foregroundStyle(FilmyTheme.primary)
+                }
+
+                Spacer()
+
+                Button("Reset") {
+                    draft = originalRecipe
+                    onReset?()
+                }
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(FilmyTheme.accent)
+                .buttonStyle(.plain)
+                .accessibilityLabel("Reset recipe controls")
+            }
+
+            VStack(spacing: 16) {
+                RecipeSliderRow(title: "Exposure", value: binding(\.exposure), range: -2...2, format: "%+.1f EV")
+                RecipeSliderRow(title: "Highlights", value: binding(\.tone.highlight), range: -1...1, format: "%+.2f")
+                RecipeSliderRow(title: "Shadows", value: binding(\.tone.shadow), range: -1...1, format: "%+.2f")
+                RecipeSliderRow(title: "Color", value: binding(\.saturation), range: 0...2, format: "%.2f")
+                RecipeSliderRow(title: "Contrast", value: binding(\.contrast), range: 0.5...1.7, format: "%.2f")
+                RecipeChoiceRow(title: "Dynamic range", selection: dynamicRangeBinding) {
+                    ForEach(FilmRecipe.DynamicRange.allCases, id: \.self) { range in
+                        Text(range.displayName).tag(range)
+                    }
+                }
+                RecipeSliderRow(title: "Color Chrome", value: binding(\.colorChrome), range: 0...1, format: "%.2f")
+                RecipeSliderRow(title: "FX Blue", value: binding(\.fxBlue), range: -1...1, format: "%+.2f")
+                RecipeSliderRow(title: "Warmth", value: binding(\.whiteBalance.temperature), range: -1...1, format: "%+.2f")
+                RecipeSliderRow(title: "Tint", value: binding(\.whiteBalance.tint), range: -1...1, format: "%+.2f")
+                RecipeSliderRow(title: "Sharpness", value: binding(\.sharpness), range: -1...1, format: "%+.2f")
+                RecipeSliderRow(title: "Noise reduction", value: binding(\.noiseReduction), range: 0...1, format: "%.2f")
+                RecipeSliderRow(title: "Clarity", value: binding(\.clarity), range: -1...1, format: "%+.2f")
+                RecipeSliderRow(title: "Grain", value: binding(\.grain), range: 0...1, format: "%.2f")
+                RecipeSliderRow(title: "Grain size", value: binding(\.grainSize), range: 0.35...2.5, format: "%.2f")
+                RecipeSliderRow(title: "Vignette", value: binding(\.vignette), range: 0...1, format: "%.2f")
+                RecipeSliderRow(title: "Halation", value: binding(\.halation), range: 0...1, format: "%.2f")
+            }
+        }
+        .padding(16)
+        .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 19, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 19, style: .continuous).stroke(FilmyTheme.line, lineWidth: 1) }
+    }
+
+    private func binding(_ keyPath: WritableKeyPath<FilmRecipe, Double>) -> Binding<Double> {
+        Binding(
+            get: { draft[keyPath: keyPath] },
+            set: { newValue in
+                draft[keyPath: keyPath] = newValue
+                onUpdate?(draft)
+            }
+        )
+    }
+
+    private var dynamicRangeBinding: Binding<FilmRecipe.DynamicRange> {
+        Binding(
+            get: { draft.dynamicRange },
+            set: { newValue in
+                draft.dynamicRange = newValue
+                onUpdate?(draft)
+            }
+        )
+    }
+}
+
+private struct RecipeChoiceRow<Content: View>: View {
+    let title: String
+    @Binding var selection: FilmRecipe.DynamicRange
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundStyle(FilmyTheme.primary)
+            Spacer()
+            Picker(title, selection: $selection, content: content)
+                .pickerStyle(.menu)
+                .tint(FilmyTheme.accent)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+        }
+    }
+}
+
+private struct RecipeSliderRow: View {
+    let title: String
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    let format: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(FilmyTheme.primary)
+                Spacer()
+                Text(String(format: format, value))
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(FilmyTheme.secondary)
+                    .monospacedDigit()
+            }
+
+            Slider(value: $value, in: range)
+                .tint(FilmyTheme.accent)
+                .accessibilityLabel(title)
+        }
     }
 }

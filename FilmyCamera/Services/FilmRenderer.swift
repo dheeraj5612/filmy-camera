@@ -74,13 +74,16 @@ public final class FilmRenderer {
         let sourceExtent = image.extent
         var output = image
 
+        output = applyDynamicRange(to: output, recipe: recipe)
         output = applyExposureAndTone(to: output, recipe: recipe)
         output = applyWhiteBalance(to: output, recipe: recipe)
         output = applyColorControls(to: output, recipe: recipe)
         output = applyColorCube(to: output, recipe: recipe, quality: quality)
+        output = applyDetailControls(to: output, recipe: recipe)
         output = applyClarity(to: output, recipe: recipe)
         output = applyGrain(to: output, recipe: recipe, quality: quality)
         output = applyVignette(to: output, recipe: recipe)
+        output = applyHalation(to: output, recipe: recipe)
         output = clampOutput(toNormalizedRange: output)
 
         // Some finishing filters can expand their extent. Camera and export
@@ -141,6 +144,22 @@ public final class FilmRenderer {
         return toneCurve.outputImage ?? output
     }
 
+    private static func applyDynamicRange(
+        to image: CIImage,
+        recipe: FilmRecipe
+    ) -> CIImage {
+        let amount = recipe.dynamicRange.highlightProtection
+        guard amount > 0.0001,
+              let filter = CIFilter(name: "CIHighlightShadowAdjust") else {
+            return image
+        }
+
+        filter.setValue(image, forKey: kCIInputImageKey)
+        filter.setValue(-amount, forKey: "inputHighlightAmount")
+        filter.setValue(amount * 0.18, forKey: "inputShadowAmount")
+        return filter.outputImage?.cropped(to: image.extent) ?? image
+    }
+
     private static func applyWhiteBalance(
         to image: CIImage,
         recipe: FilmRecipe
@@ -183,7 +202,7 @@ public final class FilmRenderer {
         guard let cube = CIFilter(name: "CIColorCubeWithColorSpace") else { return image }
 
         let dimension = quality.cubeDimension
-        let cubeKey = "\(recipe.hashValue)-\(dimension)" as NSString
+        let cubeKey = stableCubeCacheKey(recipe: recipe, dimension: dimension) as NSString
         let cubeData: NSData
         if let cached = cubeCache.storage.object(forKey: cubeKey) {
             cubeData = cached
@@ -220,6 +239,38 @@ public final class FilmRenderer {
         blur.setValue(image, forKey: kCIInputImageKey)
         blur.setValue(abs(clarity) * 0.65, forKey: kCIInputRadiusKey)
         return blur.outputImage?.cropped(to: image.extent) ?? image
+    }
+
+    private static func applyDetailControls(
+        to image: CIImage,
+        recipe: FilmRecipe
+    ) -> CIImage {
+        var output = image
+
+        let noiseReduction = clamp(recipe.noiseReduction, lower: 0, upper: 1)
+        if noiseReduction > 0.0001,
+           let noiseFilter = CIFilter(name: "CINoiseReduction") {
+            noiseFilter.setValue(output, forKey: kCIInputImageKey)
+            noiseFilter.setValue(noiseReduction * 0.035, forKey: "inputNoiseLevel")
+            noiseFilter.setValue(1 - noiseReduction * 0.65, forKey: "inputSharpness")
+            output = noiseFilter.outputImage?.cropped(to: image.extent) ?? output
+        }
+
+        let sharpness = clamp(recipe.sharpness, lower: -1, upper: 1)
+        if sharpness > 0.0001,
+           let unsharp = CIFilter(name: "CIUnsharpMask") {
+            unsharp.setValue(output, forKey: kCIInputImageKey)
+            unsharp.setValue(0.35 + sharpness * 0.65, forKey: kCIInputRadiusKey)
+            unsharp.setValue(sharpness * 0.7, forKey: kCIInputIntensityKey)
+            output = unsharp.outputImage?.cropped(to: image.extent) ?? output
+        } else if sharpness < -0.0001,
+                  let blur = CIFilter(name: "CIGaussianBlur") {
+            blur.setValue(output, forKey: kCIInputImageKey)
+            blur.setValue(abs(sharpness) * 0.35, forKey: kCIInputRadiusKey)
+            output = blur.outputImage?.cropped(to: image.extent) ?? output
+        }
+
+        return output
     }
 
     private static func applyGrain(
@@ -275,6 +326,43 @@ public final class FilmRenderer {
         vignette.setValue(intensity * 1.35, forKey: kCIInputIntensityKey)
         vignette.setValue(max(extent.width, extent.height) * 0.62, forKey: kCIInputRadiusKey)
         return vignette.outputImage?.cropped(to: extent) ?? image
+    }
+
+    private static func applyHalation(
+        to image: CIImage,
+        recipe: FilmRecipe
+    ) -> CIImage {
+        let amount = clamp(recipe.halation, lower: 0, upper: 1)
+        guard amount > 0.0001 else { return image }
+
+        let extent = image.extent
+        let highlightMask = image
+            .applyingFilter("CIColorControls", parameters: [
+                kCIInputSaturationKey: 0,
+                kCIInputContrastKey: 2.4,
+                kCIInputBrightnessKey: -1.15
+            ])
+            .applyingFilter("CIMaskToAlpha")
+            .applyingFilter("CIGaussianBlur", parameters: [
+                kCIInputRadiusKey: 1.5 + amount * 4.5
+            ])
+            .cropped(to: extent)
+
+        let redLayer = CIImage(
+            color: CIColor(red: 1.0, green: 0.10, blue: 0.035, alpha: amount * 0.24)
+        )
+        .cropped(to: extent)
+
+        let maskedLayer = redLayer.applyingFilter("CIBlendWithMask", parameters: [
+            kCIInputBackgroundImageKey: CIImage(color: .clear).cropped(to: extent),
+            "inputMaskImage": highlightMask
+        ])
+
+        return maskedLayer
+            .applyingFilter("CIScreenBlendMode", parameters: [
+                kCIInputBackgroundImageKey: image
+            ])
+            .cropped(to: extent)
     }
 
     private static func makeCubeData(
@@ -340,16 +428,146 @@ public final class FilmRenderer {
 
         // Blue-response controls primarily affect cool shadows/highlights,
         // keeping skin and warm midtones stable.
-        let blueWeight = Float(recipe.blueResponse) * (1 - luma) * chroma * 0.18
+        let blueInfluence = Float(clamp(recipe.blueResponse + recipe.fxBlue * 0.72, lower: -1, upper: 1))
+        let coolChroma = max(0, blue - max(red * 0.55, green * 0.45))
+        let blueWeight = blueInfluence * (1 - luma) * max(chroma * 0.45, coolChroma) * 0.30
         mappedBlue += blueWeight
         mappedRed -= blueWeight * 0.16
         mappedGreen += blueWeight * 0.04
 
-        return (
-            clamp(mappedRed, lower: 0, upper: 1),
-            clamp(mappedGreen, lower: 0, upper: 1),
-            clamp(mappedBlue, lower: 0, upper: 1)
+        let baseMapped = applyFilmBase(
+            red: mappedRed,
+            green: mappedGreen,
+            blue: mappedBlue,
+            luma: luma,
+            recipe: recipe
         )
+
+        return (
+            clamp(baseMapped.red, lower: 0, upper: 1),
+            clamp(baseMapped.green, lower: 0, upper: 1),
+            clamp(baseMapped.blue, lower: 0, upper: 1)
+        )
+    }
+
+    private static func applyFilmBase(
+        red: Float,
+        green: Float,
+        blue: Float,
+        luma: Float,
+        recipe: FilmRecipe
+    ) -> (red: Float, green: Float, blue: Float) {
+        var mappedRed = red
+        var mappedGreen = green
+        var mappedBlue = blue
+
+        func saturate(_ amount: Float) {
+            mappedRed = luma + (mappedRed - luma) * amount
+            mappedGreen = luma + (mappedGreen - luma) * amount
+            mappedBlue = luma + (mappedBlue - luma) * amount
+        }
+
+        let shadowWeight = 1 - smoothstep(0.08, 0.62, luma)
+        let highlightWeight = smoothstep(0.48, 0.98, luma)
+
+        switch recipe.filmBase {
+        case .standard, .provia:
+            break
+        case .classicChrome:
+            saturate(0.94)
+            mappedRed += 0.010 * highlightWeight
+            mappedBlue += 0.012 * shadowWeight
+            mappedGreen += 0.006 * shadowWeight
+        case .velvia:
+            saturate(1.08 + 0.06 * smoothstep(0.18, 0.92, luma))
+            mappedRed += 0.010 * highlightWeight
+            mappedGreen += 0.010 * (1 - shadowWeight)
+            mappedBlue += 0.014 * highlightWeight
+        case .astia:
+            saturate(0.98)
+            mappedRed += 0.012 * highlightWeight
+            mappedBlue -= 0.006 * highlightWeight
+        case .proNegative, .proNegStandard:
+            saturate(0.97)
+            mappedRed += 0.005 * highlightWeight
+        case .eterna:
+            saturate(0.90)
+            mappedRed += 0.009 * shadowWeight
+            mappedBlue += 0.012 * shadowWeight
+            mappedGreen += 0.006 * shadowWeight
+        case .eternaBleachBypass:
+            saturate(0.72)
+            mappedRed += 0.006 * highlightWeight
+            mappedBlue += 0.008 * shadowWeight
+        case .acros, .acrosYellow, .acrosRed, .acrosGreen, .monochrome:
+            let filterBias: Float
+            switch recipe.filmBase {
+            case .acrosYellow: filterBias = 0.08
+            case .acrosRed: filterBias = 0.13
+            case .acrosGreen: filterBias = -0.06
+            default: filterBias = 0
+            }
+            let filteredLuma = luma + filterBias * (red - blue)
+            mappedRed = filteredLuma
+            mappedGreen = filteredLuma
+            mappedBlue = filteredLuma
+        case .classicNegative:
+            saturate(0.98)
+            mappedRed += 0.018 * highlightWeight
+            mappedBlue += 0.020 * shadowWeight
+            mappedGreen -= 0.006 * shadowWeight
+        case .nostalgicNegative:
+            saturate(1.01)
+            mappedRed += 0.022 * highlightWeight
+            mappedBlue += 0.018 * shadowWeight
+            mappedGreen -= 0.004 * highlightWeight
+        case .realaAce:
+            saturate(0.99)
+            mappedBlue += 0.006 * shadowWeight
+        }
+
+        return (mappedRed, mappedGreen, mappedBlue)
+    }
+
+    private static func stableCubeCacheKey(
+        recipe: FilmRecipe,
+        dimension: Int
+    ) -> String {
+        let values = [
+            recipe.id,
+            recipe.filmBase.rawValue,
+            String(dimension),
+            canonical(recipe.exposure),
+            canonical(recipe.tone.highlight),
+            canonical(recipe.tone.shadow),
+            canonical(recipe.saturation),
+            canonical(recipe.contrast),
+            String(recipe.dynamicRange.rawValue),
+            canonical(recipe.whiteBalance.temperature),
+            canonical(recipe.whiteBalance.tint),
+            canonical(recipe.colorChrome),
+            canonical(recipe.blueResponse),
+            canonical(recipe.fxBlue),
+            canonical(recipe.sharpness),
+            canonical(recipe.noiseReduction),
+            canonical(recipe.clarity),
+            canonical(recipe.grain),
+            canonical(recipe.grainSize),
+            canonical(recipe.vignette),
+            canonical(recipe.halation),
+            canonical(recipe.palette.redBias),
+            canonical(recipe.palette.greenBias),
+            canonical(recipe.palette.blueBias),
+            canonical(recipe.palette.redGreenMix),
+            canonical(recipe.palette.greenBlueMix),
+            canonical(recipe.palette.blueRedMix),
+            canonical(recipe.palette.saturation)
+        ]
+        return values.joined(separator: "|")
+    }
+
+    private static func canonical(_ value: Double) -> String {
+        String(format: "%.8f", locale: Locale(identifier: "en_US_POSIX"), value)
     }
 
     private static func mix(_ lhs: Float, _ rhs: Float, _ amount: Float) -> Float {

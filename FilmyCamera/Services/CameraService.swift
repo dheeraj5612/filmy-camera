@@ -18,6 +18,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
     @Published public private(set) var isRunning = false
     @Published public private(set) var statusMessage = "Camera is ready"
+    @Published public private(set) var zoomFactor: CGFloat = 1
 
     /// Receives unfiltered live frames on the main queue.
     public var onFrame: FrameHandler?
@@ -100,6 +101,61 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         sessionQueue.async { [weak self] in
             guard let self else { return }
             self.capturePhotoOnQueue(completion: completionBox.completion)
+        }
+    }
+
+    /// Sets continuous focus and exposure at a normalized preview location.
+    /// The point uses the camera's metadata coordinate system: (0, 0) is the
+    /// top-left and (1, 1) is the bottom-right of the displayed preview.
+    public func focus(at normalizedPoint: CGPoint) {
+        let point = CGPoint(
+            x: min(max(normalizedPoint.x, 0), 1),
+            y: min(max(normalizedPoint.y, 0), 1)
+        )
+
+        sessionQueue.async { [weak self] in
+            guard let self, let device = self.activeDevice() else { return }
+            do {
+                try device.lockForConfiguration()
+                defer { device.unlockForConfiguration() }
+
+                if device.isFocusPointOfInterestSupported {
+                    device.focusPointOfInterest = point
+                    if device.isFocusModeSupported(.continuousAutoFocus) {
+                        device.focusMode = .continuousAutoFocus
+                    } else if device.isFocusModeSupported(.autoFocus) {
+                        device.focusMode = .autoFocus
+                    }
+                }
+
+                if device.isExposurePointOfInterestSupported {
+                    device.exposurePointOfInterest = point
+                    if device.isExposureModeSupported(.continuousAutoExposure) {
+                        device.exposureMode = .continuousAutoExposure
+                    }
+                }
+            } catch {
+                self.publishStatus("Focus is unavailable right now.")
+            }
+        }
+    }
+
+    /// Sets a bounded optical/digital zoom factor for the active camera.
+    public func setZoom(_ factor: CGFloat) {
+        sessionQueue.async { [weak self] in
+            guard let self, let device = self.activeDevice() else { return }
+            let upperBound = min(device.maxAvailableVideoZoomFactor, 6)
+            let nextFactor = min(max(factor, device.minAvailableVideoZoomFactor), upperBound)
+            guard nextFactor.isFinite else { return }
+
+            do {
+                try device.lockForConfiguration()
+                device.videoZoomFactor = nextFactor
+                device.unlockForConfiguration()
+                self.publishZoom(nextFactor)
+            } catch {
+                self.publishStatus("Zoom is unavailable right now.")
+            }
         }
     }
 
@@ -218,6 +274,12 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             ?? AVCaptureDevice.default(.builtInTrueDepthCamera, for: .video, position: .front)
     }
 
+    private func activeDevice() -> AVCaptureDevice? {
+        session.inputs
+            .compactMap { ($0 as? AVCaptureDeviceInput)?.device }
+            .first
+    }
+
     private func configureOrientation() {
         let portraitAngle: CGFloat = 90
         configureRotation(videoOutput.connection(with: .video), angle: portraitAngle)
@@ -271,6 +333,12 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private func publishRunning(_ running: Bool) {
         publishOnMain { [weak self] in
             self?.isRunning = running
+        }
+    }
+
+    private func publishZoom(_ factor: CGFloat) {
+        publishOnMain { [weak self] in
+            self?.zoomFactor = factor
         }
     }
 

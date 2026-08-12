@@ -5,10 +5,10 @@ Filmy Camera is a native iPhone camera built around the feeling of choosing a fi
 ## Current product slice
 
 - Live camera session through `AVCaptureVideoDataOutput` and `AVCapturePhotoOutput`.
-- GPU-backed Core Image processing with a generated 3D color cube, tone curve, temperature/tint, grain, and vignette stages.
-- Eleven recipe starting points based on public Fujifilm-style controls: film base, tone curve, color, white-balance shift, Color Chrome-style compression, blue response, grain, clarity, and vignette.
-- Capture to Photos with the selected look baked into the saved image.
-- Dark, camera-first SwiftUI UI with recipe rail, recipe detail sheet, capture feedback, and a recent grid.
+- GPU-backed Core Image processing with a generated 3D color cube, dynamic range, tone curve, temperature/tint, Color Chrome, FX Blue, detail, grain, halation, and vignette stages.
+- Eleven editable recipe starting points based on public Fujifilm-style controls: film base, tone curve, color, white-balance shift, dynamic range, Color Chrome, FX Blue, sharpness, noise reduction, clarity, grain, grain size, halation, and vignette.
+- Full-resolution capture review with retake or explicit Save to Photos, so a frame is never committed silently.
+- Dark, camera-first SwiftUI UI with recipe rail, persistent tuning, recipe detail sheet, capture review, and a recent grid.
 - Simulator-safe empty state: the full interface runs without camera hardware and clearly asks for a physical iPhone for capture.
 
 ## Build

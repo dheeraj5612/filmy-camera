@@ -23,8 +23,9 @@ What you get:
 
 - A focused camera screen designed for one-handed shooting
 - A quick rail of curated film-style recipes
-- Transparent tone, color, white-balance shift, grain, clarity, and vignette settings in every recipe
+- Adjustable tone, color, white-balance shift, grain, clarity, and vignette controls
 - Live preview and full-resolution exports with the selected look applied
+- A review step to retake or explicitly save each finished frame
 - A quiet recent-photo grid for reviewing the moments you just made
 - No account required
 

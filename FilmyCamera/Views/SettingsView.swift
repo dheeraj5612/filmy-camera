@@ -8,7 +8,6 @@ struct SettingsView: View {
 
     @AppStorage("showGrid") private var showGrid = true
     @AppStorage("hapticsEnabled") private var hapticsEnabled = true
-    @AppStorage("saveOriginals") private var saveOriginals = false
 
     var body: some View {
         NavigationStack {
@@ -88,15 +87,6 @@ struct SettingsView: View {
 
                     Divider().overlay(FilmyTheme.line)
 
-                    SettingRow(
-                        systemName: "square.and.arrow.down",
-                        title: "Keep the original",
-                        detail: "Reserved for the future dual-save workflow."
-                    ) {
-                        Toggle("Keep the original", isOn: $saveOriginals)
-                            .labelsHidden()
-                            .tint(FilmyTheme.accent)
-                    }
                 }
             }
         }
@@ -120,6 +110,15 @@ struct SettingsView: View {
                             title: isSimulator ? "SIMULATOR" : camera.isRunning ? "LIVE" : "READY",
                             isEnabled: !isSimulator
                         )
+                    }
+
+                    if cameraPermissionNeedsSettings {
+                        Divider().overlay(FilmyTheme.line)
+                        Button("Open System Settings", action: openSystemSettings)
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundStyle(FilmyTheme.accent)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityHint("Opens Filmy Camera camera permissions")
                     }
 
                     Divider().overlay(FilmyTheme.line)
@@ -204,6 +203,10 @@ struct SettingsView: View {
 
     private var isSimulator: Bool {
         camera.statusMessage.localizedCaseInsensitiveContains("Simulator")
+    }
+
+    private var cameraPermissionNeedsSettings: Bool {
+        !isSimulator && camera.statusMessage.localizedCaseInsensitiveContains("access")
     }
 
     private var photoStatusDetail: String {

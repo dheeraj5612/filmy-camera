@@ -5,12 +5,13 @@
 - [x] Verify the production Swift app target is present under `FilmyCamera/`.
 - [x] Exercise the production `FilmRecipe.builtIns` and `FilmRenderer.render` APIs from XCTest.
 - [x] Confirm the generated Xcode project exposes the `FilmyCamera` scheme and `FilmyCameraTests` target.
+- [x] Verify the simulator camera shell, editable recipe controls, accessibility labels, and empty-state recovery surface.
 
 ## Product and device QA
 
 - [ ] Test camera permission denial, recovery, and first-run messaging on a physical iPhone.
 - [ ] Test photo-library permission denial, limited access, save, and recent-photo behavior.
-- [ ] Verify preview and saved output use the same selected recipe.
+- [ ] Verify preview and saved output use the same selected recipe, including the capture-review handoff.
 - [ ] Verify output bounds, orientation, image dimensions, metadata, and memory use with representative photos.
 - [ ] Test every bundled recipe in bright daylight, low light, skin tones, sky, and mixed lighting.
 - [ ] Test interruption/resume for phone calls, backgrounding, camera unavailable, and low storage.

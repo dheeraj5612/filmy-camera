@@ -24,14 +24,19 @@ final class RecipeInvariantsTests: XCTestCase {
             XCTAssertTrue((-2.0...2.0).contains(recipe.tone.shadow), recipe.id)
             XCTAssertTrue((0.0...2.0).contains(recipe.saturation), recipe.id)
             XCTAssertTrue((0.0...2.0).contains(recipe.contrast), recipe.id)
+            XCTAssertTrue(FilmRecipe.DynamicRange.allCases.contains(recipe.dynamicRange), recipe.id)
             XCTAssertTrue((-1.0...1.0).contains(recipe.whiteBalance.temperature), recipe.id)
             XCTAssertTrue((-1.0...1.0).contains(recipe.whiteBalance.tint), recipe.id)
             XCTAssertTrue((-1.0...1.0).contains(recipe.colorChrome), recipe.id)
             XCTAssertTrue((-1.0...1.0).contains(recipe.blueResponse), recipe.id)
+            XCTAssertTrue((-1.0...1.0).contains(recipe.fxBlue), recipe.id)
+            XCTAssertTrue((-1.0...1.0).contains(recipe.sharpness), recipe.id)
+            XCTAssertTrue((0.0...1.0).contains(recipe.noiseReduction), recipe.id)
             XCTAssertTrue((-1.0...1.0).contains(recipe.clarity), recipe.id)
             XCTAssertTrue((0.0...1.0).contains(recipe.grain), recipe.id)
             XCTAssertTrue((0.1...4.0).contains(recipe.grainSize), recipe.id)
             XCTAssertTrue((0.0...1.0).contains(recipe.vignette), recipe.id)
+            XCTAssertTrue((0.0...1.0).contains(recipe.halation), recipe.id)
             XCTAssertTrue((0.0...2.0).contains(recipe.palette.saturation), recipe.id)
 
             let paletteValues = [
@@ -54,14 +59,19 @@ final class RecipeInvariantsTests: XCTestCase {
                 recipe.tone.shadow,
                 recipe.saturation,
                 recipe.contrast,
+                Double(recipe.dynamicRange.rawValue),
                 recipe.whiteBalance.temperature,
                 recipe.whiteBalance.tint,
                 recipe.colorChrome,
                 recipe.blueResponse,
+                recipe.fxBlue,
+                recipe.sharpness,
+                recipe.noiseReduction,
                 recipe.clarity,
                 recipe.grain,
                 recipe.grainSize,
                 recipe.vignette,
+                recipe.halation,
                 recipe.palette.redBias,
                 recipe.palette.greenBias,
                 recipe.palette.blueBias,
@@ -73,5 +83,13 @@ final class RecipeInvariantsTests: XCTestCase {
 
             XCTAssertTrue(values.allSatisfy(\.isFinite), recipe.id)
         }
+    }
+
+    func testRecipeRoundTripsThroughPersistentRepresentation() throws {
+        let original = FilmRecipe.builtIns[0]
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(FilmRecipe.self, from: data)
+
+        XCTAssertEqual(decoded, original)
     }
 }
