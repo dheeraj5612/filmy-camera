@@ -48,7 +48,7 @@ public struct FilteredCameraPreview: UIViewRepresentable {
         let coordinator = context.coordinator
         coordinator.previewView = view
         view.update(recipe: recipe, quality: quality)
-        cameraService.onFrame = { [weak coordinator] image in
+        coordinator.frameHandlerID = cameraService.installFrameHandler { [weak coordinator] image in
             coordinator?.receive(image)
         }
         view.accessibilityLabel = "Live camera preview"
@@ -68,7 +68,7 @@ public struct FilteredCameraPreview: UIViewRepresentable {
         // SwiftUI can recreate the callback after another view has used the
         // service. Reinstalling this tiny forwarding closure keeps the preview
         // attached to the current representable instance.
-        cameraService.onFrame = { [weak coordinator] image in
+        coordinator.frameHandlerID = cameraService.installFrameHandler { [weak coordinator] image in
             coordinator?.receive(image)
         }
     }
@@ -77,7 +77,9 @@ public struct FilteredCameraPreview: UIViewRepresentable {
         _ uiView: FilteredCameraPreviewView,
         coordinator: Coordinator
     ) {
-        coordinator.service?.onFrame = nil
+        if let frameHandlerID = coordinator.frameHandlerID {
+            coordinator.service?.removeFrameHandler(frameHandlerID)
+        }
         coordinator.previewView = nil
         uiView.clearImage()
     }
@@ -85,6 +87,7 @@ public struct FilteredCameraPreview: UIViewRepresentable {
     public final class Coordinator: @unchecked Sendable {
         fileprivate weak var previewView: FilteredCameraPreviewView?
         fileprivate weak var service: CameraService?
+        fileprivate var frameHandlerID: UUID?
         fileprivate var recipe: FilmRecipe
         fileprivate var quality: FilmRenderer.Quality
 

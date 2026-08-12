@@ -6,6 +6,9 @@ struct SettingsView: View {
     @ObservedObject var camera: CameraService
     @ObservedObject var photoLibrary: PhotoLibraryService
 
+    private let privacyPolicyURL = URL(string: "https://dheeraj5612.github.io/filmycam-legal/privacy-policy.html")!
+    private let supportURL = URL(string: "https://github.com/dheeraj5612/filmy-camera/issues")!
+
     @AppStorage("showGrid") private var showGrid = true
     @AppStorage("hapticsEnabled") private var hapticsEnabled = true
 
@@ -186,6 +189,27 @@ struct SettingsView: View {
                             .font(.system(size: 11, weight: .semibold, design: .rounded))
                             .foregroundStyle(FilmyTheme.mint)
                     }
+
+                    Divider().overlay(FilmyTheme.line)
+
+                    HStack(spacing: 16) {
+                        Link(destination: privacyPolicyURL) {
+                            Label("Privacy Policy", systemImage: "hand.raised.fill")
+                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        }
+                        .accessibilityIdentifier("privacy-policy-link")
+
+                        Spacer(minLength: 8)
+
+                        Link(destination: supportURL) {
+                            Label("Contact Support", systemImage: "questionmark.circle.fill")
+                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        }
+                        .accessibilityIdentifier("support-link")
+                    }
+                    .foregroundStyle(FilmyTheme.accent)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
                 }
             }
         }

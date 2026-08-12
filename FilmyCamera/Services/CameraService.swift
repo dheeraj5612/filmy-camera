@@ -96,10 +96,13 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// Receives unfiltered live frames on the main queue.
     public var onFrame: FrameHandler?
 
+    private var frameHandlerID: UUID?
+
     private let sessionQueue = DispatchQueue(
         label: "com.dheeraj.filmycamera.camera-session",
         qos: .userInitiated
     )
+    private let sessionQueueKey = DispatchSpecificKey<Void>()
     private let videoQueue = DispatchQueue(
         label: "com.dheeraj.filmycamera.camera-frames",
         qos: .userInitiated
@@ -142,6 +145,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         self.session = AVCaptureSession()
         super.init()
 
+        sessionQueue.setSpecific(key: sessionQueueKey, value: ())
         frameDeliveryGate.owner = self
         videoOutput.alwaysDiscardsLateVideoFrames = true
         videoOutput.videoSettings = [
@@ -154,7 +158,28 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     deinit {
         sessionObservers.forEach(NotificationCenter.default.removeObserver)
         videoOutput.setSampleBufferDelegate(nil, queue: nil)
-        session.stopRunning()
+
+        let session = session
+        var pendingCompletion: PhotoCompletion?
+        let stopSession = { [self] in
+            if session.isRunning {
+                session.stopRunning()
+            }
+            pendingCompletion = self.pendingPhotoCompletion
+            self.pendingPhotoCompletion = nil
+            self.pendingPhotoCapturedAt = nil
+        }
+        if DispatchQueue.getSpecific(key: sessionQueueKey) == nil {
+            sessionQueue.sync(execute: stopSession)
+        } else {
+            stopSession()
+        }
+
+        if let pendingCompletion {
+            DispatchQueue.main.async {
+                pendingCompletion(nil)
+            }
+        }
     }
 
     /// Requests camera permission when needed and starts the session. On a
@@ -182,6 +207,23 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             self.publishAvailability(.paused)
             self.publishStatus("Camera paused")
         }
+    }
+
+    /// Installs a preview callback and returns an ownership token. A stale
+    /// SwiftUI representable can only remove its own callback, so tearing down
+    /// an older preview cannot freeze a newer one using the same service.
+    @discardableResult
+    public func installFrameHandler(_ handler: @escaping FrameHandler) -> UUID {
+        let id = UUID()
+        frameHandlerID = id
+        onFrame = handler
+        return id
+    }
+
+    public func removeFrameHandler(_ id: UUID) {
+        guard frameHandlerID == id else { return }
+        frameHandlerID = nil
+        onFrame = nil
     }
 
     /// Keeps the preview and still output aligned with the current camera
@@ -219,8 +261,6 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         sessionQueue.async { [weak self] in
             guard let self, let device = self.activeDevice() else { return }
             do {
-                self.focusExposureLocked = false
-                self.publishFocusExposureLocked(false)
                 try device.lockForConfiguration()
                 defer { device.unlockForConfiguration() }
 
@@ -239,6 +279,9 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                         device.exposureMode = .continuousAutoExposure
                     }
                 }
+
+                self.focusExposureLocked = false
+                self.publishFocusExposureLocked(false)
             } catch {
                 self.publishStatus("Focus is unavailable right now.")
             }
@@ -354,9 +397,15 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 self.sessionQueue.async { [weak self] in
                     guard let self else { return }
                     self.authorizationRequestInFlight = false
-                    if granted, self.wantsToRun {
-                        self.configureAndStartOnQueue()
-                    } else {
+                    if granted {
+                        if self.wantsToRun {
+                            self.configureAndStartOnQueue()
+                        } else {
+                            self.publishRunning(false)
+                            self.publishAvailability(.paused)
+                            self.publishStatus("Camera paused")
+                        }
+                    } else if self.wantsToRun {
                         self.publishRunning(false)
                         self.publishAvailability(.permissionDenied)
                         self.publishStatus("Camera access is required to preview and capture.")

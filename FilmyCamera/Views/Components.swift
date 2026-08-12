@@ -130,6 +130,7 @@ struct CameraActionButton: View {
 
 struct CameraStatusPill: View {
     let isRunning: Bool
+    let availability: CameraService.Availability
     let message: String
 
     var body: some View {
@@ -152,20 +153,22 @@ struct CameraStatusPill: View {
     }
 
     private var condensedMessage: String {
-        let normalized = message.lowercased()
-        if normalized.contains("simulator") {
+        switch availability {
+        case .simulator:
             return "Preview only"
-        }
-        if normalized.contains("disabled") {
+        case .permissionDenied:
             return "Access off"
-        }
-        if normalized.contains("required") {
+        case .requestingPermission:
             return "Access needed"
-        }
-        if normalized.contains("unavailable") || normalized.contains("could not") {
+        case .interrupted, .needsRecovery, .unavailable:
             return "Unavailable"
+        case .paused:
+            return "Paused"
+        case .idle, .starting:
+            return "Starting"
+        case .running:
+            return isRunning ? "Live" : "Starting"
         }
-        return message
     }
 }
 

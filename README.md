@@ -17,9 +17,11 @@ Filmy Camera is a native iPhone camera built around the feeling of choosing a fi
 xcodegen generate
 xcodebuild -project FilmyCamera.xcodeproj \
   -scheme FilmyCamera \
-  -destination 'platform=iOS Simulator,name=FilmyCamera iPhone' \
+  -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
   build
 ```
+
+If that simulator is not installed, replace the destination with any available iPhone ID from `xcrun simctl list devices available`.
 
 For deterministic simulator tests on CI or a busy development machine, add `-parallel-testing-enabled NO -maximum-parallel-testing-workers 1` to the test invocation.
 
