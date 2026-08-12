@@ -65,35 +65,17 @@ final class RecipeInvariantsTests: XCTestCase {
 
     func testBuiltInRecipeControlsStayWithinNormalizedEditorBounds() {
         for recipe in FilmRecipe.builtIns {
-            XCTAssertTrue((-2.0...2.0).contains(recipe.exposure), recipe.id)
-            XCTAssertTrue((-2.0...2.0).contains(recipe.tone.highlight), recipe.id)
-            XCTAssertTrue((-2.0...2.0).contains(recipe.tone.shadow), recipe.id)
-            XCTAssertTrue((0.0...2.0).contains(recipe.saturation), recipe.id)
-            XCTAssertTrue((0.0...2.0).contains(recipe.contrast), recipe.id)
             XCTAssertTrue(FilmRecipe.DynamicRange.allCases.contains(recipe.dynamicRange), recipe.id)
-            XCTAssertTrue((-1.0...1.0).contains(recipe.whiteBalance.temperature), recipe.id)
-            XCTAssertTrue((-1.0...1.0).contains(recipe.whiteBalance.tint), recipe.id)
-            XCTAssertTrue((-1.0...1.0).contains(recipe.colorChrome), recipe.id)
-            XCTAssertTrue((-1.0...1.0).contains(recipe.blueResponse), recipe.id)
-            XCTAssertTrue((-1.0...1.0).contains(recipe.fxBlue), recipe.id)
-            XCTAssertTrue((-1.0...1.0).contains(recipe.sharpness), recipe.id)
-            XCTAssertTrue((0.0...1.0).contains(recipe.noiseReduction), recipe.id)
-            XCTAssertTrue((-1.0...1.0).contains(recipe.clarity), recipe.id)
-            XCTAssertTrue((0.0...1.0).contains(recipe.grain), recipe.id)
-            XCTAssertTrue((0.1...4.0).contains(recipe.grainSize), recipe.id)
-            XCTAssertTrue((0.0...1.0).contains(recipe.vignette), recipe.id)
-            XCTAssertTrue((0.0...1.0).contains(recipe.halation), recipe.id)
-            XCTAssertTrue((0.0...2.0).contains(recipe.palette.saturation), recipe.id)
 
-            let paletteValues = [
-                recipe.palette.redBias,
-                recipe.palette.greenBias,
-                recipe.palette.blueBias,
-                recipe.palette.redGreenMix,
-                recipe.palette.greenBlueMix,
-                recipe.palette.blueRedMix
-            ]
-            XCTAssertTrue(paletteValues.allSatisfy { (-1.0...1.0).contains($0) }, recipe.id)
+            for control in FilmRecipe.Control.allCases {
+                let value = control.value(in: recipe)
+                XCTAssertTrue(
+                    control.editorRange.contains(value),
+                    "\(recipe.id): \(control.rawValue)=\(value) outside editor range"
+                )
+            }
+
+            XCTAssertTrue(recipe.isValid, "\(recipe.id): \(recipe.validationIssues)")
         }
     }
 
@@ -137,6 +119,91 @@ final class RecipeInvariantsTests: XCTestCase {
         let decoded = try JSONDecoder().decode(FilmRecipe.self, from: data)
 
         XCTAssertEqual(decoded, original)
+        XCTAssertEqual(decoded.schemaVersion, FilmRecipe.currentSchemaVersion)
+        XCTAssertEqual(decoded.provenance, FilmRecipe.currentProvenance)
+    }
+
+    func testBuiltInRecipesExposeCompleteApproximationProvenance() {
+        for recipe in FilmRecipe.builtIns {
+            XCTAssertEqual(recipe.schemaVersion, FilmRecipe.currentSchemaVersion, recipe.id)
+            XCTAssertTrue(recipe.provenance.isComplete, recipe.id)
+            XCTAssertEqual(recipe.provenance.source, .publicOfficialDocumentation, recipe.id)
+            XCTAssertEqual(recipe.provenance.implementation, .originalParametricApproximation, recipe.id)
+            XCTAssertEqual(recipe.provenance.calibration, .notCalibratedToFujifilmHardware, recipe.id)
+            XCTAssertEqual(recipe.provenance.references, FilmRecipe.PublicReference.allCases, recipe.id)
+
+            for reference in recipe.provenance.references {
+                XCTAssertTrue(reference.url.hasPrefix("https://"), reference.rawValue)
+                XCTAssertFalse(reference.title.isEmpty, reference.rawValue)
+                XCTAssertFalse(reference.scope.isEmpty, reference.rawValue)
+            }
+
+            let disclaimer = recipe.provenance.disclaimer
+            XCTAssertTrue(disclaimer.contains("original approximations"), recipe.id)
+            XCTAssertTrue(disclaimer.contains("not pixel-identical"), recipe.id)
+            XCTAssertTrue(disclaimer.contains("not affiliated"), recipe.id)
+            XCTAssertTrue(disclaimer.contains("no proprietary LUTs"), recipe.id)
+        }
+    }
+
+    func testControlContractHasStableSemanticsAndUniqueIdentifiers() {
+        let controls = FilmRecipe.Control.allCases
+        XCTAssertFalse(controls.isEmpty)
+        XCTAssertEqual(Set(controls.map(\.rawValue)).count, controls.count)
+
+        for control in controls {
+            XCTAssertLessThan(control.editorRange.lowerBound, control.editorRange.upperBound, control.rawValue)
+            XCTAssertFalse(control.displayName.isEmpty, control.rawValue)
+            XCTAssertFalse(control.semanticDescription.isEmpty, control.rawValue)
+        }
+
+        XCTAssertEqual(FilmRecipe.Control.exposure.unit, .exposureEV)
+        XCTAssertEqual(FilmRecipe.Control.color.unit, .multiplier)
+        XCTAssertEqual(FilmRecipe.Control.grainSize.unit, .normalizedSize)
+        XCTAssertEqual(FilmRecipe.Control.exposure.editorRange, -2.0...2.0)
+        XCTAssertEqual(FilmRecipe.Control.grainSize.editorRange, 0.35...2.5)
+    }
+
+    func testLegacyRecipeWithoutProvenanceRemainsReadableButFailsAudit() throws {
+        let original = FilmRecipe.builtIns[0]
+        let encoded = try JSONEncoder().encode(original)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object.removeValue(forKey: "schemaVersion")
+        object.removeValue(forKey: "provenance")
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(FilmRecipe.self, from: legacyData)
+
+        XCTAssertEqual(decoded.id, original.id)
+        XCTAssertEqual(decoded.name, original.name)
+        XCTAssertEqual(decoded.subtitle, original.subtitle)
+        XCTAssertEqual(decoded.filmBase, original.filmBase)
+        XCTAssertEqual(decoded.exposure, original.exposure)
+        XCTAssertEqual(decoded.tone, original.tone)
+        XCTAssertEqual(decoded.saturation, original.saturation)
+        XCTAssertEqual(decoded.contrast, original.contrast)
+        XCTAssertEqual(decoded.dynamicRange, original.dynamicRange)
+        XCTAssertEqual(decoded.whiteBalance, original.whiteBalance)
+        XCTAssertEqual(decoded.palette, original.palette)
+        XCTAssertEqual(decoded.schemaVersion, 1)
+        XCTAssertEqual(decoded.provenance, FilmRecipe.legacyProvenance)
+        XCTAssertFalse(decoded.provenance.isComplete)
+        XCTAssertTrue(decoded.validationIssues.contains { $0.code == .provenanceUnavailable })
+        XCTAssertFalse(decoded.isValid)
+    }
+
+    func testValidationFindsNonFiniteAndMonochromeInvariantViolations() {
+        var nonFinite = FilmRecipe.builtIns[0]
+        nonFinite.exposure = .infinity
+        XCTAssertTrue(nonFinite.validationIssues.contains {
+            $0.code == .nonFiniteControl && $0.control == .exposure
+        })
+
+        var coloredMonochrome = FilmRecipe.builtIns.first { $0.filmBase == .acros }!
+        coloredMonochrome.saturation = 0.25
+        coloredMonochrome.palette.saturation = 0.25
+        XCTAssertTrue(coloredMonochrome.validationIssues.contains { $0.code == .monochromeColorMustBeZero })
+        XCTAssertTrue(coloredMonochrome.validationIssues.contains { $0.code == .monochromePaletteSaturationMustBeZero })
     }
 
     func testSelectedRecipePersistsAcrossViewModelInstances() async {

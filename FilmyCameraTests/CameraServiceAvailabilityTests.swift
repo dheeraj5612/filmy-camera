@@ -41,4 +41,58 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         camera.removeFrameHandler(newerHandler)
         XCTAssertNil(camera.onFrame)
     }
+
+    func testFlashDefaultsToSafeOffAndUnsupportedBeforeCameraConfiguration() {
+        let camera = CameraService()
+
+        XCTAssertEqual(camera.flashMode, .off)
+        XCTAssertEqual(camera.flashAvailability, .unsupported)
+        XCTAssertFalse(camera.lowLightBoostSupported)
+        XCTAssertFalse(camera.isLowLightBoostEnabled)
+    }
+
+    func testFlashModesPreserveAVFoundationRawValuesAndCycleOrder() {
+        XCTAssertEqual(CameraService.FlashMode.off.rawValue, 0)
+        XCTAssertEqual(CameraService.FlashMode.on.rawValue, 1)
+        XCTAssertEqual(CameraService.FlashMode.auto.rawValue, 2)
+        XCTAssertEqual(
+            CameraService.FlashMode.allCases,
+            [.off, .auto, .on]
+        )
+    }
+
+    func testFlashAvailabilitySeparatesUnsupportedAndTemporaryHardwareStates() {
+        XCTAssertEqual(
+            CameraService.resolveFlashAvailability(
+                hasFlash: false,
+                supportedModeRawValues: [0, 1, 2],
+                flashAvailable: true
+            ),
+            .unsupported
+        )
+        XCTAssertEqual(
+            CameraService.resolveFlashAvailability(
+                hasFlash: true,
+                supportedModeRawValues: [0],
+                flashAvailable: true
+            ),
+            .unsupported
+        )
+        XCTAssertEqual(
+            CameraService.resolveFlashAvailability(
+                hasFlash: true,
+                supportedModeRawValues: [0, 1, 2],
+                flashAvailable: false
+            ),
+            .temporarilyUnavailable
+        )
+        XCTAssertEqual(
+            CameraService.resolveFlashAvailability(
+                hasFlash: true,
+                supportedModeRawValues: [0, 1, 2],
+                flashAvailable: true
+            ),
+            .available
+        )
+    }
 }

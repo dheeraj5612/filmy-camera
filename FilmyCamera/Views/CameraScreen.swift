@@ -101,6 +101,14 @@ struct CameraScreen: View {
 
             if !shouldShowCameraEmptyState {
                 VStack(spacing: 8) {
+                    if camera.flashAvailability != .unsupported {
+                        FlashControl(
+                            mode: camera.flashMode,
+                            availability: camera.flashAvailability,
+                            action: camera.cycleFlashMode
+                        )
+                    }
+
                     ZoomControl(value: camera.zoomFactor) { direction in
                         let delta: CGFloat = direction == .increment ? 0.5 : -0.5
                         camera.setZoom(camera.zoomFactor + delta)
@@ -319,7 +327,7 @@ struct CameraScreen: View {
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("LOOKING THROUGH")
-                        .font(.system(.caption2, design: .rounded).weight(.bold))
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
                         .tracking(1.2)
                         .foregroundStyle(.white.opacity(0.55))
                     HStack(spacing: 7) {
@@ -391,6 +399,9 @@ struct CameraScreen: View {
             RoundedRectangle(cornerRadius: FilmyTheme.actionPlateRadius, style: .continuous)
                 .stroke(Color.white.opacity(0.16), lineWidth: 1)
         }
+        // Keep the bounded camera plate legible at large accessibility sizes;
+        // the controls still expose their full actions and values to VoiceOver.
+        .dynamicTypeSize(.xSmall ... .large)
     }
 
     private var offlineControls: some View {
@@ -401,15 +412,20 @@ struct CameraScreen: View {
                         .font(.system(.caption2, design: .rounded).weight(.bold))
                         .tracking(1.1)
                         .foregroundStyle(.white.opacity(0.55))
-                    Text(viewModel.selectedRecipe.name)
-                        .font(.system(.title3, design: .rounded).weight(.bold))
-                        .foregroundStyle(.white)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.72)
+                        .minimumScaleFactor(0.68)
                         .allowsTightening(true)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(viewModel.selectedRecipe.name)
+                        .font(.system(size: 20, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.68)
+                        .allowsTightening(true)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-
-                Spacer()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
 
                 CameraActionButton(
                     systemName: "slider.horizontal.3",
@@ -417,6 +433,7 @@ struct CameraScreen: View {
                     accessibilityLabel: "Tune \(viewModel.selectedRecipe.name)",
                     action: { recipeForDetail = viewModel.selectedRecipe }
                 )
+                .fixedSize(horizontal: true, vertical: false)
             }
 
             RecipePickerView(
@@ -426,24 +443,32 @@ struct CameraScreen: View {
             )
             .frame(height: 76)
 
-            HStack(spacing: 12) {
+            HStack(alignment: .center, spacing: 12) {
                 CameraActionButton(
                     systemName: "square.grid.2x2",
                     title: "Roll",
                     accessibilityLabel: "Open roll",
                     action: onOpenGallery
                 )
+                .fixedSize(horizontal: true, vertical: false)
 
-                Spacer(minLength: 8)
+                HStack(spacing: 8) {
+                    Image(systemName: "iphone")
+                        .accessibilityHidden(true)
 
-                Label("Capture on iPhone", systemImage: "iphone")
-                    .font(.system(.caption, design: .rounded).weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.56))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
-                    .allowsTightening(true)
-                    .frame(minHeight: FilmyTheme.minimumHitTarget)
-                    .accessibilityLabel("Capture is available on a physical iPhone")
+                    Text("Capture on iPhone")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.56))
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.68)
+                        .allowsTightening(true)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, minHeight: FilmyTheme.minimumHitTarget)
+                .layoutPriority(1)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Capture is available on a physical iPhone")
             }
         }
         .padding(.horizontal, 13)
@@ -454,5 +479,9 @@ struct CameraScreen: View {
             RoundedRectangle(cornerRadius: FilmyTheme.actionPlateRadius, style: .continuous)
                 .stroke(Color.white.opacity(0.16), lineWidth: 1)
         }
+        // The camera plate is a bounded optical control surface. Keep its labels
+        // readable at large accessibility sizes while exposing full actions and
+        // values through the accessibility tree above.
+        .dynamicTypeSize(.xSmall ... .large)
     }
 }

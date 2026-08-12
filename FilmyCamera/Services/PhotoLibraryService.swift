@@ -1,10 +1,75 @@
 import Combine
 @preconcurrency import Photos
+import PhotosUI
+import ImageIO
 import UIKit
 
 struct SavedFrameMetadata: Codable, Hashable, Sendable {
     let recipe: FilmRecipe
     let capturedAt: Date
+}
+
+struct LocalSavedFrame: Identifiable, Hashable, Sendable {
+    let assetIdentifier: String
+    let pixelWidth: Int
+    let pixelHeight: Int
+
+    var id: String { assetIdentifier }
+}
+
+enum PhotoLibraryGalleryAsset: Identifiable {
+    case photos(PHAsset)
+    case cached(LocalSavedFrame)
+
+    var id: String { assetIdentifier }
+
+    var assetIdentifier: String {
+        switch self {
+        case .photos(let asset):
+            return asset.localIdentifier
+        case .cached(let frame):
+            return frame.assetIdentifier
+        }
+    }
+
+    var pixelWidth: Int {
+        switch self {
+        case .photos(let asset):
+            return asset.pixelWidth
+        case .cached(let frame):
+            return frame.pixelWidth
+        }
+    }
+
+    var pixelHeight: Int {
+        switch self {
+        case .photos(let asset):
+            return asset.pixelHeight
+        case .cached(let frame):
+            return frame.pixelHeight
+        }
+    }
+
+    var isPhotosAsset: Bool {
+        if case .photos = self { return true }
+        return false
+    }
+}
+
+enum PhotoLibraryAuthorizationPolicy {
+    static func canRead(_ status: PHAuthorizationStatus) -> Bool {
+        status == .authorized || status == .limited
+    }
+
+    static func canAdd(_ status: PHAuthorizationStatus) -> Bool {
+        // Limited access is a read/write concept. The add-only access level
+        // reports .authorized when the app may create new Photos assets.
+        status == .authorized
+    }
+
+    static func canManageCollections(_ status: PHAuthorizationStatus) -> Bool {
+        status == .authorized
+    }
 }
 
 enum PhotoLibraryServiceError: LocalizedError, Sendable {
@@ -88,13 +153,23 @@ final class PhotoLibraryService: ObservableObject {
         }
     }
 
+    private struct SavedFrameResource: Codable, Hashable, Sendable {
+        let filename: String
+        let pixelWidth: Int
+        let pixelHeight: Int
+    }
+
     @Published private(set) var assets: [PHAsset] = []
+    @Published private(set) var localSavedFrames: [LocalSavedFrame] = []
     @Published private(set) var authorizationStatus: PHAuthorizationStatus
+    @Published private(set) var addOnlyAuthorizationStatus: PHAuthorizationStatus
     @Published private(set) var isLoading = false
 
     private let albumTitle = "Filmy Camera"
     private let savedAssetIdentifiersKey = "filmyCamera.savedAssetIdentifiers"
     private let savedFrameMetadataKey = "filmyCamera.savedFrameMetadata"
+    private let savedFrameResourcesKey = "filmyCamera.savedFrameResources"
+    private let localFramesDirectoryName = "FilmyCameraFrames"
     private let isUITesting: Bool
 
     private(set) var metadataByAssetIdentifier: [String: SavedFrameMetadata]
@@ -102,42 +177,70 @@ final class PhotoLibraryService: ObservableObject {
     init() {
         isUITesting = ProcessInfo.processInfo.arguments.contains("-ui-testing")
         metadataByAssetIdentifier = Self.loadMetadata(forKey: savedFrameMetadataKey)
-        authorizationStatus = isUITesting
-            ? .denied
-            : PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        if isUITesting {
+            authorizationStatus = .denied
+            addOnlyAuthorizationStatus = .denied
+        } else {
+            authorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+            addOnlyAuthorizationStatus = PHPhotoLibrary.authorizationStatus(for: .addOnly)
+            refreshCachedFrames(excluding: [])
+        }
+    }
+
+    var canSaveToPhotos: Bool {
+        PhotoLibraryAuthorizationPolicy.canAdd(addOnlyAuthorizationStatus)
+    }
+
+    var canDeletePhotos: Bool {
+        !isUITesting && PhotoLibraryAuthorizationPolicy.canRead(authorizationStatus)
+    }
+
+    var galleryAssets: [PhotoLibraryGalleryAsset] {
+        let photoIdentifiers = Set(assets.map(\.localIdentifier))
+        return assets.map(PhotoLibraryGalleryAsset.photos)
+            + localSavedFrames
+                .filter { !photoIdentifiers.contains($0.assetIdentifier) }
+                .map(PhotoLibraryGalleryAsset.cached)
     }
 
     func requestAccessIfNeeded() async -> Bool {
         if isUITesting {
             authorizationStatus = .denied
+            addOnlyAuthorizationStatus = .denied
             assets = []
+            localSavedFrames = []
             return false
         }
 
         let currentStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         if currentStatus == .notDetermined {
-            authorizationStatus = await requestAuthorization(for: .readWrite)
-        } else {
-            authorizationStatus = currentStatus
+            _ = await requestAuthorization(for: .readWrite)
+        }
+        refreshAuthorizationStatuses()
+
+        guard PhotoLibraryAuthorizationPolicy.canRead(authorizationStatus) else {
+            assets = []
+            refreshCachedFrames(excluding: [])
+            return false
         }
 
-        if authorizationStatus == .authorized || authorizationStatus == .limited {
-            refresh()
-            return true
-        }
-        return false
+        refresh()
+        return true
     }
 
     func refresh() {
         if isUITesting {
             authorizationStatus = .denied
+            addOnlyAuthorizationStatus = .denied
             assets = []
+            localSavedFrames = []
             return
         }
 
-        authorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-        guard authorizationStatus == .authorized || authorizationStatus == .limited else {
+        refreshAuthorizationStatuses()
+        guard PhotoLibraryAuthorizationPolicy.canRead(authorizationStatus) else {
             assets = []
+            refreshCachedFrames(excluding: [])
             return
         }
 
@@ -147,12 +250,37 @@ final class PhotoLibraryService: ObservableObject {
         if authorizationStatus == .authorized, let album = appAlbum() {
             let result = PHAsset.fetchAssets(in: album, options: options)
             let albumAssets = result.objects(at: IndexSet(integersIn: 0..<result.count))
-            let knownAssets = fetchSavedAssets(options: options)
+            let knownAssets = fetchSavedAssets(options: options, reconcileMissing: true)
             let albumIdentifiers = Set(albumAssets.map(\.localIdentifier))
             assets = Array((albumAssets + knownAssets.filter { !albumIdentifiers.contains($0.localIdentifier) }).prefix(60))
         } else {
-            assets = Array(fetchSavedAssets(options: options).prefix(60))
+            assets = Array(fetchSavedAssets(
+                options: options,
+                reconcileMissing: authorizationStatus == .authorized
+            ).prefix(60))
         }
+        refreshCachedFrames(excluding: Set(assets.map(\.localIdentifier)))
+    }
+
+    func presentLimitedLibraryPicker() {
+        guard !isUITesting, authorizationStatus == .limited,
+              let windowScene = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene })
+                .first(where: { $0.activationState == .foregroundActive }),
+              let presenter = windowScene.windows.first(where: \.isKeyWindow)?.rootViewController else {
+            return
+        }
+
+        PHPhotoLibrary.shared().presentLimitedLibraryPicker(from: presenter) { [weak self] _ in
+            Task { @MainActor in
+                self?.refresh()
+            }
+        }
+    }
+
+    private func refreshAuthorizationStatuses() {
+        authorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        addOnlyAuthorizationStatus = PHPhotoLibrary.authorizationStatus(for: .addOnly)
     }
 
     func save(
@@ -164,24 +292,28 @@ final class PhotoLibraryService: ObservableObject {
     ) {
         Task { @MainActor in
             let status = PHPhotoLibrary.authorizationStatus(for: .addOnly)
-            let canSave: Bool
-
+            let resolvedStatus: PHAuthorizationStatus
             if status == .notDetermined {
-                canSave = await requestAuthorization(for: .addOnly) == .authorized
+                resolvedStatus = await requestAuthorization(for: .addOnly)
             } else {
-                canSave = status == .authorized || status == .limited
+                resolvedStatus = status
             }
+            addOnlyAuthorizationStatus = resolvedStatus
 
-            guard canSave else {
+            guard PhotoLibraryAuthorizationPolicy.canAdd(resolvedStatus) else {
                 completion(false)
                 return
             }
 
             // Limited and add-only access cannot create or fetch user albums. The
             // newly created asset is still available to the app under limited access.
-            let canManageAppAlbum = PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized
+            let canManageAppAlbum = PhotoLibraryAuthorizationPolicy.canManageCollections(
+                PHPhotoLibrary.authorizationStatus(for: .readWrite)
+            )
             let assetIdentifierBox = IdentifierBox()
             let metadata = SavedFrameMetadata(recipe: recipe, capturedAt: capturedAt)
+            let cacheData = imageData.flatMap { $0.isEmpty ? nil : $0 }
+                ?? image.jpegData(compressionQuality: 0.95)
 
             PHPhotoLibrary.shared().performChanges {
                 let request: PHAssetChangeRequest
@@ -202,7 +334,12 @@ final class PhotoLibraryService: ObservableObject {
                         return
                     }
 
-                    self.rememberSavedAsset(assetIdentifier, metadata: metadata)
+                    self.rememberSavedAsset(
+                        assetIdentifier,
+                        metadata: metadata,
+                        imageData: cacheData,
+                        image: image
+                    )
                     guard canManageAppAlbum else {
                         self.refresh()
                         completion(true)
@@ -226,12 +363,16 @@ final class PhotoLibraryService: ObservableObject {
         metadataByAssetIdentifier[asset.localIdentifier]
     }
 
+    func metadata(for asset: PhotoLibraryGalleryAsset) -> SavedFrameMetadata? {
+        metadataByAssetIdentifier[asset.assetIdentifier]
+    }
+
     func delete(
         asset: PHAsset,
         completion: @escaping @MainActor (Result<Void, PhotoLibraryServiceError>) -> Void
     ) {
         let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-        guard status == .authorized || status == .limited else {
+        guard PhotoLibraryAuthorizationPolicy.canRead(status) else {
             completion(.failure(.accessDenied))
             return
         }
@@ -254,6 +395,17 @@ final class PhotoLibraryService: ObservableObject {
         }
     }
 
+    func delete(
+        asset: PhotoLibraryGalleryAsset,
+        completion: @escaping @MainActor (Result<Void, PhotoLibraryServiceError>) -> Void
+    ) {
+        guard case .photos(let photoAsset) = asset else {
+            completion(.failure(.accessDenied))
+            return
+        }
+        delete(asset: photoAsset, completion: completion)
+    }
+
     private func appAlbum() -> PHAssetCollection? {
         let options = PHFetchOptions()
         options.predicate = NSPredicate(format: "localizedTitle == %@", albumTitle)
@@ -269,29 +421,57 @@ final class PhotoLibraryService: ObservableObject {
         set { UserDefaults.standard.set(Array(newValue.prefix(120)), forKey: savedAssetIdentifiersKey) }
     }
 
-    private func rememberSavedAsset(_ identifier: String, metadata: SavedFrameMetadata) {
+    private var savedFrameResources: [String: SavedFrameResource] {
+        get {
+            guard let data = UserDefaults.standard.data(forKey: savedFrameResourcesKey),
+                  let resources = try? JSONDecoder().decode([String: SavedFrameResource].self, from: data) else {
+                return [:]
+            }
+            return resources
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue) else { return }
+            UserDefaults.standard.set(data, forKey: savedFrameResourcesKey)
+        }
+    }
+
+    private func rememberSavedAsset(
+        _ identifier: String,
+        metadata: SavedFrameMetadata,
+        imageData: Data?,
+        image: UIImage
+    ) {
         let identifiers = [identifier] + savedAssetIdentifiers.filter { $0 != identifier }
         savedAssetIdentifiers = Array(identifiers.prefix(120))
         metadataByAssetIdentifier[identifier] = metadata
         let retainedIdentifiers = Set(savedAssetIdentifiers)
         metadataByAssetIdentifier = metadataByAssetIdentifier.filter { retainedIdentifiers.contains($0.key) }
         persistMetadata()
+        pruneResources(keeping: savedAssetIdentifiers)
+        cacheFrame(
+            identifier: identifier,
+            imageData: imageData,
+            fallbackImage: image
+        )
     }
 
     private func forgetSavedAsset(_ identifier: String) {
         savedAssetIdentifiers = savedAssetIdentifiers.filter { $0 != identifier }
         metadataByAssetIdentifier.removeValue(forKey: identifier)
         persistMetadata()
+        removeCachedFrame(identifier: identifier)
     }
 
-    private func fetchSavedAssets(options: PHFetchOptions) -> [PHAsset] {
+    private func fetchSavedAssets(
+        options: PHFetchOptions,
+        reconcileMissing: Bool
+    ) -> [PHAsset] {
         let identifiers = savedAssetIdentifiers
         guard !identifiers.isEmpty else { return [] }
 
-        // Reconcile all persisted identifiers before applying the gallery's
-        // display limit. Otherwise a missing asset beyond the first 60 can
-        // remain in UserDefaults indefinitely and its recipe sidecar can no
-        // longer be trusted.
+        // Reconcile only with full read access. In limited mode, an asset the
+        // user did not select is intentionally invisible to PhotoKit; pruning
+        // it here would destroy its recipe metadata and local Roll fallback.
         let reconciliationOptions = PHFetchOptions()
         reconciliationOptions.predicate = options.predicate
         reconciliationOptions.sortDescriptors = options.sortDescriptors
@@ -303,9 +483,10 @@ final class PhotoLibraryService: ObservableObject {
         let fetched = result.objects(at: IndexSet(integersIn: 0..<result.count))
         let assetsByIdentifier = Dictionary(uniqueKeysWithValues: fetched.map { ($0.localIdentifier, $0) })
         let accessibleIdentifiers = identifiers.filter { assetsByIdentifier[$0] != nil }
-        if accessibleIdentifiers != identifiers {
+        if reconcileMissing && accessibleIdentifiers != identifiers {
             savedAssetIdentifiers = accessibleIdentifiers
             pruneMetadata(keeping: accessibleIdentifiers)
+            pruneResources(keeping: accessibleIdentifiers)
         }
         return accessibleIdentifiers.compactMap { assetsByIdentifier[$0] }
     }
@@ -321,6 +502,86 @@ final class PhotoLibraryService: ObservableObject {
         guard pruned.count != metadataByAssetIdentifier.count else { return }
         metadataByAssetIdentifier = pruned
         persistMetadata()
+    }
+
+    private func pruneResources(keeping identifiers: [String]) {
+        let allowed = Set(identifiers)
+        var resources = savedFrameResources
+        let removed = resources.keys.filter { !allowed.contains($0) }
+        guard !removed.isEmpty else { return }
+
+        for identifier in removed {
+            if let resource = resources.removeValue(forKey: identifier) {
+                try? FileManager.default.removeItem(at: localFrameURL(for: resource.filename))
+            }
+        }
+        savedFrameResources = resources
+    }
+
+    private func refreshCachedFrames(excluding excludedIdentifiers: Set<String>) {
+        let resources = savedFrameResources
+        localSavedFrames = savedAssetIdentifiers.compactMap { identifier in
+            guard !excludedIdentifiers.contains(identifier),
+                  let resource = resources[identifier],
+                  FileManager.default.fileExists(atPath: localFrameURL(for: resource.filename).path) else {
+                return nil
+            }
+            return LocalSavedFrame(
+                assetIdentifier: identifier,
+                pixelWidth: resource.pixelWidth,
+                pixelHeight: resource.pixelHeight
+            )
+        }
+    }
+
+    private func cacheFrame(identifier: String, imageData: Data?, fallbackImage: UIImage) {
+        guard let data = imageData, !data.isEmpty,
+              let directoryURL = localFramesDirectoryURL else {
+            return
+        }
+
+        let filename = "\(UUID().uuidString).jpg"
+        let resourceURL = directoryURL.appendingPathComponent(filename, isDirectory: false)
+        do {
+            try FileManager.default.createDirectory(
+                at: directoryURL,
+                withIntermediateDirectories: true
+            )
+            try data.write(to: resourceURL, options: .atomic)
+
+            var resources = savedFrameResources
+            if let previousResource = resources[identifier], previousResource.filename != filename {
+                try? FileManager.default.removeItem(at: localFrameURL(for: previousResource.filename))
+            }
+            let pixelWidth = fallbackImage.cgImage?.width ?? max(Int(fallbackImage.size.width * fallbackImage.scale), 1)
+            let pixelHeight = fallbackImage.cgImage?.height ?? max(Int(fallbackImage.size.height * fallbackImage.scale), 1)
+            resources[identifier] = SavedFrameResource(
+                filename: filename,
+                pixelWidth: pixelWidth,
+                pixelHeight: pixelHeight
+            )
+            savedFrameResources = resources
+        } catch {
+            // The Photos write remains the source-of-truth save operation. A
+            // cache failure must not make the user retry and create a duplicate.
+        }
+    }
+
+    private func removeCachedFrame(identifier: String) {
+        var resources = savedFrameResources
+        guard let resource = resources.removeValue(forKey: identifier) else { return }
+        try? FileManager.default.removeItem(at: localFrameURL(for: resource.filename))
+        savedFrameResources = resources
+    }
+
+    private var localFramesDirectoryURL: URL? {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent(localFramesDirectoryName, isDirectory: true)
+    }
+
+    private func localFrameURL(for filename: String) -> URL {
+        localFramesDirectoryURL?.appendingPathComponent(filename, isDirectory: false)
+            ?? URL(fileURLWithPath: filename)
     }
 
     private static func loadMetadata(forKey key: String) -> [String: SavedFrameMetadata] {
@@ -384,6 +645,15 @@ final class PhotoLibraryService: ObservableObject {
         }
     }
 
+    func image(for asset: PhotoLibraryGalleryAsset, targetSize: CGSize) async -> UIImage? {
+        switch asset {
+        case .photos(let photoAsset):
+            return await image(for: photoAsset, targetSize: targetSize)
+        case .cached(let frame):
+            return cachedImage(for: frame, targetSize: targetSize)
+        }
+    }
+
     func image(for asset: PHAsset, targetSize: CGSize) async -> UIImage? {
         let imageManager = PHImageManager.default()
         let state = ImageRequestState(imageManager: imageManager)
@@ -419,6 +689,29 @@ final class PhotoLibraryService: ObservableObject {
         }, onCancel: {
             state.cancel()
         })
+    }
+
+    private func cachedImage(for frame: LocalSavedFrame, targetSize: CGSize) -> UIImage? {
+        guard let resource = savedFrameResources[frame.assetIdentifier],
+              let data = try? Data(contentsOf: localFrameURL(for: resource.filename)),
+              let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+            return nil
+        }
+
+        let maxPixelSize = max(Int(targetSize.width), Int(targetSize.height), 1)
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(
+            source,
+            0,
+            options as CFDictionary
+        ) else {
+            return nil
+        }
+        return UIImage(cgImage: image)
     }
 
     private func requestAuthorization(for accessLevel: PHAccessLevel) async -> PHAuthorizationStatus {

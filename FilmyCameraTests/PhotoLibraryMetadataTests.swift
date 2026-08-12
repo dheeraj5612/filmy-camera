@@ -19,4 +19,26 @@ final class PhotoLibraryMetadataTests: XCTestCase {
         XCTAssertTrue(PhotoLibraryServiceError.accessDenied.localizedDescription.contains("Settings"))
         XCTAssertTrue(PhotoLibraryServiceError.changeFailed.localizedDescription.contains("Try again"))
     }
+
+    func testReadWriteAuthorizationAllowsFullAndLimitedAccess() {
+        XCTAssertTrue(PhotoLibraryAuthorizationPolicy.canRead(.authorized))
+        XCTAssertTrue(PhotoLibraryAuthorizationPolicy.canRead(.limited))
+        XCTAssertFalse(PhotoLibraryAuthorizationPolicy.canRead(.notDetermined))
+        XCTAssertFalse(PhotoLibraryAuthorizationPolicy.canRead(.denied))
+        XCTAssertFalse(PhotoLibraryAuthorizationPolicy.canRead(.restricted))
+    }
+
+    func testAddOnlyAuthorizationIsDistinctFromLimitedReadAccess() {
+        XCTAssertTrue(PhotoLibraryAuthorizationPolicy.canAdd(.authorized))
+        XCTAssertFalse(PhotoLibraryAuthorizationPolicy.canAdd(.limited))
+        XCTAssertFalse(PhotoLibraryAuthorizationPolicy.canAdd(.notDetermined))
+        XCTAssertFalse(PhotoLibraryAuthorizationPolicy.canAdd(.denied))
+        XCTAssertFalse(PhotoLibraryAuthorizationPolicy.canAdd(.restricted))
+    }
+
+    func testLimitedReadAccessCannotManageAnAppAlbum() {
+        XCTAssertTrue(PhotoLibraryAuthorizationPolicy.canManageCollections(.authorized))
+        XCTAssertFalse(PhotoLibraryAuthorizationPolicy.canManageCollections(.limited))
+        XCTAssertFalse(PhotoLibraryAuthorizationPolicy.canManageCollections(.denied))
+    }
 }
