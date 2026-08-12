@@ -40,7 +40,7 @@ final class FilmyCameraUITests: XCTestCase {
         gallery.tap()
         dismissPhotosPermissionIfNeeded()
 
-        XCTAssertTrue(app.staticTexts["Gallery"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Photo access is off"].waitForExistence(timeout: 5))
         attachScreenshot(named: "gallery-empty-state")
 
         let settings = app.buttons["Settings"]
