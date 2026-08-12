@@ -8,6 +8,7 @@ struct CaptureReviewView: View {
     let saveErrorMessage: String?
     let onSave: () -> Void
     let onRetake: () -> Void
+    let onOpenSettings: () -> Void
 
     @Environment(\.dismiss) private var dismiss
 
@@ -70,11 +71,18 @@ struct CaptureReviewView: View {
                 .accessibilityLabel("Recipe \(recipe.name)")
 
                 if let saveErrorMessage {
-                    Label(saveErrorMessage, systemImage: "exclamationmark.triangle.fill")
-                        .font(.system(.footnote, design: .rounded).weight(.medium))
-                        .foregroundStyle(FilmyTheme.accent)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isStaticText)
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label(saveErrorMessage, systemImage: "exclamationmark.triangle.fill")
+                            .font(.system(.footnote, design: .rounded).weight(.medium))
+                            .foregroundStyle(FilmyTheme.accent)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityAddTraits(.isStaticText)
+
+                        Button("Open Photos Settings", action: onOpenSettings)
+                            .font(.system(.footnote, design: .rounded).weight(.bold))
+                            .foregroundStyle(FilmyTheme.accent)
+                            .accessibilityHint("Opens Filmy Camera Photos permissions")
+                    }
                 }
 
                 HStack(spacing: 10) {

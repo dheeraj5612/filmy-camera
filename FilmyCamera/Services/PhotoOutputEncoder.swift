@@ -32,13 +32,20 @@ enum PhotoOutputEncoder {
         tiff[kCGImagePropertyTIFFSoftware as String] = "Filmy Camera"
         properties[kCGImagePropertyTIFFDictionary as String] = tiff
 
+        // The filtered frame may be aspect-fill cropped before encoding. Keep
+        // the exported metadata truthful instead of carrying source-camera
+        // dimensions into the finished JPEG.
         let dateFormatter = DateFormatter()
         dateFormatter.locale = Locale(identifier: "en_US_POSIX")
         dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
         dateFormatter.dateFormat = "yyyy:MM:dd HH:mm:ss"
         var exif = properties[kCGImagePropertyExifDictionary as String] as? [String: Any] ?? [:]
         exif[kCGImagePropertyExifDateTimeOriginal as String] = dateFormatter.string(from: capturedAt)
+        exif[kCGImagePropertyExifPixelXDimension as String] = image.width
+        exif[kCGImagePropertyExifPixelYDimension as String] = image.height
         properties[kCGImagePropertyExifDictionary as String] = exif
+        properties[kCGImagePropertyPixelWidth as String] = image.width
+        properties[kCGImagePropertyPixelHeight as String] = image.height
         properties[kCGImagePropertyOrientation as String] = 1
 
         let outputData = NSMutableData()

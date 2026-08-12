@@ -1,5 +1,7 @@
 import Combine
 import CoreImage
+import CoreMedia
+import ImageIO
 import SwiftUI
 import UIKit
 
@@ -172,13 +174,18 @@ final class CameraViewModel: ObservableObject {
                 }
 
                 DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                    let renderedPhoto = Self.render(
-                        image: capturedPhoto.image,
-                        sourceData: capturedPhoto.fileData,
-                        recipe: recipe,
-                        viewportSize: viewportSize,
-                        capturedAt: capturedPhoto.capturedAt
-                    )
+                    let renderedPhoto = autoreleasepool {
+                        Self.render(
+                            sourceData: capturedPhoto.fileData,
+                            recipe: recipe,
+                            viewportSize: viewportSize,
+                            capturedAt: capturedPhoto.capturedAt,
+                            grainSeed: Self.grainSeed(
+                                for: capturedPhoto.capturedAt,
+                                dimensions: capturedPhoto.dimensions
+                            )
+                        )
+                    }
 
                     DispatchQueue.main.async {
                         guard let self else { return }
@@ -244,13 +251,19 @@ final class CameraViewModel: ObservableObject {
     }
 
     private nonisolated static func render(
-        image: UIImage,
         sourceData: Data,
         recipe: FilmRecipe,
         viewportSize: CGSize,
-        capturedAt: Date
+        capturedAt: Date,
+        grainSeed: UInt32
     ) -> RenderedPhoto? {
-        guard let input = CIImage(image: image) else { return nil }
+        // Resolve the source image's EXIF orientation before applying the
+        // preview crop. The finished JPEG is written with orientation=1, so
+        // its pixels and dimensions must already be in display orientation.
+        guard let input = CIImage(
+            data: sourceData,
+            options: [.applyOrientationProperty: true]
+        ) else { return nil }
         let framedInput: CIImage
         if viewportSize.width > 0, viewportSize.height > 0 {
             let crop = CameraFrameLayout.aspectFillCrop(
@@ -262,7 +275,12 @@ final class CameraViewModel: ObservableObject {
             framedInput = input
         }
 
-        let filtered = FilmRenderer.render(framedInput, recipe: recipe, quality: .photo)
+        let filtered = FilmRenderer.render(
+            framedInput,
+            recipe: recipe,
+            quality: .photo,
+            grainSeed: grainSeed
+        )
         guard let output = FilmRenderer.sharedContext.createCGImage(filtered, from: filtered.extent) else { return nil }
         guard let data = PhotoOutputEncoder.jpegData(
             for: output,
@@ -272,11 +290,42 @@ final class CameraViewModel: ObservableObject {
             return nil
         }
 
+        let reviewImage = downsampledReviewImage(from: data)
+            ?? UIImage(cgImage: output)
         return RenderedPhoto(
-            image: UIImage(cgImage: output),
+            image: reviewImage,
             data: data,
             capturedAt: capturedAt
         )
+    }
+
+    private nonisolated static func downsampledReviewImage(from data: Data) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+            return nil
+        }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: 1800
+        ]
+        guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(
+            source,
+            0,
+            options as CFDictionary
+        ) else {
+            return nil
+        }
+        return UIImage(cgImage: thumbnail)
+    }
+
+    private nonisolated static func grainSeed(
+        for date: Date,
+        dimensions: CMVideoDimensions
+    ) -> UInt32 {
+        let timestamp = UInt32(truncatingIfNeeded: Int64(date.timeIntervalSince1970.rounded()))
+        let width = UInt32(truncatingIfNeeded: dimensions.width)
+        let height = UInt32(truncatingIfNeeded: dimensions.height)
+        return timestamp &* 1_664_525 &+ width &* 1_013 &+ height
     }
 
 }

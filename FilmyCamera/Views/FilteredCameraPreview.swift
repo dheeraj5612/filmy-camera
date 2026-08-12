@@ -51,6 +51,7 @@ public struct FilteredCameraPreview: UIViewRepresentable {
         cameraService.onFrame = { [weak coordinator] image in
             coordinator?.receive(image)
         }
+        view.accessibilityLabel = "Live camera preview"
         return view
     }
 
@@ -234,10 +235,15 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
         }
 
         let targetRect = CGRect(origin: .zero, size: drawableSize)
-        let filtered = FilmRenderer.render(image, recipe: recipe, quality: quality)
-        let fitted = CameraFrameLayout.aspectFill(filtered, in: targetRect)
+        // Frame before rendering so vignette, halation, and grain use the
+        // same visible composition as the still path. Rendering the resized
+        // frame also keeps preview work proportional to the drawable rather
+        // than to the camera sensor's full video dimensions.
+        let framed = CameraFrameLayout.aspectFill(image, in: targetRect)
+        let filtered = FilmRenderer.render(framed, recipe: recipe, quality: quality)
+            .cropped(to: targetRect)
         ciContext.render(
-            fitted,
+            filtered,
             to: drawable.texture,
             commandBuffer: commandBuffer,
             bounds: targetRect,

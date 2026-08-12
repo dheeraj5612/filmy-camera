@@ -169,6 +169,51 @@ struct CameraStatusPill: View {
     }
 }
 
+struct ZoomControl: View {
+    let value: CGFloat
+    let onAdjust: (AccessibilityAdjustmentDirection) -> Void
+
+    var body: some View {
+        Text("\(value, specifier: "%.1f")×")
+            .font(.system(size: 12, weight: .bold, design: .rounded))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(Color.black.opacity(0.46), in: Capsule())
+            .overlay { Capsule().stroke(Color.white.opacity(0.16), lineWidth: 1) }
+            .accessibilityElement()
+            .accessibilityLabel("Zoom")
+            .accessibilityValue("\(value, specifier: "%.1f") times")
+            .accessibilityHint("Swipe up or down to adjust zoom. Pinch the preview to zoom with touch.")
+            .accessibilityAdjustableAction { direction in
+                onAdjust(direction)
+            }
+    }
+}
+
+struct FocusLockControl: View {
+    let isLocked: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(
+                isLocked ? "Locked" : "Lock",
+                systemImage: isLocked ? "lock.fill" : "lock.open"
+            )
+            .font(.system(size: 11, weight: .bold, design: .rounded))
+            .foregroundStyle(isLocked ? FilmyTheme.background : .white)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(isLocked ? FilmyTheme.accent : Color.black.opacity(0.46), in: Capsule())
+            .overlay { Capsule().stroke(Color.white.opacity(isLocked ? 0 : 0.16), lineWidth: 1) }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isLocked ? "Unlock focus and exposure" : "Lock focus and exposure")
+        .accessibilityHint("Keeps focus and exposure at the selected point")
+    }
+}
+
 struct RecipeSwatch: View {
     let recipe: FilmRecipe
     var isSelected = false

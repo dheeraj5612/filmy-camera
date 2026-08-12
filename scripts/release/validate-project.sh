@@ -53,6 +53,7 @@ require_spec_value 'PRODUCT_BUNDLE_IDENTIFIER: com.dheeraj.filmycamera' "product
 require_spec_value 'CURRENT_PROJECT_VERSION: "1"' "initial build number"
 require_spec_value 'MARKETING_VERSION: "1.0.0"' "marketing version"
 require_spec_value 'DEVELOPMENT_TEAM: AQW5C8DEEG' "development team"
+require_spec_value 'CFBundleDisplayName: Filmy Camera' "display name"
 require_spec_value 'ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon' "app icon configuration"
 require_spec_value 'NSCameraUsageDescription:' "camera permission copy"
 require_spec_value 'NSPhotoLibraryAddUsageDescription:' "photo-add permission copy"
