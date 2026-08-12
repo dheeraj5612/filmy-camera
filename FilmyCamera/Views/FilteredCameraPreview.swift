@@ -98,17 +98,25 @@ public struct FilteredCameraPreview: UIViewRepresentable {
         }
 
         fileprivate func receive(_ image: CIImage) {
+            // CameraService documents onFrame as main-queue delivery. Avoid
+            // adding another async hop to every captured frame.
             let imageBox = CIImageBox(image)
-            DispatchQueue.main.async { [weak self] in
-                self?.previewView?.display(image: imageBox.image)
+            if Thread.isMainThread {
+                MainActor.assumeIsolated { [weak self] in
+                    self?.previewView?.display(image: imageBox.image)
+                }
+            } else {
+                DispatchQueue.main.async { [weak self] in
+                    self?.previewView?.display(image: imageBox.image)
+                }
             }
         }
     }
 }
 
 /// CIImage is immutable for this use, but its SDK declaration is not Sendable
-/// on older Swift 6 toolchains. Boxing keeps the queue handoff explicit and
-/// limits the unchecked boundary to this renderer-owned value.
+/// on older Swift 6 toolchains. Boxing is limited to the exceptional off-main
+/// fallback so the normal camera path stays synchronous.
 private final class CIImageBox: @unchecked Sendable {
     let image: CIImage
 
@@ -128,42 +136,52 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
     private var quality: FilmRenderer.Quality = .preview
 
     public override init(frame: CGRect, device: MTLDevice?) {
-        let selectedDevice = device ?? MTLCreateSystemDefaultDevice()
-        if let selectedDevice {
-            ciContext = CIContext(
-                mtlDevice: selectedDevice,
-                options: [.cacheIntermediates: false]
-            )
-            commandQueue = selectedDevice.makeCommandQueue()
-        } else {
-            ciContext = CIContext(options: [.useSoftwareRenderer: true])
-            commandQueue = nil
-        }
+        let selectedDevice = device ?? FilmRenderer.metalDevice ?? MTLCreateSystemDefaultDevice()
+        let resources = Self.makeRenderResources(for: selectedDevice)
+        ciContext = resources.context
+        commandQueue = resources.commandQueue
 
         super.init(frame: frame, device: selectedDevice)
         configureView()
     }
 
     public required init(coder: NSCoder) {
-        let selectedDevice = MTLCreateSystemDefaultDevice()
-        if let selectedDevice {
-            ciContext = CIContext(
-                mtlDevice: selectedDevice,
-                options: [.cacheIntermediates: false]
-            )
-            commandQueue = selectedDevice.makeCommandQueue()
-        } else {
-            ciContext = CIContext(options: [.useSoftwareRenderer: true])
-            commandQueue = nil
-        }
+        let selectedDevice = FilmRenderer.metalDevice ?? MTLCreateSystemDefaultDevice()
+        let resources = Self.makeRenderResources(for: selectedDevice)
+        ciContext = resources.context
+        commandQueue = resources.commandQueue
 
         super.init(coder: coder)
         configureView()
     }
 
+    private static func makeRenderResources(
+        for device: MTLDevice?
+    ) -> (context: CIContext, commandQueue: MTLCommandQueue?) {
+        guard let device else {
+            return (
+                CIContext(options: [.useSoftwareRenderer: true]),
+                nil
+            )
+        }
+
+        let context: CIContext
+        if let sharedDevice = FilmRenderer.metalDevice,
+           device === sharedDevice {
+            context = FilmRenderer.sharedContext
+        } else {
+            context = CIContext(
+                mtlDevice: device,
+                options: [.cacheIntermediates: false]
+            )
+        }
+
+        return (context, device.makeCommandQueue())
+    }
+
     private func configureView() {
         delegate = self
-        device = device ?? MTLCreateSystemDefaultDevice()
+        device = device ?? FilmRenderer.metalDevice ?? MTLCreateSystemDefaultDevice()
         framebufferOnly = false
         enableSetNeedsDisplay = true
         isPaused = true
@@ -176,9 +194,12 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
     }
 
     func update(recipe: FilmRecipe, quality: FilmRenderer.Quality) {
+        guard self.recipe != recipe || self.quality != quality else { return }
         self.recipe = recipe
         self.quality = quality
-        setNeedsDisplay()
+        if latestImage != nil {
+            setNeedsDisplay()
+        }
     }
 
     func display(image: CIImage) {
@@ -187,17 +208,21 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
     }
 
     func clearImage() {
+        guard latestImage != nil else { return }
         latestImage = nil
         setNeedsDisplay()
     }
 
     public func draw(in view: MTKView) {
         guard let drawable = currentDrawable,
-              let commandBuffer = commandQueue?.makeCommandBuffer(),
               let image = latestImage,
               let sRGBColorSpace,
               drawableSize.width > 0,
               drawableSize.height > 0 else {
+            return
+        }
+
+        guard let commandBuffer = commandQueue?.makeCommandBuffer() else {
             return
         }
 
@@ -219,8 +244,11 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
         _ view: MTKView,
         drawableSizeWillChange size: CGSize
     ) {
-        // The current drawable is sized by MTKView; the next frame naturally
-        // recomputes the aspect-fill transform for the new bounds.
+        // Keep the last frame visible and recompute its aspect-fill transform
+        // immediately after rotation or another drawable-size change.
+        if latestImage != nil {
+            setNeedsDisplay()
+        }
     }
 
     private func aspectFill(_ image: CIImage, in target: CGRect) -> CIImage {

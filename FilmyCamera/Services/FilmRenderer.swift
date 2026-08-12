@@ -34,6 +34,15 @@ public final class FilmRenderer {
                 return 1
             }
         }
+
+        fileprivate var halationBlurScale: Double {
+            switch self {
+            case .preview:
+                return 0.65
+            case .photo, .export:
+                return 1
+            }
+        }
     }
 
     public nonisolated(unsafe) static let metalDevice: MTLDevice? = MTLCreateSystemDefaultDevice()
@@ -52,11 +61,54 @@ public final class FilmRenderer {
         return CIContext(options: [.useSoftwareRenderer: true])
     }()
 
+    private struct CubeCacheKey: Hashable, Sendable {
+        let recipe: FilmRecipe
+        let dimension: Int
+    }
+
     private final class CubeCache: @unchecked Sendable {
-        let storage = NSCache<NSString, NSData>()
+        private let lock = NSLock()
+        private var storage: [CubeCacheKey: NSData] = [:]
+        private let maxEntries = 32
+
+        func data(for key: CubeCacheKey, make: () -> NSData) -> NSData {
+            lock.lock()
+            defer { lock.unlock() }
+
+            if let cached = storage[key] {
+                return cached
+            }
+
+            // Slider changes can produce many distinct recipes. Keep the
+            // cache bounded without making a miss affect rendered output.
+            if storage.count >= maxEntries {
+                storage.removeAll(keepingCapacity: true)
+            }
+
+            let generated = make()
+            storage[key] = generated
+            return generated
+        }
+    }
+
+    private final class ImmutableResources: @unchecked Sendable {
+        let randomGeneratorImage: CIImage?
+        let clearImage: CIImage
+        let zeroComponents: CIVector
+        let oneComponents: CIVector
+        let neutralWhiteBalance: CIVector
+
+        init() {
+            randomGeneratorImage = CIFilter(name: "CIRandomGenerator")?.outputImage
+            clearImage = CIImage(color: .clear)
+            zeroComponents = CIVector(x: 0, y: 0, z: 0, w: 0)
+            oneComponents = CIVector(x: 1, y: 1, z: 1, w: 1)
+            neutralWhiteBalance = CIVector(x: 6500, y: 0)
+        }
     }
 
     private static let cubeCache = CubeCache()
+    private static let immutableResources = ImmutableResources()
     private static let sRGBColorSpace = CGColorSpace(name: CGColorSpace.sRGB)
 
     private init() {}
@@ -83,7 +135,7 @@ public final class FilmRenderer {
         output = applyClarity(to: output, recipe: recipe)
         output = applyGrain(to: output, recipe: recipe, quality: quality)
         output = applyVignette(to: output, recipe: recipe)
-        output = applyHalation(to: output, recipe: recipe)
+        output = applyHalation(to: output, recipe: recipe, quality: quality)
         output = clampOutput(toNormalizedRange: output)
 
         // Some finishing filters can expand their extent. Camera and export
@@ -96,11 +148,11 @@ public final class FilmRenderer {
 
         filter.setValue(image, forKey: kCIInputImageKey)
         filter.setValue(
-            CIVector(x: 0, y: 0, z: 0, w: 0),
+            immutableResources.zeroComponents,
             forKey: "inputMinComponents"
         )
         filter.setValue(
-            CIVector(x: 1, y: 1, z: 1, w: 1),
+            immutableResources.oneComponents,
             forKey: "inputMaxComponents"
         )
         return filter.outputImage?.cropped(to: image.extent) ?? image
@@ -171,13 +223,12 @@ public final class FilmRenderer {
 
         // CITemperatureAndTint works in Kelvin/tint units. The model keeps
         // recipe controls normalized so they are easy to expose as sliders.
-        let neutral = CIVector(x: 6500, y: 0)
         let target = CIVector(
             x: 6500 - clamp(recipe.temperatureShift, lower: -1, upper: 1) * 1800,
             y: clamp(recipe.tintShift, lower: -1, upper: 1) * 120
         )
         filter.setValue(image, forKey: kCIInputImageKey)
-        filter.setValue(neutral, forKey: "inputNeutral")
+        filter.setValue(immutableResources.neutralWhiteBalance, forKey: "inputNeutral")
         filter.setValue(target, forKey: "inputTargetNeutral")
         return filter.outputImage ?? image
     }
@@ -202,14 +253,9 @@ public final class FilmRenderer {
         guard let cube = CIFilter(name: "CIColorCubeWithColorSpace") else { return image }
 
         let dimension = quality.cubeDimension
-        let cubeKey = stableCubeCacheKey(recipe: recipe, dimension: dimension) as NSString
-        let cubeData: NSData
-        if let cached = cubeCache.storage.object(forKey: cubeKey) {
-            cubeData = cached
-        } else {
-            let generated = makeCubeData(dimension: dimension, recipe: recipe)
-            cubeData = generated as NSData
-            cubeCache.storage.setObject(cubeData, forKey: cubeKey)
+        let cubeKey = CubeCacheKey(recipe: recipe, dimension: dimension)
+        let cubeData = cubeCache.data(for: cubeKey) {
+            makeCubeData(dimension: dimension, recipe: recipe) as NSData
         }
 
         cube.setValue(image, forKey: kCIInputImageKey)
@@ -280,7 +326,7 @@ public final class FilmRenderer {
     ) -> CIImage {
         let amount = clamp(recipe.grain * quality.grainScale, lower: 0, upper: 1)
         guard amount > 0.0001,
-              let random = CIFilter(name: "CIRandomGenerator")?.outputImage,
+              let random = immutableResources.randomGeneratorImage,
               let softLight = CIFilter(name: "CISoftLightBlendMode") else {
             return image
         }
@@ -330,7 +376,8 @@ public final class FilmRenderer {
 
     private static func applyHalation(
         to image: CIImage,
-        recipe: FilmRecipe
+        recipe: FilmRecipe,
+        quality: Quality
     ) -> CIImage {
         let amount = clamp(recipe.halation, lower: 0, upper: 1)
         guard amount > 0.0001 else { return image }
@@ -344,7 +391,7 @@ public final class FilmRenderer {
             ])
             .applyingFilter("CIMaskToAlpha")
             .applyingFilter("CIGaussianBlur", parameters: [
-                kCIInputRadiusKey: 1.5 + amount * 4.5
+                kCIInputRadiusKey: 1.5 + amount * 4.5 * quality.halationBlurScale
             ])
             .cropped(to: extent)
 
@@ -354,7 +401,7 @@ public final class FilmRenderer {
         .cropped(to: extent)
 
         let maskedLayer = redLayer.applyingFilter("CIBlendWithMask", parameters: [
-            kCIInputBackgroundImageKey: CIImage(color: .clear).cropped(to: extent),
+            kCIInputBackgroundImageKey: immutableResources.clearImage.cropped(to: extent),
             "inputMaskImage": highlightMask
         ])
 
@@ -527,47 +574,6 @@ public final class FilmRenderer {
         }
 
         return (mappedRed, mappedGreen, mappedBlue)
-    }
-
-    private static func stableCubeCacheKey(
-        recipe: FilmRecipe,
-        dimension: Int
-    ) -> String {
-        let values = [
-            recipe.id,
-            recipe.filmBase.rawValue,
-            String(dimension),
-            canonical(recipe.exposure),
-            canonical(recipe.tone.highlight),
-            canonical(recipe.tone.shadow),
-            canonical(recipe.saturation),
-            canonical(recipe.contrast),
-            String(recipe.dynamicRange.rawValue),
-            canonical(recipe.whiteBalance.temperature),
-            canonical(recipe.whiteBalance.tint),
-            canonical(recipe.colorChrome),
-            canonical(recipe.blueResponse),
-            canonical(recipe.fxBlue),
-            canonical(recipe.sharpness),
-            canonical(recipe.noiseReduction),
-            canonical(recipe.clarity),
-            canonical(recipe.grain),
-            canonical(recipe.grainSize),
-            canonical(recipe.vignette),
-            canonical(recipe.halation),
-            canonical(recipe.palette.redBias),
-            canonical(recipe.palette.greenBias),
-            canonical(recipe.palette.blueBias),
-            canonical(recipe.palette.redGreenMix),
-            canonical(recipe.palette.greenBlueMix),
-            canonical(recipe.palette.blueRedMix),
-            canonical(recipe.palette.saturation)
-        ]
-        return values.joined(separator: "|")
-    }
-
-    private static func canonical(_ value: Double) -> String {
-        String(format: "%.8f", locale: Locale(identifier: "en_US_POSIX"), value)
     }
 
     private static func mix(_ lhs: Float, _ rhs: Float, _ amount: Float) -> Float {

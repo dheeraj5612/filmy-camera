@@ -14,6 +14,42 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     public typealias FrameHandler = (CIImage) -> Void
     public typealias PhotoCompletion = (UIImage?) -> Void
 
+    /// Keeps only the newest frame while the main thread is busy rendering.
+    /// Camera preview is inherently latest-value data; queuing every frame
+    /// makes the UI chase stale images and increases memory pressure.
+    private final class FrameDeliveryGate: @unchecked Sendable {
+        weak var owner: CameraService?
+
+        private let lock = NSLock()
+        private var pendingImage: CIImage?
+        private var deliveryScheduled = false
+
+        func submit(_ image: CIImage) {
+            lock.lock()
+            pendingImage = image
+            guard !deliveryScheduled else {
+                lock.unlock()
+                return
+            }
+            deliveryScheduled = true
+            lock.unlock()
+
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+
+                self.lock.lock()
+                let nextImage = self.pendingImage
+                self.pendingImage = nil
+                self.deliveryScheduled = false
+                self.lock.unlock()
+
+                if let nextImage {
+                    self.owner?.onFrame?(nextImage)
+                }
+            }
+        }
+    }
+
     public let session: AVCaptureSession
 
     @Published public private(set) var isRunning = false
@@ -34,6 +70,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private let videoOutput = AVCaptureVideoDataOutput()
     private let photoOutput = AVCapturePhotoOutput()
     private let sRGBColorSpace = CGColorSpace(name: CGColorSpace.sRGB)
+    private let frameDeliveryGate = FrameDeliveryGate()
 
     // These values are accessed only by sessionQueue, except for immutable
     // AVFoundation objects used by the public session property.
@@ -62,6 +99,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         self.session = AVCaptureSession()
         super.init()
 
+        frameDeliveryGate.owner = self
         videoOutput.alwaysDiscardsLateVideoFrames = true
         videoOutput.videoSettings = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
@@ -274,6 +312,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         photoOutput.maxPhotoQualityPrioritization = .quality
         session.commitConfiguration()
 
+        configurePreviewFrameRate(for: device)
         configureOrientation()
         isConfigured = true
         session.startRunning()
@@ -357,6 +396,28 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         let portraitAngle: CGFloat = 90
         configureRotation(videoOutput.connection(with: .video), angle: portraitAngle)
         configureRotation(photoOutput.connection(with: .video), angle: portraitAngle)
+    }
+
+    private func configurePreviewFrameRate(for device: AVCaptureDevice) {
+        let targetDuration = CMTime(value: 1, timescale: 30)
+        let supportsTargetDuration = device.activeFormat.videoSupportedFrameRateRanges.contains {
+            CMTimeCompare(targetDuration, $0.minFrameDuration) >= 0
+                && CMTimeCompare(targetDuration, $0.maxFrameDuration) <= 0
+        }
+        guard supportsTargetDuration else { return }
+
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+            // The preview view renders at 30 fps. Match the active camera
+            // cadence so the device does not create frames that the renderer
+            // will immediately drop on a 60 fps-capable format.
+            device.activeVideoMinFrameDuration = targetDuration
+            device.activeVideoMaxFrameDuration = targetDuration
+        } catch {
+            // Frame-rate capping is an optimization only; the session remains
+            // valid if a device refuses this configuration.
+        }
     }
 
     private func configureRotation(
@@ -458,10 +519,9 @@ extension CameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
         }
 
         // CIImage is immutable and the callback is intentionally delivered on
-        // main, where SwiftUI/Metal preview views can consume it safely.
-        publishOnMain { [weak self] in
-            self?.onFrame?(image)
-        }
+        // main, where SwiftUI/Metal preview views can consume it safely. The
+        // gate drops stale frames if rendering is slower than capture.
+        frameDeliveryGate.submit(image)
     }
 }
 
