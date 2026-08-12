@@ -54,9 +54,10 @@ Do not commit certificates, provisioning profiles, API keys, or App Store Connec
 
 ## Verified evidence
 
-- Main release commit: `8d5bfef9024aa71f15e3afc57596205996f735f4`
-- GitHub Actions run: [31576446123](https://github.com/dheeraj5612/filmy-camera/actions/runs/31576446123) — post-merge simulator build and 9 XCTest cases passed.
+- Main release commit: `063899eef40fb39d2597f52935b340fc5f02d9a0`
+- GitHub Actions run: [31579510158](https://github.com/dheeraj5612/filmy-camera/actions/runs/31579510158) — post-merge simulator build and 9 XCTest cases passed.
 - Local simulator: iPhone 17, iOS 26.5 — camera shell, recipe editor, accessibility tree, and simulator capture fallback verified.
 - Local archive: `/tmp/filmycamera-rc-20260812-v4.xcarchive` — current unsigned validation archive with dSYM and privacy manifest present.
-- The merged release includes Provia Standard and camera-session interruption/restart recovery.
+- The merged release includes Provia Standard, camera-session interruption/restart recovery, and automatic signing configuration for team `AQW5C8DEEG`.
+- Signing follow-up: [PR #4](https://github.com/dheeraj5612/filmy-camera/pull/4) and [PR #5](https://github.com/dheeraj5612/filmy-camera/pull/5) merged with green simulator/XCTest checks.
 - Physical QA and App Store Connect submission remain open until device and Apple account access are available.
