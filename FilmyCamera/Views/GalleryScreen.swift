@@ -11,7 +11,6 @@ struct GalleryScreen: View {
 
     private let columns = [
         GridItem(.flexible(), spacing: 8),
-        GridItem(.flexible(), spacing: 8),
         GridItem(.flexible(), spacing: 8)
     ]
 
@@ -20,8 +19,8 @@ struct GalleryScreen: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 22) {
                     SectionHeading(
-                        eyebrow: "Your frames",
-                        title: "Gallery",
+                        eyebrow: "Your roll",
+                        title: "Roll",
                         trailing: photoLibrary.assets.isEmpty ? nil : "\(photoLibrary.assets.count) recent"
                     )
 
@@ -151,7 +150,10 @@ private struct GalleryThumbnail: View {
                     }
             }
         }
-        .aspectRatio(0.82, contentMode: .fit)
+        .aspectRatio(
+            CGFloat(max(asset.pixelWidth, 1)) / CGFloat(max(asset.pixelHeight, 1)),
+            contentMode: .fit
+        )
         .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 13, style: .continuous)

@@ -34,7 +34,7 @@ struct CaptureReviewView: View {
                         Image(systemName: "xmark")
                             .font(.system(size: 13, weight: .bold))
                             .foregroundStyle(FilmyTheme.primary)
-                            .frame(width: 34, height: 34)
+                            .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
                             .background(FilmyTheme.panel, in: Circle())
                     }
                     .buttonStyle(.plain)
@@ -51,6 +51,20 @@ struct CaptureReviewView: View {
                             .stroke(Color.white.opacity(0.14), lineWidth: 1)
                     }
                     .accessibilityLabel("Captured frame with \(recipe.name)")
+
+                HStack(spacing: 7) {
+                    Image(systemName: "camera.aperture")
+                    Text(recipe.name)
+                        .lineLimit(1)
+                }
+                .font(.system(.caption, design: .rounded).weight(.semibold))
+                .foregroundStyle(FilmyTheme.secondary)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 8)
+                .background(FilmyTheme.panel, in: Capsule())
+                .overlay { Capsule().stroke(FilmyTheme.line, lineWidth: 1) }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Recipe \(recipe.name)")
 
                 HStack(spacing: 10) {
                     Button {
@@ -69,8 +83,8 @@ struct CaptureReviewView: View {
                     Button {
                         onSave()
                     } label: {
-                        Label("Save to Photos", systemImage: "square.and.arrow.down")
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                        Label("Keep Frame", systemImage: "checkmark")
+                            .font(.system(.body, design: .rounded).weight(.bold))
                             .foregroundStyle(FilmyTheme.background)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 15)

@@ -11,6 +11,13 @@ enum FilmyTheme {
     static let accent = Color(red: 0.97, green: 0.72, blue: 0.27)
     static let mint = Color(red: 0.47, green: 0.83, blue: 0.73)
     static let cornerRadius: CGFloat = 22
+    static let controlRadius: CGFloat = 12
+    static let actionPlateRadius: CGFloat = 24
+    static let minimumHitTarget: CGFloat = 44
+
+    static let titleFont = Font.system(.title2, design: .rounded).weight(.bold)
+    static let bodyFont = Font.system(.body, design: .rounded)
+    static let metadataFont = Font.system(.caption, design: .monospaced).weight(.semibold)
 }
 
 struct SectionHeading: View {
@@ -73,7 +80,7 @@ struct FilmyIconButton: View {
             Image(systemName: systemName)
                 .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(isProminent ? FilmyTheme.background : FilmyTheme.primary)
-                .frame(width: 42, height: 42)
+                .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
                 .background(
                     isProminent ? FilmyTheme.accent : Color.black.opacity(0.38),
                     in: Circle()
@@ -81,6 +88,39 @@ struct FilmyIconButton: View {
                 .overlay {
                     Circle().stroke(Color.white.opacity(isProminent ? 0 : 0.18), lineWidth: 1)
                 }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+struct CameraActionButton: View {
+    let systemName: String
+    let title: String
+    let accessibilityLabel: String
+    var isProminent = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Image(systemName: systemName)
+                    .font(.system(size: 15, weight: .bold))
+                Text(title)
+                    .font(.system(.caption2, design: .rounded).weight(.bold))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(isProminent ? FilmyTheme.background : FilmyTheme.primary)
+            .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
+            .padding(.horizontal, 6)
+            .background(
+                isProminent ? FilmyTheme.accent : Color.black.opacity(0.32),
+                in: RoundedRectangle(cornerRadius: FilmyTheme.controlRadius, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: FilmyTheme.controlRadius, style: .continuous)
+                    .stroke(Color.white.opacity(isProminent ? 0 : 0.14), lineWidth: 1)
+            }
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
@@ -151,6 +191,27 @@ struct RecipeSwatch: View {
                 .stroke(isSelected ? FilmyTheme.accent : Color.white.opacity(0.14), lineWidth: isSelected ? 2 : 1)
         }
         .shadow(color: isSelected ? FilmyTheme.accent.opacity(0.22) : .clear, radius: 12, y: 5)
+    }
+}
+
+struct RecipeEditorSectionLabel: View {
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(.body, design: .rounded).weight(.bold))
+                    .foregroundStyle(FilmyTheme.primary)
+                Text(detail)
+                    .font(.system(.caption, design: .rounded).weight(.medium))
+                    .foregroundStyle(FilmyTheme.secondary)
+            }
+
+            Spacer(minLength: 12)
+        }
+        .contentShape(Rectangle())
     }
 }
 

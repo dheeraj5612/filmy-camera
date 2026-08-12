@@ -25,7 +25,7 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertTrue(classicChrome.waitForExistence(timeout: 5))
         classicChrome.tap()
 
-        let details = app.buttons["View details for Classic Chrome"]
+        let details = app.buttons["Tune Classic Chrome"]
         XCTAssertTrue(details.waitForExistence(timeout: 5))
         details.tap()
 
@@ -35,7 +35,7 @@ final class FilmyCameraUITests: XCTestCase {
     }
 
     func testGalleryAndSettingsNavigation() throws {
-        let gallery = app.buttons["Gallery"]
+        let gallery = app.buttons["Roll"]
         XCTAssertTrue(gallery.waitForExistence(timeout: 5))
         gallery.tap()
 
