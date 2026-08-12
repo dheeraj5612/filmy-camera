@@ -91,6 +91,8 @@ final class CameraViewModel: ObservableObject {
         }
     }
     @Published private(set) var isCapturing = false
+    @Published private(set) var isSaving = false
+    @Published private(set) var saveErrorMessage: String?
     @Published private(set) var toastMessage: String?
     @Published private(set) var lastCaptureDate: Date?
     @Published private(set) var reviewImage: UIImage?
@@ -143,6 +145,7 @@ final class CameraViewModel: ObservableObject {
     func capture(camera: CameraService) {
         guard !isCapturing else { return }
         isCapturing = true
+        saveErrorMessage = nil
         let recipe = selectedRecipe
 
         camera.capturePhoto { [weak self] image in
@@ -171,23 +174,29 @@ final class CameraViewModel: ObservableObject {
 
     func saveReview(photoLibrary: PhotoLibraryService) {
         guard let reviewImage, let reviewRecipe else { return }
+        guard !isSaving else { return }
 
+        isSaving = true
+        saveErrorMessage = nil
         photoLibrary.save(image: reviewImage) { [weak self] saved in
             guard let self else { return }
+            self.isSaving = false
             if saved {
                 self.lastCaptureDate = Date()
                 self.reviewImage = nil
                 self.reviewRecipe = nil
                 self.showToast("Saved with \(reviewRecipe.name)")
             } else {
-                self.showToast("Photo access is needed to save")
+                self.saveErrorMessage = "Photo access is needed to save this frame. Enable Photos access in Settings, then try again."
             }
         }
     }
 
     func discardReview() {
+        guard !isSaving else { return }
         reviewImage = nil
         reviewRecipe = nil
+        saveErrorMessage = nil
     }
 
     private func showToast(_ message: String) {

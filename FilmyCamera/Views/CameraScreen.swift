@@ -8,6 +8,7 @@ struct CameraScreen: View {
     let onOpenGallery: () -> Void
 
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("showGrid") private var showGrid = true
     @AppStorage("hapticsEnabled") private var hapticsEnabled = true
     @State private var recipeForDetail: FilmRecipe?
@@ -27,7 +28,7 @@ struct CameraScreen: View {
                                 y: value.location.y / max(proxy.size.height, 1)
                             )
                             camera.focus(at: normalizedPoint)
-                            withAnimation(.spring(response: 0.24, dampingFraction: 0.72)) {
+                            withAnimation(reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.72)) {
                                 focusPoint = value.location
                             }
                         }
@@ -68,7 +69,14 @@ struct CameraScreen: View {
             if let focusPoint {
                 FocusReticle()
                     .position(focusPoint)
-                    .transition(.scale(scale: 0.86).combined(with: .opacity))
+                    .transition(reduceMotion ? .opacity : .scale(scale: 0.86).combined(with: .opacity))
+                    .task(id: focusPoint) {
+                        try? await Task.sleep(for: .seconds(1.2))
+                        guard !Task.isCancelled else { return }
+                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) {
+                            self.focusPoint = nil
+                        }
+                    }
             }
 
             if camera.zoomFactor > 1.01 {
@@ -126,6 +134,8 @@ struct CameraScreen: View {
                 CaptureReviewView(
                     image: image,
                     recipe: recipe,
+                    isSaving: viewModel.isSaving,
+                    saveErrorMessage: viewModel.saveErrorMessage,
                     onSave: { viewModel.saveReview(photoLibrary: photoLibrary) },
                     onRetake: viewModel.discardReview
                 )

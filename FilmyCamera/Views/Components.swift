@@ -456,6 +456,9 @@ struct PreviewPlaceholder: View {
                         .accessibilityHint("Opens Filmy Camera permissions")
                 }
             }
+            // Keep the explanation above the camera action plate so the
+            // unavailable state remains readable on short iPhone displays.
+            .offset(y: -128)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
