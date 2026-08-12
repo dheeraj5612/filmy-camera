@@ -98,10 +98,22 @@ public struct FilteredCameraPreview: UIViewRepresentable {
         }
 
         fileprivate func receive(_ image: CIImage) {
+            let imageBox = CIImageBox(image)
             DispatchQueue.main.async { [weak self] in
-                self?.previewView?.display(image: image)
+                self?.previewView?.display(image: imageBox.image)
             }
         }
+    }
+}
+
+/// CIImage is immutable for this use, but its SDK declaration is not Sendable
+/// on older Swift 6 toolchains. Boxing keeps the queue handoff explicit and
+/// limits the unchecked boundary to this renderer-owned value.
+private final class CIImageBox: @unchecked Sendable {
+    let image: CIImage
+
+    init(_ image: CIImage) {
+        self.image = image
     }
 }
 
