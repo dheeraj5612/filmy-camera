@@ -85,6 +85,12 @@ extension FilmRecipe {
 
 @MainActor
 final class CameraViewModel: ObservableObject {
+    private struct RenderedPhoto: @unchecked Sendable {
+        let image: UIImage
+        let data: Data
+        let capturedAt: Date
+    }
+
     @Published var selectedRecipeID: String = UserDefaults.standard.string(forKey: "selectedRecipeID") ?? FilmRecipe.builtIns[0].id {
         didSet {
             UserDefaults.standard.set(selectedRecipeID, forKey: "selectedRecipeID")
@@ -100,6 +106,8 @@ final class CameraViewModel: ObservableObject {
     @Published private var recipeOverrides: [String: FilmRecipe] = [:]
 
     private var toastTask: Task<Void, Never>?
+    private var reviewImageData: Data?
+    private var reviewCapturedAt: Date?
 
     init() {
         guard let data = UserDefaults.standard.data(forKey: "recipeOverrides"),
@@ -149,11 +157,11 @@ final class CameraViewModel: ObservableObject {
         let recipe = selectedRecipe
         let viewportSize = camera.previewViewportSize
 
-        camera.capturePhoto { [weak self] image in
+        camera.capturePhoto { [weak self] capturedPhoto in
             Task { @MainActor [weak self] in
                 guard let self else { return }
 
-                guard let image else {
+                guard let capturedPhoto else {
                     self.isCapturing = false
                     if camera.statusMessage.localizedCaseInsensitiveContains("Simulator") {
                         self.showToast("Capture is available on a physical iPhone")
@@ -164,20 +172,24 @@ final class CameraViewModel: ObservableObject {
                 }
 
                 DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                    let finishedImage = Self.render(
-                        image: image,
+                    let renderedPhoto = Self.render(
+                        image: capturedPhoto.image,
+                        sourceData: capturedPhoto.fileData,
                         recipe: recipe,
-                        viewportSize: viewportSize
+                        viewportSize: viewportSize,
+                        capturedAt: capturedPhoto.capturedAt
                     )
 
                     DispatchQueue.main.async {
                         guard let self else { return }
                         self.isCapturing = false
-                        guard let finishedImage else {
+                        guard let renderedPhoto else {
                             self.showToast("The selected look could not be rendered. Try the capture again.")
                             return
                         }
-                        self.reviewImage = finishedImage
+                        self.reviewImage = renderedPhoto.image
+                        self.reviewImageData = renderedPhoto.data
+                        self.reviewCapturedAt = renderedPhoto.capturedAt
                         self.reviewRecipe = recipe
                     }
                 }
@@ -191,12 +203,19 @@ final class CameraViewModel: ObservableObject {
 
         isSaving = true
         saveErrorMessage = nil
-        photoLibrary.save(image: reviewImage, recipe: reviewRecipe) { [weak self] saved in
+        photoLibrary.save(
+            image: reviewImage,
+            imageData: reviewImageData,
+            recipe: reviewRecipe,
+            capturedAt: reviewCapturedAt ?? Date()
+        ) { [weak self] saved in
             guard let self else { return }
             self.isSaving = false
             if saved {
-                self.lastCaptureDate = Date()
+                self.lastCaptureDate = self.reviewCapturedAt ?? Date()
                 self.reviewImage = nil
+                self.reviewImageData = nil
+                self.reviewCapturedAt = nil
                 self.reviewRecipe = nil
                 self.showToast("Saved with \(reviewRecipe.name)")
             } else {
@@ -208,6 +227,8 @@ final class CameraViewModel: ObservableObject {
     func discardReview() {
         guard !isSaving else { return }
         reviewImage = nil
+        reviewImageData = nil
+        reviewCapturedAt = nil
         reviewRecipe = nil
         saveErrorMessage = nil
     }
@@ -224,9 +245,11 @@ final class CameraViewModel: ObservableObject {
 
     private nonisolated static func render(
         image: UIImage,
+        sourceData: Data,
         recipe: FilmRecipe,
-        viewportSize: CGSize
-    ) -> UIImage? {
+        viewportSize: CGSize,
+        capturedAt: Date
+    ) -> RenderedPhoto? {
         guard let input = CIImage(image: image) else { return nil }
         let framedInput: CIImage
         if viewportSize.width > 0, viewportSize.height > 0 {
@@ -241,6 +264,19 @@ final class CameraViewModel: ObservableObject {
 
         let filtered = FilmRenderer.render(framedInput, recipe: recipe, quality: .photo)
         guard let output = FilmRenderer.sharedContext.createCGImage(filtered, from: filtered.extent) else { return nil }
-        return UIImage(cgImage: output, scale: image.scale, orientation: image.imageOrientation)
+        guard let data = PhotoOutputEncoder.jpegData(
+            for: output,
+            sourceData: sourceData,
+            capturedAt: capturedAt
+        ) else {
+            return nil
+        }
+
+        return RenderedPhoto(
+            image: UIImage(cgImage: output),
+            data: data,
+            capturedAt: capturedAt
+        )
     }
+
 }

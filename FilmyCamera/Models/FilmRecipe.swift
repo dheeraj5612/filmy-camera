@@ -45,6 +45,49 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             case .monochrome: return "Acros Monochrome"
             }
         }
+
+        /// Public filter vocabulary mapped to an original channel-mix
+        /// approximation. The values are intentionally inspectable rather
+        /// than hidden in renderer-only conditionals.
+        public var monochromeFilter: MonochromeFilter? {
+            switch self {
+            case .acros:
+                return .neutral
+            case .acrosYellow:
+                return .yellow
+            case .acrosRed:
+                return .red
+            case .acrosGreen:
+                return .green
+            case .monochrome:
+                return .neutral
+            default:
+                return nil
+            }
+        }
+    }
+
+    public enum MonochromeFilter: String, CaseIterable, Codable, Hashable, Sendable {
+        case neutral
+        case yellow
+        case red
+        case green
+
+        /// Linear-light RGB weights for the filter's luminance response.
+        /// This is an original approximation of the public filter intent,
+        /// not proprietary Fujifilm calibration data.
+        public var channelWeights: (red: Double, green: Double, blue: Double) {
+            switch self {
+            case .neutral:
+                return (0.2126, 0.7152, 0.0722)
+            case .yellow:
+                return (0.30, 0.66, 0.04)
+            case .red:
+                return (0.48, 0.47, 0.05)
+            case .green:
+                return (0.16, 0.76, 0.08)
+            }
+        }
     }
 
     /// Public Fujifilm-style dynamic-range modes. These are expressed as

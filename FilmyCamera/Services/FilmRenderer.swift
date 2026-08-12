@@ -111,17 +111,19 @@ public final class FilmRenderer {
     }
 
     private final class ImmutableResources: @unchecked Sendable {
-        let randomGeneratorImage: CIImage?
+        let grainTexture: CIImage?
         let clearImage: CIImage
         let zeroComponents: CIVector
         let oneComponents: CIVector
+        let alphaVector: CIVector
         let neutralWhiteBalance: CIVector
 
         init() {
-            randomGeneratorImage = CIFilter(name: "CIRandomGenerator")?.outputImage
+            grainTexture = FilmRenderer.makeDeterministicGrainTexture()
             clearImage = CIImage(color: .clear)
             zeroComponents = CIVector(x: 0, y: 0, z: 0, w: 0)
             oneComponents = CIVector(x: 1, y: 1, z: 1, w: 1)
+            alphaVector = CIVector(x: 0, y: 0, z: 0, w: 1)
             neutralWhiteBalance = CIVector(x: 6500, y: 0)
         }
     }
@@ -225,6 +227,7 @@ public final class FilmRenderer {
         output = applyDynamicRange(to: output, recipe: recipe)
         output = applyExposureAndTone(to: output, recipe: recipe)
         output = applyWhiteBalance(to: output, recipe: recipe)
+        output = applyMonochromeFilter(to: output, recipe: recipe)
         output = applyColorControls(to: output, recipe: recipe)
         output = applyColorCube(to: output, recipe: recipe, quality: quality)
         output = applyDetailControls(to: output, recipe: recipe)
@@ -329,13 +332,42 @@ public final class FilmRenderer {
         return filter.outputImage ?? image
     }
 
+    private static func applyMonochromeFilter(
+        to image: CIImage,
+        recipe: FilmRecipe
+    ) -> CIImage {
+        guard let monochromeFilter = recipe.filmBase.monochromeFilter,
+              let filter = CIFilter(name: "CIColorMatrix") else {
+            return image
+        }
+
+        let weights = monochromeFilter.channelWeights
+        let vector = CIVector(
+            x: weights.red,
+            y: weights.green,
+            z: weights.blue,
+            w: 0
+        )
+        filter.setValue(image, forKey: kCIInputImageKey)
+        filter.setValue(vector, forKey: "inputRVector")
+        filter.setValue(vector, forKey: "inputGVector")
+        filter.setValue(vector, forKey: "inputBVector")
+        filter.setValue(immutableResources.alphaVector, forKey: "inputAVector")
+        return filter.outputImage?.cropped(to: image.extent) ?? image
+    }
+
     private static func applyColorControls(
         to image: CIImage,
         recipe: FilmRecipe
     ) -> CIImage {
         guard let controls = CIFilter(name: "CIColorControls") else { return image }
         controls.setValue(image, forKey: kCIInputImageKey)
-        controls.setValue(clamp(recipe.saturation, lower: 0, upper: 2), forKey: kCIInputSaturationKey)
+        // The matrix above has already produced the monochrome response. Do
+        // not let a legacy saturation value of zero erase that channel mix.
+        let saturation = recipe.filmBase.monochromeFilter == nil
+            ? clamp(recipe.saturation, lower: 0, upper: 2)
+            : 1
+        controls.setValue(saturation, forKey: kCIInputSaturationKey)
         controls.setValue(clamp(recipe.contrast, lower: 0.5, upper: 1.7), forKey: kCIInputContrastKey)
         controls.setValue(0, forKey: kCIInputBrightnessKey)
         return controls.outputImage ?? image
@@ -426,7 +458,7 @@ public final class FilmRenderer {
         // to a full-resolution still.
         let amount = clamp(recipe.grain, lower: 0, upper: 1)
         guard amount > 0.0001,
-              let random = immutableResources.randomGeneratorImage,
+              let grainTexture = immutableResources.grainTexture,
               let softLight = CIFilter(name: "CISoftLightBlendMode") else {
             return image
         }
@@ -439,8 +471,9 @@ public final class FilmRenderer {
             0.35,
             min(recipe.grainSize * resolutionScale, 8.0)
         )
-        let noise = random
+        let noise = grainTexture
             .transformed(by: CGAffineTransform(scaleX: 1 / grainSize, y: 1 / grainSize))
+            .applyingFilter("CIAffineTile")
             .cropped(to: extent)
             .applyingFilter("CIColorControls", parameters: [
                 kCIInputSaturationKey: 0,
@@ -558,6 +591,15 @@ public final class FilmRenderer {
         let palette = recipe.palette
         let luma = red * 0.2126 + green * 0.7152 + blue * 0.0722
         let chroma = max(red, max(green, blue)) - min(red, min(green, blue))
+        let hue = rgbHue(red: red, green: green, blue: blue, chroma: chroma)
+        let blueHueWeight = max(
+            hueSectorWeight(hue, center: 0.58, halfWidth: 0.15),
+            hueSectorWeight(hue, center: 0.68, halfWidth: 0.14)
+        )
+        let warmHueWeight = max(
+            hueSectorWeight(hue, center: 0.00, halfWidth: 0.14),
+            hueSectorWeight(hue, center: 0.13, halfWidth: 0.14)
+        )
 
         var mappedRed = red + Float(palette.redBias)
             + Float(palette.redGreenMix) * (green - luma)
@@ -574,9 +616,20 @@ public final class FilmRenderer {
         // Color Chrome-style compression protects highly saturated highlights
         // without turning the whole image gray.
         let highlightWeight = smoothstep(0.30, 0.92, luma)
+        let chromeSectorWeight = max(
+            warmHueWeight,
+            max(
+                hueSectorWeight(hue, center: 0.30, halfWidth: 0.17),
+                max(
+                    hueSectorWeight(hue, center: 0.48, halfWidth: 0.16),
+                    blueHueWeight
+                )
+            )
+        )
         let compression = Float(clamp(recipe.colorChrome, lower: 0, upper: 1))
             * highlightWeight
             * chroma
+            * (0.35 + chromeSectorWeight * 0.65)
             * 0.30
         mappedRed = mix(mappedRed, luma + (mappedRed - luma) * 0.72, compression)
         mappedGreen = mix(mappedGreen, luma + (mappedGreen - luma) * 0.72, compression)
@@ -585,8 +638,11 @@ public final class FilmRenderer {
         // Blue-response controls primarily affect cool shadows/highlights,
         // keeping skin and warm midtones stable.
         let blueInfluence = Float(clamp(recipe.blueResponse + recipe.fxBlue * 0.72, lower: -1, upper: 1))
-        let coolChroma = max(0, blue - max(red * 0.55, green * 0.45))
-        let blueWeight = blueInfluence * (1 - luma) * max(chroma * 0.45, coolChroma) * 0.30
+        let blueWeight = blueInfluence
+            * (1 - luma)
+            * chroma
+            * blueHueWeight
+            * 0.42
         mappedBlue += blueWeight
         mappedRed -= blueWeight * 0.16
         mappedGreen += blueWeight * 0.04
@@ -656,17 +712,9 @@ public final class FilmRenderer {
             mappedRed += 0.006 * highlightWeight
             mappedBlue += 0.008 * shadowWeight
         case .acros, .acrosYellow, .acrosRed, .acrosGreen, .monochrome:
-            let filterBias: Float
-            switch recipe.filmBase {
-            case .acrosYellow: filterBias = 0.08
-            case .acrosRed: filterBias = 0.13
-            case .acrosGreen: filterBias = -0.06
-            default: filterBias = 0
-            }
-            let filteredLuma = luma + filterBias * (red - blue)
-            mappedRed = filteredLuma
-            mappedGreen = filteredLuma
-            mappedBlue = filteredLuma
+            mappedRed = luma
+            mappedGreen = luma
+            mappedBlue = luma
         case .classicNegative:
             saturate(0.98)
             mappedRed += 0.018 * highlightWeight
@@ -692,6 +740,81 @@ public final class FilmRenderer {
     private static func smoothstep(_ edge0: Float, _ edge1: Float, _ value: Float) -> Float {
         let normalized = clamp((value - edge0) / (edge1 - edge0), lower: 0, upper: 1)
         return normalized * normalized * (3 - 2 * normalized)
+    }
+
+    private static func rgbHue(
+        red: Float,
+        green: Float,
+        blue: Float,
+        chroma: Float
+    ) -> Float {
+        guard chroma > 0.00001 else { return 0 }
+
+        let maximum = max(red, max(green, blue))
+        let rawHue: Float
+        if maximum == red {
+            rawHue = (green - blue) / chroma
+        } else if maximum == green {
+            rawHue = (blue - red) / chroma + 2
+        } else {
+            rawHue = (red - green) / chroma + 4
+        }
+
+        let normalized = rawHue / 6
+        return normalized < 0 ? normalized + 1 : normalized
+    }
+
+    private static func hueSectorWeight(
+        _ hue: Float,
+        center: Float,
+        halfWidth: Float
+    ) -> Float {
+        var wrappedDelta = (hue - center).truncatingRemainder(dividingBy: 1)
+        if wrappedDelta > 0.5 {
+            wrappedDelta -= 1
+        } else if wrappedDelta < -0.5 {
+            wrappedDelta += 1
+        }
+        let distance = abs(wrappedDelta)
+        return 1 - smoothstep(halfWidth * 0.55, halfWidth, distance)
+    }
+
+    private static func makeDeterministicGrainTexture() -> CIImage? {
+        let size = 512
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
+        var bytes = [UInt8](repeating: 0, count: size * size * 4)
+        var state: UInt32 = 0x9E37_79B9
+
+        for index in stride(from: 0, to: bytes.count, by: 4) {
+            // A small xorshift generator gives us a stable, platform-neutral
+            // texture without relying on CIRandomGenerator's process state.
+            state ^= state << 13
+            state ^= state >> 17
+            state ^= state << 5
+            let centered = Int((state >> 24) & 0x3F) - 31
+            let value = UInt8(max(0, min(255, 128 + centered)))
+            bytes[index] = value
+            bytes[index + 1] = value
+            bytes[index + 2] = value
+            bytes[index + 3] = 255
+        }
+
+        guard let context = bytes.withUnsafeMutableBytes({ rawBuffer in
+            CGContext(
+                data: rawBuffer.baseAddress,
+                width: size,
+                height: size,
+                bitsPerComponent: 8,
+                bytesPerRow: size * 4,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+        }),
+              let image = context.makeImage() else {
+            return nil
+        }
+
+        return CIImage(cgImage: image)
     }
 
     private static func clamp<T: Comparable>(

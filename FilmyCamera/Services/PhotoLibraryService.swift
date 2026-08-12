@@ -27,6 +27,67 @@ final class PhotoLibraryService: ObservableObject {
         var value: String?
     }
 
+    private final class ImageRequestState: @unchecked Sendable {
+        private let lock = NSLock()
+        private let imageManager: PHImageManager
+        private var requestID: PHImageRequestID?
+        private var continuation: CheckedContinuation<UIImage?, Never>?
+        private var didFinish = false
+
+        init(imageManager: PHImageManager) {
+            self.imageManager = imageManager
+        }
+
+        func install(_ continuation: CheckedContinuation<UIImage?, Never>) {
+            lock.lock()
+            let shouldFinish = didFinish
+            if !shouldFinish {
+                self.continuation = continuation
+            }
+            lock.unlock()
+
+            if shouldFinish {
+                continuation.resume(returning: nil)
+            }
+        }
+
+        func install(requestID: PHImageRequestID) {
+            lock.lock()
+            let shouldCancel = didFinish
+            if !shouldCancel {
+                self.requestID = requestID
+            }
+            lock.unlock()
+
+            if shouldCancel {
+                imageManager.cancelImageRequest(requestID)
+            }
+        }
+
+        func finish(with image: UIImage?, cancelRequest: Bool = false) {
+            lock.lock()
+            guard !didFinish else {
+                lock.unlock()
+                return
+            }
+            didFinish = true
+            let continuation = self.continuation
+            self.continuation = nil
+            let requestID = self.requestID
+            self.requestID = nil
+            lock.unlock()
+
+            if cancelRequest, let requestID {
+                imageManager.cancelImageRequest(requestID)
+            }
+            continuation?.resume(returning: image)
+        }
+
+        func cancel() {
+            finish(with: nil, cancelRequest: true)
+        }
+    }
+
     @Published private(set) var assets: [PHAsset] = []
     @Published private(set) var authorizationStatus: PHAuthorizationStatus
     @Published private(set) var isLoading = false
@@ -88,15 +149,17 @@ final class PhotoLibraryService: ObservableObject {
             let albumAssets = result.objects(at: IndexSet(integersIn: 0..<result.count))
             let knownAssets = fetchSavedAssets(options: options)
             let albumIdentifiers = Set(albumAssets.map(\.localIdentifier))
-            assets = albumAssets + knownAssets.filter { !albumIdentifiers.contains($0.localIdentifier) }
+            assets = Array((albumAssets + knownAssets.filter { !albumIdentifiers.contains($0.localIdentifier) }).prefix(60))
         } else {
-            assets = fetchSavedAssets(options: options)
+            assets = Array(fetchSavedAssets(options: options).prefix(60))
         }
     }
 
     func save(
         image: UIImage,
+        imageData: Data? = nil,
         recipe: FilmRecipe,
+        capturedAt: Date = Date(),
         completion: @escaping @MainActor (Bool) -> Void
     ) {
         Task { @MainActor in
@@ -118,10 +181,18 @@ final class PhotoLibraryService: ObservableObject {
             // newly created asset is still available to the app under limited access.
             let canManageAppAlbum = PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized
             let assetIdentifierBox = IdentifierBox()
-            let metadata = SavedFrameMetadata(recipe: recipe, capturedAt: Date())
+            let metadata = SavedFrameMetadata(recipe: recipe, capturedAt: capturedAt)
 
             PHPhotoLibrary.shared().performChanges {
-                let request = PHAssetChangeRequest.creationRequestForAsset(from: image)
+                let request: PHAssetChangeRequest
+                if let imageData, !imageData.isEmpty {
+                    let creationRequest = PHAssetCreationRequest()
+                    creationRequest.addResource(with: .photo, data: imageData, options: nil)
+                    request = creationRequest
+                } else {
+                    request = PHAssetChangeRequest.creationRequestForAsset(from: image)
+                }
+                request.creationDate = capturedAt
                 assetIdentifierBox.value = request.placeholderForCreatedAsset?.localIdentifier
             } completionHandler: { [weak self] success, _ in
                 guard let self else { return }
@@ -217,7 +288,18 @@ final class PhotoLibraryService: ObservableObject {
         let identifiers = savedAssetIdentifiers
         guard !identifiers.isEmpty else { return [] }
 
-        let result = PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: options)
+        // Reconcile all persisted identifiers before applying the gallery's
+        // display limit. Otherwise a missing asset beyond the first 60 can
+        // remain in UserDefaults indefinitely and its recipe sidecar can no
+        // longer be trusted.
+        let reconciliationOptions = PHFetchOptions()
+        reconciliationOptions.predicate = options.predicate
+        reconciliationOptions.sortDescriptors = options.sortDescriptors
+        reconciliationOptions.fetchLimit = 0
+        let result = PHAsset.fetchAssets(
+            withLocalIdentifiers: identifiers,
+            options: reconciliationOptions
+        )
         let fetched = result.objects(at: IndexSet(integersIn: 0..<result.count))
         let assetsByIdentifier = Dictionary(uniqueKeysWithValues: fetched.map { ($0.localIdentifier, $0) })
         let accessibleIdentifiers = identifiers.filter { assetsByIdentifier[$0] != nil }
@@ -303,42 +385,40 @@ final class PhotoLibraryService: ObservableObject {
     }
 
     func image(for asset: PHAsset, targetSize: CGSize) async -> UIImage? {
-        await withCheckedContinuation { continuation in
-            let options = PHImageRequestOptions()
-            options.deliveryMode = .highQualityFormat
-            options.resizeMode = .fast
-            options.isNetworkAccessAllowed = true
-            options.isSynchronous = false
+        let imageManager = PHImageManager.default()
+        let state = ImageRequestState(imageManager: imageManager)
 
-            let callbackLock = NSLock()
-            var didFinish = false
+        return await withTaskCancellationHandler(operation: {
+            await withCheckedContinuation { continuation in
+                state.install(continuation)
+                let options = PHImageRequestOptions()
+                options.deliveryMode = .highQualityFormat
+                options.resizeMode = .fast
+                options.isNetworkAccessAllowed = true
+                options.isSynchronous = false
 
-            PHImageManager.default().requestImage(
-                for: asset,
-                targetSize: targetSize,
-                contentMode: .aspectFill,
-                options: options
-            ) { image, info in
-                let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
-                let isCancelled = (info?[PHImageCancelledKey] as? Bool) ?? false
-                let hasError = info?[PHImageErrorKey] != nil
+                let requestID = imageManager.requestImage(
+                    for: asset,
+                    targetSize: targetSize,
+                    contentMode: .aspectFill,
+                    options: options
+                ) { image, info in
+                    let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                    let isCancelled = (info?[PHImageCancelledKey] as? Bool) ?? false
+                    let hasError = info?[PHImageErrorKey] != nil
 
-                // Photos may deliver a fast degraded image before the final
-                // high-quality result. Resume exactly once, and surface
-                // cancellation/iCloud failures as a nil image.
-                guard !isDegraded || isCancelled || hasError else { return }
+                    // Photos may deliver a fast degraded image before the final
+                    // high-quality result. Resume exactly once, and surface
+                    // cancellation/iCloud failures as a nil image.
+                    guard !isDegraded || isCancelled || hasError else { return }
 
-                callbackLock.lock()
-                guard !didFinish else {
-                    callbackLock.unlock()
-                    return
+                    state.finish(with: isCancelled || hasError ? nil : image)
                 }
-                didFinish = true
-                callbackLock.unlock()
-
-                continuation.resume(returning: isCancelled || hasError ? nil : image)
+                state.install(requestID: requestID)
             }
-        }
+        }, onCancel: {
+            state.cancel()
+        })
     }
 
     private func requestAuthorization(for accessLevel: PHAccessLevel) async -> PHAuthorizationStatus {

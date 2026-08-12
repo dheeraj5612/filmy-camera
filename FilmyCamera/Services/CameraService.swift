@@ -12,7 +12,27 @@ import UIKit
 /// callers do not need to coordinate AVFoundation's worker threads.
 public final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
     public typealias FrameHandler = (CIImage) -> Void
-    public typealias PhotoCompletion = (UIImage?) -> Void
+
+    public struct CapturedPhoto: @unchecked Sendable {
+        public let image: UIImage
+        public let fileData: Data
+        public let capturedAt: Date
+        public let dimensions: CMVideoDimensions
+
+        public init(
+            image: UIImage,
+            fileData: Data,
+            capturedAt: Date,
+            dimensions: CMVideoDimensions
+        ) {
+            self.image = image
+            self.fileData = fileData
+            self.capturedAt = capturedAt
+            self.dimensions = dimensions
+        }
+    }
+
+    public typealias PhotoCompletion = (CapturedPhoto?) -> Void
 
     /// Keeps only the newest frame while the main thread is busy rendering.
     /// Camera preview is inherently latest-value data; queuing every frame
@@ -77,8 +97,11 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     // These values are accessed only by sessionQueue, except for immutable
     // AVFoundation objects used by the public session property.
     private var isConfigured = false
+    private var wantsToRun = false
     private var authorizationRequestInFlight = false
     private var pendingPhotoCompletion: PhotoCompletion?
+    private var pendingPhotoCapturedAt: Date?
+    private var configuredPhotoDimensions = CMVideoDimensions(width: 0, height: 0)
     private var sessionObservers: [NSObjectProtocol] = []
     private var rotationAngle: CGFloat = 90
     private var lastDeliveredFrameSize: CGSize = .zero
@@ -122,6 +145,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// simulator or a device without a camera this becomes a clean empty state.
     public func start() {
         sessionQueue.async { [weak self] in
+            self?.wantsToRun = true
             self?.requestAuthorizationAndStartOnQueue()
         }
     }
@@ -130,9 +154,11 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     public func stop() {
         sessionQueue.async { [weak self] in
             guard let self else { return }
+            self.wantsToRun = false
             if self.session.isRunning {
                 self.session.stopRunning()
             }
+            self.cancelPendingPhotoOnQueue(status: "Capture canceled.")
             self.publishRunning(false)
             self.publishStatus("Camera paused")
         }
@@ -220,6 +246,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func requestAuthorizationAndStartOnQueue() {
+        guard wantsToRun else { return }
         guard !session.isRunning else {
             publishRunning(true)
             publishStatus("Camera ready")
@@ -247,7 +274,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 self.sessionQueue.async { [weak self] in
                     guard let self else { return }
                     self.authorizationRequestInFlight = false
-                    if granted {
+                    if granted, self.wantsToRun {
                         self.configureAndStartOnQueue()
                     } else {
                         self.publishRunning(false)
@@ -265,6 +292,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func configureAndStartOnQueue() {
+        guard wantsToRun else { return }
         guard !session.isRunning else {
             publishRunning(true)
             publishStatus("Camera ready")
@@ -314,6 +342,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         session.addInput(input)
 
         guard session.canAddOutput(videoOutput) else {
+            session.removeInput(input)
             session.commitConfiguration()
             publishRunning(false)
             publishStatus("Live preview is unavailable.")
@@ -322,6 +351,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         session.addOutput(videoOutput)
 
         guard session.canAddOutput(photoOutput) else {
+            session.removeOutput(videoOutput)
+            session.removeInput(input)
             session.commitConfiguration()
             publishRunning(false)
             publishStatus("Still capture is unavailable.")
@@ -329,6 +360,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
         session.addOutput(photoOutput)
         photoOutput.maxPhotoQualityPrioritization = .quality
+        configurePhotoDimensions(for: device)
         session.commitConfiguration()
 
         configurePreviewFrameRate(for: device)
@@ -360,8 +392,9 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 queue: nil
             ) { [weak self] _ in
                 self?.sessionQueue.async { [weak self] in
-                    self?.publishRunning(false)
-                    self?.publishStatus("Camera temporarily unavailable.")
+                    guard let self, self.wantsToRun else { return }
+                    self.publishRunning(false)
+                    self.publishStatus("Camera temporarily unavailable.")
                 }
             },
             notificationCenter.addObserver(
@@ -371,6 +404,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             ) { [weak self] _ in
                 self?.sessionQueue.async { [weak self] in
                     guard let self,
+                          self.wantsToRun,
                           AVCaptureDevice.authorizationStatus(for: .video) == .authorized else {
                         return
                     }
@@ -387,6 +421,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         // Apple recommends restarting after media services reset. Other
         // runtime errors remain visible so the UI can explain the recovery
         // path instead of silently presenting a frozen preview.
+        guard wantsToRun else { return }
         if codeRawValue == AVError.Code.mediaServicesWereReset.rawValue, isConfigured {
             session.startRunning()
             let running = session.isRunning
@@ -438,6 +473,18 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
     }
 
+    private func configurePhotoDimensions(for device: AVCaptureDevice) {
+        let supportedDimensions = device.activeFormat.supportedMaxPhotoDimensions
+        guard let maximum = supportedDimensions.max(by: { lhs, rhs in
+            Int64(lhs.width) * Int64(lhs.height) < Int64(rhs.width) * Int64(rhs.height)
+        }) else {
+            return
+        }
+
+        photoOutput.maxPhotoDimensions = maximum
+        configuredPhotoDimensions = maximum
+    }
+
     private func configureRotation(
         _ connection: AVCaptureConnection?,
         angle: CGFloat
@@ -463,23 +510,36 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
 
         pendingPhotoCompletion = completion
+        pendingPhotoCapturedAt = Date()
         let settings = AVCapturePhotoSettings()
         settings.flashMode = .off
         settings.photoQualityPrioritization = .quality
+        if configuredPhotoDimensions.width > 0, configuredPhotoDimensions.height > 0 {
+            settings.maxPhotoDimensions = configuredPhotoDimensions
+        }
         photoOutput.capturePhoto(with: settings, delegate: self)
     }
 
-    private func finishPhotoOnQueue(_ image: UIImage?) {
+    private func finishPhotoOnQueue(_ photo: CapturedPhoto?) {
         let completion = pendingPhotoCompletion
         pendingPhotoCompletion = nil
+        pendingPhotoCapturedAt = nil
         guard let completion else { return }
 
-        if image == nil {
+        if photo == nil {
             publishStatus("The photo could not be processed.")
         } else {
             publishStatus("Photo captured")
         }
-        publishPhoto(image, completion: completion)
+        publishPhoto(photo, completion: completion)
+    }
+
+    private func cancelPendingPhotoOnQueue(status: String) {
+        guard let completion = pendingPhotoCompletion else { return }
+        pendingPhotoCompletion = nil
+        pendingPhotoCapturedAt = nil
+        publishStatus(status)
+        publishPhoto(nil, completion: completion)
     }
 
     private func publishRunning(_ running: Bool) {
@@ -512,9 +572,9 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
     }
 
-    private func publishPhoto(_ image: UIImage?, completion: @escaping PhotoCompletion) {
+    private func publishPhoto(_ photo: CapturedPhoto?, completion: @escaping PhotoCompletion) {
         publishOnMain {
-            completion(image)
+            completion(photo)
         }
     }
 
@@ -570,18 +630,30 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
         didFinishProcessingPhoto photo: AVCapturePhoto,
         error: Error?
     ) {
-        let image: UIImage?
+        let data: Data?
         if error == nil,
-           let data = photo.fileDataRepresentation() {
-            image = UIImage(data: data)
+           let fileData = photo.fileDataRepresentation() {
+            data = fileData
         } else {
-            image = nil
+            data = nil
         }
+        let dimensions = photo.resolvedSettings.photoDimensions
 
         // Photo delegate callbacks are not required to arrive on our session
         // queue, so serialize completion state before hopping to main.
         sessionQueue.async { [weak self] in
-            self?.finishPhotoOnQueue(image)
+            guard let self else { return }
+            let capturedPhoto = data.flatMap { fileData in
+                UIImage(data: fileData).map {
+                    CapturedPhoto(
+                        image: $0,
+                        fileData: fileData,
+                        capturedAt: self.pendingPhotoCapturedAt ?? Date(),
+                        dimensions: dimensions
+                    )
+                }
+            }
+            self.finishPhotoOnQueue(capturedPhoto)
         }
     }
 }
