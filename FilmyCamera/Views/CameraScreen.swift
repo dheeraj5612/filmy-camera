@@ -27,6 +27,14 @@ struct CameraScreen: View {
                     .accessibilityLabel("Live camera preview")
                     .accessibilityValue(camera.isRunning ? "Showing the \(viewModel.selectedRecipe.name) look" : camera.statusMessage)
                     .accessibilityHint("Tap the preview to focus and expose the frame")
+                    .accessibilityAction(named: "Focus and expose at center") {
+                        let normalizedPoint = CGPoint(x: 0.5, y: 0.5)
+                        camera.focus(at: normalizedPoint)
+                        focusNormalizedPoint = normalizedPoint
+                        withAnimation(reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.72)) {
+                            focusPoint = CGPoint(x: proxy.size.width / 2, y: proxy.size.height / 2)
+                        }
+                    }
                     .accessibilityIdentifier("camera-preview")
                     .gesture(
                         SpatialTapGesture().onEnded { value in
@@ -182,7 +190,11 @@ struct CameraScreen: View {
 
             Spacer(minLength: 8)
 
-            CameraStatusPill(isRunning: camera.isRunning, message: camera.statusMessage)
+            CameraStatusPill(
+                isRunning: camera.isRunning,
+                availability: camera.availability,
+                message: camera.statusMessage
+            )
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Filmy Camera. \(camera.statusMessage)")
@@ -206,11 +218,27 @@ struct CameraScreen: View {
     @ViewBuilder
     private var cameraPlaceholder: some View {
         switch camera.availability {
-        case .interrupted, .needsRecovery, .unavailable:
+        case .interrupted:
             PreviewPlaceholder(
                 isSimulator: false,
                 recipe: viewModel.selectedRecipe,
                 message: "The camera was interrupted. Resume when you are ready.",
+                actionTitle: "Resume Camera",
+                action: camera.start
+            )
+        case .needsRecovery:
+            PreviewPlaceholder(
+                isSimulator: false,
+                recipe: viewModel.selectedRecipe,
+                message: "The camera needs to be reopened before it can capture.",
+                actionTitle: "Resume Camera",
+                action: camera.start
+            )
+        case .unavailable:
+            PreviewPlaceholder(
+                isSimulator: false,
+                recipe: viewModel.selectedRecipe,
+                message: camera.statusMessage,
                 actionTitle: "Resume Camera",
                 action: camera.start
             )
@@ -376,6 +404,9 @@ struct CameraScreen: View {
                     Text(viewModel.selectedRecipe.name)
                         .font(.system(.title3, design: .rounded).weight(.bold))
                         .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                        .allowsTightening(true)
                 }
 
                 Spacer()
@@ -408,6 +439,9 @@ struct CameraScreen: View {
                 Label("Capture on iPhone", systemImage: "iphone")
                     .font(.system(.caption, design: .rounded).weight(.semibold))
                     .foregroundStyle(.white.opacity(0.56))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+                    .allowsTightening(true)
                     .frame(minHeight: FilmyTheme.minimumHitTarget)
                     .accessibilityLabel("Capture is available on a physical iPhone")
             }

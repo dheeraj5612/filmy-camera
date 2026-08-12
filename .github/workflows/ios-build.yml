@@ -10,6 +10,7 @@ on:
       - "FilmyCameraUITests/**"
       - "FilmyCamera.xcodeproj/**"
       - "scripts/release/**"
+      - "docs/release-checklist.md"
       - "project.yml"
       - ".github/workflows/ios-build.yml"
   pull_request: {}
@@ -63,7 +64,7 @@ jobs:
           if grep -Eq '^(FilmyCamera/|FilmyCameraTests/|FilmyCameraUITests/|FilmyCamera\.xcodeproj/|project\.yml$|\.github/workflows/ios-build\.yml$)' <<<"${changed_files}"; then
             ios_changed=true
           fi
-          if grep -Eq '^(scripts/release/|project\.yml$|FilmyCamera/Info\.plist$|FilmyCamera/Resources/PrivacyInfo\.xcprivacy$|docs/app-store/)' <<<"${changed_files}"; then
+          if grep -Eq '^(scripts/release/|project\.yml$|FilmyCamera/Info\.plist$|FilmyCamera/Resources/PrivacyInfo\.xcprivacy$|docs/app-store/|docs/release-checklist\.md$)' <<<"${changed_files}"; then
             release_scripts_changed=true
           fi
 
@@ -108,6 +109,19 @@ jobs:
           set -euo pipefail
           echo "${GITHUB_WORKSPACE}/.ci/xcodegen/bin" >> "${GITHUB_PATH}"
           "${GITHUB_WORKSPACE}/.ci/xcodegen/bin/xcodegen" --version
+
+      - name: Select and verify Xcode 16.4
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -d /Applications/Xcode_16.4.app/Contents/Developer ]]; then
+            echo "DEVELOPER_DIR=/Applications/Xcode_16.4.app/Contents/Developer" >> "${GITHUB_ENV}"
+          fi
+          xcodebuild -version
+          [[ "$(xcodebuild -version | awk '/^Xcode / { print $2; exit }')" == "16.4" ]] || {
+            echo "The iOS gate requires Xcode 16.4" >&2
+            exit 1
+          }
 
       - name: Generate Xcode project
         run: xcodegen generate --spec project.yml
@@ -208,12 +222,25 @@ jobs:
   release-scripts:
     needs: change-scope
     if: needs.change-scope.outputs.release_scripts_changed == 'true'
-    runs-on: ubuntu-latest
+    runs-on: macos-15
     timeout-minutes: 10
 
     steps:
       - name: Check out repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Select and verify Xcode 16.4
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -d /Applications/Xcode_16.4.app/Contents/Developer ]]; then
+            echo "DEVELOPER_DIR=/Applications/Xcode_16.4.app/Contents/Developer" >> "${GITHUB_ENV}"
+          fi
+          xcodebuild -version
+          [[ "$(xcodebuild -version | awk '/^Xcode / { print $2; exit }')" == "16.4" ]] || {
+            echo "The release-scripts gate requires Xcode 16.4" >&2
+            exit 1
+          }
 
       - name: Validate release script syntax and safety
         shell: bash

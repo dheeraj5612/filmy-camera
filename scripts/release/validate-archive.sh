@@ -7,6 +7,10 @@ if [[ -z "${archive_path}" ]]; then
   exit 64
 fi
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+root_dir="$(cd "${script_dir}/../.." && pwd)"
+project_spec="${root_dir}/project.yml"
+
 if [[ ! -d "${archive_path}" ]]; then
   echo "Archive not found: ${archive_path}" >&2
   exit 1
@@ -37,6 +41,9 @@ bundle_id="$(plist_value CFBundleIdentifier)"
 version="$(plist_value CFBundleShortVersionString)"
 build="$(plist_value CFBundleVersion)"
 
+expected_version="$(sed -n 's/^[[:space:]]*MARKETING_VERSION:[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' "${project_spec}" | head -n 1)"
+expected_build="$(sed -n 's/^[[:space:]]*CURRENT_PROJECT_VERSION:[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' "${project_spec}" | head -n 1)"
+
 [[ "${bundle_id}" == "com.dheeraj.filmycamera" ]] || {
   echo "Unexpected bundle identifier: ${bundle_id}" >&2
   exit 1
@@ -44,6 +51,11 @@ build="$(plist_value CFBundleVersion)"
 
 [[ -n "${version}" && -n "${build}" ]] || {
   echo "Archive is missing marketing version or build number" >&2
+  exit 1
+}
+
+[[ "${version}" == "${expected_version}" && "${build}" == "${expected_build}" ]] || {
+  echo "Archive version/build ${version} (${build}) does not match project.yml ${expected_version} (${expected_build})" >&2
   exit 1
 }
 
@@ -71,6 +83,8 @@ application_identifier="$(profile_value application-identifier)"
 profile_team_id="${application_identifier%%.*}"
 profile_bundle_id="${application_identifier#*.}"
 profile_get_task_allow="$(profile_value get-task-allow)"
+profile_expiration="$(/usr/libexec/PlistBuddy -c 'Print :ExpirationDate' "${profile_plist}" 2>/dev/null || true)"
+profile_expiration_epoch="$(date -j -f '%Y-%m-%d %H:%M:%S %z' "${profile_expiration}" '+%s' 2>/dev/null || true)"
 
 [[ "${profile_bundle_id}" == "${bundle_id}" ]] || {
   echo "Provisioning profile bundle identifier does not match app: ${profile_bundle_id}" >&2
@@ -89,6 +103,11 @@ profile_get_task_allow="$(profile_value get-task-allow)"
 
 [[ "${profile_get_task_allow}" == "false" ]] || {
   echo "Distribution archive must disable get-task-allow" >&2
+  exit 1
+}
+
+[[ -n "${profile_expiration_epoch}" && "${profile_expiration_epoch}" -gt "$(date '+%s')" ]] || {
+  echo "Embedded provisioning profile is expired or has an unreadable expiration date" >&2
   exit 1
 }
 

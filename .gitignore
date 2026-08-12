@@ -16,7 +16,10 @@ Packages/
 # Local release credentials and archives
 *.p12
 *.mobileprovision
+*.provisionprofile
 *.cer
+*.p8
+*.pem
 *.ipa
 *.xcarchive
 fastlane/report.xml

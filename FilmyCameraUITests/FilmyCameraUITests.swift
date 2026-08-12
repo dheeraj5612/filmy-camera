@@ -46,6 +46,8 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertTrue(settings.waitForExistence(timeout: 5))
         settings.tap()
         XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["privacy-policy-link"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["support-link"].waitForExistence(timeout: 5))
         attachScreenshot(named: "settings")
     }
 

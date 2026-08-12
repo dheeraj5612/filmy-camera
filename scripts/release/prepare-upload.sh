@@ -176,6 +176,8 @@ has_installed_app_store_profile() {
   local decoded_profile
   local application_identifier
   local get_task_allow
+  local expiration_date
+  local expiration_epoch
 
   [[ -n "${user_home}" ]] || return 1
   command -v security >/dev/null 2>&1 || return 1
@@ -190,8 +192,11 @@ has_installed_app_store_profile() {
     fi
     application_identifier="$(plist_value 'Entitlements:application-identifier' "${decoded_profile}" 2>/dev/null || true)"
     get_task_allow="$(plist_value 'Entitlements:get-task-allow' "${decoded_profile}" 2>/dev/null || true)"
+    expiration_date="$(/usr/libexec/PlistBuddy -c 'Print :ExpirationDate' "${decoded_profile}" 2>/dev/null || true)"
+    expiration_epoch="$(date -j -f '%Y-%m-%d %H:%M:%S %z' "${expiration_date}" '+%s' 2>/dev/null || true)"
     [[ "${application_identifier}" == "${team_id}.${bundle_id}" ]] || continue
     [[ "${get_task_allow}" == false ]] || continue
+    [[ -n "${expiration_epoch}" && "${expiration_epoch}" -gt "$(date '+%s')" ]] || continue
     # App Store profiles do not contain a ProvisionedDevices entitlement.
     if /usr/libexec/PlistBuddy -c 'Print :ProvisionedDevices' "${decoded_profile}" >/dev/null 2>&1; then
       continue
@@ -317,6 +322,8 @@ validate_exported_ipa() {
   local profile_bundle_id
   local profile_team_id
   local get_task_allow
+  local expiration_date
+  local expiration_epoch
   local signature_details
 
   [[ -f "${ipa}" ]] || {
@@ -372,12 +379,18 @@ validate_exported_ipa() {
   profile_team_id="${application_identifier%%.*}"
   profile_bundle_id="${application_identifier#*.}"
   get_task_allow="$(plist_value 'Entitlements:get-task-allow' "${decoded_profile}" 2>/dev/null || true)"
+  expiration_date="$(plist_value ExpirationDate "${decoded_profile}" 2>/dev/null || true)"
+  expiration_epoch="$(date -j -f '%Y-%m-%d %H:%M:%S %z' "${expiration_date}" '+%s' 2>/dev/null || true)"
   [[ "${profile_team_id}" == "${team_id}" && "${profile_bundle_id}" == "${bundle_id}" ]] || {
     echo "Exported IPA provisioning profile does not match the production app" >&2
     return 1
   }
   [[ "${get_task_allow}" == false ]] || {
     echo "Exported IPA must disable get-task-allow" >&2
+    return 1
+  }
+  [[ -n "${expiration_epoch}" && "${expiration_epoch}" -gt "$(date '+%s')" ]] || {
+    echo "Exported IPA provisioning profile is expired or has an unreadable expiration date" >&2
     return 1
   }
 

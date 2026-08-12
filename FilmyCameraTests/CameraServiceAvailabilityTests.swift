@@ -29,4 +29,16 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         XCTAssertEqual(CameraService.Availability.permissionDenied.rawValue, "permissionDenied")
         XCTAssertEqual(CameraService.Availability.needsRecovery.rawValue, "needsRecovery")
     }
+
+    func testStalePreviewOwnerCannotRemoveNewerFrameHandler() {
+        let camera = CameraService()
+        let olderHandler = camera.installFrameHandler { _ in }
+        let newerHandler = camera.installFrameHandler { _ in }
+
+        camera.removeFrameHandler(olderHandler)
+        XCTAssertNotNil(camera.onFrame)
+
+        camera.removeFrameHandler(newerHandler)
+        XCTAssertNil(camera.onFrame)
+    }
 }
