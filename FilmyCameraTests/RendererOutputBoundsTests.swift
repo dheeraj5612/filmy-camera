@@ -1,5 +1,6 @@
 import CoreGraphics
 import CoreImage
+import UIKit
 import XCTest
 @testable import FilmyCamera
 
@@ -192,6 +193,67 @@ final class RendererOutputBoundsTests: XCTestCase {
             .map { abs(Double($0.0) - Double($0.1)) }
             .reduce(0, +)
         XCTAssertGreaterThan(distance, 0.01)
+    }
+
+    func testRecipeLookRemainsStableAcrossPreviewPhotoAndExportQuality() {
+        let extent = CGRect(x: 0, y: 0, width: 64, height: 48)
+        let input = CIImage(color: CIColor(red: 0.76, green: 0.34, blue: 0.16, alpha: 1))
+            .cropped(to: extent)
+        var recipe = FilmRecipe.builtIns[7]
+        recipe.grain = 0.42
+        recipe.grainSize = 1.2
+        recipe.halation = 0.55
+        let context = CIContext(options: [
+            .useSoftwareRenderer: true,
+            .cacheIntermediates: false
+        ])
+
+        let outputs = [FilmRenderer.Quality.preview, .photo, .export].map {
+            renderFloatPixels(
+                FilmRenderer.render(input, recipe: recipe, quality: $0),
+                extent: extent,
+                context: context
+            )
+        }
+
+        for pair in zip(outputs, outputs.dropFirst()) {
+            let meanAbsoluteDifference = zip(pair.0, pair.1)
+                .map { abs(Double($0.0) - Double($0.1)) }
+                .reduce(0, +) / Double(pair.0.count)
+            XCTAssertLessThan(
+                meanAbsoluteDifference,
+                0.035,
+                "Quality tier changed the look too much"
+            )
+        }
+    }
+
+    func testRecipeThumbnailUsesTheRendererAndRequestedSize() {
+        let size = CGSize(width: 120, height: 80)
+        let image = FilmRenderer.thumbnail(for: FilmRecipe.builtIns[1], size: size)
+
+        XCTAssertNotNil(image)
+        XCTAssertEqual(image?.cgImage?.width, Int(size.width))
+        XCTAssertEqual(image?.cgImage?.height, Int(size.height))
+    }
+
+    func testAspectFillCropMatchesThePreviewViewport() {
+        let source = CGRect(x: 0, y: 0, width: 4000, height: 3000)
+        let portraitCrop = CameraFrameLayout.aspectFillCrop(
+            sourceExtent: source,
+            targetSize: CGSize(width: 390, height: 844)
+        )
+        XCTAssertEqual(portraitCrop.width / portraitCrop.height, 390 / 844, accuracy: 0.0001)
+        XCTAssertEqual(portraitCrop.midX, source.midX, accuracy: 0.001)
+        XCTAssertEqual(portraitCrop.midY, source.midY, accuracy: 0.001)
+
+        let landscapeCrop = CameraFrameLayout.aspectFillCrop(
+            sourceExtent: source,
+            targetSize: CGSize(width: 844, height: 390)
+        )
+        XCTAssertEqual(landscapeCrop.width / landscapeCrop.height, 844 / 390, accuracy: 0.0001)
+        XCTAssertEqual(landscapeCrop.midX, source.midX, accuracy: 0.001)
+        XCTAssertEqual(landscapeCrop.midY, source.midY, accuracy: 0.001)
     }
 
     private func renderFloatPixels(

@@ -310,13 +310,33 @@ final class PhotoLibraryService: ObservableObject {
             options.isNetworkAccessAllowed = true
             options.isSynchronous = false
 
+            let callbackLock = NSLock()
+            var didFinish = false
+
             PHImageManager.default().requestImage(
                 for: asset,
                 targetSize: targetSize,
                 contentMode: .aspectFill,
                 options: options
-            ) { image, _ in
-                continuation.resume(returning: image)
+            ) { image, info in
+                let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                let isCancelled = (info?[PHImageCancelledKey] as? Bool) ?? false
+                let hasError = info?[PHImageErrorKey] != nil
+
+                // Photos may deliver a fast degraded image before the final
+                // high-quality result. Resume exactly once, and surface
+                // cancellation/iCloud failures as a nil image.
+                guard !isDegraded || isCancelled || hasError else { return }
+
+                callbackLock.lock()
+                guard !didFinish else {
+                    callbackLock.unlock()
+                    return
+                }
+                didFinish = true
+                callbackLock.unlock()
+
+                continuation.resume(returning: isCancelled || hasError ? nil : image)
             }
         }
     }

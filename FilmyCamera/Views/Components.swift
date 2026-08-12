@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 enum FilmyTheme {
     static let background = Color(red: 0.035, green: 0.039, blue: 0.044)
@@ -173,12 +174,23 @@ struct RecipeSwatch: View {
     var isSelected = false
     var compact = false
 
+    @State private var thumbnailData: Data?
+
     var body: some View {
-        LinearGradient(
-            colors: recipe.previewColors,
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
+        ZStack {
+            if let thumbnailData,
+               let image = UIImage(data: thumbnailData) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                LinearGradient(
+                    colors: recipe.previewColors,
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            }
+        }
         .overlay {
             LinearGradient(
                 colors: [.clear, .black.opacity(0.72)],
@@ -208,6 +220,11 @@ struct RecipeSwatch: View {
                 .stroke(isSelected ? FilmyTheme.accent : Color.white.opacity(0.14), lineWidth: isSelected ? 2 : 1)
         }
         .shadow(color: isSelected ? FilmyTheme.accent.opacity(0.22) : .clear, radius: 12, y: 5)
+        .task(id: recipe) {
+            thumbnailData = await Task.detached(priority: .utility) {
+                FilmRenderer.thumbnail(for: recipe)?.pngData()
+            }.value
+        }
     }
 }
 

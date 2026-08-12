@@ -159,10 +159,12 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
         for device: MTLDevice?
     ) -> (context: CIContext, commandQueue: MTLCommandQueue?) {
         guard let device else {
-            return (
-                CIContext(options: [.useSoftwareRenderer: true]),
-                nil
-            )
+            var options: [CIContextOption: Any] = [.useSoftwareRenderer: true]
+            if let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) {
+                options[.workingColorSpace] = colorSpace
+                options[.outputColorSpace] = colorSpace
+            }
+            return (CIContext(options: options), nil)
         }
 
         let context: CIContext
@@ -170,9 +172,14 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
            device === sharedDevice {
             context = FilmRenderer.sharedContext
         } else {
+            var options: [CIContextOption: Any] = [.cacheIntermediates: false]
+            if let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) {
+                options[.workingColorSpace] = colorSpace
+                options[.outputColorSpace] = colorSpace
+            }
             context = CIContext(
                 mtlDevice: device,
-                options: [.cacheIntermediates: false]
+                options: options
             )
         }
 
@@ -228,7 +235,7 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
 
         let targetRect = CGRect(origin: .zero, size: drawableSize)
         let filtered = FilmRenderer.render(image, recipe: recipe, quality: quality)
-        let fitted = aspectFill(filtered, in: targetRect)
+        let fitted = CameraFrameLayout.aspectFill(filtered, in: targetRect)
         ciContext.render(
             fitted,
             to: drawable.texture,
@@ -251,25 +258,4 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
         }
     }
 
-    private func aspectFill(_ image: CIImage, in target: CGRect) -> CIImage {
-        let extent = image.extent
-        guard extent.width > 0,
-              extent.height > 0,
-              target.width > 0,
-              target.height > 0 else {
-            return image
-        }
-
-        let normalized = image.transformed(
-            by: CGAffineTransform(translationX: -extent.minX, y: -extent.minY)
-        )
-        let scale = max(target.width / extent.width, target.height / extent.height)
-        let scaled = normalized.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-        let scaledExtent = scaled.extent
-        let offset = CGAffineTransform(
-            translationX: target.midX - scaledExtent.midX,
-            y: target.midY - scaledExtent.midY
-        )
-        return scaled.transformed(by: offset).cropped(to: target)
-    }
 }

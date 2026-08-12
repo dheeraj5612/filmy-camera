@@ -28,19 +28,23 @@ The analog character comes from tone, color, grain, and halation. The interface 
 - Added recipe/date provenance plus share, delete, and destructive-confirmation actions to the Gallery detail flow.
 - Tied camera start/stop to the active tab and scene phase, with a recoverable interruption state instead of frozen capture controls.
 - Corrected tap-to-focus for the preview's aspect-fill crop and aligned camera connections with portrait/landscape layouts.
+- Made the viewfinder crop a shared camera-frame contract so the saved still keeps the same composition as the live preview.
+- Made capture fail closed when the selected look cannot be materialized instead of silently falling back to the unfiltered image.
 - Reframed capture confirmation around `Keep Frame` and added a recipe metadata chip.
 - Corrected simulator Settings permission states so denied camera access is not shown as `READY`.
 - Updated UI tests to cover the new `Roll` and `Tune` language.
+- Replaced recipe-rail gradient placeholders with deterministic synthetic scenes rendered through the real FilmRenderer, and made preview/photo/export share one canonical color cube.
+- Made the Core Image working/output color space explicit sRGB and normalized grain/halation scale across output resolutions.
 
 ## Deliberately deferred
 
-- Bundled photographic recipe thumbnails: the current implementation has no licensed neutral stills or capture sample set. The next asset pass should add original/licensed reference images and run them through the existing preview renderer.
+- Bundled photographic recipe thumbnails: the current implementation still has no licensed neutral stills or capture sample set. The rail now uses original synthetic reference scenes rendered by the production pipeline; a photographic asset pass should add only original/licensed images and run them through the same renderer.
 - Accessible focus/exposure lock controls: the camera service currently supports tap focus/exposure and pinch zoom, but not an explicit lock state. The UI should not imply controls the service cannot honor.
 
 ## Verification
 
 - Simulator build succeeded for the iOS 18.5 `FilmyCamera iPhone` runtime.
-- Unit/renderer tests: 17 passed.
+- Unit/renderer tests: 20 passed.
 - UI tests: 2 passed.
-- Full simulator suite: 19 tests passed with 0 failures.
+- Full simulator suite: 22 tests passed with 0 failures.
 - Final simulator review confirmed the unavailable-camera state and compact offline action plate remain legible.

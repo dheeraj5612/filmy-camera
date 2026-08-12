@@ -56,6 +56,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     @Published public private(set) var statusMessage = "Camera is ready"
     @Published public private(set) var zoomFactor: CGFloat = 1
     @Published public private(set) var previewFrameSize: CGSize = .zero
+    @Published public private(set) var previewViewportSize: CGSize = .zero
 
     /// Receives unfiltered live frames on the main queue.
     public var onFrame: FrameHandler?
@@ -141,6 +142,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// surface when the phone rotates or enters a split-screen layout.
     public func updateOrientation(for viewSize: CGSize) {
         guard viewSize.width > 0, viewSize.height > 0 else { return }
+        publishPreviewViewportSize(viewSize)
         let nextAngle: CGFloat = viewSize.width > viewSize.height ? 0 : 90
 
         sessionQueue.async { [weak self] in
@@ -495,6 +497,12 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private func publishPreviewFrameSize(_ size: CGSize) {
         publishOnMain { [weak self] in
             self?.previewFrameSize = size
+        }
+    }
+
+    private func publishPreviewViewportSize(_ size: CGSize) {
+        publishOnMain { [weak self] in
+            self?.previewViewportSize = size
         }
     }
 

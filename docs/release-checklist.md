@@ -11,7 +11,7 @@
 
 - [ ] Test camera permission denial, recovery, and first-run messaging on a physical iPhone.
 - [ ] Test photo-library permission denial, limited access, save, and recent-photo behavior.
-- [ ] Verify preview and saved output use the same selected recipe, including the capture-review handoff.
+- [ ] Verify preview and saved output use the same selected recipe, including the capture-review handoff (the shared aspect-fill crop and fail-closed render path are covered in simulator tests; physical-device verification remains open).
 - [ ] Verify output bounds, orientation, image dimensions, metadata, and memory use with representative photos.
 - [ ] Test every bundled recipe in bright daylight, low light, skin tones, sky, and mixed lighting.
 - [ ] Test interruption/resume for phone calls, backgrounding, camera unavailable, and low storage.
@@ -22,7 +22,7 @@
 
 - [x] Run `xcodegen generate` from a clean checkout.
 - [x] Run the credential-free release project preflight (`scripts/release/validate-project.sh`).
-- [x] Run the iPhone Simulator build and XCTest workflow in `.github/workflows/ios-build.yml` (17 unit/renderer tests plus 2 UI tests).
+- [x] Run the iPhone Simulator build and XCTest workflow in `.github/workflows/ios-build.yml` (20 unit/renderer tests plus 2 UI tests on the current branch).
 - [x] Keep release-script syntax, ShellCheck, and fail-closed upload-preparation checks in CI.
 - [ ] Run a Release archive on a physical-device destination.
 - [x] Validate `Info.plist`, launch behavior, app icon, version `1.0.0`, and build number `1`.
@@ -77,5 +77,6 @@ The archive wrapper generates the project and creates a Release archive for a ge
 - Local simulator: iPhone 17, iOS 26.5 — camera shell, recipe editor, Gallery/Settings navigation, accessibility tree, screenshots, and simulator capture fallback verified.
 - Historical unsigned archive: `/tmp/filmycamera-rc-20260812-ui-deterministic.xcarchive` — contains dSYM and `PrivacyInfo.xcprivacy`, but predates current main; rebuild and pin a current archive before release use.
 - Current product evidence covers Provia Standard, camera-session recovery, deterministic UI-test mode, saved recipe/date provenance, share/delete actions in Gallery, and release-script fail-closed behavior. The archive validator now fails closed on a missing profile, mismatched team/bundle, enabled `get-task-allow`, missing dSYM/privacy manifest, or non-distribution signature. Signing is only declared in project settings for team `AQW5C8DEEG`; CI remains simulator-only and unsigned, with no signed device archive or App Store submission proven.
+- Current branch evidence adds a renderer-backed synthetic recipe rail, canonical look parity across quality tiers, shared preview/still aspect-fill framing, and a fail-closed render path. The local iOS 18.5 simulator suite is 22 tests green; this evidence must be refreshed against the exact merged mainline SHA before release use.
 - Signing follow-up: [PR #4](https://github.com/dheeraj5612/filmy-camera/pull/4) and [PR #5](https://github.com/dheeraj5612/filmy-camera/pull/5) merged with green simulator/XCTest checks.
 - Physical QA and App Store Connect submission remain open until device and Apple account access are available.
