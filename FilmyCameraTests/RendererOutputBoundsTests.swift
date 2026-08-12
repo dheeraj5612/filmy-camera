@@ -195,6 +195,110 @@ final class RendererOutputBoundsTests: XCTestCase {
         XCTAssertGreaterThan(distance, 0.01)
     }
 
+    func testMonochromeFiltersUseDistinctChannelMixes() {
+        let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
+        let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+        let source = CIImage(color: CIColor(red: 0.90, green: 0.12, blue: 0.08, alpha: 1))
+            .cropped(to: extent)
+        let filmBases: [FilmRecipe.FilmBase] = [.acrosYellow, .acrosRed, .acrosGreen]
+        let values = filmBases.map { filmBase -> [Float] in
+            let recipe = FilmRecipe(
+                id: filmBase.rawValue,
+                name: filmBase.displayName,
+                subtitle: "Test",
+                filmBase: filmBase,
+                saturation: 0,
+                contrast: 1,
+                grain: 0,
+                vignette: 0,
+                halation: 0
+            )
+            return renderFloatPixels(
+                FilmRenderer.render(source, recipe: recipe, quality: .photo),
+                extent: extent,
+                context: context
+            )
+        }
+
+        for value in values {
+            XCTAssertEqual(value[0], value[1], accuracy: 0.001)
+            XCTAssertEqual(value[1], value[2], accuracy: 0.001)
+            XCTAssertTrue(value[0].isFinite)
+        }
+
+        let distances = [
+            zip(values[0], values[1]).map { abs(Double($0.0) - Double($0.1)) }.reduce(0, +),
+            zip(values[1], values[2]).map { abs(Double($0.0) - Double($0.1)) }.reduce(0, +)
+        ]
+        XCTAssertTrue(distances.allSatisfy { $0 > 0.005 })
+    }
+
+    func testGrainIsStableAcrossRepeatedRenders() {
+        let extent = CGRect(x: 0, y: 0, width: 32, height: 24)
+        let input = CIImage(color: CIColor(red: 0.68, green: 0.36, blue: 0.18, alpha: 1))
+            .cropped(to: extent)
+        let recipe = FilmRecipe(
+            id: "deterministic-grain",
+            name: "Deterministic Grain",
+            subtitle: "Test",
+            grain: 0.72,
+            grainSize: 1.1
+        )
+        let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+
+        let first = renderFloatPixels(
+            FilmRenderer.render(input, recipe: recipe, quality: .photo),
+            extent: extent,
+            context: context
+        )
+        let second = renderFloatPixels(
+            FilmRenderer.render(input, recipe: recipe, quality: .photo),
+            extent: extent,
+            context: context
+        )
+
+        let difference = zip(first, second)
+            .map { abs(Double($0.0) - Double($0.1)) }
+            .reduce(0, +)
+        XCTAssertLessThan(difference, 0.0001)
+    }
+
+    func testFXBlueRespondsMoreToBlueHuesThanWarmHues() {
+        let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
+        let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+        let base = FilmRecipe(
+            id: "base",
+            name: "Base",
+            subtitle: "Test",
+            grain: 0,
+            vignette: 0,
+            halation: 0
+        )
+        var fxBlue = base
+        fxBlue.fxBlue = 1
+
+        func distance(for color: CIColor) -> Double {
+            let input = CIImage(color: color).cropped(to: extent)
+            let original = renderFloatPixels(
+                FilmRenderer.render(input, recipe: base, quality: .photo),
+                extent: extent,
+                context: context
+            )
+            let filtered = renderFloatPixels(
+                FilmRenderer.render(input, recipe: fxBlue, quality: .photo),
+                extent: extent,
+                context: context
+            )
+            return zip(original, filtered)
+                .map { abs(Double($0.0) - Double($0.1)) }
+                .reduce(0, +)
+        }
+
+        let blueDistance = distance(for: CIColor(red: 0.08, green: 0.18, blue: 0.90, alpha: 1))
+        let warmDistance = distance(for: CIColor(red: 0.90, green: 0.20, blue: 0.08, alpha: 1))
+        XCTAssertGreaterThan(blueDistance, warmDistance + 0.001)
+    }
+
     func testRecipeLookRemainsStableAcrossPreviewPhotoAndExportQuality() {
         let extent = CGRect(x: 0, y: 0, width: 64, height: 48)
         let input = CIImage(color: CIColor(red: 0.76, green: 0.34, blue: 0.16, alpha: 1))

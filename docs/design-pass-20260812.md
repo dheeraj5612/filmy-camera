@@ -40,6 +40,8 @@ The analog character comes from tone, color, grain, and halation. The interface 
 
 - Bundled photographic recipe thumbnails: the current implementation still has no licensed neutral stills or capture sample set. The rail now uses original synthetic reference scenes rendered by the production pipeline; a photographic asset pass should add only original/licensed images and run them through the same renderer.
 - Accessible focus/exposure lock controls: the camera service currently supports tap focus/exposure and pinch zoom, but not an explicit lock state. The UI should not imply controls the service cannot honor.
+- Physical-device color calibration and signed release validation: simulator and hosted gates prove the render contract and UI shell, but cannot prove sensor-specific color, capture metadata, memory pressure, or Apple distribution access.
+- Capture/output fidelity pass: monochrome filters now use typed channel mixes, hue-sector response keeps Color Chrome and FX Blue selective, grain is deterministic across render tiers, still capture keeps encoded source data through rendering, and Photos writes the filtered JPEG with capture-time metadata while excluding GPS by default.
 
 ## Verification
 
