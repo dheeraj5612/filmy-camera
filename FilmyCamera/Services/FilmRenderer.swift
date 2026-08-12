@@ -3,44 +3,27 @@ import CoreImage
 import Foundation
 import Metal
 import MetalKit
+import UIKit
 
 /// Core Image renderer for live camera frames and full-resolution stills.
 ///
 /// Each recipe gets a generated 3D color cube. The cube is cached by the
-/// recipe's complete value and quality tier, so live frames do not rebuild the
-/// table while the filter graph remains deterministic and inspectable.
+/// renderer inputs that actually affect the color transform, so exposure and
+/// finishing-slider changes do not rebuild the table while the filter graph
+/// remains deterministic and inspectable.
 public final class FilmRenderer {
     public enum Quality: Hashable, Sendable {
         case preview
         case photo
         case export
 
+        /// Keep one canonical transform across the live preview, still, and
+        /// export paths. Quality is retained as a call-site contract so those
+        /// paths can evolve independently without changing a recipe's look.
         fileprivate var cubeDimension: Int {
             switch self {
-            case .preview:
-                return 16
-            case .photo:
+            case .preview, .photo, .export:
                 return 32
-            case .export:
-                return 48
-            }
-        }
-
-        fileprivate var grainScale: Double {
-            switch self {
-            case .preview:
-                return 0.72
-            case .photo, .export:
-                return 1
-            }
-        }
-
-        fileprivate var halationBlurScale: Double {
-            switch self {
-            case .preview:
-                return 0.65
-            case .photo, .export:
-                return 1
             }
         }
     }
@@ -54,16 +37,39 @@ public final class FilmRenderer {
         if let metalDevice {
             return CIContext(
                 mtlDevice: metalDevice,
-                options: [.cacheIntermediates: false]
+                options: contextOptions
             )
         }
 
-        return CIContext(options: [.useSoftwareRenderer: true])
+        return CIContext(options: contextOptions.merging([
+            .useSoftwareRenderer: true
+        ]) { _, new in new })
     }()
 
+    private struct CubeRecipeKey: Hashable, Sendable {
+        let filmBase: FilmRecipe.FilmBase
+        let colorChrome: Double
+        let blueResponse: Double
+        let fxBlue: Double
+        let palette: FilmRecipe.Palette
+
+        init(recipe: FilmRecipe) {
+            filmBase = recipe.filmBase
+            colorChrome = recipe.colorChrome
+            blueResponse = recipe.blueResponse
+            fxBlue = recipe.fxBlue
+            palette = recipe.palette
+        }
+    }
+
     private struct CubeCacheKey: Hashable, Sendable {
-        let recipe: FilmRecipe
+        let recipe: CubeRecipeKey
         let dimension: Int
+
+        init(recipe: FilmRecipe, dimension: Int) {
+            self.recipe = CubeRecipeKey(recipe: recipe)
+            self.dimension = dimension
+        }
     }
 
     private final class CubeCache: @unchecked Sendable {
@@ -73,8 +79,22 @@ public final class FilmRenderer {
 
         func data(for key: CubeCacheKey, make: () -> NSData) -> NSData {
             lock.lock()
+            if let cached = storage[key] {
+                lock.unlock()
+                return cached
+            }
+            lock.unlock()
+
+            // Cube generation is intentionally outside the lock. A recipe
+            // change should not stall an already-rendering frame or another
+            // thread requesting a different recipe.
+            let generated = make()
+
+            lock.lock()
             defer { lock.unlock() }
 
+            // Another thread may have generated the same cube while this
+            // thread was outside the lock. Reuse the first completed value.
             if let cached = storage[key] {
                 return cached
             }
@@ -85,7 +105,6 @@ public final class FilmRenderer {
                 storage.removeAll(keepingCapacity: true)
             }
 
-            let generated = make()
             storage[key] = generated
             return generated
         }
@@ -111,7 +130,84 @@ public final class FilmRenderer {
     private static let immutableResources = ImmutableResources()
     private static let sRGBColorSpace = CGColorSpace(name: CGColorSpace.sRGB)
 
+    private static var contextOptions: [CIContextOption: Any] {
+        var options: [CIContextOption: Any] = [
+            .cacheIntermediates: false
+        ]
+        if let sRGBColorSpace {
+            options[.workingColorSpace] = sRGBColorSpace
+            options[.outputColorSpace] = sRGBColorSpace
+        }
+        return options
+    }
+
     private init() {}
+
+    /// Builds a tiny deterministic reference scene for recipe selection UI.
+    /// It is deliberately synthetic rather than a bundled photograph, so the
+    /// picker previews the real renderer without introducing an unlicensed
+    /// image asset or pretending that one lighting condition is universal.
+    public static func thumbnail(
+        for recipe: FilmRecipe,
+        size: CGSize = CGSize(width: 264, height: 160)
+    ) -> UIImage? {
+        let width = max(size.width.rounded(), 1)
+        let height = max(size.height.rounded(), 1)
+        let extent = CGRect(x: 0, y: 0, width: width, height: height)
+        var reference = CIImage(
+            color: CIColor(red: 0.15, green: 0.12, blue: 0.10, alpha: 1)
+        )
+        .cropped(to: extent)
+
+        let blocks: [(CGRect, CIColor)] = [
+            (
+                CGRect(x: 0, y: height * 0.48, width: width, height: height * 0.52),
+                CIColor(red: 0.28, green: 0.47, blue: 0.58, alpha: 1)
+            ),
+            (
+                CGRect(x: 0, y: height * 0.18, width: width, height: height * 0.30),
+                CIColor(red: 0.72, green: 0.56, blue: 0.34, alpha: 1)
+            ),
+            (
+                CGRect(x: width * 0.04, y: height * 0.16, width: width * 0.42, height: height * 0.30),
+                CIColor(red: 0.15, green: 0.29, blue: 0.18, alpha: 1)
+            ),
+            (
+                CGRect(x: width * 0.56, y: height * 0.14, width: width * 0.36, height: height * 0.24),
+                CIColor(red: 0.68, green: 0.19, blue: 0.12, alpha: 1)
+            ),
+            (
+                CGRect(x: width * 0.48, y: height * 0.48, width: width * 0.30, height: height * 0.34),
+                CIColor(red: 0.66, green: 0.39, blue: 0.28, alpha: 1)
+            ),
+            (
+                CGRect(x: width * 0.10, y: height * 0.56, width: width * 0.20, height: height * 0.22),
+                CIColor(red: 0.91, green: 0.78, blue: 0.53, alpha: 1)
+            ),
+            (
+                CGRect(x: width * 0.80, y: height * 0.56, width: width * 0.12, height: height * 0.22),
+                CIColor(red: 0.86, green: 0.86, blue: 0.82, alpha: 1)
+            )
+        ]
+
+        for (blockRect, color) in blocks {
+            reference = CIImage(color: color)
+                .cropped(to: blockRect)
+                .composited(over: reference)
+        }
+
+        let rendered = render(reference, recipe: recipe, quality: .preview)
+        guard let sRGBColorSpace,
+              let image = sharedContext.createCGImage(
+                  rendered,
+                  from: extent,
+                  format: .RGBA8,
+                  colorSpace: sRGBColorSpace
+              ) else {
+            return nil
+        }
+        return UIImage(cgImage: image)
+    }
 
     /// Applies the selected look to a CIImage. The returned image remains a
     /// CIImage so the caller can render it directly into a Metal texture or a
@@ -322,9 +418,13 @@ public final class FilmRenderer {
     private static func applyGrain(
         to image: CIImage,
         recipe: FilmRecipe,
-        quality: Quality
+        quality _: Quality
     ) -> CIImage {
-        let amount = clamp(recipe.grain * quality.grainScale, lower: 0, upper: 1)
+        // Grain is part of the look, not a preview-only effect. Normalize the
+        // procedural frequency to a reference image size so the same recipe
+        // remains visually stable when the source changes from a video frame
+        // to a full-resolution still.
+        let amount = clamp(recipe.grain, lower: 0, upper: 1)
         guard amount > 0.0001,
               let random = immutableResources.randomGeneratorImage,
               let softLight = CIFilter(name: "CISoftLightBlendMode") else {
@@ -332,7 +432,13 @@ public final class FilmRenderer {
         }
 
         let extent = image.extent
-        let grainSize = max(0.35, min(recipe.grainSize, 2.5))
+        let referenceDimension = 1080.0
+        let outputDimension = max(Double(extent.width), Double(extent.height))
+        let resolutionScale = max(outputDimension / referenceDimension, 0.5)
+        let grainSize = max(
+            0.35,
+            min(recipe.grainSize * resolutionScale, 8.0)
+        )
         let noise = random
             .transformed(by: CGAffineTransform(scaleX: 1 / grainSize, y: 1 / grainSize))
             .cropped(to: extent)
@@ -377,12 +483,15 @@ public final class FilmRenderer {
     private static func applyHalation(
         to image: CIImage,
         recipe: FilmRecipe,
-        quality: Quality
+        quality _: Quality
     ) -> CIImage {
         let amount = clamp(recipe.halation, lower: 0, upper: 1)
         guard amount > 0.0001 else { return image }
 
         let extent = image.extent
+        let referenceDimension = 1080.0
+        let outputDimension = max(Double(extent.width), Double(extent.height))
+        let resolutionScale = max(outputDimension / referenceDimension, 0.5)
         let highlightMask = image
             .applyingFilter("CIColorControls", parameters: [
                 kCIInputSaturationKey: 0,
@@ -391,7 +500,7 @@ public final class FilmRenderer {
             ])
             .applyingFilter("CIMaskToAlpha")
             .applyingFilter("CIGaussianBlur", parameters: [
-                kCIInputRadiusKey: 1.5 + amount * 4.5 * quality.halationBlurScale
+                kCIInputRadiusKey: (1.5 + amount * 4.5) * resolutionScale
             ])
             .cropped(to: extent)
 

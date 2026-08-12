@@ -11,6 +11,7 @@
 		1FA4D1311CC59621E8A662B9 /* FilmyCameraApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D59729E8AC667A9120C460CB /* FilmyCameraApp.swift */; };
 		2700E6F80817004C1415242D /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 432F02B03418EEADA550733F /* PrivacyInfo.xcprivacy */; };
 		28C6A5B2352ED08BD1E21114 /* CameraViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A9AFC52D1FB5ECED33CB2DA /* CameraViewModel.swift */; };
+		2959F22572BAEE1007915415 /* CameraFrameLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D82A69BBE148C6317A2FA41 /* CameraFrameLayout.swift */; };
 		3D00E159DAA3E3944EACD36E /* CaptureReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53925B09E478B6CD4AF36BE1 /* CaptureReviewView.swift */; };
 		3F104912E7B0F794D16EC5E3 /* GalleryScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10A0F8269AA5365633E9A3C0 /* GalleryScreen.swift */; };
 		47FDBDD59FA6A75558E422B8 /* FilmRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F56BE8EB7D6BDB867CFD8C3A /* FilmRenderer.swift */; };
@@ -59,6 +60,7 @@
 		61617C6B4DB09D291F5DEA10 /* FilmyCameraUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmyCameraUITests.swift; sourceTree = "<group>"; };
 		6A9AFC52D1FB5ECED33CB2DA /* CameraViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraViewModel.swift; sourceTree = "<group>"; };
 		8433ABA6CF2F34E7F51023B6 /* PhotoLibraryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibraryService.swift; sourceTree = "<group>"; };
+		8D82A69BBE148C6317A2FA41 /* CameraFrameLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraFrameLayout.swift; sourceTree = "<group>"; };
 		8F580BECA95D881DF1EB3789 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A3940D2834957A9E44F66872 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A657E128117A2C10BAD8B761 /* FilmyCamera.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = FilmyCamera.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -107,6 +109,7 @@
 		325853F97B7E117222F4E01E /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				8D82A69BBE148C6317A2FA41 /* CameraFrameLayout.swift */,
 				DC1520CC0C54A1860FEB034D /* CameraService.swift */,
 				F56BE8EB7D6BDB867CFD8C3A /* FilmRenderer.swift */,
 				8433ABA6CF2F34E7F51023B6 /* PhotoLibraryService.swift */,
@@ -309,6 +312,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				2959F22572BAEE1007915415 /* CameraFrameLayout.swift in Sources */,
 				AF1962852DF723AD8B04E986 /* CameraScreen.swift in Sources */,
 				6106750DF50A29C7163FD992 /* CameraService.swift in Sources */,
 				28C6A5B2352ED08BD1E21114 /* CameraViewModel.swift in Sources */,

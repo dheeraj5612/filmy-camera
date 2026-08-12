@@ -147,6 +147,7 @@ final class CameraViewModel: ObservableObject {
         isCapturing = true
         saveErrorMessage = nil
         let recipe = selectedRecipe
+        let viewportSize = camera.previewViewportSize
 
         camera.capturePhoto { [weak self] image in
             Task { @MainActor [weak self] in
@@ -163,11 +164,19 @@ final class CameraViewModel: ObservableObject {
                 }
 
                 DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                    let finishedImage = Self.render(image: image, recipe: recipe) ?? image
+                    let finishedImage = Self.render(
+                        image: image,
+                        recipe: recipe,
+                        viewportSize: viewportSize
+                    )
 
                     DispatchQueue.main.async {
                         guard let self else { return }
                         self.isCapturing = false
+                        guard let finishedImage else {
+                            self.showToast("The selected look could not be rendered. Try the capture again.")
+                            return
+                        }
                         self.reviewImage = finishedImage
                         self.reviewRecipe = recipe
                     }
@@ -213,9 +222,24 @@ final class CameraViewModel: ObservableObject {
         }
     }
 
-    private nonisolated static func render(image: UIImage, recipe: FilmRecipe) -> UIImage? {
+    private nonisolated static func render(
+        image: UIImage,
+        recipe: FilmRecipe,
+        viewportSize: CGSize
+    ) -> UIImage? {
         guard let input = CIImage(image: image) else { return nil }
-        let filtered = FilmRenderer.render(input, recipe: recipe, quality: .photo)
+        let framedInput: CIImage
+        if viewportSize.width > 0, viewportSize.height > 0 {
+            let crop = CameraFrameLayout.aspectFillCrop(
+                sourceExtent: input.extent,
+                targetSize: viewportSize
+            )
+            framedInput = input.cropped(to: crop)
+        } else {
+            framedInput = input
+        }
+
+        let filtered = FilmRenderer.render(framedInput, recipe: recipe, quality: .photo)
         guard let output = FilmRenderer.sharedContext.createCGImage(filtered, from: filtered.extent) else { return nil }
         return UIImage(cgImage: output, scale: image.scale, orientation: image.imageOrientation)
     }
