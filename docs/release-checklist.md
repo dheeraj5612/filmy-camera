@@ -70,9 +70,9 @@ The archive wrapper generates the project and creates a Release archive for a ge
 
 ## Verified evidence
 
-- Last verified main baseline: `d163339dd86930066aecde6143673b7617f6a05a`
-- GitHub Actions run: [31610155414](https://github.com/dheeraj5612/filmy-camera/actions/runs/31610155414) — green Xcode 16.4 simulator build; 9 unit/renderer tests plus 2 UI tests (11 total) passed on the verified main baseline.
-- Local branch verification: 15 unit/renderer tests passed; the gallery/settings UI flow passed when run in isolation after the gallery provenance changes.
+- Last verified app-code mainline: `425d15d3d0a841745e7fc9b0ed359fa932c40741`
+- GitHub Actions run: [31615041557](https://github.com/dheeraj5612/filmy-camera/actions/runs/31615041557) — green Xcode 16.4 simulator build; 15 unit/renderer tests plus 2 UI tests (17 total) passed, alongside the release-script safety lane.
+- Local simulator verification: 17 tests passed; the gallery/settings UI flow passed both in the full suite and when run in isolation after the gallery provenance changes.
 - Local release project preflight: `scripts/release/validate-project.sh` passed for bundle `com.dheeraj.filmycamera`, version `1.0.0 (1)`, the privacy manifest, the 1024×1024 icon, and all expected schemes/tests.
 - Local simulator: iPhone 17, iOS 26.5 — camera shell, recipe editor, Gallery/Settings navigation, accessibility tree, screenshots, and simulator capture fallback verified.
 - Historical unsigned archive: `/tmp/filmycamera-rc-20260812-ui-deterministic.xcarchive` — contains dSYM and `PrivacyInfo.xcprivacy`, but predates current main; rebuild and pin a current archive before release use.
