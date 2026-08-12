@@ -5,6 +5,7 @@ import UIKit
 struct GalleryScreen: View {
     @ObservedObject var photoLibrary: PhotoLibraryService
 
+    @Environment(\.scenePhase) private var scenePhase
     @State private var isShowingPhoto = false
     @State private var selectedAsset: PHAsset?
 
@@ -38,6 +39,35 @@ struct GalleryScreen: View {
         }
         .task {
             _ = await photoLibrary.requestAccessIfNeeded()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            photoLibrary.refresh()
+            guard photoLibrary.authorizationStatus == .authorized
+                    || photoLibrary.authorizationStatus == .limited else {
+                selectedAsset = nil
+                isShowingPhoto = false
+                return
+            }
+
+            if let selectedAsset,
+               !photoLibrary.assets.contains(where: { $0.localIdentifier == selectedAsset.localIdentifier }) {
+                self.selectedAsset = nil
+                isShowingPhoto = false
+            }
+        }
+        .onChange(of: photoLibrary.authorizationStatus) { _, status in
+            guard status == .authorized || status == .limited else {
+                selectedAsset = nil
+                isShowingPhoto = false
+                return
+            }
+
+            if let selectedAsset,
+               !photoLibrary.assets.contains(where: { $0.localIdentifier == selectedAsset.localIdentifier }) {
+                self.selectedAsset = nil
+                isShowingPhoto = false
+            }
         }
         .sheet(isPresented: $isShowingPhoto) {
             if let selectedAsset {
@@ -130,6 +160,13 @@ private struct GalleryThumbnail: View {
         .task(id: asset.localIdentifier) {
             image = await photoLibrary.image(for: asset, targetSize: CGSize(width: 360, height: 440))
         }
+        .onChange(of: photoLibrary.authorizationStatus) { _, status in
+            guard status == .authorized || status == .limited else {
+                image = nil
+                return
+            }
+            image = nil
+        }
     }
 }
 
@@ -154,6 +191,11 @@ private struct GalleryDetailView: View {
         }
         .task {
             image = await photoLibrary.image(for: asset, targetSize: CGSize(width: 1600, height: 2200))
+        }
+        .onChange(of: photoLibrary.authorizationStatus) { _, status in
+            if status != .authorized && status != .limited {
+                image = nil
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Selected gallery photo")
