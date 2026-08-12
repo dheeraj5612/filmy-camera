@@ -205,14 +205,8 @@ struct CameraScreen: View {
 
     @ViewBuilder
     private var cameraPlaceholder: some View {
-        let status = camera.statusMessage.lowercased()
-        let isSimulator = status.contains("simulator")
-        let needsSettings = status.contains("access") || status.contains("permission")
-        let needsResume = status.contains("reopened")
-            || status.contains("temporarily")
-            || status.contains("could not start")
-
-        if needsResume {
+        switch camera.availability {
+        case .interrupted, .needsRecovery, .unavailable:
             PreviewPlaceholder(
                 isSimulator: false,
                 recipe: viewModel.selectedRecipe,
@@ -220,19 +214,19 @@ struct CameraScreen: View {
                 actionTitle: "Resume Camera",
                 action: camera.start
             )
-        } else if needsSettings {
+        case .permissionDenied:
             PreviewPlaceholder(
                 isSimulator: false,
                 recipe: viewModel.selectedRecipe,
                 actionTitle: "Open Settings",
                 action: openSystemSettings
             )
-        } else if isSimulator {
+        case .simulator:
             PreviewPlaceholder(
                 isSimulator: true,
                 recipe: viewModel.selectedRecipe
             )
-        } else {
+        case .idle, .starting, .requestingPermission, .paused, .running:
             PreviewPlaceholder(
                 isSimulator: false,
                 recipe: viewModel.selectedRecipe,

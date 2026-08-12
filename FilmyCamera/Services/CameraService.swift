@@ -13,6 +13,22 @@ import UIKit
 public final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
     public typealias FrameHandler = (CIImage) -> Void
 
+    /// A typed lifecycle contract for the camera UI. `statusMessage` remains
+    /// user-facing copy, but views should use this value for branching so a
+    /// wording change cannot silently break recovery behavior.
+    public enum Availability: String, Equatable, Sendable {
+        case idle
+        case starting
+        case requestingPermission
+        case running
+        case paused
+        case simulator
+        case permissionDenied
+        case interrupted
+        case needsRecovery
+        case unavailable
+    }
+
     public struct CapturedPhoto: @unchecked Sendable {
         public let fileData: Data
         public let capturedAt: Date
@@ -71,6 +87,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
     @Published public private(set) var isRunning = false
     @Published public private(set) var statusMessage = "Camera is ready"
+    @Published public private(set) var availability: Availability = .idle
     @Published public private(set) var zoomFactor: CGFloat = 1
     @Published public private(set) var isFocusExposureLocked = false
     @Published public private(set) var previewFrameSize: CGSize = .zero
@@ -144,6 +161,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// simulator or a device without a camera this becomes a clean empty state.
     public func start() {
         sessionQueue.async { [weak self] in
+            self?.publishAvailability(.starting)
             self?.wantsToRun = true
             self?.requestAuthorizationAndStartOnQueue()
         }
@@ -161,6 +179,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             self.focusExposureLocked = false
             self.publishFocusExposureLocked(false)
             self.publishRunning(false)
+            self.publishAvailability(.paused)
             self.publishStatus("Camera paused")
         }
     }
@@ -307,6 +326,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         guard wantsToRun else { return }
         guard !session.isRunning else {
             publishRunning(true)
+            publishAvailability(.running)
             publishStatus("Camera ready")
             return
         }
@@ -316,6 +336,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         // permission prompt for hardware that cannot exist in this process.
         guard defaultCameraDevice() != nil else {
             publishRunning(false)
+            publishAvailability(.simulator)
             publishStatus("Camera unavailable in Simulator. Use an iPhone to preview and capture.")
             return
         }
@@ -326,6 +347,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         case .notDetermined:
             guard !authorizationRequestInFlight else { return }
             authorizationRequestInFlight = true
+            publishAvailability(.requestingPermission)
             publishStatus("Requesting camera access…")
             AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
                 guard let self else { return }
@@ -336,15 +358,18 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                         self.configureAndStartOnQueue()
                     } else {
                         self.publishRunning(false)
+                        self.publishAvailability(.permissionDenied)
                         self.publishStatus("Camera access is required to preview and capture.")
                     }
                 }
             }
         case .denied, .restricted:
             publishRunning(false)
+            publishAvailability(.permissionDenied)
             publishStatus("Camera access is disabled in Settings.")
         @unknown default:
             publishRunning(false)
+            publishAvailability(.unavailable)
             publishStatus("Camera access is unavailable.")
         }
     }
@@ -353,6 +378,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         guard wantsToRun else { return }
         guard !session.isRunning else {
             publishRunning(true)
+            publishAvailability(.running)
             publishStatus("Camera ready")
             return
         }
@@ -365,12 +391,14 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             session.startRunning()
             let running = session.isRunning
             publishRunning(running)
+            publishAvailability(running ? .running : .unavailable)
             publishStatus(running ? "Camera ready" : "Camera could not start.")
             return
         }
 
         guard let device = defaultCameraDevice() else {
             publishRunning(false)
+            publishAvailability(.simulator)
             publishStatus("Camera unavailable in Simulator. Use an iPhone to preview and capture.")
             return
         }
@@ -380,6 +408,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             input = try AVCaptureDeviceInput(device: device)
         } catch {
             publishRunning(false)
+            publishAvailability(.unavailable)
             publishStatus("Camera could not be configured.")
             return
         }
@@ -394,6 +423,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         guard session.canAddInput(input) else {
             session.commitConfiguration()
             publishRunning(false)
+            publishAvailability(.unavailable)
             publishStatus("Camera input is unavailable.")
             return
         }
@@ -403,6 +433,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             session.removeInput(input)
             session.commitConfiguration()
             publishRunning(false)
+            publishAvailability(.unavailable)
             publishStatus("Live preview is unavailable.")
             return
         }
@@ -413,6 +444,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             session.removeInput(input)
             session.commitConfiguration()
             publishRunning(false)
+            publishAvailability(.unavailable)
             publishStatus("Still capture is unavailable.")
             return
         }
@@ -428,6 +460,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
         let running = session.isRunning
         publishRunning(running)
+        publishAvailability(running ? .running : .unavailable)
         publishStatus(running ? "Camera ready" : "Camera could not start.")
     }
 
@@ -452,6 +485,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 self?.sessionQueue.async { [weak self] in
                     guard let self, self.wantsToRun else { return }
                     self.publishRunning(false)
+                    self.publishAvailability(.interrupted)
                     self.publishStatus("Camera temporarily unavailable.")
                 }
             },
@@ -469,6 +503,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                     self.session.startRunning()
                     let running = self.session.isRunning
                     self.publishRunning(running)
+                    self.publishAvailability(running ? .running : .needsRecovery)
                     self.publishStatus(running ? "Camera ready" : "Camera could not start.")
                 }
             }
@@ -484,11 +519,13 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             session.startRunning()
             let running = session.isRunning
             publishRunning(running)
+            publishAvailability(running ? .running : .needsRecovery)
             publishStatus(running ? "Camera ready" : "Camera needs to be reopened.")
             return
         }
 
         publishRunning(false)
+        publishAvailability(.needsRecovery)
         publishStatus("Camera needs to be reopened.")
     }
 
@@ -603,6 +640,12 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private func publishRunning(_ running: Bool) {
         publishOnMain { [weak self] in
             self?.isRunning = running
+        }
+    }
+
+    private func publishAvailability(_ availability: Availability) {
+        publishOnMain { [weak self] in
+            self?.availability = availability
         }
     }
 
