@@ -1,0 +1,43 @@
+# Filmy Camera design pass — 2026-08-12
+
+## North star
+
+Filmy Camera should feel like a quiet digital rangefinder: the viewfinder stays primary, choosing a recipe feels like choosing a film stock, and deeper controls appear only when the photographer asks for them.
+
+The analog character comes from tone, color, grain, and halation. The interface does not need fake film borders or decorative chrome to communicate that character.
+
+## Research inputs
+
+- [Apple Camera Control HIG](https://developer.apple.com/design/human-interface-guidelines/camera-control) — keep custom camera controls out of system camera-control overlay areas.
+- [Apple Human Interface Guidelines](https://developer.apple.com/design/human-interface-guidelines) — preserve clear hierarchy, accessible hit regions, and restraint with materials.
+- [Apple Behind the Design: Halide Mark II](https://developer.apple.com/news/?id=x6bv1a36) — excitement without intimidation, consistent gestures, and a small active-state color language.
+- [Halide](https://halide.cam/?v=1.0.22) — tactile camera-inspired controls, minimal viewfinder chrome, and intentional grain/halation processes.
+- [Moment Pro Camera II](https://www.momentprocamera.com/) and [Moment manual](https://www.momentprocamera.com/manual) — progressive disclosure through action plates, lens bars, exposure, profiles, and looks.
+- [Dazz Cam on the App Store](https://apps.apple.com/us/app/dazz-cam-vintage-camera/id1422471180) — a low-friction, one-tap camera workflow organized around distinct camera/film formats.
+- [Fujifilm X-T5 image-quality controls](https://fujifilm-dsc.com/en/manual/x-t5/menu_shooting/image_quality_setting/) — public vocabulary used for Tone, Color, Dynamic Range, Color Chrome, grain, and finish groupings.
+
+## Implemented in this pass
+
+- Reframed the camera action plate around `Roll`, `Tune`, and `Look` instead of a generic details/info pair.
+- Made focus feedback interaction-only so a reticle does not sit permanently over the viewfinder.
+- Added a compact simulator/offline action plate so the unavailable-camera explanation remains readable and capture is not presented as available.
+- Grouped recipe controls into `Tone`, `Color`, `Texture`, and `Finish`; Tone and Color open first, while deeper texture and finish controls stay available through disclosure.
+- Added semantic slider values and larger control rows for VoiceOver and motor accessibility.
+- Centralized camera hit-target, typography, control radius, and action-plate tokens in `FilmyTheme`.
+- Reframed Gallery as `Roll`, moved to a two-column contact-sheet feel, and preserved each asset’s aspect ratio.
+- Reframed capture confirmation around `Keep Frame` and added a recipe metadata chip.
+- Corrected simulator Settings permission states so denied camera access is not shown as `READY`.
+- Updated UI tests to cover the new `Roll` and `Tune` language.
+
+## Deliberately deferred
+
+- Bundled photographic recipe thumbnails: the current implementation has no licensed neutral stills or capture sample set. The next asset pass should add original/licensed reference images and run them through the existing preview renderer.
+- Accessible focus/exposure lock controls: the camera service currently supports tap focus/exposure and pinch zoom, but not an explicit lock state. The UI should not imply controls the service cannot honor.
+- Gallery metadata/share/delete: the current Photos service does not yet persist recipe metadata with each saved asset.
+
+## Verification
+
+- Simulator build succeeded for the iOS 18.5 `FilmyCamera iPhone` runtime.
+- Unit tests: 9 passed.
+- UI tests: 2 passed.
+- Final simulator review confirmed the unavailable-camera state and compact offline action plate remain legible.

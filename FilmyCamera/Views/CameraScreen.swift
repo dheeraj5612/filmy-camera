@@ -65,8 +65,11 @@ struct CameraScreen: View {
                     .ignoresSafeArea()
             }
 
-            FocusReticle()
-                .position(focusPoint ?? CGPoint(x: UIScreen.main.bounds.midX, y: UIScreen.main.bounds.midY))
+            if let focusPoint {
+                FocusReticle()
+                    .position(focusPoint)
+                    .transition(.scale(scale: 0.86).combined(with: .opacity))
+            }
 
             if camera.zoomFactor > 1.01 {
                 Text("\(camera.zoomFactor, specifier: "%.1f")×")
@@ -83,7 +86,11 @@ struct CameraScreen: View {
             VStack(spacing: 0) {
                 header
                 Spacer(minLength: 20)
-                controls
+                if shouldShowCameraEmptyState {
+                    offlineControls
+                } else {
+                    controls
+                }
             }
             .padding(.horizontal, 18)
             .padding(.top, 10)
@@ -208,11 +215,11 @@ struct CameraScreen: View {
     }
 
     private var controls: some View {
-        VStack(spacing: 16) {
-            HStack(alignment: .bottom) {
+        VStack(spacing: 12) {
+            HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("LOOKING THROUGH")
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .font(.system(.caption2, design: .rounded).weight(.bold))
                         .tracking(1.2)
                         .foregroundStyle(.white.opacity(0.55))
                     HStack(spacing: 7) {
@@ -227,27 +234,18 @@ struct CameraScreen: View {
                                 .background(FilmyTheme.accent, in: Capsule())
                         }
                     }
-                    .font(.system(size: 21, weight: .bold, design: .rounded))
+                    .font(.system(.title3, design: .rounded).weight(.bold))
                         .foregroundStyle(.white)
                 }
 
                 Spacer()
 
-                Button {
-                    recipeForDetail = viewModel.selectedRecipe
-                } label: {
-                    HStack(spacing: 5) {
-                        Text("Details")
-                        Image(systemName: "arrow.up.right")
-                    }
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.86))
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 8)
-                    .background(Color.black.opacity(0.35), in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("View details for \(viewModel.selectedRecipe.name)")
+                CameraActionButton(
+                    systemName: "slider.horizontal.3",
+                    title: "Tune",
+                    accessibilityLabel: "Tune \(viewModel.selectedRecipe.name)",
+                    action: { recipeForDetail = viewModel.selectedRecipe }
+                )
             }
 
             RecipePickerView(
@@ -255,10 +253,15 @@ struct CameraScreen: View {
                 selectedRecipeID: $viewModel.selectedRecipeID,
                 onOpenDetail: { recipeForDetail = $0 }
             )
-            .frame(height: 80)
+            .frame(height: 76)
 
             HStack {
-                FilmyIconButton(systemName: "square.grid.2x2", accessibilityLabel: "Open gallery", action: onOpenGallery)
+                CameraActionButton(
+                    systemName: "square.grid.2x2",
+                    title: "Roll",
+                    accessibilityLabel: "Open roll",
+                    action: onOpenGallery
+                )
 
                 Spacer()
 
@@ -271,20 +274,78 @@ struct CameraScreen: View {
 
                 Spacer()
 
-                FilmyIconButton(
-                    systemName: "info",
-                    accessibilityLabel: "About the selected recipe",
+                CameraActionButton(
+                    systemName: "camera.aperture",
+                    title: "Look",
+                    accessibilityLabel: "View \(viewModel.selectedRecipe.name) look details",
                     action: { recipeForDetail = viewModel.selectedRecipe }
                 )
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 2)
         }
-        .padding(.horizontal, 15)
-        .padding(.top, 15)
-        .padding(.bottom, 12)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .padding(.horizontal, 13)
+        .padding(.top, 13)
+        .padding(.bottom, 11)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: FilmyTheme.actionPlateRadius, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
+            RoundedRectangle(cornerRadius: FilmyTheme.actionPlateRadius, style: .continuous)
+                .stroke(Color.white.opacity(0.16), lineWidth: 1)
+        }
+    }
+
+    private var offlineControls: some View {
+        VStack(spacing: 10) {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("PREVIEW MODE")
+                        .font(.system(.caption2, design: .rounded).weight(.bold))
+                        .tracking(1.1)
+                        .foregroundStyle(.white.opacity(0.55))
+                    Text(viewModel.selectedRecipe.name)
+                        .font(.system(.title3, design: .rounded).weight(.bold))
+                        .foregroundStyle(.white)
+                }
+
+                Spacer()
+
+                CameraActionButton(
+                    systemName: "slider.horizontal.3",
+                    title: "Tune",
+                    accessibilityLabel: "Tune \(viewModel.selectedRecipe.name)",
+                    action: { recipeForDetail = viewModel.selectedRecipe }
+                )
+            }
+
+            RecipePickerView(
+                recipes: FilmRecipe.builtIns,
+                selectedRecipeID: $viewModel.selectedRecipeID,
+                onOpenDetail: { recipeForDetail = $0 }
+            )
+            .frame(height: 76)
+
+            HStack(spacing: 12) {
+                CameraActionButton(
+                    systemName: "square.grid.2x2",
+                    title: "Roll",
+                    accessibilityLabel: "Open roll",
+                    action: onOpenGallery
+                )
+
+                Spacer(minLength: 8)
+
+                Label("Capture on iPhone", systemImage: "iphone")
+                    .font(.system(.caption, design: .rounded).weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.56))
+                    .frame(minHeight: FilmyTheme.minimumHitTarget)
+                    .accessibilityLabel("Capture is available on a physical iPhone")
+            }
+        }
+        .padding(.horizontal, 13)
+        .padding(.top, 13)
+        .padding(.bottom, 11)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: FilmyTheme.actionPlateRadius, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: FilmyTheme.actionPlateRadius, style: .continuous)
                 .stroke(Color.white.opacity(0.16), lineWidth: 1)
         }
     }

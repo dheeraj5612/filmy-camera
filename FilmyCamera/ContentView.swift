@@ -28,7 +28,7 @@ struct ContentView: View {
 
             GalleryScreen(photoLibrary: photoLibrary)
                 .tabItem {
-                    Label("Gallery", systemImage: "square.grid.2x2.fill")
+                    Label("Roll", systemImage: "square.grid.2x2.fill")
                 }
                 .tag(Tab.gallery)
 

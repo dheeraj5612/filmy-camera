@@ -1,3 +1,4 @@
+import AVFoundation
 import Photos
 import SwiftUI
 import UIKit
@@ -104,11 +105,11 @@ struct SettingsView: View {
                     SettingRow(
                         systemName: "camera.fill",
                         title: "Camera",
-                        detail: isSimulator ? "Simulator-safe preview mode" : camera.statusMessage
+                        detail: cameraStatusDetail
                     ) {
                         PermissionBadge(
-                            title: isSimulator ? "SIMULATOR" : camera.isRunning ? "LIVE" : "READY",
-                            isEnabled: !isSimulator
+                            title: cameraStatusTitle,
+                            isEnabled: cameraStatusIsEnabled
                         )
                     }
 
@@ -206,7 +207,38 @@ struct SettingsView: View {
     }
 
     private var cameraPermissionNeedsSettings: Bool {
-        !isSimulator && camera.statusMessage.localizedCaseInsensitiveContains("access")
+        AVCaptureDevice.authorizationStatus(for: .video) == .denied
+            || AVCaptureDevice.authorizationStatus(for: .video) == .restricted
+            || camera.statusMessage.localizedCaseInsensitiveContains("access")
+    }
+
+    private var cameraStatusTitle: String {
+        if isSimulator { return "SIMULATOR" }
+
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized where camera.isRunning: return "LIVE"
+        case .authorized: return "ALLOWED"
+        case .notDetermined: return "ASK"
+        case .denied, .restricted: return "OFF"
+        @unknown default: return "CHECK"
+        }
+    }
+
+    private var cameraStatusIsEnabled: Bool {
+        if isSimulator { return false }
+        return AVCaptureDevice.authorizationStatus(for: .video) == .authorized && camera.isRunning
+    }
+
+    private var cameraStatusDetail: String {
+        if isSimulator { return "Simulator-safe preview mode" }
+
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized where camera.isRunning: return "Live preview is ready to capture."
+        case .authorized: return "Camera access is enabled; preview is paused."
+        case .notDetermined: return "Ask when you are ready to capture."
+        case .denied, .restricted: return "Enable camera access in Settings to preview and capture."
+        @unknown default: return camera.statusMessage
+        }
     }
 
     private var photoStatusDetail: String {
