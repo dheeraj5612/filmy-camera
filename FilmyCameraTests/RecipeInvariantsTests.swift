@@ -3,6 +3,43 @@ import XCTest
 @testable import FilmyCamera
 
 final class RecipeInvariantsTests: XCTestCase {
+    private let selectedRecipeKey = "selectedRecipeID"
+    private let recipeOverridesKey = "recipeOverrides"
+    private var hadSelectedRecipeValue = false
+    private var previousSelectedRecipeID: String?
+    private var hadRecipeOverridesValue = false
+    private var previousRecipeOverrides: Data?
+
+    override func setUp() {
+        super.setUp()
+
+        let defaults = UserDefaults.standard
+        hadSelectedRecipeValue = defaults.object(forKey: selectedRecipeKey) != nil
+        previousSelectedRecipeID = defaults.string(forKey: selectedRecipeKey)
+        hadRecipeOverridesValue = defaults.object(forKey: recipeOverridesKey) != nil
+        previousRecipeOverrides = defaults.data(forKey: recipeOverridesKey)
+        defaults.removeObject(forKey: selectedRecipeKey)
+        defaults.removeObject(forKey: recipeOverridesKey)
+    }
+
+    override func tearDown() {
+        let defaults = UserDefaults.standard
+
+        if hadSelectedRecipeValue {
+            defaults.set(previousSelectedRecipeID, forKey: selectedRecipeKey)
+        } else {
+            defaults.removeObject(forKey: selectedRecipeKey)
+        }
+
+        if hadRecipeOverridesValue {
+            defaults.set(previousRecipeOverrides, forKey: recipeOverridesKey)
+        } else {
+            defaults.removeObject(forKey: recipeOverridesKey)
+        }
+
+        super.tearDown()
+    }
+
     func testBuiltInRecipesHaveUniqueStableIdentityAndDisplayValues() {
         let recipes = FilmRecipe.builtIns
 
@@ -91,5 +128,83 @@ final class RecipeInvariantsTests: XCTestCase {
         let decoded = try JSONDecoder().decode(FilmRecipe.self, from: data)
 
         XCTAssertEqual(decoded, original)
+    }
+
+    func testSelectedRecipePersistsAcrossViewModelInstances() async {
+        let expected = FilmRecipe.builtIns[2]
+        let model = await CameraViewModel()
+
+        await model.select(recipe: expected)
+
+        let storedID = UserDefaults.standard.string(forKey: selectedRecipeKey)
+        let reloadedModel = await CameraViewModel()
+        let reloadedID = await reloadedModel.selectedRecipeID
+        let reloadedRecipe = await reloadedModel.selectedRecipe
+
+        XCTAssertEqual(storedID, expected.id)
+        XCTAssertEqual(reloadedID, expected.id)
+        XCTAssertEqual(reloadedRecipe, expected)
+    }
+
+    func testCustomizedRecipePersistsAndResetRestoresBuiltIn() async {
+        let original = FilmRecipe.builtIns[1]
+        var customized = original
+        customized.exposure = 1.25
+        customized.tone = FilmRecipe.Tone(highlight: -0.45, shadow: 0.60)
+        customized.grain = 0.72
+        customized.palette.blueBias = 0.18
+
+        let model = await CameraViewModel()
+        await model.select(recipe: original)
+        await model.update(recipe: customized)
+
+        let reloadedModel = await CameraViewModel()
+        let reloadedRecipe = await reloadedModel.selectedRecipe
+        let isCustomizedBeforeReset = await reloadedModel.isCustomized(original)
+
+        XCTAssertEqual(reloadedRecipe, customized)
+        XCTAssertTrue(isCustomizedBeforeReset)
+
+        await reloadedModel.reset(recipeID: original.id)
+
+        let resetRecipe = await reloadedModel.selectedRecipe
+        let isCustomizedAfterReset = await reloadedModel.isCustomized(original)
+        XCTAssertEqual(resetRecipe, original)
+        XCTAssertFalse(isCustomizedAfterReset)
+    }
+
+    func testUnknownPersistedSelectionFallsBackToFirstBuiltInRecipe() async {
+        UserDefaults.standard.set("recipe-that-no-longer-exists", forKey: selectedRecipeKey)
+
+        let model = await CameraViewModel()
+        let persistedID = await model.selectedRecipeID
+        let resolvedRecipe = await model.selectedRecipe
+
+        XCTAssertEqual(persistedID, "recipe-that-no-longer-exists")
+        XCTAssertEqual(resolvedRecipe, FilmRecipe.builtIns[0])
+    }
+
+    func testCaptureFailureReturnsToIdleWithoutLeavingAReviewFrame() async {
+        let model = await CameraViewModel()
+        let camera = CameraService()
+
+        // The session is intentionally never started. CameraService must
+        // report this as a clean, recoverable capture failure on any device.
+        await model.capture(camera: camera)
+
+        for _ in 0..<100 {
+            if await model.isCapturing == false { break }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        let isCapturing = await model.isCapturing
+        let reviewImage = await model.reviewImage
+        let reviewRecipe = await model.reviewRecipe
+        let toastMessage = await model.toastMessage
+
+        XCTAssertFalse(isCapturing)
+        XCTAssertNil(reviewImage)
+        XCTAssertNil(reviewRecipe)
+        XCTAssertEqual(toastMessage, "Capture is available on a physical iPhone")
     }
 }
