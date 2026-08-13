@@ -2,7 +2,7 @@
 
 ## Current workspace gate
 
-- [x] Current hardening branch is `codex/security-hardening-20260813` at HEAD `39f7f9b50d60acf73bdbb936d94be8e111770d12`.
+- [x] Current hardening branch is `codex/security-hardening-20260813` at HEAD `bea69ea0aede05fae9288fe53da8630be6e05f4b`.
 - [x] Reconcile the App Store signing configuration across `project.yml`, `FilmyCamera.xcodeproj/project.pbxproj`, `scripts/release/prepare-upload.sh`, `scripts/release/validate-archive.sh`, and `scripts/release/validate-project.sh` for Developer team `6ALSCF5GBV`.
 - [x] Verify the production Swift app target is present under `FilmyCamera/`.
 - [x] Exercise the production `FilmRecipe.builtIns` and `FilmRenderer.render` APIs from XCTest.
@@ -25,7 +25,7 @@
 - [x] Run `xcodegen generate` and verify generated-project reproducibility after reconciling the signing-team update.
 - [x] Run the credential-free release project preflight (`scripts/release/validate-project.sh`) against team `6ALSCF5GBV`.
 - [x] Run the iPhone Simulator build and XCTest workflow locally; 85 tests passed on iPhone 17 Pro Simulator running iOS 26.5.
-- [x] Record the current hosted hardening evidence: [PR #55](https://github.com/dheeraj5612/filmy-camera/pull/55) and [run 31751099210](https://github.com/dheeraj5612/filmy-camera/actions/runs/31751099210) for branch `codex/security-hardening-20260813` at HEAD `39f7f9b50d60acf73bdbb936d94be8e111770d12`; `change-scope`, `release-scripts`, and `build-and-test` all passed.
+- [x] Record the current hosted hardening evidence: [PR #55](https://github.com/dheeraj5612/filmy-camera/pull/55) and [run 31754451852](https://github.com/dheeraj5612/filmy-camera/actions/runs/31754451852) for branch `codex/security-hardening-20260813` at HEAD `bea69ea0aede05fae9288fe53da8630be6e05f4b`; `change-scope`, `release-scripts`, and `build-and-test` all passed.
 - [x] Keep release-script syntax, ShellCheck, and fail-closed upload-preparation checks in CI.
 - [ ] Run a signed Release archive for a generic iOS device destination and verify the app on a physical iPhone; the current unsigned archive fails validation because it has no embedded provisioning profile.
 - [x] Validate `Info.plist`, launch behavior, app icon, version `1.0.0`, and build number `1`.
@@ -79,10 +79,11 @@ The hosted workflow keeps the release-script gate on metadata and checklist chan
 
 ## Verified evidence
 
-- Current repository evidence: branch `codex/security-hardening-20260813` at committed HEAD `39f7f9b50d60acf73bdbb936d94be8e111770d12`, with the latest UI polish, capture identity hardening, accessibility coverage, and team-aligned release configuration.
-- Current hosted evidence: [PR #55](https://github.com/dheeraj5612/filmy-camera/pull/55) and [run 31751099210](https://github.com/dheeraj5612/filmy-camera/actions/runs/31751099210), both tied to committed HEAD `39f7f9b50d60acf73bdbb936d94be8e111770d12`; the PR remains open and draft.
-- Current local simulator evidence: 85 tests passed on iPhone 17 Pro Simulator running iOS 26.5; camera shell, recipe details, Gallery, Settings navigation, simulator fallback, and renderer parity are covered.
-- Current UI hardening: the recipe-detail hero no longer duplicates the swatch label; recipe-editor section icons participate in layout; simulator fallback hides the unavailable live-preview accessibility target; and Photos permission badges remain readable at narrow widths. The modern darkroom/amber camera shell, recipe rail, accessibility labels, and touch-target work remain covered by the simulator gate.
+- Current repository evidence: branch `codex/security-hardening-20260813` at committed HEAD `bea69ea0aede05fae9288fe53da8630be6e05f4b`, with the camera-shell UI revamp, capture identity hardening, accessibility coverage, and team-aligned release configuration.
+- Current hosted evidence: [PR #55](https://github.com/dheeraj5612/filmy-camera/pull/55) and [run 31754451852](https://github.com/dheeraj5612/filmy-camera/actions/runs/31754451852), both tied to committed HEAD `bea69ea0aede05fae9288fe53da8630be6e05f4b`; `change-scope`, `release-scripts`, and the simulator build/test lane passed, and the PR remains open and draft.
+- Current local simulator evidence: 85 tests passed on iPhone 17 Pro Simulator running iOS 26.5 (81 unit tests and 4 UI tests); camera shell, recipe details, Gallery, Settings navigation, simulator fallback, and renderer parity are covered.
+- Current credential-free device archive evidence: the Release archive reached a successful arm64 device build and contains the app, dSYM, privacy manifest, version `1.0.0`, and build `1`; archive validation correctly stopped because no embedded App Store provisioning profile is installed.
+- Current UI hardening: the recipe-detail hero no longer duplicates the swatch label; recipe-editor section icons participate in layout; simulator fallback hides the unavailable live-preview accessibility target; Photos permission badges remain readable at narrow widths; and the 2026-08-13 revamp adds floating navigation, ambient page surfaces, a film-stock header, pinned quick controls, and bounded Dynamic Type chrome. The modern darkroom/amber camera shell, recipe rail, accessibility labels, and touch-target work remain covered by the simulator gate.
 - Current security/release hardening: CI checkout credentials are not persisted; ShellCheck and XcodeGen are pinned and verified; the credential scan covers tracked files; local photo-cache orphan cleanup is reconciled; exported JPEG metadata uses an explicit privacy-safe allowlist; archive project generation is reproducibility-checked; App Store profiles are team-validated and reject development-device entitlements; and late photo callbacks cannot consume newer capture state.
 - Pre-PR #55 mainline: `27dbd3a353c6171aa9a33c95acf92f97fc955555`.
 - Historical hardening commits: `fb51d6879a10146837ea3212ac698049eefed8fa` (headless release credential checks), `47c93dce619bcc031b89d2802fa91013c1c49c00` (CI workflow), `f6799ab9fbcb87b9b28c4d9569e4a13de27b7cfd` (Photos ownership/cache safety), and `1662f833f8909e1dd535a05075282ea230b1202b` (camera/review error states).
