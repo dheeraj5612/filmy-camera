@@ -49,8 +49,8 @@ struct SectionHeading: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
-        .accessibilityValue(trailing ?? "")
+        .accessibilityLabel(Text(title))
+        .accessibilityValue(Text(trailing ?? ""))
         .accessibilityAddTraits(.isHeader)
     }
 }
