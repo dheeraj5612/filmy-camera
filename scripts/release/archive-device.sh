@@ -6,6 +6,7 @@ root_dir="$(cd -P "${script_dir}/../.." && pwd -P)"
 archive_path="${FILMY_ARCHIVE_PATH:-${root_dir}/build/FilmyCamera.xcarchive}"
 derived_data_path="${FILMY_DERIVED_DATA_PATH:-${root_dir}/build/DerivedData}"
 xcodegen_version='2.45.4'
+xcodegen_sha256='6aa2b4da95304b343bea12890c59f9655aa428c08b351d57d592cfab4e88a9f1'
 xcodegen_path="${FILMY_XCODEGEN_PATH:-${root_dir}/.ci/xcodegen/bin/xcodegen}"
 allow_provisioning_updates=false
 asc_key_id="${FILMY_ASC_KEY_ID:-}"
@@ -64,6 +65,11 @@ canonical_existing_path() {
 
 xcodegen_path="$(canonical_existing_path "${xcodegen_path}")" || {
   echo "Pinned XcodeGen ${xcodegen_version} could not be canonicalized" >&2
+  exit 127
+}
+actual_xcodegen_sha256="$(shasum -a 256 "${xcodegen_path}" | awk '{ print $1 }')"
+[[ "${actual_xcodegen_sha256}" == "${xcodegen_sha256}" ]] || {
+  echo "XcodeGen ${xcodegen_version} failed integrity verification at: ${xcodegen_path}" >&2
   exit 127
 }
 xcodegen_version_output="$("${xcodegen_path}" --version 2>&1)" || {
