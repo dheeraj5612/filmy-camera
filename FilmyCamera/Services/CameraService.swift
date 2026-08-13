@@ -477,10 +477,17 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             do {
                 try device.lockForConfiguration()
                 defer { device.unlockForConfiguration() }
-                let nextBias = Self.clampedExposureBias(
-                    bias,
+                guard let bounds = Self.exposureBiasBounds(
                     lowerBound: device.minExposureTargetBias,
                     upperBound: device.maxExposureTargetBias
+                ) else {
+                    self.publishStatus("Exposure control is unavailable right now.")
+                    return
+                }
+                let nextBias = Self.clampedExposureBias(
+                    bias,
+                    lowerBound: bounds.lower,
+                    upperBound: bounds.upper
                 )
                 self.selectedExposureBias = nextBias
                 self.applyExposureBiasOnQueue(to: device)
@@ -502,6 +509,19 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         let lower = min(lowerBound, upperBound)
         let upper = max(lowerBound, upperBound)
         return min(max(value, lower), upper)
+    }
+
+    private static func exposureBiasBounds(
+        lowerBound: Float,
+        upperBound: Float
+    ) -> (lower: Float, upper: Float)? {
+        guard lowerBound.isFinite, upperBound.isFinite else { return nil }
+        let hardwareLower = min(lowerBound, upperBound)
+        let hardwareUpper = max(lowerBound, upperBound)
+        let lower = max(hardwareLower, -2)
+        let upper = min(hardwareUpper, 2)
+        guard lower <= upper else { return nil }
+        return (lower, upper)
     }
 
     private func requestAuthorizationAndStartOnQueue() {
@@ -822,9 +842,10 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func refreshExposureBiasOnQueue(for device: AVCaptureDevice) {
-        guard device.minExposureTargetBias.isFinite,
-              device.maxExposureTargetBias.isFinite,
-              device.minExposureTargetBias <= device.maxExposureTargetBias else {
+        guard let bounds = Self.exposureBiasBounds(
+            lowerBound: device.minExposureTargetBias,
+            upperBound: device.maxExposureTargetBias
+        ) else {
             selectedExposureBias = 0
             publishExposureBias(0)
             return
@@ -832,8 +853,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
         selectedExposureBias = Self.clampedExposureBias(
             selectedExposureBias,
-            lowerBound: device.minExposureTargetBias,
-            upperBound: device.maxExposureTargetBias
+            lowerBound: bounds.lower,
+            upperBound: bounds.upper
         )
         do {
             try device.lockForConfiguration()
@@ -851,10 +872,16 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 || device.isExposureModeSupported(.autoExpose) else {
             return
         }
-        let bias = Self.clampedExposureBias(
-            selectedExposureBias,
+        guard let bounds = Self.exposureBiasBounds(
             lowerBound: device.minExposureTargetBias,
             upperBound: device.maxExposureTargetBias
+        ) else {
+            return
+        }
+        let bias = Self.clampedExposureBias(
+            selectedExposureBias,
+            lowerBound: bounds.lower,
+            upperBound: bounds.upper
         )
         device.setExposureTargetBias(bias, completionHandler: nil)
     }
