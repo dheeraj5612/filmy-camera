@@ -365,4 +365,22 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         )
     }
 
+    func testStandaloneLensReselectionResetsToItsAdvertisedOpticalMagnification() {
+        let advertisedMagnification: CGFloat = 2
+        let hardwareZoom = CameraService.standaloneHardwareZoomFactor(
+            userFacingZoomFactor: advertisedMagnification,
+            opticalMagnification: advertisedMagnification
+        )
+
+        XCTAssertEqual(hardwareZoom, 1, accuracy: 0.0001)
+        XCTAssertEqual(
+            CameraService.standaloneUserFacingZoomFactor(
+                hardwareZoomFactor: hardwareZoom,
+                opticalMagnification: advertisedMagnification
+            ),
+            advertisedMagnification,
+            accuracy: 0.0001
+        )
+    }
+
 }

@@ -357,6 +357,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private var flashAvailabilityState: FlashAvailability = .unsupported
     private var pendingPhotoFlashFallback = false
     private var sessionObservers: [NSObjectProtocol] = []
+    private var activeConstituentObservation: NSKeyValueObservation?
+    private var observedVirtualDeviceID: String?
     private var rotationAngle: CGFloat = 90
     private var lastDeliveredFrameSize: CGSize = .zero
 
@@ -405,6 +407,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
     deinit {
         sessionObservers.forEach(NotificationCenter.default.removeObserver)
+        activeConstituentObservation?.invalidate()
+        activeConstituentObservation = nil
         videoOutput.setSampleBufferDelegate(nil, queue: nil)
 
         let session = session
@@ -1161,8 +1165,10 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
 
         if option.id == device.uniqueID {
-            // This option already describes the installed physical input, so
-            // no hardware transaction is needed before committing its ID.
+            // Reapply the advertised optical magnification through the
+            // user-facing conversion so a reselected standalone lens clears
+            // any digital zoom accumulated on that input.
+            guard setZoomOnQueue(option.zoomFactor) else { return }
             selectedLensIDs[position] = device.uniqueID
             selectedLensOrigins[position] = .standalone
             publishSelectedLensID(option.id)
@@ -1387,6 +1393,48 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         return options.first(where: { $0.id == device.uniqueID })?.id
     }
 
+    private func updateActiveConstituentObservationOnQueue(
+        for device: AVCaptureDevice
+    ) {
+        guard device.isVirtualDevice else {
+            activeConstituentObservation?.invalidate()
+            activeConstituentObservation = nil
+            observedVirtualDeviceID = nil
+            return
+        }
+
+        guard observedVirtualDeviceID != device.uniqueID else { return }
+
+        activeConstituentObservation?.invalidate()
+        observedVirtualDeviceID = device.uniqueID
+        let deviceID = device.uniqueID
+        activeConstituentObservation = device.observe(
+            \AVCaptureDevice.activePrimaryConstituent,
+            options: [.new]
+        ) { [weak self] _, _ in
+            self?.sessionQueue.async { [weak self] in
+                guard let self,
+                      let activeDevice = self.activeDevice(),
+                      activeDevice.isVirtualDevice,
+                      activeDevice.uniqueID == deviceID else { return }
+                self.refreshActiveLensSelectionOnQueue(for: activeDevice)
+            }
+        }
+    }
+
+    private func refreshActiveLensSelectionOnQueue(for device: AVCaptureDevice) {
+        let position = cameraPosition(for: device)
+        let selectedID = activeLensOptionIDOnQueue(
+            for: device,
+            options: currentLensOptions
+        )
+        if let selectedID {
+            selectedLensIDs[position] = selectedID
+            selectedLensOrigins[position] = .virtual
+        }
+        publishSelectedLensID(selectedID)
+    }
+
     private func refreshCameraInventoryOnQueue(for device: AVCaptureDevice) {
         let position = cameraPosition(for: device)
         let availablePositions = CameraPosition.allCases.filter {
@@ -1394,6 +1442,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
         let options = makeLensOptionsOnQueue(for: device, position: position)
         currentLensOptions = options
+        updateActiveConstituentObservationOnQueue(for: device)
 
         // Never restore a saved ID merely because it is present in the
         // inventory. The active input/constituent is the source of truth;
