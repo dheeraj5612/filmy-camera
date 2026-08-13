@@ -47,7 +47,11 @@ public struct FilteredCameraPreview: UIViewRepresentable {
         let view = FilteredCameraPreviewView(frame: .zero)
         let coordinator = context.coordinator
         coordinator.previewView = view
-        view.update(recipe: recipe, quality: quality)
+        view.update(
+            recipe: recipe,
+            quality: quality,
+            grainSeed: cameraService.previewGrainSeed
+        )
         coordinator.frameHandlerID = cameraService.installFrameHandler { [weak coordinator] image in
             coordinator?.receive(image)
         }
@@ -63,7 +67,11 @@ public struct FilteredCameraPreview: UIViewRepresentable {
         coordinator.previewView = uiView
         coordinator.recipe = recipe
         coordinator.quality = quality
-        uiView.update(recipe: recipe, quality: quality)
+        uiView.update(
+            recipe: recipe,
+            quality: quality,
+            grainSeed: cameraService.previewGrainSeed
+        )
 
         // SwiftUI can recreate the callback after another view has used the
         // service. Reinstalling this tiny forwarding closure keeps the preview
@@ -138,6 +146,7 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
     private var latestImage: CIImage?
     private var recipe = FilmRecipe.builtIns[0]
     private var quality: FilmRenderer.Quality = .preview
+    private var grainSeed = FilmRenderer.canonicalGrainSeed
 
     public override init(frame: CGRect, device: MTLDevice?) {
         let selectedDevice = device ?? FilmRenderer.metalDevice ?? MTLCreateSystemDefaultDevice()
@@ -204,10 +213,15 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
         contentMode = .scaleAspectFill
     }
 
-    func update(recipe: FilmRecipe, quality: FilmRenderer.Quality) {
-        guard self.recipe != recipe || self.quality != quality else { return }
+    func update(
+        recipe: FilmRecipe,
+        quality: FilmRenderer.Quality,
+        grainSeed: UInt32
+    ) {
+        guard self.recipe != recipe || self.quality != quality || self.grainSeed != grainSeed else { return }
         self.recipe = recipe
         self.quality = quality
+        self.grainSeed = grainSeed
         if latestImage != nil {
             setNeedsDisplay()
         }
@@ -243,7 +257,12 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
         // frame also keeps preview work proportional to the drawable rather
         // than to the camera sensor's full video dimensions.
         let framed = CameraFrameLayout.aspectFill(image, in: targetRect)
-        let filtered = FilmRenderer.render(framed, recipe: recipe, quality: quality)
+        let filtered = FilmRenderer.render(
+            framed,
+            recipe: recipe,
+            quality: quality,
+            grainSeed: grainSeed
+        )
             .cropped(to: targetRect)
         ciContext.render(
             filtered,

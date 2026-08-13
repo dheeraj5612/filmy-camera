@@ -19,7 +19,7 @@ struct CameraScreen: View {
     @State private var pinchStartZoom: CGFloat = 1
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .top) {
             GeometryReader { proxy in
                 FilteredCameraPreview(camera: camera, recipe: viewModel.selectedRecipe)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -71,11 +71,16 @@ struct CameraScreen: View {
 
             if shouldShowCameraEmptyState {
                 cameraPlaceholder
-                .ignoresSafeArea()
+                    .ignoresSafeArea()
             }
 
             LinearGradient(
-                colors: [Color.black.opacity(0.64), .clear, Color.black.opacity(0.84)],
+                gradient: Gradient(stops: [
+                    .init(color: Color.black.opacity(0.76), location: 0),
+                    .init(color: Color.black.opacity(0.08), location: 0.23),
+                    .init(color: Color.black.opacity(0.18), location: 0.58),
+                    .init(color: Color.black.opacity(0.9), location: 1)
+                ]),
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -86,6 +91,9 @@ struct CameraScreen: View {
                 RuleOfThirdsGrid()
                     .ignoresSafeArea()
             }
+
+            ViewfinderFrame()
+                .ignoresSafeArea()
 
             if let focusPoint {
                 FocusReticle()
@@ -100,57 +108,13 @@ struct CameraScreen: View {
                     }
             }
 
-            if !shouldShowCameraEmptyState || isUITesting {
-                VStack(spacing: 8) {
-                    if camera.flashAvailability != .unsupported {
-                        FlashControl(
-                            mode: camera.flashMode,
-                            availability: camera.flashAvailability,
-                            action: camera.cycleFlashMode
-                        )
-                    }
-
-                    CameraHardwareControls(camera: camera)
-
-                    ZoomControl(value: camera.zoomFactor) { direction in
-                        let delta: CGFloat = direction == .increment ? 0.5 : -0.5
-                        camera.setZoom(camera.zoomFactor + delta)
-                    }
-
-                    ExposureControl(value: camera.exposureBias) { direction in
-                        let delta: Float = direction == .increment ? (1.0 / 3.0) : -(1.0 / 3.0)
-                        camera.setExposureBias(camera.exposureBias + delta)
-                    }
-
-                    if hasHardwareSelection {
-                        hardwareSelectionControls
-                    }
-
-                    if (focusPoint != nil || camera.isFocusExposureLocked), let focusNormalizedPoint {
-                        FocusLockControl(isLocked: camera.isFocusExposureLocked) {
-                            camera.toggleFocusExposureLock(at: focusNormalizedPoint)
-                        }
-                    }
-                }
-                .padding(.top, 76)
+            GeometryReader { proxy in
+                cameraChrome(for: proxy.size)
             }
-
-            VStack(spacing: 0) {
-                header
-                Spacer(minLength: 20)
-                if shouldShowCameraEmptyState {
-                    offlineControls
-                } else {
-                    controls
-                }
-            }
-            .padding(.horizontal, 18)
-            .padding(.top, 10)
-            .padding(.bottom, 8)
 
             if let toastMessage = viewModel.toastMessage {
                 ToastView(message: toastMessage, style: viewModel.toastStyle)
-                    .padding(.top, 82)
+                    .padding(.top, 88)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
@@ -202,24 +166,73 @@ struct CameraScreen: View {
         }
     }
 
-    private var header: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("FILMY CAMERA")
-                    .font(.system(size: 12, weight: .black, design: .rounded))
-                    .tracking(2.2)
-                    .foregroundStyle(.white)
+    @ViewBuilder
+    private func cameraChrome(for size: CGSize) -> some View {
+        if size.width > size.height {
+            landscapeCameraChrome
+        } else {
+            portraitCameraChrome
+        }
+    }
 
-                Text("Choose a feeling. Make a frame.")
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.78))
+    private var portraitCameraChrome: some View {
+        VStack(spacing: 0) {
+            header
+
+            if !shouldShowCameraEmptyState || isUITesting {
+                cameraUtilityRail
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(
-                Color.black.opacity(0.46),
-                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-            )
+
+            Spacer(minLength: 12)
+
+            if shouldShowCameraEmptyState {
+                offlineControls
+            } else {
+                controls
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
+    }
+
+    private var landscapeCameraChrome: some View {
+        VStack(spacing: 8) {
+            header
+
+            if !shouldShowCameraEmptyState || isUITesting {
+                landscapeUtilityRail
+            }
+
+            Spacer(minLength: 4)
+            landscapeBottomControls
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
+    }
+
+    private var header: some View {
+        HStack(alignment: .center, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "camera.aperture")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(FilmyTheme.accent)
+                    .frame(width: 32, height: 32)
+                    .background(FilmyTheme.accent.opacity(0.14), in: Circle())
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("FILMY CAMERA")
+                        .font(.system(size: 12, weight: .black, design: .rounded))
+                        .tracking(2.2)
+                        .foregroundStyle(.white)
+
+                    Text(camera.isRunning ? "MAKE A FRAME" : "VIEWFINDER PAUSED")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .tracking(1.1)
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+            }
 
             Spacer(minLength: 8)
 
@@ -229,8 +242,101 @@ struct CameraScreen: View {
                 message: camera.statusMessage
             )
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.white.opacity(0.16), lineWidth: 1)
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Filmy Camera. \(camera.statusMessage)")
+    }
+
+    private var cameraUtilityRail: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                if camera.flashAvailability != .unsupported {
+                    FlashControl(
+                        mode: camera.flashMode,
+                        availability: camera.flashAvailability,
+                        action: camera.cycleFlashMode
+                    )
+                }
+
+                CameraHardwareControls(camera: camera)
+
+                Spacer(minLength: 0)
+            }
+
+            HStack(spacing: 8) {
+                ZoomControl(value: camera.zoomFactor) { direction in
+                    let delta: CGFloat = direction == .increment ? 0.5 : -0.5
+                    camera.setZoom(camera.zoomFactor + delta)
+                }
+
+                ExposureControl(value: camera.exposureBias) { direction in
+                    let delta: Float = direction == .increment ? (1.0 / 3.0) : -(1.0 / 3.0)
+                    camera.setExposureBias(camera.exposureBias + delta)
+                }
+
+                if (focusPoint != nil || camera.isFocusExposureLocked), let focusNormalizedPoint {
+                    FocusLockControl(isLocked: camera.isFocusExposureLocked) {
+                        camera.toggleFocusExposureLock(at: focusNormalizedPoint)
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(8)
+        .background(Color.black.opacity(0.32), in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 17, style: .continuous)
+                .stroke(Color.white.opacity(0.13), lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("camera-utility-rail")
+    }
+
+    private var landscapeUtilityRail: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                if camera.flashAvailability != .unsupported {
+                    FlashControl(
+                        mode: camera.flashMode,
+                        availability: camera.flashAvailability,
+                        action: camera.cycleFlashMode
+                    )
+                }
+
+                CameraHardwareControls(camera: camera)
+
+                ZoomControl(value: camera.zoomFactor) { direction in
+                    let delta: CGFloat = direction == .increment ? 0.5 : -0.5
+                    camera.setZoom(camera.zoomFactor + delta)
+                }
+
+                ExposureControl(value: camera.exposureBias) { direction in
+                    let delta: Float = direction == .increment ? (1.0 / 3.0) : -(1.0 / 3.0)
+                    camera.setExposureBias(camera.exposureBias + delta)
+                }
+
+                if (focusPoint != nil || camera.isFocusExposureLocked), let focusNormalizedPoint {
+                    FocusLockControl(isLocked: camera.isFocusExposureLocked) {
+                        camera.toggleFocusExposureLock(at: focusNormalizedPoint)
+                    }
+                }
+            }
+            .padding(8)
+        }
+        .background(Color.black.opacity(0.32), in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 17, style: .continuous)
+                .stroke(Color.white.opacity(0.13), lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("camera-utility-rail")
     }
 
     private var shouldShowCameraEmptyState: Bool {
@@ -442,53 +548,17 @@ struct CameraScreen: View {
     }
 
     private var controls: some View {
-        VStack(spacing: 12) {
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("LOOKING THROUGH")
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
-                        .tracking(1.2)
-                        .foregroundStyle(.white.opacity(0.76))
-                    HStack(spacing: 7) {
-                        Text(viewModel.selectedRecipe.name)
-                        if viewModel.isCustomized(viewModel.selectedRecipe) {
-                            Text("TUNED")
-                                .font(.system(size: 8, weight: .black, design: .rounded))
-                                .tracking(0.7)
-                                .foregroundStyle(FilmyTheme.background)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 4)
-                                .background(FilmyTheme.accent, in: Capsule())
-                        }
-                    }
-                    .font(.system(.title3, design: .rounded).weight(.bold))
-                        .foregroundStyle(.white)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(
-                    Color.black.opacity(0.42),
-                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                )
-
-                Spacer()
-
-                CameraActionButton(
-                    systemName: "slider.horizontal.3",
-                    title: "Tune",
-                    accessibilityLabel: "Tune \(viewModel.selectedRecipe.name)",
-                    action: { recipeForDetail = viewModel.selectedRecipe }
-                )
-            }
+        VStack(spacing: 14) {
+            recipeHeader
 
             RecipePickerView(
                 recipes: FilmRecipe.builtIns,
                 selectedRecipeID: $viewModel.selectedRecipeID,
                 onOpenDetail: { recipeForDetail = $0 }
             )
-            .frame(height: 76)
+            .frame(height: 80)
 
-            HStack {
+            HStack(alignment: .center, spacing: 16) {
                 CameraActionButton(
                     systemName: "square.grid.2x2",
                     title: "Roll",
@@ -496,7 +566,7 @@ struct CameraScreen: View {
                     action: onOpenGallery
                 )
 
-                Spacer()
+                Spacer(minLength: 0)
 
                 CaptureButton(isCapturing: viewModel.isCapturing) {
                     if hapticsEnabled {
@@ -505,55 +575,7 @@ struct CameraScreen: View {
                     viewModel.capture(camera: camera)
                 }
 
-                Spacer()
-
-                CameraActionButton(
-                    systemName: "camera.aperture",
-                    title: "Look",
-                    accessibilityLabel: "View \(viewModel.selectedRecipe.name) look details",
-                    action: { recipeForDetail = viewModel.selectedRecipe }
-                )
-            }
-            .padding(.horizontal, 2)
-        }
-        .padding(.horizontal, 13)
-        .padding(.top, 13)
-        .padding(.bottom, 11)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: FilmyTheme.actionPlateRadius, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: FilmyTheme.actionPlateRadius, style: .continuous)
-                .stroke(Color.white.opacity(0.16), lineWidth: 1)
-        }
-    }
-
-    private var offlineControls: some View {
-        VStack(spacing: 10) {
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("PREVIEW MODE")
-                        .font(.system(.caption2, design: .rounded).weight(.bold))
-                        .tracking(1.1)
-                        .foregroundStyle(.white.opacity(0.76))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.68)
-                        .allowsTightening(true)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(viewModel.selectedRecipe.name)
-                        .font(.system(size: 20, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.68)
-                        .allowsTightening(true)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .layoutPriority(1)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(
-                    Color.black.opacity(0.42),
-                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                )
+                Spacer(minLength: 0)
 
                 CameraActionButton(
                     systemName: "slider.horizontal.3",
@@ -561,15 +583,172 @@ struct CameraScreen: View {
                     accessibilityLabel: "Tune \(viewModel.selectedRecipe.name)",
                     action: { recipeForDetail = viewModel.selectedRecipe }
                 )
-                .fixedSize(horizontal: true, vertical: false)
             }
+            .padding(.horizontal, 2)
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 14)
+        .padding(.bottom, 12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .stroke(Color.white.opacity(0.18), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.26), radius: 28, y: 12)
+    }
+
+    private var landscapeBottomControls: some View {
+        Group {
+            if shouldShowCameraEmptyState {
+                HStack(spacing: 10) {
+                    CameraActionButton(
+                        systemName: "square.grid.2x2",
+                        title: "Roll",
+                        accessibilityLabel: "Open roll",
+                        action: onOpenGallery
+                    )
+
+                    landscapeRecipeMenu
+
+                    CameraActionButton(
+                        systemName: "slider.horizontal.3",
+                        title: "Tune",
+                        accessibilityLabel: "Tune " + viewModel.selectedRecipe.name,
+                        action: { recipeForDetail = viewModel.selectedRecipe }
+                    )
+                }
+            } else {
+                HStack(spacing: 10) {
+                    CameraActionButton(
+                        systemName: "square.grid.2x2",
+                        title: "Roll",
+                        accessibilityLabel: "Open roll",
+                        action: onOpenGallery
+                    )
+
+                    landscapeRecipeMenu
+
+                    CaptureButton(isCapturing: viewModel.isCapturing) {
+                        if hapticsEnabled {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        }
+                        viewModel.capture(camera: camera)
+                    }
+
+                    CameraActionButton(
+                        systemName: "slider.horizontal.3",
+                        title: "Tune",
+                        accessibilityLabel: "Tune " + viewModel.selectedRecipe.name,
+                        action: { recipeForDetail = viewModel.selectedRecipe }
+                    )
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.white.opacity(0.18), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.26), radius: 20, y: 8)
+    }
+
+    private var landscapeRecipeMenu: some View {
+        Menu {
+            ForEach(FilmRecipe.builtIns) { recipe in
+                Button {
+                    viewModel.select(recipe: recipe)
+                } label: {
+                    if recipe.id == viewModel.selectedRecipeID {
+                        Label(recipe.name, systemImage: "checkmark")
+                    } else {
+                        Text(recipe.name)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 7) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("LOOK")
+                        .font(.system(size: 9, weight: .black, design: .rounded))
+                        .tracking(1.1)
+                        .foregroundStyle(FilmyTheme.accent)
+                    Text(viewModel.selectedRecipe.name)
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                }
+
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .padding(.horizontal, 12)
+            .background(Color.black.opacity(0.38), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.white.opacity(0.14), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("landscape-recipe-picker")
+        .accessibilityLabel("Choose film recipe")
+        .accessibilityValue(viewModel.selectedRecipe.name)
+        .layoutPriority(1)
+    }
+
+    private var recipeHeader: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("CURRENT LOOK")
+                    .font(.system(size: 10, weight: .black, design: .rounded))
+                    .tracking(1.5)
+                    .foregroundStyle(FilmyTheme.accent)
+
+                HStack(spacing: 7) {
+                    Text(viewModel.selectedRecipe.name)
+                        .font(.system(.title3, design: .rounded).weight(.bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+
+                    if viewModel.isCustomized(viewModel.selectedRecipe) {
+                        Text("TUNED")
+                            .font(.system(size: 8, weight: .black, design: .rounded))
+                            .tracking(0.7)
+                            .foregroundStyle(FilmyTheme.background)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 4)
+                            .background(FilmyTheme.accent, in: Capsule())
+                    }
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            Text(viewModel.selectedRecipe.base.uppercased())
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .tracking(1)
+                .foregroundStyle(.white.opacity(0.54))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+    }
+
+    private var offlineControls: some View {
+        VStack(spacing: 12) {
+            recipeHeader
 
             RecipePickerView(
                 recipes: FilmRecipe.builtIns,
                 selectedRecipeID: $viewModel.selectedRecipeID,
                 onOpenDetail: { recipeForDetail = $0 }
             )
-            .frame(height: 76)
+            .frame(height: 80)
 
             HStack(alignment: .center, spacing: 12) {
                 CameraActionButton(
@@ -582,13 +761,14 @@ struct CameraScreen: View {
 
                 HStack(spacing: 8) {
                     Image(systemName: "iphone")
+                        .font(.system(size: 15, weight: .semibold))
                         .accessibilityHidden(true)
 
                     Text("Capture on iPhone")
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.56))
+                        .font(.system(.caption, design: .rounded).weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.58))
                         .lineLimit(2)
-                        .minimumScaleFactor(0.68)
+                        .minimumScaleFactor(0.72)
                         .allowsTightening(true)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
@@ -597,16 +777,57 @@ struct CameraScreen: View {
                 .layoutPriority(1)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Capture is available on a physical iPhone")
+
+                CameraActionButton(
+                    systemName: "slider.horizontal.3",
+                    title: "Tune",
+                    accessibilityLabel: "Tune \(viewModel.selectedRecipe.name)",
+                    action: { recipeForDetail = viewModel.selectedRecipe }
+                )
+                .fixedSize(horizontal: true, vertical: false)
             }
         }
-        .padding(.horizontal, 13)
-        .padding(.top, 13)
-        .padding(.bottom, 11)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: FilmyTheme.actionPlateRadius, style: .continuous))
+        .padding(.horizontal, 14)
+        .padding(.top, 14)
+        .padding(.bottom, 12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: FilmyTheme.actionPlateRadius, style: .continuous)
-                .stroke(Color.white.opacity(0.16), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .stroke(Color.white.opacity(0.18), lineWidth: 1)
         }
+        .shadow(color: .black.opacity(0.26), radius: 28, y: 12)
+    }
+}
+
+private struct ViewfinderFrame: View {
+    var body: some View {
+        GeometryReader { proxy in
+            let inset: CGFloat = 22
+            let length: CGFloat = 22
+            let width = proxy.size.width
+            let height = proxy.size.height
+
+            Path { path in
+                path.move(to: CGPoint(x: inset, y: inset + length))
+                path.addLine(to: CGPoint(x: inset, y: inset))
+                path.addLine(to: CGPoint(x: inset + length, y: inset))
+
+                path.move(to: CGPoint(x: width - inset - length, y: inset))
+                path.addLine(to: CGPoint(x: width - inset, y: inset))
+                path.addLine(to: CGPoint(x: width - inset, y: inset + length))
+
+                path.move(to: CGPoint(x: inset, y: height - inset - length))
+                path.addLine(to: CGPoint(x: inset, y: height - inset))
+                path.addLine(to: CGPoint(x: inset + length, y: height - inset))
+
+                path.move(to: CGPoint(x: width - inset - length, y: height - inset))
+                path.addLine(to: CGPoint(x: width - inset, y: height - inset))
+                path.addLine(to: CGPoint(x: width - inset, y: height - inset - length))
+            }
+            .stroke(Color.white.opacity(0.22), style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round))
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
@@ -650,9 +871,9 @@ private struct CameraHardwareControls: View {
                                 camera.setLens(id: lens.id)
                             } label: {
                                 if lens.id == camera.selectedLensID {
-                                    Label("(lens.title) · (lens.detail)", systemImage: "checkmark")
+                                    Label("\(lens.title) · \(lens.detail)", systemImage: "checkmark")
                                 } else {
-                                    Text("(lens.title) · (lens.detail)")
+                                    Text("\(lens.title) · \(lens.detail)")
                                 }
                             }
                         }

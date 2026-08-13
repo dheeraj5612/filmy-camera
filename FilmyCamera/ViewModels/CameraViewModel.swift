@@ -190,6 +190,11 @@ final class CameraViewModel: ObservableObject {
         saveErrorMessage = nil
         let recipe = selectedRecipe
         let viewportSize = camera.previewViewportSize
+        let previewScale = max(UIScreen.main.scale, 1)
+        let previewDrawableSize = CGSize(
+            width: viewportSize.width * previewScale,
+            height: viewportSize.height * previewScale
+        )
 
         camera.capturePhoto { [weak self] capturedPhoto in
             Task { @MainActor [weak self] in
@@ -216,11 +221,9 @@ final class CameraViewModel: ObservableObject {
                             sourceData: capturedPhoto.fileData,
                             recipe: recipe,
                             viewportSize: viewportSize,
+                            previewDrawableSize: previewDrawableSize,
                             capturedAt: capturedPhoto.capturedAt,
-                            grainSeed: Self.grainSeed(
-                                for: capturedPhoto.capturedAt,
-                                dimensions: capturedPhoto.dimensions
-                            )
+                            grainSeed: camera.previewGrainSeed
                         )
                     }
 
@@ -297,6 +300,7 @@ final class CameraViewModel: ObservableObject {
         sourceData: Data,
         recipe: FilmRecipe,
         viewportSize: CGSize,
+        previewDrawableSize: CGSize,
         capturedAt: Date,
         grainSeed: UInt32
     ) -> RenderedPhoto? {
@@ -313,16 +317,37 @@ final class CameraViewModel: ObservableObject {
                 sourceExtent: input.extent,
                 targetSize: viewportSize
             )
-            framedInput = input.cropped(to: crop)
-        } else {
+            // The preview rebases its aspect-fill crop to the drawable's
+            // zero-origin coordinate space before filtering. Do the same for
+            // stills so absolute Core Image phases cannot inherit the sensor
+            // crop's x/y origin.
             framedInput = input
+                .cropped(to: crop)
+                .transformed(by: CGAffineTransform(
+                    translationX: -crop.minX,
+                    y: -crop.minY
+                ))
+        } else {
+            let extent = input.extent
+            framedInput = input.transformed(by: CGAffineTransform(
+                translationX: -extent.minX,
+                y: -extent.minY
+            ))
         }
+
+        let grainPhase = Self.scaledGrainPhase(
+            grainSeed,
+            grainSize: recipe.grainSize,
+            previewSize: previewDrawableSize,
+            stillSize: framedInput.extent.size
+        )
 
         let filtered = FilmRenderer.render(
             framedInput,
             recipe: recipe,
             quality: .photo,
-            grainSeed: grainSeed
+            grainSeed: grainSeed,
+            grainPhase: grainPhase
         )
         guard let output = FilmRenderer.outputCGImage(filtered, from: filtered.extent) else { return nil }
         guard let data = PhotoOutputEncoder.jpegData(
@@ -343,6 +368,61 @@ final class CameraViewModel: ObservableObject {
         )
     }
 
+    /// FilmRenderer interprets grain phase in output pixels after scaling the
+    /// deterministic texture. Match the renderer's effective texture scale
+    /// for both images so clamped large-grain recipes preserve the same
+    /// texture coordinates between preview and capture.
+    nonisolated static func scaledGrainPhase(
+        _ seed: UInt32,
+        grainSize: Double = 1,
+        previewSize: CGSize,
+        stillSize: CGSize
+    ) -> CGPoint {
+        let previewPhase = CGPoint(
+            x: CGFloat(seed & 0x1FF),
+            y: CGFloat((seed >> 9) & 0x1FF)
+        )
+        let previewDimension = max(previewSize.width, previewSize.height)
+        let stillDimension = max(stillSize.width, stillSize.height)
+        guard previewDimension.isFinite,
+              stillDimension.isFinite,
+              previewDimension > 0,
+              stillDimension > 0 else {
+            return previewPhase
+        }
+
+        let previewTextureScale = effectiveGrainTextureScale(
+            grainSize: grainSize,
+            imageSize: previewSize
+        )
+        let stillTextureScale = effectiveGrainTextureScale(
+            grainSize: grainSize,
+            imageSize: stillSize
+        )
+        let scale = stillTextureScale / previewTextureScale
+        guard scale.isFinite, scale > 0 else { return previewPhase }
+        return CGPoint(
+            x: previewPhase.x * scale,
+            y: previewPhase.y * scale
+        )
+    }
+
+    /// Keep this in lockstep with FilmRenderer's private grain scale. The
+    /// phase is applied after the grain texture transform, so the effective
+    /// (including clamped) scale—not just the image-size ratio—is the mapping
+    /// that keeps preview and still coordinates aligned.
+    nonisolated static func effectiveGrainTextureScale(
+        grainSize: Double,
+        imageSize: CGSize
+    ) -> CGFloat {
+        let outputDimension = max(imageSize.width, imageSize.height)
+        guard outputDimension.isFinite, outputDimension > 0 else { return 1 }
+
+        let resolutionScale = max(outputDimension / 1080, 0.5)
+        let finiteGrainSize = grainSize.isFinite ? CGFloat(grainSize) : 1
+        return max(0.35, min(finiteGrainSize * resolutionScale, 8))
+    }
+
     private nonisolated static func downsampledReviewImage(from data: Data) -> UIImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
             return nil
@@ -360,16 +440,6 @@ final class CameraViewModel: ObservableObject {
             return nil
         }
         return UIImage(cgImage: thumbnail)
-    }
-
-    private nonisolated static func grainSeed(
-        for date: Date,
-        dimensions: CMVideoDimensions
-    ) -> UInt32 {
-        let timestamp = UInt32(truncatingIfNeeded: Int64(date.timeIntervalSince1970.rounded()))
-        let width = UInt32(truncatingIfNeeded: dimensions.width)
-        let height = UInt32(truncatingIfNeeded: dimensions.height)
-        return timestamp &* 1_664_525 &+ width &* 1_013 &+ height
     }
 
 }

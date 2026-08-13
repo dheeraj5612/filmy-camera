@@ -151,6 +151,34 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         XCTAssertEqual(CameraService.CameraPosition.front.title, "Front")
     }
 
+    func testPreviewPixelFormatPrefersNativeBiPlanarVideoBuffers() {
+        XCTAssertEqual(
+            CameraService.preferredPreviewPixelFormat(
+                available: [
+                    kCVPixelFormatType_32BGRA,
+                    kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+                ]
+            ),
+            kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+        )
+        XCTAssertEqual(
+            CameraService.preferredPreviewPixelFormat(
+                available: [
+                    kCVPixelFormatType_32BGRA,
+                    kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+                ]
+            ),
+            kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+        )
+    }
+
+    func testPreviewPixelFormatFallsBackToBGRAWhenYUVIsUnavailable() {
+        XCTAssertEqual(
+            CameraService.preferredPreviewPixelFormat(available: [kCVPixelFormatType_32BGRA]),
+            kCVPixelFormatType_32BGRA
+        )
+    }
+
     func testExposureBiasClampsNonFiniteAndOutOfRangeValues() {
         XCTAssertEqual(CameraService.clampedExposureBias(.nan), 0)
         XCTAssertEqual(CameraService.clampedExposureBias(.infinity), 0)
@@ -217,4 +245,149 @@ final class CameraServiceAvailabilityTests: XCTestCase {
             .available
         )
     }
+
+    func testVirtualLensSelectionUsesSwitchOverThresholdsAndActiveHardware() {
+        XCTAssertEqual(
+            CameraService.selectedVirtualLensIndex(
+                zoomFactor: 1.6,
+                switchOverZoomFactors: [2, 4],
+                constituentCount: 3
+            ),
+            0
+        )
+        XCTAssertEqual(
+            CameraService.selectedVirtualLensIndex(
+                zoomFactor: 2,
+                switchOverZoomFactors: [2, 4],
+                constituentCount: 3
+            ),
+            1
+        )
+        XCTAssertEqual(
+            CameraService.selectedVirtualLensIndex(
+                zoomFactor: 1,
+                switchOverZoomFactors: [2, 4],
+                constituentCount: 3,
+                activeConstituentIndex: 2
+            ),
+            2
+        )
+    }
+
+    func testSavedLensOriginOnlyRestoresStandaloneInputs() {
+        XCTAssertTrue(
+            CameraService.shouldRestoreStandaloneLens(origin: .standalone)
+        )
+        XCTAssertFalse(
+            CameraService.shouldRestoreStandaloneLens(origin: .virtual)
+        )
+        XCTAssertFalse(
+            CameraService.shouldRestoreStandaloneLens(origin: nil)
+        )
+    }
+
+    func testVirtualZoomNormalizationAnchorsWideConstituentAtOneTimes() {
+        XCTAssertEqual(
+            CameraService.normalizedUserZoomFactor(
+                hardwareZoomFactor: 2,
+                wideReferenceHardwareZoomFactor: 2
+            ),
+            1,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            CameraService.normalizedUserZoomFactor(
+                hardwareZoomFactor: 4,
+                wideReferenceHardwareZoomFactor: 2
+            ),
+            2,
+            accuracy: 0.0001
+        )
+
+        let telephotoTitleMagnification = CameraService.normalizedUserZoomFactor(
+            hardwareZoomFactor: 4,
+            wideReferenceHardwareZoomFactor: 2
+        )
+        XCTAssertEqual(telephotoTitleMagnification, 2.0, accuracy: 0.0001)
+
+        XCTAssertEqual(
+            CameraService.normalizedUserZoomFactor(
+                hardwareZoomFactor: .nan,
+                wideReferenceHardwareZoomFactor: 2
+            ),
+            1,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            CameraService.normalizedUserZoomFactor(
+                hardwareZoomFactor: 2,
+                wideReferenceHardwareZoomFactor: 0
+            ),
+            2,
+            accuracy: 0.0001
+        )
+    }
+
+    func testStandaloneLensMagnificationUsesFieldOfViewRelationships() {
+        let magnification = CameraService.standaloneLensMagnification(
+            wideFieldOfView: 70,
+            lensFieldOfView: 35
+        )
+
+        XCTAssertNotNil(magnification)
+        XCTAssertGreaterThan(magnification ?? 0, 1.5)
+        XCTAssertLessThan(magnification ?? .infinity, 3)
+        XCTAssertNil(
+            CameraService.standaloneLensMagnification(
+                wideFieldOfView: 0,
+                lensFieldOfView: 35
+            )
+        )
+    }
+
+    func testStandaloneZoomConversionsPreserveOpticalScale() {
+        XCTAssertEqual(
+            CameraService.standaloneUserFacingZoomFactor(
+                hardwareZoomFactor: 1,
+                opticalMagnification: 2
+            ),
+            2,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            CameraService.standaloneHardwareZoomFactor(
+                userFacingZoomFactor: 3,
+                opticalMagnification: 2
+            ),
+            1.5,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            CameraService.standaloneUserFacingZoomFactor(
+                hardwareZoomFactor: 1,
+                opticalMagnification: 0.5
+            ),
+            0.5,
+            accuracy: 0.0001
+        )
+    }
+
+    func testStandaloneLensReselectionResetsToItsAdvertisedOpticalMagnification() {
+        let advertisedMagnification: CGFloat = 2
+        let hardwareZoom = CameraService.standaloneHardwareZoomFactor(
+            userFacingZoomFactor: advertisedMagnification,
+            opticalMagnification: advertisedMagnification
+        )
+
+        XCTAssertEqual(hardwareZoom, 1, accuracy: 0.0001)
+        XCTAssertEqual(
+            CameraService.standaloneUserFacingZoomFactor(
+                hardwareZoomFactor: hardwareZoom,
+                opticalMagnification: advertisedMagnification
+            ),
+            advertisedMagnification,
+            accuracy: 0.0001
+        )
+    }
+
 }

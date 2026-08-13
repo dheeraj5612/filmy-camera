@@ -60,6 +60,11 @@ final class FilmyCameraUITests: XCTestCase {
         let settingsHeading = app.staticTexts["Settings"]
         XCTAssertTrue(settingsHeading.waitForExistence(timeout: 5))
 
+        XCTAssertFalse(
+            app.buttons["camera-permission-request"].exists,
+            "Simulator-safe mode must not expose a direct camera permission prompt"
+        )
+
         let privacyPolicy = app.descendants(matching: .any)["privacy-policy-link"]
         scrollToHittable(privacyPolicy, in: app)
         assertMinimumHitTarget(privacyPolicy, named: "Privacy Policy")
@@ -69,9 +74,10 @@ final class FilmyCameraUITests: XCTestCase {
         assertMinimumHitTarget(support, named: "Contact Support")
 
         let photosPermission = app.buttons["photos-permission-settings"]
+        scrollBackToHittable(photosPermission, in: app)
         assertMinimumHitTarget(photosPermission, named: "Photos permission settings")
 
-        let clearCache = app.descendants(matching: .any)["clear-local-cache"]
+        let clearCache = app.buttons["clear-local-cache"]
         XCTAssertTrue(clearCache.waitForExistence(timeout: 5))
         XCTAssertGreaterThanOrEqual(clearCache.frame.width, 44, "Clear local cache needs a 44pt width")
         XCTAssertGreaterThanOrEqual(clearCache.frame.height, 44, "Clear local cache needs a 44pt height")
@@ -118,8 +124,25 @@ final class FilmyCameraUITests: XCTestCase {
 
     private func scrollToHittable(_ element: XCUIElement, in app: XCUIApplication) {
         XCTAssertTrue(element.waitForExistence(timeout: 5))
-        for _ in 0..<4 where !element.isHittable {
-            app.swipeUp()
+        let scrollView = app.scrollViews.firstMatch
+        for _ in 0..<8 where !element.isHittable {
+            if scrollView.exists {
+                scrollView.swipeUp()
+            } else {
+                app.swipeUp()
+            }
+        }
+    }
+
+    private func scrollBackToHittable(_ element: XCUIElement, in app: XCUIApplication) {
+        XCTAssertTrue(element.waitForExistence(timeout: 5))
+        let scrollView = app.scrollViews.firstMatch
+        for _ in 0..<8 where !element.isHittable {
+            if scrollView.exists {
+                scrollView.swipeDown()
+            } else {
+                app.swipeDown()
+            }
         }
     }
 

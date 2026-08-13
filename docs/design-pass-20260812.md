@@ -36,7 +36,7 @@ The analog character comes from tone, color, grain, and halation. The interface 
 - Replaced recipe-rail gradient placeholders with deterministic synthetic scenes rendered through the real FilmRenderer, and made preview/photo/export share one canonical color cube.
 - Made the Core Image working/output color space explicit sRGB and normalized grain/halation scale across output resolutions.
 - Added selectable original Acros neutral/yellow/red/green filter starting points so every exposed monochrome filter mode is reachable from the recipe rail.
-- Added a lower-cost preview cube, capture-derived grain phase, preview-before-render framing, EXIF orientation normalization, truthful output dimensions, and a downsampled review image to keep the live and saved frame contracts aligned without retaining two full-resolution decoded images.
+- Added a lower-cost preview cube, session-scoped grain phase shared by preview and capture, preview-before-render framing, EXIF orientation normalization, truthful output dimensions, and a downsampled review image to keep the live and saved frame contracts aligned without retaining two full-resolution decoded images.
 - Added VoiceOver routes for live preview, adjustable zoom, and focus/exposure lock; added an explicit Photos-settings recovery action on failed save; and disabled picker/toast motion when Reduce Motion is enabled.
 - Added a typed camera availability contract for permission, simulator, interruption, recovery, and running states so camera recovery UI no longer parses status copy.
 - Hardened release automation with a display-name assertion, `.provisionprofile` support, reproducible XcodeGen output checks, successful-run XCTest artifact retention, and broader metadata/privacy change triggering.
