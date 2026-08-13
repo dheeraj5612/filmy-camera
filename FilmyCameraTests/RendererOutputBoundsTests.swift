@@ -129,6 +129,126 @@ final class RendererOutputBoundsTests: XCTestCase {
         }
     }
 
+    func testRendererSanitizesNonFiniteRecipeControls() {
+        var recipe = FilmRecipe.builtIns[0]
+        recipe.exposure = .nan
+        recipe.tone = FilmRecipe.Tone(highlight: .infinity, shadow: -.infinity)
+        recipe.saturation = .nan
+        recipe.contrast = .infinity
+        recipe.whiteBalance = FilmRecipe.WhiteBalanceShift(temperature: .nan, tint: .infinity)
+        recipe.colorChrome = .nan
+        recipe.blueResponse = .infinity
+        recipe.fxBlue = -.infinity
+        recipe.sharpness = .nan
+        recipe.noiseReduction = .infinity
+        recipe.clarity = -.infinity
+        recipe.grain = .nan
+        recipe.grainSize = .infinity
+        recipe.vignette = -.infinity
+        recipe.halation = .nan
+        recipe.palette = FilmRecipe.Palette(
+            redBias: .nan,
+            greenBias: .infinity,
+            blueBias: -.infinity,
+            redGreenMix: .nan,
+            greenBlueMix: .infinity,
+            blueRedMix: -.infinity,
+            saturation: .nan
+        )
+
+        let extent = CGRect(x: 0, y: 0, width: 4, height: 4)
+        let input = CIImage(color: CIColor(red: 0.8, green: 0.2, blue: 0.5, alpha: 1))
+            .cropped(to: extent)
+        let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+
+        for quality in [FilmRenderer.Quality.preview, .photo, .export] {
+            let output = FilmRenderer.render(input, recipe: recipe, quality: quality)
+            let pixels = renderFloatPixels(output, extent: extent, context: context)
+            XCTAssertTrue(pixels.allSatisfy(\.isFinite), "Non-finite output at \(quality)")
+            XCTAssertTrue(
+                pixels.allSatisfy { (-0.0005...1.0005).contains(Double($0)) },
+                "Non-finite controls escaped normalized bounds at \(quality)"
+            )
+        }
+    }
+
+    func testColorChromeDoesNotChangeBlueWhenDedicatedBlueControlsAreOff() {
+        let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
+        let input = CIImage(color: CIColor(red: 0.08, green: 0.18, blue: 0.90, alpha: 1))
+            .cropped(to: extent)
+        let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+        var withoutChrome = FilmRecipe.builtIns[0]
+        withoutChrome.colorChrome = 0
+        withoutChrome.blueResponse = 0
+        withoutChrome.fxBlue = 0
+        var withChrome = withoutChrome
+        withChrome.colorChrome = 1
+
+        let base = renderFloatPixels(
+            FilmRenderer.render(input, recipe: withoutChrome, quality: .photo),
+            extent: extent,
+            context: context
+        )
+        let chrome = renderFloatPixels(
+            FilmRenderer.render(input, recipe: withChrome, quality: .photo),
+            extent: extent,
+            context: context
+        )
+
+        let distance = zip(base, chrome)
+            .map { abs(Double($0.0) - Double($0.1)) }
+            .reduce(0, +)
+        XCTAssertLessThan(distance, 0.0005)
+    }
+
+    func testRendererPreservesSourceAlpha() {
+        let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
+        let input = CIImage(color: CIColor(red: 0.45, green: 0.20, blue: 0.75, alpha: 0.35))
+            .cropped(to: extent)
+        let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+        let pixels = renderFloatPixels(
+            FilmRenderer.render(input, recipe: FilmRecipe.builtIns[2], quality: .photo),
+            extent: extent,
+            context: context
+        )
+
+        XCTAssertEqual(pixels.count, 4)
+        XCTAssertEqual(pixels[3], 0.35, accuracy: 0.02)
+    }
+
+    func testOpaqueCopyReplacesSourceAlpha() {
+        let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
+        let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+        var referenceRGB: [Float]?
+        for sourceAlpha in [1.0, 0.35] {
+            // Make the non-opaque fixture explicitly premultiplied, matching
+            // the representation used by Core Image pixel buffers.
+            let input = CIImage(color: CIColor(red: 0.42, green: 0.18, blue: 0.76, alpha: sourceAlpha))
+                .premultiplyingAlpha()
+                .cropped(to: extent)
+            let pixels = renderFloatPixels(
+                FilmRenderer.opaqueImage(from: input),
+                extent: extent,
+                context: context
+            )
+
+            XCTAssertEqual(pixels.count, 4)
+            XCTAssertEqual(pixels[3], 1, accuracy: 0.001, "Source alpha \(sourceAlpha) was not replaced")
+            if let referenceRGB {
+                for channel in 0..<3 {
+                    XCTAssertEqual(
+                        pixels[channel],
+                        referenceRGB[channel],
+                        accuracy: 0.01,
+                        "RGB channel \(channel) changed with source alpha"
+                    )
+                }
+            } else {
+                referenceRGB = Array(pixels.prefix(3))
+            }
+        }
+    }
+
     func testFilmBaseChangesRenderedColorEvenWithSharedNumericControls() {
         let extent = CGRect(x: 0, y: 0, width: 16, height: 16)
         let input = CIImage(color: CIColor(red: 0.88, green: 0.42, blue: 0.16, alpha: 1))

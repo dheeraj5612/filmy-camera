@@ -246,8 +246,26 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             self.focusExposureLocked = false
             self.publishFocusExposureLocked(false)
             self.publishRunning(false)
-            self.publishAvailability(.paused)
-            self.publishStatus("Camera paused")
+
+            // Stopping the session is a lifecycle event, not a permission
+            // decision. Preserve a denied state so Settings cannot report
+            // camera access as allowed merely because the user changed tabs.
+            if !self.isConfigured && self.defaultCameraDevice() == nil {
+                self.publishAvailability(.simulator)
+                self.publishStatus("Camera unavailable in Simulator. Use an iPhone to preview and capture.")
+            } else {
+                switch AVCaptureDevice.authorizationStatus(for: .video) {
+                case .denied, .restricted:
+                    self.publishAvailability(.permissionDenied)
+                    self.publishStatus("Camera access is disabled in Settings.")
+                case .notDetermined:
+                    self.publishAvailability(.idle)
+                    self.publishStatus("Camera is ready")
+                default:
+                    self.publishAvailability(.paused)
+                    self.publishStatus("Camera paused")
+                }
+            }
         }
     }
 

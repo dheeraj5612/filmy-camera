@@ -58,11 +58,23 @@ require_spec_value 'ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon' "app icon confi
 require_spec_value 'NSCameraUsageDescription:' "camera permission copy"
 require_spec_value 'NSPhotoLibraryAddUsageDescription:' "photo-add permission copy"
 require_spec_value 'NSPhotoLibraryUsageDescription:' "photo-read permission copy"
+require_spec_value 'ITSAppUsesNonExemptEncryption: false' "export-compliance declaration"
 
 if ! grep -Fq 'NSPrivacyTracking' "${privacy_manifest}" \
   || ! grep -Fq 'NSPrivacyCollectedDataTypes' "${privacy_manifest}" \
   || ! grep -Fq 'NSPrivacyAccessedAPICategoryUserDefaults' "${privacy_manifest}"; then
   echo "Privacy manifest is missing required declarations" >&2
+  failures=$((failures + 1))
+fi
+
+if ! /usr/libexec/PlistBuddy -c 'Print :ITSAppUsesNonExemptEncryption' "${info_plist}" 2>/dev/null | grep -Fxq 'false'; then
+  echo "Info.plist must declare exempt export compliance" >&2
+  failures=$((failures + 1))
+fi
+
+icon_has_alpha="$(sips -g hasAlpha "${icon_file}" 2>/dev/null | awk -F': ' '/hasAlpha/ { print $2; exit }')"
+if [[ "${icon_has_alpha}" == "yes" ]]; then
+  echo "App icon must be opaque; iOS applies the platform mask: ${icon_file}" >&2
   failures=$((failures + 1))
 fi
 

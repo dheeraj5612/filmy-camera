@@ -24,8 +24,12 @@ There is no telemetry, diagnostics upload, contact import, location collection, 
 | Capability | User-facing purpose | Source evidence |
 | --- | --- | --- |
 | Camera | Live preview and capture after the user opens Camera | `FilmyCamera/Info.plist`, `FilmyCamera/Services/CameraService.swift` |
-| Photos read | Review frames saved by Filmy Camera and explicitly browse Photos | `FilmyCamera/Info.plist`, `FilmyCamera/Services/PhotoLibraryService.swift` |
+| Photos read | Review frames saved by Filmy Camera in the in-app Roll | `FilmyCamera/Info.plist`, `FilmyCamera/Services/PhotoLibraryService.swift` |
 | Photos add-only | Save a finished frame after the user taps Save to Photos | `FilmyCamera/Info.plist`, `FilmyCamera/Services/PhotoLibraryService.swift` |
 | UserDefaults | Store selected recipe, recipe edits, and saved-frame metadata locally | `FilmyCamera/Resources/PrivacyInfo.xcprivacy`, `FilmyCamera/ViewModels/CameraViewModel.swift` |
 
 The privacy manifest declares no collected data, no tracking, and UserDefaults reason `CA92.1`. Re-review this matrix if networking, analytics, payments, accounts, crash reporting, or cloud backup is added.
+
+## Export compliance
+
+The current build does not implement non-exempt encryption or network services. `ITSAppUsesNonExemptEncryption` is set to `false`; re-evaluate this declaration if networking, custom cryptography, or a third-party SDK that changes the encryption assessment is added.

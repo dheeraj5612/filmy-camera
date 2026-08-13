@@ -92,9 +92,9 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         case red
         case green
 
-        /// Linear-light RGB weights for the filter's luminance response.
-        /// This is an original approximation of the public filter intent,
-        /// not proprietary Fujifilm calibration data.
+        /// Display-referred sRGB RGB weights for the filter's luminance
+        /// response. This is an original approximation of the public filter
+        /// intent, not proprietary Fujifilm calibration data.
         public var channelWeights: (red: Double, green: Double, blue: Double) {
             switch self {
             case .neutral:
@@ -222,8 +222,10 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             calibration = try container.decode(Calibration.self, forKey: .calibration)
             references = try container.decode([PublicReference].self, forKey: .references)
             parentRecipeID = try container.decodeIfPresent(String.self, forKey: .parentRecipeID)
+            // A missing renderer version is legacy metadata, not evidence that
+            // the record is compatible with the current renderer.
             rendererVersion = try container.decodeIfPresent(String.self, forKey: .rendererVersion)
-                ?? FilmRecipe.rendererVersion
+                ?? "legacy-unknown"
         }
 
         public var disclaimer: String {
@@ -772,7 +774,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         if filmBase.monochromeFilter != nil && abs(palette.saturation) > 0.000001 {
             issues.append(ValidationIssue(code: .monochromePaletteSaturationMustBeZero))
         }
-        if !provenance.isComplete {
+        if schemaVersion != Self.currentSchemaVersion || !provenance.isComplete {
             issues.append(ValidationIssue(code: .provenanceUnavailable))
         }
 

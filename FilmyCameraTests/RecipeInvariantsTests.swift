@@ -307,10 +307,26 @@ final class RecipeInvariantsTests: XCTestCase {
         let reviewImage = await model.reviewImage
         let reviewRecipe = await model.reviewRecipe
         let toastMessage = await model.toastMessage
+        let toastStyle = await model.toastStyle
 
         XCTAssertFalse(isCapturing)
         XCTAssertNil(reviewImage)
         XCTAssertNil(reviewRecipe)
         XCTAssertEqual(toastMessage, "Capture could not be completed. Resume the camera and try again.")
+        XCTAssertEqual(toastStyle, .error)
+    }
+
+    func testSchemaTwoRecordWithCurrentLookingProvenanceFailsCurrentAudit() throws {
+        let original = FilmRecipe.builtIns[0]
+        let encoded = try JSONEncoder().encode(original)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object["schemaVersion"] = 2
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try JSONDecoder().decode(FilmRecipe.self, from: legacyData)
+
+        XCTAssertEqual(decoded.provenance.rendererVersion, FilmRecipe.rendererVersion)
+        XCTAssertTrue(decoded.provenance.isComplete)
+        XCTAssertTrue(decoded.validationIssues.contains { $0.code == .provenanceUnavailable })
+        XCTAssertFalse(decoded.isValid)
     }
 }

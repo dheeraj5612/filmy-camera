@@ -162,6 +162,10 @@ run_project_preflight() {
   "${script_dir}/validate-project.sh"
 }
 
+run_store_metadata_preflight() {
+  "${script_dir}/validate-store-metadata.sh" --final
+}
+
 has_distribution_identity() {
   local identities
   command -v security >/dev/null 2>&1 || return 1
@@ -434,6 +438,7 @@ prepare_export() {
   local exporter_args=()
 
   run_project_preflight
+  run_store_metadata_preflight
   validate_archive
   require_local_distribution_material
   ensure_empty_export_path
@@ -541,6 +546,10 @@ run_check() {
   local failures=0
 
   if ! run_project_preflight; then
+    failures=1
+  fi
+
+  if ! run_store_metadata_preflight; then
     failures=1
   fi
 

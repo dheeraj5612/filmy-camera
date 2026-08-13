@@ -137,7 +137,7 @@ struct CameraScreen: View {
             .padding(.bottom, 8)
 
             if let toastMessage = viewModel.toastMessage {
-                ToastView(message: toastMessage)
+                ToastView(message: toastMessage, style: viewModel.toastStyle)
                     .padding(.top, 82)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
@@ -174,7 +174,7 @@ struct CameraScreen: View {
                 )
                 .presentationDetents([.large])
                 .presentationDragIndicator(.hidden)
-                .interactiveDismissDisabled(viewModel.reviewImage != nil && !viewModel.isSaving)
+                .interactiveDismissDisabled(viewModel.reviewImage != nil)
             }
         }
         .onAppear { updateCameraActivity() }
@@ -408,9 +408,6 @@ struct CameraScreen: View {
             RoundedRectangle(cornerRadius: FilmyTheme.actionPlateRadius, style: .continuous)
                 .stroke(Color.white.opacity(0.16), lineWidth: 1)
         }
-        // Keep the bounded camera plate legible at large accessibility sizes;
-        // the controls still expose their full actions and values to VoiceOver.
-        .dynamicTypeSize(.xSmall ... .large)
     }
 
     private var offlineControls: some View {
@@ -488,9 +485,5 @@ struct CameraScreen: View {
             RoundedRectangle(cornerRadius: FilmyTheme.actionPlateRadius, style: .continuous)
                 .stroke(Color.white.opacity(0.16), lineWidth: 1)
         }
-        // The camera plate is a bounded optical control surface. Keep its labels
-        // readable at large accessibility sizes while exposing full actions and
-        // values through the accessibility tree above.
-        .dynamicTypeSize(.xSmall ... .large)
     }
 }

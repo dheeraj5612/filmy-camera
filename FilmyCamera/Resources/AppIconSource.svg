@@ -22,7 +22,8 @@
       <feDropShadow dx="0" dy="22" stdDeviation="18" flood-color="#000" flood-opacity=".42"/>
     </filter>
   </defs>
-  <rect width="1024" height="1024" rx="230" fill="url(#bg)"/>
+  <!-- Keep the source square opaque; iOS applies the platform mask. -->
+  <rect width="1024" height="1024" fill="url(#bg)"/>
   <circle cx="512" cy="512" r="300" fill="#07090c" opacity=".82" filter="url(#shadow)"/>
   <circle cx="512" cy="512" r="258" fill="none" stroke="#e8d3bd" stroke-opacity=".22" stroke-width="9"/>
   <circle cx="512" cy="512" r="232" fill="url(#lens)" stroke="#eed9bf" stroke-opacity=".5" stroke-width="10"/>

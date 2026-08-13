@@ -87,6 +87,12 @@ extension FilmRecipe {
 
 @MainActor
 final class CameraViewModel: ObservableObject {
+    enum ToastStyle: Equatable {
+        case success
+        case error
+        case info
+    }
+
     private struct RenderedPhoto: @unchecked Sendable {
         let image: UIImage
         let data: Data
@@ -102,6 +108,7 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var isSaving = false
     @Published private(set) var saveErrorMessage: String?
     @Published private(set) var toastMessage: String?
+    @Published private(set) var toastStyle: ToastStyle = .success
     @Published private(set) var lastCaptureDate: Date?
     @Published private(set) var reviewImage: UIImage?
     @Published private(set) var reviewRecipe: FilmRecipe?
@@ -183,9 +190,9 @@ final class CameraViewModel: ObservableObject {
                 guard let capturedPhoto else {
                     self.isCapturing = false
                     if camera.availability == .simulator {
-                        self.showToast("Capture is available on a physical iPhone")
+                        self.showToast("Capture is available on a physical iPhone", style: .info)
                     } else {
-                        self.showToast("Capture could not be completed. Resume the camera and try again.")
+                        self.showToast("Capture could not be completed. Resume the camera and try again.", style: .error)
                     }
                     return
                 }
@@ -218,7 +225,7 @@ final class CameraViewModel: ObservableObject {
                             // session instead of waiting for another lifecycle
                             // event or tab transition.
                             camera.start()
-                            self.showToast("The selected look could not be rendered. Try the capture again.")
+                            self.showToast("The selected look could not be rendered. Try the capture again.", style: .error)
                             return
                         }
                         self.reviewImage = renderedPhoto.image
@@ -267,9 +274,10 @@ final class CameraViewModel: ObservableObject {
         saveErrorMessage = nil
     }
 
-    private func showToast(_ message: String) {
+    private func showToast(_ message: String, style: ToastStyle = .success) {
         toastTask?.cancel()
         toastMessage = message
+        toastStyle = style
         toastTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(2.4))
             guard !Task.isCancelled else { return }
