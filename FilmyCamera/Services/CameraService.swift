@@ -127,6 +127,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     @Published public private(set) var lowLightBoostSupported = false
     @Published public private(set) var isLowLightBoostEnabled = false
     @Published public private(set) var zoomFactor: CGFloat = 1
+    @Published public private(set) var exposureBias: Float = 0
     @Published public private(set) var isFocusExposureLocked = false
     @Published public private(set) var previewFrameSize: CGSize = .zero
     @Published public private(set) var previewViewportSize: CGSize = .zero
@@ -160,6 +161,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private var configuredPhotoDimensions = CMVideoDimensions(width: 0, height: 0)
     private var focusExposureLocked = false
     private var selectedFlashMode: FlashMode = .off
+    private var selectedExposureBias: Float = 0
     private var flashAvailabilityState: FlashAvailability = .unsupported
     private var pendingPhotoFlashFallback = false
     private var sessionObservers: [NSObjectProtocol] = []
@@ -372,6 +374,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                     if device.isExposureModeSupported(.continuousAutoExposure) {
                         device.exposureMode = .continuousAutoExposure
                     }
+                    self.applyExposureBiasOnQueue(to: device)
                 }
 
                 self.focusExposureLocked = false
@@ -405,6 +408,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                     } else if device.isExposureModeSupported(.autoExpose) {
                         device.exposureMode = .autoExpose
                     }
+                    self.applyExposureBiasOnQueue(to: device)
                     self.focusExposureLocked = false
                     self.publishFocusExposureLocked(false)
                     self.publishStatus("Focus and exposure unlocked")
@@ -457,6 +461,74 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 self.publishStatus("Zoom is unavailable right now.")
             }
         }
+    }
+
+    /// Applies exposure compensation in EV while keeping the camera's own
+    /// metering active. The device-specific range is respected on hardware;
+    /// the public UI uses a conservative +/-2 EV contract for consistency.
+    public func setExposureBias(_ bias: Float) {
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            guard let device = self.activeDevice() else {
+                self.publishStatus("Exposure control is available on iPhone.")
+                return
+            }
+
+            do {
+                try device.lockForConfiguration()
+                defer { device.unlockForConfiguration() }
+                guard let bounds = Self.exposureBiasBounds(
+                    lowerBound: device.minExposureTargetBias,
+                    upperBound: device.maxExposureTargetBias
+                ) else {
+                    self.publishStatus("Exposure control is unavailable right now.")
+                    return
+                }
+                let nextBias = Self.clampedExposureBias(
+                    Self.quantizedExposureBias(bias),
+                    lowerBound: bounds.lower,
+                    upperBound: bounds.upper
+                )
+                self.selectedExposureBias = nextBias
+                self.applyExposureBiasOnQueue(to: device)
+                self.publishExposureBias(nextBias)
+            } catch {
+                self.publishStatus("Exposure control is unavailable right now.")
+            }
+        }
+    }
+
+    /// Pure clamping used at the AVFoundation boundary and in unit tests.
+    /// Invalid inputs return neutral exposure instead of reaching the device.
+    public static func clampedExposureBias(
+        _ value: Float,
+        lowerBound: Float = -2,
+        upperBound: Float = 2
+    ) -> Float {
+        guard value.isFinite else { return 0 }
+        let lower = min(lowerBound, upperBound)
+        let upper = max(lowerBound, upperBound)
+        return min(max(value, lower), upper)
+    }
+
+    /// Snaps camera compensation to real one-third-stop increments so repeated
+    /// touch adjustments stay symmetric and always return cleanly to neutral.
+    public static func quantizedExposureBias(_ value: Float) -> Float {
+        guard value.isFinite else { return 0 }
+        return (value * 3).rounded() / 3
+    }
+
+    private static func exposureBiasBounds(
+        lowerBound: Float,
+        upperBound: Float
+    ) -> (lower: Float, upper: Float)? {
+        guard lowerBound.isFinite, upperBound.isFinite else { return nil }
+        let hardwareLower = min(lowerBound, upperBound)
+        let hardwareUpper = max(lowerBound, upperBound)
+        let lower = max(hardwareLower, -2)
+        let upper = min(hardwareUpper, 2)
+        guard lower <= upper else { return nil }
+        return (lower, upper)
     }
 
     private func requestAuthorizationAndStartOnQueue() {
@@ -764,6 +836,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private func configureCaptureCapabilitiesOnQueue(for device: AVCaptureDevice) {
         refreshFlashCapabilitiesOnQueue(for: device)
         configureLowLightBoostOnQueue(for: device)
+        refreshExposureBiasOnQueue(for: device)
     }
 
     private func refreshCaptureCapabilitiesOnQueue(for device: AVCaptureDevice) {
@@ -772,6 +845,52 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             supported: device.isLowLightBoostSupported,
             enabled: device.isLowLightBoostEnabled
         )
+        refreshExposureBiasOnQueue(for: device)
+    }
+
+    private func refreshExposureBiasOnQueue(for device: AVCaptureDevice) {
+        guard let bounds = Self.exposureBiasBounds(
+            lowerBound: device.minExposureTargetBias,
+            upperBound: device.maxExposureTargetBias
+        ) else {
+            selectedExposureBias = 0
+            publishExposureBias(0)
+            return
+        }
+
+        selectedExposureBias = Self.clampedExposureBias(
+            Self.quantizedExposureBias(selectedExposureBias),
+            lowerBound: bounds.lower,
+            upperBound: bounds.upper
+        )
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+            applyExposureBiasOnQueue(to: device)
+        } catch {
+            // Exposure compensation is optional; keep the camera session
+            // usable even when a device refuses configuration at startup.
+        }
+        publishExposureBias(selectedExposureBias)
+    }
+
+    private func applyExposureBiasOnQueue(to device: AVCaptureDevice) {
+        guard device.isExposureModeSupported(.continuousAutoExposure)
+                || device.isExposureModeSupported(.autoExpose) else {
+            return
+        }
+        guard let bounds = Self.exposureBiasBounds(
+            lowerBound: device.minExposureTargetBias,
+            upperBound: device.maxExposureTargetBias
+        ) else {
+            return
+        }
+        let bias = Self.clampedExposureBias(
+            Self.quantizedExposureBias(selectedExposureBias),
+            lowerBound: bounds.lower,
+            upperBound: bounds.upper
+        )
+        device.setExposureTargetBias(bias, completionHandler: nil)
     }
 
     private func refreshFlashCapabilitiesOnQueue(for device: AVCaptureDevice) {
@@ -881,6 +1000,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         publishFlashAvailability(.unsupported)
         publishFlashMode(.off)
         publishLowLightBoostState(supported: false, enabled: false)
+        selectedExposureBias = 0
+        publishExposureBias(0)
         photoOutput.photoSettingsForSceneMonitoring = nil
     }
 
@@ -1007,6 +1128,12 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private func publishZoom(_ factor: CGFloat) {
         publishOnMain { [weak self] in
             self?.zoomFactor = factor
+        }
+    }
+
+    private func publishExposureBias(_ bias: Float) {
+        publishOnMain { [weak self] in
+            self?.exposureBias = bias
         }
     }
 

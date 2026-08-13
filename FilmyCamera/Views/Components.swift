@@ -232,6 +232,71 @@ struct ZoomControl: View {
     }
 }
 
+struct ExposureControl: View {
+    let value: Float
+    let onAdjust: (AccessibilityAdjustmentDirection) -> Void
+
+    private var valueText: String {
+        String(format: "EV %@%.1f", value >= 0 ? "+" : "−", abs(value))
+    }
+
+    private var accessibilityValueText: String {
+        String(format: "%@%.1f EV", value >= 0 ? "plus " : "minus ", abs(value))
+    }
+
+    var body: some View {
+        HStack(spacing: 2) {
+            adjustmentButton(
+                systemName: "minus",
+                label: "Decrease exposure compensation",
+                direction: .decrement
+            )
+
+            Text(valueText)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .frame(minWidth: 46)
+
+            adjustmentButton(
+                systemName: "plus",
+                label: "Increase exposure compensation",
+                direction: .increment
+            )
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 2)
+        .background(Color.black.opacity(0.46), in: Capsule())
+        .overlay { Capsule().stroke(Color.white.opacity(0.16), lineWidth: 1) }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("exposure-control")
+        .accessibilityLabel("Exposure compensation")
+        .accessibilityValue(accessibilityValueText)
+        .accessibilityHint("Swipe up or down to adjust exposure compensation.")
+        .accessibilityAdjustableAction { direction in
+            onAdjust(direction)
+        }
+    }
+
+    private func adjustmentButton(
+        systemName: String,
+        label: String,
+        direction: AccessibilityAdjustmentDirection
+    ) -> some View {
+        Button {
+            onAdjust(direction)
+        } label: {
+            Image(systemName: systemName)
+                .font(.system(size: 10, weight: .black))
+                .foregroundStyle(.white.opacity(0.86))
+                .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .accessibilityHint("Adjusts exposure in one third-stop increments.")
+    }
+}
+
 struct FocusLockControl: View {
     let isLocked: Bool
     let action: () -> Void

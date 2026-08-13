@@ -114,6 +114,11 @@ struct CameraScreen: View {
                         camera.setZoom(camera.zoomFactor + delta)
                     }
 
+                    ExposureControl(value: camera.exposureBias) { direction in
+                        let delta: Float = direction == .increment ? (1.0 / 3.0) : -(1.0 / 3.0)
+                        camera.setExposureBias(camera.exposureBias + delta)
+                    }
+
                     if (focusPoint != nil || camera.isFocusExposureLocked), let focusNormalizedPoint {
                         FocusLockControl(isLocked: camera.isFocusExposureLocked) {
                             camera.toggleFocusExposureLock(at: focusNormalizedPoint)
