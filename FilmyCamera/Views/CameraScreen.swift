@@ -110,6 +110,8 @@ struct CameraScreen: View {
                         )
                     }
 
+                    CameraHardwareControls(camera: camera)
+
                     ZoomControl(value: camera.zoomFactor) { direction in
                         let delta: CGFloat = direction == .increment ? 0.5 : -0.5
                         camera.setZoom(camera.zoomFactor + delta)
@@ -118,6 +120,10 @@ struct CameraScreen: View {
                     ExposureControl(value: camera.exposureBias) { direction in
                         let delta: Float = direction == .increment ? (1.0 / 3.0) : -(1.0 / 3.0)
                         camera.setExposureBias(camera.exposureBias + delta)
+                    }
+
+                    if hasHardwareSelection {
+                        hardwareSelectionControls
                     }
 
                     if (focusPoint != nil || camera.isFocusExposureLocked), let focusNormalizedPoint {
@@ -233,6 +239,93 @@ struct CameraScreen: View {
 
     private var isUITesting: Bool {
         ProcessInfo.processInfo.arguments.contains("-ui-testing")
+    }
+
+    private var hasHardwareSelection: Bool {
+        camera.availableCameraPositions.count > 1 || camera.availableLenses.count > 1
+    }
+
+    @ViewBuilder
+    private var hardwareSelectionControls: some View {
+        VStack(spacing: 6) {
+            if camera.availableCameraPositions.count > 1 {
+                HStack(spacing: 2) {
+                    ForEach(camera.availableCameraPositions, id: \.self) { position in
+                        Button {
+                            camera.setCameraPosition(position)
+                        } label: {
+                            Label(position.title, systemImage: position.systemImageName)
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .foregroundStyle(
+                                    camera.cameraPosition == position
+                                        ? FilmyTheme.background
+                                        : FilmyTheme.primary
+                                )
+                                .frame(minWidth: 64, minHeight: FilmyTheme.minimumHitTarget)
+                                .background(
+                                    camera.cameraPosition == position
+                                        ? FilmyTheme.accent
+                                        : Color.black.opacity(0.46),
+                                    in: Capsule()
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("camera-position-\(position.rawValue)")
+                        .accessibilityLabel("Use \(position.title.lowercased()) camera")
+                        .accessibilityValue(camera.cameraPosition == position ? "Selected" : "")
+                        .accessibilityHint("Switches the active camera without changing your film recipe")
+                    }
+                }
+                .padding(2)
+                .background(Color.black.opacity(0.34), in: Capsule())
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("camera-position-picker")
+            }
+
+            if camera.availableLenses.count > 1 {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(camera.availableLenses) { lens in
+                            Button {
+                                camera.setLens(id: lens.id)
+                            } label: {
+                                VStack(spacing: 2) {
+                                    Text(lens.title)
+                                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                                    Text(lens.detail)
+                                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                                        .lineLimit(1)
+                                }
+                                .foregroundStyle(
+                                    camera.selectedLensID == lens.id
+                                        ? FilmyTheme.background
+                                        : FilmyTheme.primary
+                                )
+                                .frame(minWidth: 62, minHeight: FilmyTheme.minimumHitTarget)
+                                .background(
+                                    camera.selectedLensID == lens.id
+                                        ? FilmyTheme.accent
+                                        : Color.black.opacity(0.46),
+                                    in: Capsule()
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("camera-lens-\(lens.id)")
+                            .accessibilityLabel("Use \(lens.title) lens")
+                            .accessibilityValue(
+                                camera.selectedLensID == lens.id
+                                    ? "Selected, \(lens.detail)"
+                                    : lens.detail
+                            )
+                            .accessibilityHint("Selects the hardware lens and updates zoom")
+                        }
+                    }
+                    .padding(.horizontal, 2)
+                }
+                .frame(maxWidth: 220)
+                .accessibilityIdentifier("camera-lens-picker")
+            }
+        }
     }
 
     private var reviewPresentation: Binding<Bool> {
@@ -514,5 +607,74 @@ struct CameraScreen: View {
             RoundedRectangle(cornerRadius: FilmyTheme.actionPlateRadius, style: .continuous)
                 .stroke(Color.white.opacity(0.16), lineWidth: 1)
         }
+    }
+}
+
+private struct CameraHardwareControls: View {
+    @ObservedObject var camera: CameraService
+
+    private var showsCameraSwitch: Bool {
+        camera.availableCameraPositions.count > 1
+    }
+
+    private var showsLensMenu: Bool {
+        camera.availableLenses.count > 1
+    }
+
+    var body: some View {
+        if showsCameraSwitch || showsLensMenu {
+            HStack(spacing: 8) {
+                if showsCameraSwitch {
+                    Button {
+                        camera.toggleCameraPosition()
+                    } label: {
+                        Label(camera.cameraPosition.title, systemImage: camera.cameraPosition.systemImageName)
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 10)
+                            .frame(minHeight: FilmyTheme.minimumHitTarget)
+                            .background(Color.black.opacity(0.46), in: Capsule())
+                            .overlay { Capsule().stroke(Color.white.opacity(0.16), lineWidth: 1) }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("camera-switch-control")
+                    .accessibilityLabel("Switch camera")
+                    .accessibilityValue(camera.cameraPosition.title)
+                    .accessibilityHint("Switches between the front and back cameras.")
+                }
+
+                if showsLensMenu {
+                    Menu {
+                        ForEach(camera.availableLenses) { lens in
+                            Button {
+                                camera.setLens(id: lens.id)
+                            } label: {
+                                if lens.id == camera.selectedLensID {
+                                    Label("(lens.title) · (lens.detail)", systemImage: "checkmark")
+                                } else {
+                                    Text("(lens.title) · (lens.detail)")
+                                }
+                            }
+                        }
+                    } label: {
+                        Label(selectedLensTitle, systemImage: "camera.aperture")
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 10)
+                            .frame(minHeight: FilmyTheme.minimumHitTarget)
+                            .background(Color.black.opacity(0.46), in: Capsule())
+                            .overlay { Capsule().stroke(Color.white.opacity(0.16), lineWidth: 1) }
+                    }
+                    .accessibilityIdentifier("lens-menu-control")
+                    .accessibilityLabel("Choose lens")
+                    .accessibilityValue(selectedLensTitle)
+                    .accessibilityHint("Choose a lens on the active camera.")
+                }
+            }
+        }
+    }
+
+    private var selectedLensTitle: String {
+        camera.availableLenses.first(where: { $0.id == camera.selectedLensID })?.title ?? "Lens"
     }
 }

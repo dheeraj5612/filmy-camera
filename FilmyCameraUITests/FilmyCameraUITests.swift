@@ -78,6 +78,31 @@ final class FilmyCameraUITests: XCTestCase {
         attachScreenshot(named: "settings")
     }
 
+    func testRecipeFirstOnboardingFlow() throws {
+        let onboardingApp = MainActor.assumeIsolated {
+            let onboardingApp = XCUIApplication()
+            onboardingApp.launchArguments = ["-ui-testing-onboarding"]
+            onboardingApp.launch()
+            return onboardingApp
+        }
+
+        XCTAssertTrue(onboardingApp.staticTexts["Start with a feeling."].waitForExistence(timeout: 8))
+        let firstContinue = onboardingApp.buttons["Continue"]
+        assertMinimumHitTarget(firstContinue, named: "Onboarding continue")
+
+        firstContinue.tap()
+        XCTAssertTrue(onboardingApp.staticTexts["See the mood as you compose."].waitForExistence(timeout: 5))
+        let secondContinue = onboardingApp.buttons["Continue"]
+        assertMinimumHitTarget(secondContinue, named: "Onboarding continue on page two")
+        secondContinue.tap()
+        XCTAssertTrue(onboardingApp.staticTexts["Save the finished photo."].waitForExistence(timeout: 5))
+        let openCamera = onboardingApp.buttons["Open camera"]
+        assertMinimumHitTarget(openCamera, named: "Onboarding open camera")
+        openCamera.tap()
+
+        XCTAssertTrue(onboardingApp.staticTexts["FILMY CAMERA"].waitForExistence(timeout: 8))
+    }
+
     private func assertMinimumHitTarget(_ element: XCUIElement, named: String) {
         XCTAssertTrue(element.waitForExistence(timeout: 5), named + " should exist")
         XCTAssertTrue(element.isHittable, named + " should be hittable")

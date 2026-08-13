@@ -7,6 +7,7 @@ import XCTest
 
 final class PhotoOutputEncoderTests: XCTestCase {
     func testFilteredJPEGKeepsCaptureProvenanceAndStripsGPS() throws {
+        let recipe = FilmRecipe.builtIns[3]
         let colorSpace = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
         let context = try XCTUnwrap(CGContext(
             data: nil,
@@ -44,7 +45,8 @@ final class PhotoOutputEncoderTests: XCTestCase {
         let output = try XCTUnwrap(PhotoOutputEncoder.jpegData(
             for: image,
             sourceData: sourceData as Data,
-            capturedAt: capturedAt
+            capturedAt: capturedAt,
+            recipe: recipe
         ))
         let outputSource = try XCTUnwrap(CGImageSourceCreateWithData(output as CFData, nil))
         let properties = try XCTUnwrap(
@@ -54,13 +56,81 @@ final class PhotoOutputEncoderTests: XCTestCase {
         let exif = try XCTUnwrap(properties[kCGImagePropertyExifDictionary as String] as? [String: Any])
 
         XCTAssertEqual(tiff[kCGImagePropertyTIFFSoftware as String] as? String, "Filmy Camera")
+        XCTAssertEqual(
+            tiff[kCGImagePropertyTIFFImageDescription as String] as? String,
+            "Filmy Camera • \(recipe.name)"
+        )
         XCTAssertEqual(exif[kCGImagePropertyExifDateTimeOriginal as String] as? String, "2026:08:12 18:00:00")
         XCTAssertEqual((exif[kCGImagePropertyExifPixelXDimension as String] as? NSNumber)?.intValue, 4)
         XCTAssertEqual((exif[kCGImagePropertyExifPixelYDimension as String] as? NSNumber)?.intValue, 3)
+        XCTAssertEqual((exif[kCGImagePropertyExifColorSpace as String] as? NSNumber)?.intValue, 1)
         XCTAssertEqual((properties[kCGImagePropertyPixelWidth as String] as? NSNumber)?.intValue, 4)
         XCTAssertEqual((properties[kCGImagePropertyPixelHeight as String] as? NSNumber)?.intValue, 3)
         XCTAssertEqual((properties[kCGImagePropertyOrientation as String] as? NSNumber)?.intValue, 1)
+        XCTAssertEqual(properties[kCGImagePropertyColorModel as String] as? String, kCGImagePropertyColorModelRGB as String)
+        XCTAssertEqual(properties[kCGImagePropertyProfileName as String] as? String, PhotoOutputEncoder.outputProfileName)
         XCTAssertNil(properties[kCGImagePropertyGPSDictionary as String])
         XCTAssertEqual(CGImageSourceGetType(outputSource) as String?, UTType.jpeg.identifier)
+
+        let userComment = try XCTUnwrap(exif[kCGImagePropertyExifUserComment as String] as? String)
+        let userCommentData = try XCTUnwrap(userComment.data(using: .utf8))
+        let metadata = try JSONDecoder().decode(
+            PhotoOutputEncoder.RecipeProvenanceMetadata.self,
+            from: userCommentData
+        )
+        XCTAssertEqual(metadata.format, PhotoOutputEncoder.recipeMetadataFormat)
+        XCTAssertEqual(metadata.metadataVersion, 1)
+        XCTAssertEqual(metadata.recipeID, recipe.id)
+        XCTAssertEqual(metadata.recipeName, recipe.name)
+        XCTAssertEqual(metadata.filmBase, recipe.filmBase)
+        XCTAssertEqual(metadata.recipeSchemaVersion, recipe.schemaVersion)
+        XCTAssertEqual(metadata.rendererVersion, recipe.provenance.rendererVersion)
+        XCTAssertEqual(metadata.provenance, recipe.provenance)
+    }
+
+    func testJPEGProvenancePreservesUserModifiedDisclosure() throws {
+        var recipe = FilmRecipe.builtIns[0]
+        recipe.markUserModified(parentRecipeID: recipe.id)
+
+        let colorSpace = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        let context = try XCTUnwrap(CGContext(
+            data: nil,
+            width: 1,
+            height: 1,
+            bitsPerComponent: 8,
+            bytesPerRow: 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        let image = try XCTUnwrap(context.makeImage())
+        let output = try XCTUnwrap(PhotoOutputEncoder.jpegData(
+            for: image,
+            sourceData: try sourceJPEG(for: image),
+            capturedAt: Date(timeIntervalSince1970: 0),
+            recipe: recipe
+        ))
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(output as CFData, nil))
+        let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any])
+        let exif = try XCTUnwrap(properties[kCGImagePropertyExifDictionary as String] as? [String: Any])
+        let comment = try XCTUnwrap(exif[kCGImagePropertyExifUserComment as String] as? String)
+        let data = try XCTUnwrap(comment.data(using: .utf8))
+        let metadata = try JSONDecoder().decode(PhotoOutputEncoder.RecipeProvenanceMetadata.self, from: data)
+
+        XCTAssertEqual(metadata.provenance.source, .userModified)
+        XCTAssertEqual(metadata.provenance.parentRecipeID, recipe.id)
+        XCTAssertEqual(metadata.provenance.calibration, .notCalibratedToFujifilmHardware)
+    }
+
+    private func sourceJPEG(for image: CGImage) throws -> Data {
+        let data = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(
+            data,
+            UTType.jpeg.identifier as CFString,
+            1,
+            nil
+        ))
+        CGImageDestinationAddImage(destination, image, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return data as Data
     }
 }

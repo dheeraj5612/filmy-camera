@@ -204,16 +204,26 @@ public final class FilmRenderer {
         }
 
         let rendered = render(reference, recipe: recipe, quality: .preview)
-        guard let sRGBColorSpace,
-              let image = sharedContext.createCGImage(
-                  rendered,
-                  from: extent,
-                  format: .RGBA8,
-                  colorSpace: sRGBColorSpace
-              ) else {
+        guard let image = outputCGImage(rendered, from: extent) else {
             return nil
         }
         return UIImage(cgImage: image)
+    }
+
+    /// Materializes a display-referred still at the app's explicit output
+    /// boundary. Keeping this in one place prevents a caller from relying on
+    /// Core Image's implicit color-space choice when it creates a CGImage.
+    public static func outputCGImage(
+        _ image: CIImage,
+        from extent: CGRect? = nil
+    ) -> CGImage? {
+        guard let sRGBColorSpace else { return nil }
+        return sharedContext.createCGImage(
+            image,
+            from: extent ?? image.extent,
+            format: .RGBA8,
+            colorSpace: sRGBColorSpace
+        )
     }
 
     /// Applies the selected look to a CIImage. The returned image remains a
