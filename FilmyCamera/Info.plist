@@ -25,7 +25,7 @@
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Filmy Camera saves finished photos to your Photos library when you choose Save to Photos.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Filmy Camera reads your recent photos so you can review them in the in-app gallery.</string>
+	<string>Filmy Camera reads frames saved by Filmy Camera and photos you explicitly choose to browse in the in-app gallery.</string>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>
