@@ -222,7 +222,9 @@ jobs:
 
   release-scripts:
     needs: change-scope
-    if: needs.change-scope.outputs.release_scripts_changed == 'true'
+    # This is a required branch-protection context. Run it for every PR so a
+    # Swift-only change cannot leave the required check in a skipped state.
+    if: needs.change-scope.result == 'success'
     runs-on: macos-15
     timeout-minutes: 10
 
