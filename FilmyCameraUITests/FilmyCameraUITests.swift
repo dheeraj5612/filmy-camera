@@ -16,6 +16,8 @@ final class FilmyCameraUITests: XCTestCase {
     }
 
     func testCameraShellAndRecipeDetails() throws {
+        let cameraTab = app.buttons["camera-tab"]
+        assertMinimumHitTarget(cameraTab, named: "Camera tab")
         XCTAssertTrue(app.staticTexts["FILMY CAMERA"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["Natural Standard"].waitForExistence(timeout: 5))
 
@@ -44,14 +46,14 @@ final class FilmyCameraUITests: XCTestCase {
     }
 
     func testGalleryAndSettingsNavigation() throws {
-        let gallery = app.buttons["Roll"]
+        let gallery = app.buttons["roll-tab"]
         assertMinimumHitTarget(gallery, named: "Roll")
         gallery.tap()
 
         XCTAssertTrue(app.staticTexts["Photo access is off"].waitForExistence(timeout: 5))
         attachScreenshot(named: "gallery-empty-state")
 
-        let settings = app.buttons["Settings"]
+        let settings = app.buttons["settings-tab"]
         assertMinimumHitTarget(settings, named: "Settings tab")
         settings.tap()
 
