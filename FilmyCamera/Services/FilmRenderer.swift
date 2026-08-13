@@ -259,9 +259,11 @@ public final class FilmRenderer {
     private static func sanitizedRecipe(_ recipe: FilmRecipe) -> FilmRecipe {
         var safe = recipe
 
-        func value(_ raw: Double, _ control: FilmRecipe.Control, neutral: Double) -> Double {
-            let fallback = raw.isFinite ? raw : neutral
-            return clamp(fallback, lower: control.editorRange.lowerBound, upper: control.editorRange.upperBound)
+        func value(_ raw: Double, _: FilmRecipe.Control, neutral: Double) -> Double {
+            // Preserve finite exploratory drafts. Each renderer stage applies
+            // its own defensive bounds; only non-finite values need a neutral
+            // replacement at this boundary.
+            raw.isFinite ? raw : neutral
         }
 
         safe.exposure = value(recipe.exposure, .exposure, neutral: 0)
