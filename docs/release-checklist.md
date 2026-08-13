@@ -23,7 +23,7 @@
 - [x] Run `xcodegen generate` from a clean checkout.
 - [x] Run the credential-free release project preflight (`scripts/release/validate-project.sh`).
 - [x] Run the iPhone Simulator build and XCTest workflow locally; the current local evidence is 58 unit/renderer tests plus 2 UI tests on iOS 26.5, with the hosted iOS 18.5 gate retained for the pushed mainline.
-- [x] Re-run the hosted Xcode 16.4 workflow for this production-hardening pass and verify the exact merged SHA.
+- [ ] Re-run the hosted Xcode 16.4 workflow for this production-hardening pass and verify the exact merged SHA.
 - [x] Keep release-script syntax, ShellCheck, and fail-closed upload-preparation checks in CI.
 - [ ] Run a Release archive for a generic iOS device destination; verify the signed archive and app on a physical iPhone before upload.
 - [x] Validate `Info.plist`, launch behavior, app icon, version `1.0.0`, and build number `1`.
