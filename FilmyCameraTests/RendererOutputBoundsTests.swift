@@ -219,8 +219,12 @@ final class RendererOutputBoundsTests: XCTestCase {
     func testOpaqueCopyReplacesSourceAlpha() {
         let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
         let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+        var referenceRGB: [Float]?
         for sourceAlpha in [1.0, 0.35] {
+            // Make the non-opaque fixture explicitly premultiplied, matching
+            // the representation used by Core Image pixel buffers.
             let input = CIImage(color: CIColor(red: 0.42, green: 0.18, blue: 0.76, alpha: sourceAlpha))
+                .premultiplyingAlpha()
                 .cropped(to: extent)
             let pixels = renderFloatPixels(
                 FilmRenderer.opaqueImage(from: input),
@@ -230,6 +234,18 @@ final class RendererOutputBoundsTests: XCTestCase {
 
             XCTAssertEqual(pixels.count, 4)
             XCTAssertEqual(pixels[3], 1, accuracy: 0.001, "Source alpha \(sourceAlpha) was not replaced")
+            if let referenceRGB {
+                for channel in 0..<3 {
+                    XCTAssertEqual(
+                        pixels[channel],
+                        referenceRGB[channel],
+                        accuracy: 0.01,
+                        "RGB channel \(channel) changed with source alpha"
+                    )
+                }
+            } else {
+                referenceRGB = Array(pixels.prefix(3))
+            }
         }
     }
 

@@ -316,7 +316,10 @@ public final class FilmRenderer {
 
     static func opaqueImage(from image: CIImage) -> CIImage {
         guard let filter = CIFilter(name: "CIColorMatrix") else { return image }
-        filter.setValue(image, forKey: kCIInputImageKey)
+        // CIImage buffers are premultiplied by default. Recover straight RGB
+        // before replacing alpha, otherwise translucent source colors remain
+        // darkened when the working image becomes opaque.
+        filter.setValue(image.unpremultiplyingAlpha(), forKey: kCIInputImageKey)
         // Replace alpha with 1 rather than adding a unit bias to the source
         // alpha. The default alpha vector would otherwise turn an opaque
         // source into alpha 2 before blend-based finishing effects run.
