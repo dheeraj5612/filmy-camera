@@ -23,7 +23,7 @@
 - [x] Run `xcodegen generate` from a clean checkout.
 - [x] Run the credential-free release project preflight (`scripts/release/validate-project.sh`).
 - [x] Run the iPhone Simulator build and XCTest workflow locally; the current local evidence is 58 unit/renderer tests plus 2 UI tests on iOS 26.5, with the hosted iOS 18.5 gate retained for the pushed mainline.
-- [ ] Re-run the hosted Xcode 16.4 workflow for this production-hardening pass and verify the exact merged SHA.
+- [x] Re-run the hosted Xcode 16.4 workflow for this production-hardening pass and verify the exact merged SHA.
 - [x] Keep release-script syntax, ShellCheck, and fail-closed upload-preparation checks in CI.
 - [ ] Run a Release archive for a generic iOS device destination; verify the signed archive and app on a physical iPhone before upload.
 - [x] Validate `Info.plist`, launch behavior, app icon, version `1.0.0`, and build number `1`.
@@ -72,9 +72,10 @@ The archive wrapper generates the project and creates a Release archive for a ge
 
 ## Verified evidence
 
-- Latest local mainline: `1662f833f8909e1dd535a05075282ea230b1202b`
+- Latest merged mainline: `52e6cafe477935308b194424f32411f2a2247b39`
 - Latest hardening commits: `47c93dce619bcc031b89d2802fa91013c1c49c00` (CI workflow), `f6799ab9fbcb87b9b28c4d9569e4a13de27b7cfd` (Photos ownership/cache safety), and `1662f833f8909e1dd535a05075282ea230b1202b` (camera/review error states).
-- Hosted CI for the three hardening commits is pending after push; the prior exact mainline evidence remains [run 31662942583](https://github.com/dheeraj5612/filmy-camera/actions/runs/31662942583) on SHA `0067f437fab079c8c09d7436de8eae86c58804e8`.
+- Production-hardening mainline evidence: [run 31664749437](https://github.com/dheeraj5612/filmy-camera/actions/runs/31664749437) — green on exact merged SHA `52e6cafe477935308b194424f32411f2a2247b39`; Xcode 16.4 generated-project reproducibility, 58 unit/renderer tests, 2 UI tests, release preflight, artifact retention, ShellCheck, metadata validation, and fail-closed upload-preparation checks passed.
+- Prior exact mainline evidence remains [run 31662942583](https://github.com/dheeraj5612/filmy-camera/actions/runs/31662942583) on SHA `0067f437fab079c8c09d7436de8eae86c58804e8`.
 - Exposure-control PR: [PR #39](https://github.com/dheeraj5612/filmy-camera/pull/39) — merged after green hosted checks; adds bounded ±2 EV compensation, quantized one-third-stop adjustment, full touch targets, VoiceOver adjustment actions, and CI coverage for the required release gate.
 - Current mainline evidence GitHub Actions run: [31662479936](https://github.com/dheeraj5612/filmy-camera/actions/runs/31662479936) — green on exact main SHA `d2fdbf7ff480eb309a6ffb1ab5b4ac181de5a454`; Xcode 16.4 generated-project reproducibility, 50 unit/renderer tests, 2 UI tests, release preflight, artifact/log retention, ShellCheck, metadata validation, and the fail-closed upload-preparation lane passed.
 - Production-hardening PR: [PR #37](https://github.com/dheeraj5612/filmy-camera/pull/37) — merged after green hosted checks on source SHA `0f8374a5b62a3e8560d22762aa40d0c492a9256a`.
