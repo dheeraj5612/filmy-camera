@@ -22,9 +22,7 @@ public final class FilmRenderer {
         /// paths can evolve independently without changing a recipe's look.
         fileprivate var cubeDimension: Int {
             switch self {
-            case .preview:
-                return 16
-            case .photo, .export:
+            case .preview, .photo, .export:
                 return 32
             }
         }
@@ -229,24 +227,74 @@ public final class FilmRenderer {
         guard !image.extent.isEmpty else { return image }
 
         let sourceExtent = image.extent
-        var output = image
+        let safeRecipe = sanitizedRecipe(recipe)
+        // Core Image's blend stages can operate on premultiplied alpha. Work
+        // on an opaque copy, then restore the source alpha once at the end so
+        // a transparent input is not multiplied repeatedly by finishing FX.
+        let processingImage = opaqueImage(from: image)
+        var output = processingImage
 
-        output = applyDynamicRange(to: output, recipe: recipe)
-        output = applyExposureAndTone(to: output, recipe: recipe)
-        output = applyWhiteBalance(to: output, recipe: recipe)
-        output = applyMonochromeFilter(to: output, recipe: recipe)
-        output = applyColorControls(to: output, recipe: recipe)
-        output = applyColorCube(to: output, recipe: recipe, quality: quality)
-        output = applyDetailControls(to: output, recipe: recipe)
-        output = applyClarity(to: output, recipe: recipe)
-        output = applyGrain(to: output, recipe: recipe, quality: quality, seed: grainSeed)
-        output = applyVignette(to: output, recipe: recipe)
-        output = applyHalation(to: output, recipe: recipe, quality: quality)
+        output = applyDynamicRange(to: output, recipe: safeRecipe)
+        output = applyExposureAndTone(to: output, recipe: safeRecipe)
+        output = applyWhiteBalance(to: output, recipe: safeRecipe)
+        output = applyMonochromeFilter(to: output, recipe: safeRecipe)
+        output = applyColorControls(to: output, recipe: safeRecipe)
+        output = applyColorCube(to: output, recipe: safeRecipe, quality: quality)
+        output = applyDetailControls(to: output, recipe: safeRecipe)
+        output = applyClarity(to: output, recipe: safeRecipe)
+        output = applyGrain(to: output, recipe: safeRecipe, quality: quality, seed: grainSeed)
+        output = applyVignette(to: output, recipe: safeRecipe)
+        output = applyHalation(to: output, recipe: safeRecipe, quality: quality)
         output = clampOutput(toNormalizedRange: output)
+        output = restoreAlpha(of: output, from: image)
 
         // Some finishing filters can expand their extent. Camera and export
         // callers expect the same bounds as the source image.
         return output.cropped(to: sourceExtent)
+    }
+
+    /// The renderer is also used for decoded drafts and future import paths.
+    /// Sanitize at the render boundary so NaN or infinity can never reach a
+    /// Core Image filter or the color-cube cache.
+    private static func sanitizedRecipe(_ recipe: FilmRecipe) -> FilmRecipe {
+        var safe = recipe
+
+        func value(_ raw: Double, _ control: FilmRecipe.Control, neutral: Double) -> Double {
+            let fallback = raw.isFinite ? raw : neutral
+            return clamp(fallback, lower: control.editorRange.lowerBound, upper: control.editorRange.upperBound)
+        }
+
+        safe.exposure = value(recipe.exposure, .exposure, neutral: 0)
+        safe.tone = FilmRecipe.Tone(
+            highlight: value(recipe.tone.highlight, .highlights, neutral: 0),
+            shadow: value(recipe.tone.shadow, .shadows, neutral: 0)
+        )
+        safe.saturation = value(recipe.saturation, .color, neutral: 1)
+        safe.contrast = value(recipe.contrast, .contrast, neutral: 1)
+        safe.whiteBalance = FilmRecipe.WhiteBalanceShift(
+            temperature: value(recipe.whiteBalance.temperature, .temperature, neutral: 0),
+            tint: value(recipe.whiteBalance.tint, .tint, neutral: 0)
+        )
+        safe.colorChrome = value(recipe.colorChrome, .colorChrome, neutral: 0)
+        safe.blueResponse = value(recipe.blueResponse, .blueResponse, neutral: 0)
+        safe.fxBlue = value(recipe.fxBlue, .fxBlue, neutral: 0)
+        safe.sharpness = value(recipe.sharpness, .sharpness, neutral: 0)
+        safe.noiseReduction = value(recipe.noiseReduction, .noiseReduction, neutral: 0)
+        safe.clarity = value(recipe.clarity, .clarity, neutral: 0)
+        safe.grain = value(recipe.grain, .grain, neutral: 0)
+        safe.grainSize = value(recipe.grainSize, .grainSize, neutral: 1)
+        safe.vignette = value(recipe.vignette, .vignette, neutral: 0)
+        safe.halation = value(recipe.halation, .halation, neutral: 0)
+        safe.palette = FilmRecipe.Palette(
+            redBias: value(recipe.palette.redBias, .paletteRedBias, neutral: 0),
+            greenBias: value(recipe.palette.greenBias, .paletteGreenBias, neutral: 0),
+            blueBias: value(recipe.palette.blueBias, .paletteBlueBias, neutral: 0),
+            redGreenMix: value(recipe.palette.redGreenMix, .paletteRedGreenMix, neutral: 0),
+            greenBlueMix: value(recipe.palette.greenBlueMix, .paletteGreenBlueMix, neutral: 0),
+            blueRedMix: value(recipe.palette.blueRedMix, .paletteBlueRedMix, neutral: 0),
+            saturation: value(recipe.palette.saturation, .paletteSaturation, neutral: 1)
+        )
+        return safe
     }
 
     private static func clampOutput(toNormalizedRange image: CIImage) -> CIImage {
@@ -262,6 +310,35 @@ public final class FilmRenderer {
             forKey: "inputMaxComponents"
         )
         return filter.outputImage?.cropped(to: image.extent) ?? image
+    }
+
+    private static func opaqueImage(from image: CIImage) -> CIImage {
+        guard let filter = CIFilter(name: "CIColorMatrix") else { return image }
+        filter.setValue(image, forKey: kCIInputImageKey)
+        filter.setValue(CIVector(x: 0, y: 0, z: 0, w: 1), forKey: "inputBiasVector")
+        return filter.outputImage?.cropped(to: image.extent) ?? image
+    }
+
+    private static func restoreAlpha(of image: CIImage, from source: CIImage) -> CIImage {
+        guard let alpha = CIFilter(name: "CIColorMatrix"),
+              let blend = CIFilter(name: "CIBlendWithAlphaMask") else {
+            return image
+        }
+
+        alpha.setValue(source, forKey: kCIInputImageKey)
+        alpha.setValue(immutableResources.zeroComponents, forKey: "inputRVector")
+        alpha.setValue(immutableResources.zeroComponents, forKey: "inputGVector")
+        alpha.setValue(immutableResources.zeroComponents, forKey: "inputBVector")
+        alpha.setValue(immutableResources.alphaVector, forKey: "inputAVector")
+
+        guard let alphaImage = alpha.outputImage?.cropped(to: source.extent) else {
+            return image
+        }
+
+        blend.setValue(image, forKey: kCIInputImageKey)
+        blend.setValue(immutableResources.clearImage.cropped(to: image.extent), forKey: kCIInputBackgroundImageKey)
+        blend.setValue(alphaImage, forKey: "inputMaskImage")
+        return blend.outputImage?.cropped(to: image.extent) ?? image
     }
 
     private static func applyExposureAndTone(
@@ -427,10 +504,14 @@ public final class FilmRenderer {
             return unsharp.outputImage?.cropped(to: image.extent) ?? image
         }
 
-        guard let blur = CIFilter(name: "CIGaussianBlur") else { return image }
-        blur.setValue(image, forKey: kCIInputImageKey)
-        blur.setValue(abs(clarity) * 0.65, forKey: kCIInputRadiusKey)
-        return blur.outputImage?.cropped(to: image.extent) ?? image
+        // Negative clarity reduces local edge contrast without smearing the
+        // whole frame. A signed unsharp mask keeps large tones in place while
+        // attenuating the high-frequency component around edges.
+        guard let unsharp = CIFilter(name: "CIUnsharpMask") else { return image }
+        unsharp.setValue(image, forKey: kCIInputImageKey)
+        unsharp.setValue(0.8 + abs(clarity) * 0.8, forKey: kCIInputRadiusKey)
+        unsharp.setValue(-abs(clarity) * 0.65, forKey: kCIInputIntensityKey)
+        return unsharp.outputImage?.cropped(to: image.extent) ?? image
     }
 
     private static func applyDetailControls(
@@ -646,20 +727,18 @@ public final class FilmRenderer {
         // Color Chrome-style compression protects highly saturated highlights
         // without turning the whole image gray.
         let highlightWeight = smoothstep(0.30, 0.92, luma)
+        // Keep Color Chrome isolated from the dedicated blue controls. The
+        // public camera model describes this stage for saturated red, yellow,
+        // and green regions; cyan/deep-blue response belongs to FX Blue and
+        // blueResponse below.
         let chromeSectorWeight = max(
             warmHueWeight,
-            max(
-                hueSectorWeight(hue, center: 0.30, halfWidth: 0.17),
-                max(
-                    hueSectorWeight(hue, center: 0.48, halfWidth: 0.16),
-                    max(cyanBlueWeight, deepBlueWeight)
-                )
-            )
+            hueSectorWeight(hue, center: 0.30, halfWidth: 0.17)
         )
         let compression = Float(clamp(recipe.colorChrome, lower: 0, upper: 1))
             * highlightWeight
             * chroma
-            * (0.35 + chromeSectorWeight * 0.65)
+            * chromeSectorWeight
             * 0.30
         mappedRed = mix(mappedRed, luma + (mappedRed - luma) * 0.72, compression)
         mappedGreen = mix(mappedGreen, luma + (mappedGreen - luma) * 0.72, compression)

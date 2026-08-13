@@ -8,7 +8,8 @@ enum FilmyTheme {
     static let line = Color.white.opacity(0.12)
     static let primary = Color.white.opacity(0.94)
     static let secondary = Color.white.opacity(0.62)
-    static let tertiary = Color.white.opacity(0.38)
+    // Keep small section labels above contrast-safe opacity on dark surfaces.
+    static let tertiary = Color.white.opacity(0.56)
     static let accent = Color(red: 0.97, green: 0.72, blue: 0.27)
     static let mint = Color(red: 0.47, green: 0.83, blue: 0.73)
     static let cornerRadius: CGFloat = 22
@@ -408,11 +409,28 @@ struct FocusReticle: View {
 
 struct ToastView: View {
     let message: String
+    let style: CameraViewModel.ToastStyle
+
+    private var symbolName: String {
+        switch style {
+        case .success: "checkmark.circle.fill"
+        case .error: "exclamationmark.triangle.fill"
+        case .info: "info.circle.fill"
+        }
+    }
+
+    private var symbolColor: Color {
+        switch style {
+        case .success: FilmyTheme.mint
+        case .error: Color(red: 1, green: 0.45, blue: 0.4)
+        case .info: FilmyTheme.accent
+        }
+    }
 
     var body: some View {
         HStack(spacing: 9) {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(FilmyTheme.mint)
+            Image(systemName: symbolName)
+                .foregroundStyle(symbolColor)
             Text(message)
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
                 .foregroundStyle(FilmyTheme.primary)

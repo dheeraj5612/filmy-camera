@@ -3,6 +3,13 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root_dir="$(cd "${script_dir}/../.." && pwd)"
+final_mode=false
+
+if [[ "${1:-}" == "--final" ]]; then
+  final_mode=true
+  shift
+fi
+
 metadata_file="${1:-${root_dir}/docs/app-store/metadata-en-US.md}"
 
 if [[ ! -f "${metadata_file}" ]]; then
@@ -82,6 +89,33 @@ done
 if ! grep -Fq "It is not affiliated with Fujifilm" "${metadata_file}"; then
   echo "Metadata must retain the independent-product trademark disclaimer" >&2
   failures=$((failures + 1))
+fi
+
+if ! grep -Fq "## App Review notes" "${metadata_file}" \
+  || ! grep -Fq "the Roll only reads frames saved by Filmy Camera" "${metadata_file}"; then
+  echo "Metadata must include truthful App Review notes for the current Roll behavior" >&2
+  failures=$((failures + 1))
+fi
+
+if [[ "${final_mode}" == true ]]; then
+  status_line="$(sed -n 's/^Status:[[:space:]]*//p' "${metadata_file}" | head -n 1)"
+  if [[ "${status_line}" != "final" ]]; then
+    echo "Final App Store metadata must begin with Status: final" >&2
+    failures=$((failures + 1))
+  fi
+
+  for label in "Price" "Availability"; do
+    value="$(field_value "${label}")"
+    if [[ -z "${value}" || "${value}" == *"Confirm with the product owner"* || "${value}" == *"["* || "${value}" == *"]"* ]]; then
+      echo "Final App Store metadata must resolve ${label}" >&2
+      failures=$((failures + 1))
+    fi
+  done
+
+  if grep -Eq 'Status:[[:space:]]*draft|Confirm with the product owner|\[release owner|\[TODO|TBD' "${metadata_file}"; then
+    echo "Final App Store metadata still contains draft placeholders" >&2
+    failures=$((failures + 1))
+  fi
 fi
 
 if [[ "${failures}" -gt 0 ]]; then

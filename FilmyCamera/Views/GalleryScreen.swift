@@ -38,8 +38,8 @@ struct GalleryScreen: View {
         }
         .task {
             // Keep the Roll useful without prompting for broad Photos read
-            // access. Filmy Camera can display its own locally cached frames;
-            // browsing other Photos is an explicit user choice below.
+            // access. It displays frames created by Filmy Camera and its
+            // private local fallback cache.
             photoLibrary.refresh()
         }
         .onChange(of: scenePhase) { _, phase in
@@ -84,7 +84,7 @@ struct GalleryScreen: View {
                         systemName: "photo.badge.plus",
                         title: "Give your roll a home",
                         message: "Allow photo access to show the frames you have made with Filmy Camera.",
-                        actionTitle: "Browse Photos",
+                        actionTitle: "Allow Photos access",
                         action: requestReadAccess
                     )
                 } else {
@@ -103,7 +103,7 @@ struct GalleryScreen: View {
                     EmptyStateCard(
                         systemName: "photo.on.rectangle.angled",
                         title: "Your selected roll is empty",
-                        message: "Filmy Camera can only show the photos you selected for it."
+                        message: "Filmy Camera can only show frames saved by Filmy Camera that you allow it to read."
                     )
                 } else {
                     galleryGrid
@@ -121,7 +121,7 @@ struct GalleryScreen: View {
                 )
             } else {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Showing frames saved by Filmy Camera. Enable Photos read access to browse other library assets.")
+                    Text("Showing frames saved by Filmy Camera. Enable Photos read access to refresh them from your library.")
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundStyle(FilmyTheme.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -141,12 +141,12 @@ struct GalleryScreen: View {
         Button {
             photoLibrary.presentLimitedLibraryPicker()
         } label: {
-            Label("Manage selected photos", systemImage: "checkmark.circle")
+            Label("Manage access to saved frames", systemImage: "checkmark.circle")
                 .font(.system(size: 13, weight: .bold, design: .rounded))
                 .foregroundStyle(FilmyTheme.accent)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .accessibilityHint("Choose which photos Filmy Camera can view")
+        .accessibilityHint("Choose which saved Filmy Camera frames can be viewed in the Roll")
     }
 
     private var galleryGrid: some View {
