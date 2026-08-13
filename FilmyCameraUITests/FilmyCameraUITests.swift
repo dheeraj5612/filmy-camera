@@ -16,6 +16,8 @@ final class FilmyCameraUITests: XCTestCase {
     }
 
     func testCameraShellAndRecipeDetails() throws {
+        let cameraTab = app.buttons["camera-tab"]
+        assertMinimumHitTarget(cameraTab, named: "Camera tab")
         XCTAssertTrue(app.staticTexts["FILMY CAMERA"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["Natural Standard"].waitForExistence(timeout: 5))
 
