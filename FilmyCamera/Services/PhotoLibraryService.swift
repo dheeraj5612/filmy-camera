@@ -90,6 +90,61 @@ enum PhotoLibraryServiceError: LocalizedError, Sendable {
     }
 }
 
+enum PhotoLibraryAssetOwnership {
+    static func contains(_ assetIdentifier: String, in savedIdentifiers: [String]) -> Bool {
+        guard !assetIdentifier.isEmpty else { return false }
+        return savedIdentifiers.contains(assetIdentifier)
+    }
+
+    static func adding(
+        _ assetIdentifier: String,
+        to savedIdentifiers: [String],
+        limit: Int
+    ) -> [String] {
+        guard limit > 0 else { return [] }
+        guard !assetIdentifier.isEmpty else {
+            return normalized(savedIdentifiers, limit: limit)
+        }
+
+        return normalized(
+            [assetIdentifier] + savedIdentifiers,
+            limit: limit
+        )
+    }
+
+    static func removing(_ assetIdentifier: String, from savedIdentifiers: [String]) -> [String] {
+        savedIdentifiers.filter { $0 != assetIdentifier }
+    }
+
+    static func normalized(_ savedIdentifiers: [String], limit: Int) -> [String] {
+        guard limit > 0 else { return [] }
+
+        var seen = Set<String>()
+        return savedIdentifiers
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+            .prefix(limit)
+            .map { $0 }
+    }
+}
+
+enum PhotoLibraryCachePath {
+    static func fileURL(filename: String, in directory: URL) -> URL? {
+        guard !filename.isEmpty,
+              filename != ".",
+              filename != "..",
+              URL(fileURLWithPath: filename).lastPathComponent == filename else {
+            return nil
+        }
+
+        let directoryURL = directory.standardizedFileURL
+        let fileURL = directoryURL
+            .appendingPathComponent(filename, isDirectory: false)
+            .standardizedFileURL
+        guard fileURL.deletingLastPathComponent() == directoryURL else { return nil }
+        return fileURL
+    }
+}
+
 @MainActor
 final class PhotoLibraryService: ObservableObject {
     private final class IdentifierBox: @unchecked Sendable {
@@ -207,7 +262,10 @@ final class PhotoLibraryService: ObservableObject {
 
     func canDelete(asset: PhotoLibraryGalleryAsset) -> Bool {
         guard case .photos(let photoAsset) = asset else { return false }
-        return canDeletePhotos && savedAssetIdentifiers.contains(photoAsset.localIdentifier)
+        return canDeletePhotos && PhotoLibraryAssetOwnership.contains(
+            photoAsset.localIdentifier,
+            in: savedAssetIdentifiers
+        )
     }
 
     var galleryAssets: [PhotoLibraryGalleryAsset] {
@@ -388,7 +446,7 @@ final class PhotoLibraryService: ObservableObject {
         }
 
         let assetIdentifier = asset.localIdentifier
-        guard savedAssetIdentifiers.contains(assetIdentifier) else {
+        guard PhotoLibraryAssetOwnership.contains(assetIdentifier, in: savedAssetIdentifiers) else {
             completion(.failure(.notOwned))
             return
         }
@@ -431,8 +489,18 @@ final class PhotoLibraryService: ObservableObject {
     }
 
     private var savedAssetIdentifiers: [String] {
-        get { UserDefaults.standard.stringArray(forKey: savedAssetIdentifiersKey) ?? [] }
-        set { UserDefaults.standard.set(Array(newValue.prefix(120)), forKey: savedAssetIdentifiersKey) }
+        get {
+            PhotoLibraryAssetOwnership.normalized(
+                UserDefaults.standard.stringArray(forKey: savedAssetIdentifiersKey) ?? [],
+                limit: 120
+            )
+        }
+        set {
+            UserDefaults.standard.set(
+                PhotoLibraryAssetOwnership.normalized(newValue, limit: 120),
+                forKey: savedAssetIdentifiersKey
+            )
+        }
     }
 
     private var savedFrameResources: [String: SavedFrameResource] {
@@ -455,8 +523,11 @@ final class PhotoLibraryService: ObservableObject {
         imageData: Data?,
         image: UIImage
     ) {
-        let identifiers = [identifier] + savedAssetIdentifiers.filter { $0 != identifier }
-        savedAssetIdentifiers = Array(identifiers.prefix(120))
+        savedAssetIdentifiers = PhotoLibraryAssetOwnership.adding(
+            identifier,
+            to: savedAssetIdentifiers,
+            limit: 120
+        )
         metadataByAssetIdentifier[identifier] = metadata
         let retainedIdentifiers = Set(savedAssetIdentifiers)
         metadataByAssetIdentifier = metadataByAssetIdentifier.filter { retainedIdentifiers.contains($0.key) }
@@ -470,7 +541,10 @@ final class PhotoLibraryService: ObservableObject {
     }
 
     private func forgetSavedAsset(_ identifier: String) {
-        savedAssetIdentifiers = savedAssetIdentifiers.filter { $0 != identifier }
+        savedAssetIdentifiers = PhotoLibraryAssetOwnership.removing(
+            identifier,
+            from: savedAssetIdentifiers
+        )
         metadataByAssetIdentifier.removeValue(forKey: identifier)
         persistMetadata()
         removeCachedFrame(identifier: identifier)
@@ -526,7 +600,9 @@ final class PhotoLibraryService: ObservableObject {
 
         for identifier in removed {
             if let resource = resources.removeValue(forKey: identifier) {
-                try? FileManager.default.removeItem(at: localFrameURL(for: resource.filename))
+                if let resourceURL = localFrameURL(for: resource.filename) {
+                    try? FileManager.default.removeItem(at: resourceURL)
+                }
             }
         }
         savedFrameResources = resources
@@ -537,7 +613,8 @@ final class PhotoLibraryService: ObservableObject {
         localSavedFrames = savedAssetIdentifiers.compactMap { identifier in
             guard !excludedIdentifiers.contains(identifier),
                   let resource = resources[identifier],
-                  FileManager.default.fileExists(atPath: localFrameURL(for: resource.filename).path) else {
+                  let resourceURL = localFrameURL(for: resource.filename),
+                  FileManager.default.fileExists(atPath: resourceURL.path) else {
                 return nil
             }
             return LocalSavedFrame(
@@ -547,8 +624,9 @@ final class PhotoLibraryService: ObservableObject {
             )
         }
         hasLocalCache = savedAssetIdentifiers.contains { identifier in
-            guard let resource = resources[identifier] else { return false }
-            return FileManager.default.fileExists(atPath: localFrameURL(for: resource.filename).path)
+            guard let resource = resources[identifier],
+                  let resourceURL = localFrameURL(for: resource.filename) else { return false }
+            return FileManager.default.fileExists(atPath: resourceURL.path)
         }
     }
 
@@ -559,7 +637,7 @@ final class PhotoLibraryService: ObservableObject {
         }
 
         let filename = "\(UUID().uuidString).jpg"
-        let resourceURL = directoryURL.appendingPathComponent(filename, isDirectory: false)
+        guard let resourceURL = localFrameURL(for: filename) else { return }
         do {
             try FileManager.default.createDirectory(
                 at: directoryURL,
@@ -571,7 +649,9 @@ final class PhotoLibraryService: ObservableObject {
 
             var resources = savedFrameResources
             if let previousResource = resources[identifier], previousResource.filename != filename {
-                try? FileManager.default.removeItem(at: localFrameURL(for: previousResource.filename))
+                if let previousResourceURL = localFrameURL(for: previousResource.filename) {
+                    try? FileManager.default.removeItem(at: previousResourceURL)
+                }
             }
             let pixelWidth = fallbackImage.cgImage?.width ?? max(Int(fallbackImage.size.width * fallbackImage.scale), 1)
             let pixelHeight = fallbackImage.cgImage?.height ?? max(Int(fallbackImage.size.height * fallbackImage.scale), 1)
@@ -591,7 +671,9 @@ final class PhotoLibraryService: ObservableObject {
     private func removeCachedFrame(identifier: String) {
         var resources = savedFrameResources
         guard let resource = resources.removeValue(forKey: identifier) else { return }
-        try? FileManager.default.removeItem(at: localFrameURL(for: resource.filename))
+        if let resourceURL = localFrameURL(for: resource.filename) {
+            try? FileManager.default.removeItem(at: resourceURL)
+        }
         savedFrameResources = resources
         refreshCachedFrames(excluding: Set(assets.map(\.localIdentifier)))
     }
@@ -606,9 +688,9 @@ final class PhotoLibraryService: ObservableObject {
             .appendingPathComponent(localFramesDirectoryName, isDirectory: true)
     }
 
-    private func localFrameURL(for filename: String) -> URL {
-        localFramesDirectoryURL?.appendingPathComponent(filename, isDirectory: false)
-            ?? URL(fileURLWithPath: filename)
+    private func localFrameURL(for filename: String) -> URL? {
+        guard let directoryURL = localFramesDirectoryURL else { return nil }
+        return PhotoLibraryCachePath.fileURL(filename: filename, in: directoryURL)
     }
 
     private func migrateLocalFrameCacheIfNeeded() {
@@ -634,6 +716,7 @@ final class PhotoLibraryService: ObservableObject {
                 if !FileManager.default.fileExists(atPath: destination.path) {
                     try FileManager.default.moveItem(at: fileURL, to: destination)
                 }
+                protectLocalResource(at: destination)
             }
             try? FileManager.default.removeItem(at: legacyURL)
             protectLocalResource(at: currentURL)
@@ -659,11 +742,20 @@ final class PhotoLibraryService: ObservableObject {
         var totalBytes = 0
         var didRemoveResource = false
 
+        if let directoryURL = localFramesDirectoryURL,
+           FileManager.default.fileExists(atPath: directoryURL.path) {
+            protectLocalResource(at: directoryURL)
+        }
+
         // savedAssetIdentifiers is newest-first, so evict the oldest local
         // copies first while retaining the Photos originals.
         for identifier in savedAssetIdentifiers {
             guard let resource = resources[identifier] else { continue }
-            let url = localFrameURL(for: resource.filename)
+            guard let url = localFrameURL(for: resource.filename) else {
+                resources.removeValue(forKey: identifier)
+                didRemoveResource = true
+                continue
+            }
             let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
             let byteCount = (attributes?[.size] as? NSNumber)?.intValue ?? 0
             guard byteCount > 0 else {
@@ -677,6 +769,7 @@ final class PhotoLibraryService: ObservableObject {
                 resources.removeValue(forKey: identifier)
                 didRemoveResource = true
             } else {
+                protectLocalResource(at: url)
                 totalBytes += byteCount
             }
         }
@@ -689,7 +782,9 @@ final class PhotoLibraryService: ObservableObject {
 
     func clearLocalRollCache() {
         for resource in savedFrameResources.values {
-            try? FileManager.default.removeItem(at: localFrameURL(for: resource.filename))
+            if let resourceURL = localFrameURL(for: resource.filename) {
+                try? FileManager.default.removeItem(at: resourceURL)
+            }
         }
         savedFrameResources = [:]
         refreshCachedFrames(excluding: Set(assets.map(\.localIdentifier)))
@@ -710,8 +805,12 @@ final class PhotoLibraryService: ObservableObject {
     func shareURL(for asset: PhotoLibraryGalleryAsset) async -> URL? {
         switch asset {
         case .cached(let frame):
-            guard let filename = savedFrameResources[frame.assetIdentifier]?.filename else { return nil }
-            let url = localFrameURL(for: filename)
+            guard PhotoLibraryAssetOwnership.contains(
+                frame.assetIdentifier,
+                in: savedAssetIdentifiers
+            ),
+            let filename = savedFrameResources[frame.assetIdentifier]?.filename,
+            let url = localFrameURL(for: filename) else { return nil }
             return FileManager.default.fileExists(atPath: url.path) ? url : nil
 
         case .photos(let photoAsset):
@@ -764,6 +863,8 @@ final class PhotoLibraryService: ObservableObject {
               ) else {
             return
         }
+
+        protectLocalResource(at: directoryURL)
 
         for fileURL in files {
             try? FileManager.default.removeItem(at: fileURL)
@@ -879,7 +980,9 @@ final class PhotoLibraryService: ObservableObject {
 
     private func cachedImage(for frame: LocalSavedFrame, targetSize: CGSize) -> UIImage? {
         guard let resource = savedFrameResources[frame.assetIdentifier],
-              let data = try? Data(contentsOf: localFrameURL(for: resource.filename)),
+              PhotoLibraryAssetOwnership.contains(frame.assetIdentifier, in: savedAssetIdentifiers),
+              let resourceURL = localFrameURL(for: resource.filename),
+              let data = try? Data(contentsOf: resourceURL),
               let source = CGImageSourceCreateWithData(data as CFData, nil) else {
             return nil
         }

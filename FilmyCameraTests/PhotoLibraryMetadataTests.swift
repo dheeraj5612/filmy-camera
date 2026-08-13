@@ -42,4 +42,59 @@ final class PhotoLibraryMetadataTests: XCTestCase {
         XCTAssertFalse(PhotoLibraryAuthorizationPolicy.canManageCollections(.limited))
         XCTAssertFalse(PhotoLibraryAuthorizationPolicy.canManageCollections(.denied))
     }
+
+    func testAssetOwnershipFailsClosedForUnknownAndEmptyIdentifiers() {
+        let savedIdentifiers = ["asset-created-by-filmy-camera"]
+
+        XCTAssertTrue(PhotoLibraryAssetOwnership.contains(
+            "asset-created-by-filmy-camera",
+            in: savedIdentifiers
+        ))
+        XCTAssertFalse(PhotoLibraryAssetOwnership.contains("user-owned-asset", in: savedIdentifiers))
+        XCTAssertFalse(PhotoLibraryAssetOwnership.contains("", in: savedIdentifiers))
+    }
+
+    func testAssetOwnershipPersistsNewestUniqueBoundedIdentifiers() {
+        let savedIdentifiers = ["oldest", "middle", "newest"]
+
+        XCTAssertEqual(
+            PhotoLibraryAssetOwnership.adding("middle", to: savedIdentifiers, limit: 3),
+            ["middle", "oldest", "newest"]
+        )
+        XCTAssertEqual(
+            PhotoLibraryAssetOwnership.adding("created-now", to: savedIdentifiers, limit: 2),
+            ["created-now", "oldest"]
+        )
+        XCTAssertEqual(
+            PhotoLibraryAssetOwnership.adding("", to: ["", "known", "known"], limit: 10),
+            ["known"]
+        )
+    }
+
+    func testAssetOwnershipRemovalIsExact() {
+        XCTAssertEqual(
+            PhotoLibraryAssetOwnership.removing(
+                "created-by-filmy-camera",
+                from: ["created-by-filmy-camera", "user-owned-asset"]
+            ),
+            ["user-owned-asset"]
+        )
+        XCTAssertEqual(
+            PhotoLibraryAssetOwnership.removing("unknown", from: ["known"]),
+            ["known"]
+        )
+    }
+
+    func testLocalCachePathRejectsTraversalAndAbsolutePaths() {
+        let directory = URL(fileURLWithPath: "/tmp/FilmyCameraFrames", isDirectory: true)
+
+        XCTAssertEqual(
+            PhotoLibraryCachePath.fileURL(filename: "frame.jpg", in: directory)?.path,
+            "/tmp/FilmyCameraFrames/frame.jpg"
+        )
+        XCTAssertNil(PhotoLibraryCachePath.fileURL(filename: "../frame.jpg", in: directory))
+        XCTAssertNil(PhotoLibraryCachePath.fileURL(filename: "nested/frame.jpg", in: directory))
+        XCTAssertNil(PhotoLibraryCachePath.fileURL(filename: "/tmp/frame.jpg", in: directory))
+        XCTAssertNil(PhotoLibraryCachePath.fileURL(filename: "", in: directory))
+    }
 }

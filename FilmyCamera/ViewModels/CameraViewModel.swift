@@ -91,6 +91,14 @@ final class CameraViewModel: ObservableObject {
         case success
         case error
         case info
+
+        var accessibilityTitle: String {
+            switch self {
+            case .success: "Success"
+            case .error: "Error"
+            case .info: "Info"
+            }
+        }
     }
 
     private struct RenderedPhoto: @unchecked Sendable {

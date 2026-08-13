@@ -22,8 +22,8 @@
 
 - [x] Run `xcodegen generate` from a clean checkout.
 - [x] Run the credential-free release project preflight (`scripts/release/validate-project.sh`).
-- [x] Run the iPhone Simulator build and XCTest workflow locally; the latest hosted evidence is 50 unit/renderer tests plus 2 UI tests on iOS 18.5, with local UI verification also passing on iOS 26.5.
-- [x] Re-run the hosted Xcode 16.4 workflow for this production-hardening pass and verify the exact merged SHA.
+- [x] Run the iPhone Simulator build and XCTest workflow locally; the current local evidence is 58 unit/renderer tests plus 2 UI tests on iOS 26.5, with the hosted iOS 18.5 gate retained for the pushed mainline.
+- [ ] Re-run the hosted Xcode 16.4 workflow for this production-hardening pass and verify the exact merged SHA.
 - [x] Keep release-script syntax, ShellCheck, and fail-closed upload-preparation checks in CI.
 - [ ] Run a Release archive for a generic iOS device destination; verify the signed archive and app on a physical iPhone before upload.
 - [x] Validate `Info.plist`, launch behavior, app icon, version `1.0.0`, and build number `1`.
@@ -72,7 +72,9 @@ The archive wrapper generates the project and creates a Release archive for a ge
 
 ## Verified evidence
 
-- Last verified app-code mainline: `d2fdbf7ff480eb309a6ffb1ab5b4ac181de5a454`
+- Latest local mainline: `1662f833f8909e1dd535a05075282ea230b1202b`
+- Latest hardening commits: `47c93dce619bcc031b89d2802fa91013c1c49c00` (CI workflow), `f6799ab9fbcb87b9b28c4d9569e4a13de27b7cfd` (Photos ownership/cache safety), and `1662f833f8909e1dd535a05075282ea230b1202b` (camera/review error states).
+- Hosted CI for the three hardening commits is pending after push; the prior exact mainline evidence remains [run 31662942583](https://github.com/dheeraj5612/filmy-camera/actions/runs/31662942583) on SHA `0067f437fab079c8c09d7436de8eae86c58804e8`.
 - Exposure-control PR: [PR #39](https://github.com/dheeraj5612/filmy-camera/pull/39) — merged after green hosted checks; adds bounded ±2 EV compensation, quantized one-third-stop adjustment, full touch targets, VoiceOver adjustment actions, and CI coverage for the required release gate.
 - Current mainline evidence GitHub Actions run: [31662479936](https://github.com/dheeraj5612/filmy-camera/actions/runs/31662479936) — green on exact main SHA `d2fdbf7ff480eb309a6ffb1ab5b4ac181de5a454`; Xcode 16.4 generated-project reproducibility, 50 unit/renderer tests, 2 UI tests, release preflight, artifact/log retention, ShellCheck, metadata validation, and the fail-closed upload-preparation lane passed.
 - Production-hardening PR: [PR #37](https://github.com/dheeraj5612/filmy-camera/pull/37) — merged after green hosted checks on source SHA `0f8374a5b62a3e8560d22762aa40d0c492a9256a`.
@@ -82,9 +84,9 @@ The archive wrapper generates the project and creates a Release archive for a ge
 - Previous mainline evidence run: [31653949298](https://github.com/dheeraj5612/filmy-camera/actions/runs/31653949298) — green on exact SHA `a1da1b7fb7ec9b8d46f04db4d6516924a1517045` before the branded launch-screen update.
 - Previous main evidence run: [31650845960](https://github.com/dheeraj5612/filmy-camera/actions/runs/31650845960) — green on exact SHA `0306526e7fc9f323dc159140a0032e7d600e76e4` after the earlier release evidence update.
 - Previous mainline baseline: [31647529461](https://github.com/dheeraj5612/filmy-camera/actions/runs/31647529461) — green Xcode 16.4 simulator build before this production-hardening pass.
-- Current local simulator verification: 48 unit/renderer tests plus 2 UI tests passed on iOS 18.5 and iOS 26.5; the gallery/settings UI flow, renderer-backed recipe thumbnails, Tune flow, capture-review handoff, typed camera availability states, flash availability contract, Photos authorization policy, VoiceOver focus action, privacy/support links, and accessibility tree were verified.
+- Current local simulator verification: 58 unit/renderer tests plus 2 UI tests passed on iOS 26.5; the new camera-stop authorization state, fail-closed asset ownership/cache path checks, typed toast outcomes, review dismissal guard, gallery/settings UI flow, renderer-backed recipe thumbnails, Tune flow, capture-review handoff, Photos authorization policy, privacy/support links, and accessibility tree were verified.
 - Local release project preflight: `scripts/release/validate-project.sh` passed for bundle `com.dheeraj.filmycamera`, version `1.0.0 (1)`, the privacy manifest, the 1024×1024 icon, and all expected schemes/tests.
-- Current local simulator: iPhone 16 Pro, iOS 18.5 — camera shell, recipe editor, Gallery/Settings navigation, accessibility tree, screenshots, and simulator capture fallback verified.
+- Current local simulator: iPhone 17 Pro, iOS 26.5 — camera shell, recipe editor, Gallery/Settings navigation, accessibility tree, screenshots, and simulator capture fallback verified.
 - Historical unsigned archive: `/tmp/filmycamera-rc-20260812-ui-deterministic.xcarchive` — contains dSYM and `PrivacyInfo.xcprivacy`, but predates current main; rebuild and pin a current archive before release use.
 - Current product evidence covers Natural Standard, typed camera-session recovery, deterministic UI-test mode, saved recipe/date provenance, original-resource share and owned-asset delete actions in Gallery, removable local-cache controls, in-app privacy/support links, VoiceOver center focus/exposure actions, tactile exposure controls, and release-script fail-closed behavior. The archive validator now fails closed on a missing profile, mismatched team/bundle/version/build, expired profile, enabled `get-task-allow`, missing dSYM/privacy manifest, or non-distribution signature. Signing is only declared in project settings for team `AQW5C8DEEG`; CI remains simulator-only and unsigned, with no signed device archive or App Store submission proven.
 - Mainline evidence now includes a renderer-backed synthetic recipe rail, canonical look parity across quality tiers, typed monochrome channel response, hue-aware Color Chrome/FX Blue behavior, deterministic grain, explicit photo dimensions, capture provenance, filtered JPEG metadata, shared preview/still aspect-fill framing, and a fail-closed render path. The exact merged mainline SHA and hosted run above are green; signed-device and App Store evidence remain open.
