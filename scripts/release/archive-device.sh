@@ -5,6 +5,8 @@ script_dir="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 root_dir="$(cd -P "${script_dir}/../.." && pwd -P)"
 archive_path="${FILMY_ARCHIVE_PATH:-${root_dir}/build/FilmyCamera.xcarchive}"
 derived_data_path="${FILMY_DERIVED_DATA_PATH:-${root_dir}/build/DerivedData}"
+xcodegen_version='2.45.4'
+xcodegen_path="${FILMY_XCODEGEN_PATH:-${root_dir}/.ci/xcodegen/bin/xcodegen}"
 allow_provisioning_updates=false
 asc_key_id="${FILMY_ASC_KEY_ID:-}"
 asc_issuer_id="${FILMY_ASC_ISSUER_ID:-}"
@@ -22,6 +24,9 @@ When --allow-provisioning-updates is used, FILMY_ASC_KEY_ID,
 FILMY_ASC_ISSUER_ID, and FILMY_ASC_KEY_PATH may also be set to authenticate
 headless Xcode provisioning. The private key must be an absolute path outside
 the repository; its contents are never printed.
+
+FILMY_XCODEGEN_PATH may point to a trusted absolute XcodeGen executable. When
+it is unset, the repository-local CI XcodeGen executable is required.
 EOF
 }
 
@@ -43,17 +48,31 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
-command -v xcodegen >/dev/null || {
-  echo "xcodegen is required; install it with: brew install xcodegen" >&2
-  exit 127
-}
-
 canonical_existing_path() {
   local path="$1"
   local directory
   [[ -e "${path}" ]] || return 1
   directory="$(cd -P "$(dirname "${path}")" 2>/dev/null && pwd -P)" || return 1
   printf '%s/%s\n' "${directory}" "$(basename "${path}")"
+}
+
+[[ "${xcodegen_path}" = /* && -x "${xcodegen_path}" && ! -L "${xcodegen_path}" ]] || {
+  echo "Pinned XcodeGen ${xcodegen_version} is unavailable at: ${xcodegen_path}" >&2
+  echo "Populate .ci/xcodegen/bin/xcodegen from the CI-pinned release or set FILMY_XCODEGEN_PATH to a trusted absolute executable." >&2
+  exit 127
+}
+
+xcodegen_path="$(canonical_existing_path "${xcodegen_path}")" || {
+  echo "Pinned XcodeGen ${xcodegen_version} could not be canonicalized" >&2
+  exit 127
+}
+xcodegen_version_output="$("${xcodegen_path}" --version 2>&1)" || {
+  echo "Unable to verify the pinned XcodeGen executable: ${xcodegen_path}" >&2
+  exit 127
+}
+grep -Fxq "Version: ${xcodegen_version}" <<<"${xcodegen_version_output}" || {
+  echo "XcodeGen ${xcodegen_version} is required; found: ${xcodegen_version_output}" >&2
+  exit 127
 }
 
 validate_asc_credentials() {
@@ -109,7 +128,15 @@ validate_asc_credentials() {
 }
 
 mkdir -p "$(dirname "${archive_path}")" "${derived_data_path}"
-xcodegen generate --spec "${root_dir}/project.yml"
+(
+  cd "${root_dir}"
+  "${xcodegen_path}" generate --spec project.yml
+)
+
+if ! git -C "${root_dir}" diff --exit-code -- FilmyCamera.xcodeproj; then
+  echo "XcodeGen changed the committed project; update it intentionally and rerun the gate." >&2
+  exit 1
+fi
 
 archive_args=(
   -project "${root_dir}/FilmyCamera.xcodeproj"
