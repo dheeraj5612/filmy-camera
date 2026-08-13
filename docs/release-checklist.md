@@ -76,9 +76,9 @@ The hosted workflow keeps the release-script gate on metadata and checklist chan
 
 ## Verified evidence
 
-- Latest merged mainline: `fb51d6879a10146837ea3212ac698049eefed8fa`
+- Latest app-code mainline: `fb51d6879a10146837ea3212ac698049eefed8fa`
 - Latest hardening commits: `fb51d6879a10146837ea3212ac698049eefed8fa` (headless release credential checks), `47c93dce619bcc031b89d2802fa91013c1c49c00` (CI workflow), `f6799ab9fbcb87b9b28c4d9569e4a13de27b7cfd` (Photos ownership/cache safety), and `1662f833f8909e1dd535a05075282ea230b1202b` (camera/review error states).
-- Latest mainline evidence: [run 31673516826](https://github.com/dheeraj5612/filmy-camera/actions/runs/31673516826) — green on exact merged SHA `fb51d6879a10146837ea3212ac698049eefed8fa`; Xcode 16.4 generated-project reproducibility, 61 unit/renderer tests, 2 UI tests, release preflight, artifact retention, ShellCheck, metadata validation, and fail-closed upload-preparation checks passed.
+- Latest app-code evidence: [run 31673516826](https://github.com/dheeraj5612/filmy-camera/actions/runs/31673516826) — green on exact merged SHA `fb51d6879a10146837ea3212ac698049eefed8fa`; Xcode 16.4 generated-project reproducibility, 61 unit/renderer tests, 2 UI tests, release preflight, artifact retention, ShellCheck, metadata validation, and fail-closed upload-preparation checks passed.
 - Previous full iOS evidence: [run 31671146304](https://github.com/dheeraj5612/filmy-camera/actions/runs/31671146304) — green on exact code SHA `3ae90dd64e37d31e9ee6c1d84d223eec2fc3070a`; Xcode 16.4 generated-project reproducibility, 61 unit/renderer tests, 2 UI tests, release preflight, artifact retention, ShellCheck, metadata validation, and fail-closed upload-preparation checks passed.
 - Prior exact mainline evidence remains [run 31662942583](https://github.com/dheeraj5612/filmy-camera/actions/runs/31662942583) on SHA `0067f437fab079c8c09d7436de8eae86c58804e8`.
 - Exposure-control PR: [PR #39](https://github.com/dheeraj5612/filmy-camera/pull/39) — merged after green hosted checks; adds bounded ±2 EV compensation, quantized one-third-stop adjustment, full touch targets, VoiceOver adjustment actions, and CI coverage for the required release gate.
