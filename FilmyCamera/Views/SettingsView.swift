@@ -15,21 +15,24 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 25) {
-                    SectionHeading(eyebrow: "Control room", title: "Settings")
+            ZStack {
+                FilmyPageBackground()
 
-                    introCard
-                    captureSettings
-                    permissions
-                    localCache
-                    about
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 25) {
+                        SectionHeading(eyebrow: "Control room", title: "Settings")
+
+                        introCard
+                        captureSettings
+                        permissions
+                        localCache
+                        about
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 20)
+                    .padding(.bottom, 32)
                 }
-                .padding(.horizontal, 18)
-                .padding(.top, 20)
-                .padding(.bottom, 32)
             }
-            .background(FilmyTheme.background.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
         }
     }

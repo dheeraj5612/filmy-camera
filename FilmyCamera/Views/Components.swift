@@ -2,24 +2,62 @@ import SwiftUI
 import UIKit
 
 enum FilmyTheme {
-    static let background = Color(red: 0.035, green: 0.039, blue: 0.044)
-    static let panel = Color(red: 0.075, green: 0.081, blue: 0.09)
-    static let panelRaised = Color(red: 0.12, green: 0.13, blue: 0.145)
+    static let background = Color(red: 0.027, green: 0.031, blue: 0.039)
+    static let backgroundRaised = Color(red: 0.055, green: 0.062, blue: 0.075)
+    static let panel = Color(red: 0.075, green: 0.083, blue: 0.098)
+    static let panelRaised = Color(red: 0.13, green: 0.143, blue: 0.165)
     static let line = Color.white.opacity(0.12)
     static let primary = Color.white.opacity(0.94)
     static let secondary = Color.white.opacity(0.62)
     // Keep small section labels above contrast-safe opacity on dark surfaces.
     static let tertiary = Color.white.opacity(0.56)
-    static let accent = Color(red: 0.97, green: 0.72, blue: 0.27)
+    static let accent = Color(red: 0.98, green: 0.73, blue: 0.28)
+    static let accentWarm = Color(red: 1.0, green: 0.55, blue: 0.32)
     static let mint = Color(red: 0.47, green: 0.83, blue: 0.73)
-    static let cornerRadius: CGFloat = 22
-    static let controlRadius: CGFloat = 12
-    static let actionPlateRadius: CGFloat = 24
+    static let cornerRadius: CGFloat = 24
+    static let controlRadius: CGFloat = 14
+    static let actionPlateRadius: CGFloat = 28
     static let minimumHitTarget: CGFloat = 44
 
     static let titleFont = Font.system(.title2, design: .rounded).weight(.bold)
     static let bodyFont = Font.system(.body, design: .rounded)
     static let metadataFont = Font.system(.caption, design: .monospaced).weight(.semibold)
+
+    static let pageGradient = LinearGradient(
+        colors: [backgroundRaised.opacity(0.84), background, background],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+
+    static let plateGradient = LinearGradient(
+        colors: [Color.white.opacity(0.13), Color.white.opacity(0.045)],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+}
+
+struct FilmyPageBackground: View {
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                FilmyTheme.pageGradient
+
+                Circle()
+                    .fill(FilmyTheme.accentWarm.opacity(0.075))
+                    .frame(width: min(proxy.size.width * 0.9, 380))
+                    .blur(radius: 70)
+                    .offset(x: proxy.size.width * 0.34, y: -proxy.size.height * 0.38)
+
+                Circle()
+                    .fill(FilmyTheme.accent.opacity(0.045))
+                    .frame(width: min(proxy.size.width * 0.76, 320))
+                    .blur(radius: 80)
+                    .offset(x: -proxy.size.width * 0.48, y: proxy.size.height * 0.35)
+            }
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+    }
 }
 
 struct SectionHeading: View {
@@ -67,11 +105,16 @@ struct GlassCard<Content: View>: View {
     var body: some View {
         content
             .padding(padding)
-            .background(FilmyTheme.panel.opacity(0.94), in: RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous))
+            .background(
+                FilmyTheme.plateGradient,
+                in: RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous)
+            )
+            .background(FilmyTheme.panel.opacity(0.92), in: RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous)
                     .stroke(FilmyTheme.line, lineWidth: 1)
             }
+            .shadow(color: .black.opacity(0.18), radius: 22, y: 10)
     }
 }
 

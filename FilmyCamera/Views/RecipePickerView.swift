@@ -38,7 +38,7 @@ struct RecipePickerView: View {
                 }
                 .scrollTargetLayout()
                 .padding(.horizontal, 3)
-                .padding(.vertical, 4)
+                .padding(.vertical, 5)
             }
             .scrollClipDisabled()
             .scrollTargetBehavior(.viewAligned)
@@ -63,28 +63,32 @@ struct RecipePickerView: View {
 
         ZStack(alignment: .topTrailing) {
             RecipeSwatch(recipe: recipe, isSelected: isSelected)
-                .frame(width: 148, height: 82)
+                .frame(width: 142, height: 86)
 
             if isSelected {
-                Label("LIVE", systemImage: "checkmark")
-                    .font(.system(.caption2, design: .rounded).weight(.black))
-                    .labelStyle(.titleAndIcon)
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 9, weight: .black))
+                    Text("LIVE")
+                        .font(.system(size: 10, weight: .black, design: .rounded))
+                }
                     .foregroundStyle(FilmyTheme.background)
                     .padding(.horizontal, 8)
-                    .frame(minHeight: 28)
+                    .frame(minHeight: 26)
                     .background(FilmyTheme.accent, in: Capsule())
                     .padding(7)
                     .transition(.scale.combined(with: .opacity))
+                    .accessibilityHidden(true)
             }
         }
         .background(
-            isSelected ? FilmyTheme.accent.opacity(0.13) : Color.white.opacity(0.035),
-            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+            isSelected ? FilmyTheme.accent.opacity(0.14) : Color.white.opacity(0.035),
+            in: RoundedRectangle(cornerRadius: 20, style: .continuous)
         )
         .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .stroke(
-                    isSelected ? FilmyTheme.accent.opacity(0.68) : Color.white.opacity(0.08),
+                    isSelected ? FilmyTheme.accent.opacity(0.72) : Color.white.opacity(0.1),
                     lineWidth: isSelected ? 1.5 : 1
                 )
         }

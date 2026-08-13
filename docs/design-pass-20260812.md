@@ -41,6 +41,17 @@ The analog character comes from tone, color, grain, and halation. The interface 
 - Added a typed camera availability contract for permission, simulator, interruption, recovery, and running states so camera recovery UI no longer parses status copy.
 - Hardened release automation with a display-name assertion, `.provisionprofile` support, reproducible XcodeGen output checks, successful-run XCTest artifact retention, and broader metadata/privacy change triggering.
 
+## UI revamp — 2026-08-13
+
+- Replaced the flat bottom navigation with a floating, material-backed pill that expands the active destination while keeping the camera view dominant.
+- Added a shared ambient page background and warmer plate gradients so Camera, Roll, and Settings feel like one product surface.
+- Tightened the camera header around the selected film stock, live/paused state, and preview-only status, with the recipe descriptor visible as supporting context.
+- Reordered camera utilities so zoom, exposure, and focus lock remain visible first; less common controls continue in a horizontally scrollable rail with an accessibility hint.
+- Increased recipe-card focus, simplified the selected `LIVE` badge, and aligned the film-stock header with the recipe rail.
+- Added bounded Dynamic Type handling for decorative onboarding chrome and compact simulator fallback copy, while preserving large hit targets and existing accessibility identifiers.
+
+The revamp was built and reviewed on the iPhone 17 Pro simulator. The camera screenshot is intentionally a simulator fallback state; it proves the shell and unavailable-camera hierarchy, not physical-device camera output.
+
 ## Deliberately deferred
 
 - Bundled photographic recipe thumbnails: the current implementation still has no licensed neutral stills or capture sample set. The rail now uses original synthetic reference scenes rendered by the production pipeline; a photographic asset pass should add only original/licensed images and run them through the same renderer.

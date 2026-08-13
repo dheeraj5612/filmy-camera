@@ -16,29 +16,32 @@ struct GalleryScreen: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 18) {
-                    SectionHeading(
-                        eyebrow: "The archive",
-                        title: "Roll",
-                        trailing: photoLibrary.galleryAssets.isEmpty ? nil : "\(photoLibrary.galleryAssets.count) frames"
-                    )
+            ZStack {
+                FilmyPageBackground()
 
-                    Text("A contact sheet for the frames worth keeping.")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(FilmyTheme.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 18) {
+                        SectionHeading(
+                            eyebrow: "The archive",
+                            title: "Roll",
+                            trailing: photoLibrary.galleryAssets.isEmpty ? nil : "\(photoLibrary.galleryAssets.count) frames"
+                        )
 
-                    if !photoLibrary.galleryAssets.isEmpty {
-                        archiveSummary
+                        Text("A contact sheet for the frames worth keeping.")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(FilmyTheme.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        if !photoLibrary.galleryAssets.isEmpty {
+                            archiveSummary
+                        }
+                        galleryContent
                     }
-                    galleryContent
+                    .padding(.horizontal, 18)
+                    .padding(.top, 20)
+                    .padding(.bottom, 28)
                 }
-                .padding(.horizontal, 18)
-                .padding(.top, 20)
-                .padding(.bottom, 28)
             }
-            .background(FilmyTheme.background.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
             .refreshable {
                 photoLibrary.refresh()
