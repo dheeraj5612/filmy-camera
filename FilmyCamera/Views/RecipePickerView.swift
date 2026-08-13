@@ -356,18 +356,18 @@ struct RecipeDetailView: View {
                             .padding(.top, 8)
                             .padding(.bottom, 10)
                     } label: {
-                        RecipeEditorSectionLabel(title: section.title, detail: section.detail)
-                            .overlay(alignment: .leading) {
-                                Image(systemName: section.symbol)
-                                    .font(.system(.caption, weight: .bold))
-                                    .foregroundStyle(FilmyTheme.accent)
-                                    .frame(width: 28, height: 28)
-                                    .background(FilmyTheme.accent.opacity(0.12), in: Circle())
-                                    .offset(x: -4)
-                                    .accessibilityHidden(true)
-                            }
-                            .padding(.leading, 34)
-                            .frame(minHeight: 52)
+                        HStack(spacing: 8) {
+                            Image(systemName: section.symbol)
+                                .font(.system(.caption, weight: .bold))
+                                .foregroundStyle(FilmyTheme.accent)
+                                .frame(width: 28, height: 28)
+                                .background(FilmyTheme.accent.opacity(0.12), in: Circle())
+                                .accessibilityHidden(true)
+
+                            RecipeEditorSectionLabel(title: section.title, detail: section.detail)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
                     .tint(FilmyTheme.accent)
                     .padding(.vertical, 2)

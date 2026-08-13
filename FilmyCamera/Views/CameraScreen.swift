@@ -37,6 +37,7 @@ struct CameraScreen: View {
                         }
                     }
                     .accessibilityIdentifier("camera-preview")
+                    .accessibilityHidden(shouldShowCameraEmptyState)
                     .gesture(
                         SpatialTapGesture().onEnded { value in
                             let normalizedPoint = normalizedFocusPoint(

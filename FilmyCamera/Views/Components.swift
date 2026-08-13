@@ -629,6 +629,7 @@ struct PermissionBadge: View {
             .foregroundStyle(isEnabled ? FilmyTheme.mint : FilmyTheme.accent)
             .padding(.horizontal, 9)
             .padding(.vertical, 6)
+            .fixedSize(horizontal: true, vertical: false)
             .background((isEnabled ? FilmyTheme.mint : FilmyTheme.accent).opacity(0.12), in: Capsule())
     }
 }

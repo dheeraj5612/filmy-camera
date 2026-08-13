@@ -2,6 +2,7 @@
 
 ## Current workspace gate
 
+- [x] Current hardening branch is `codex/security-hardening-20260813` at HEAD `2ed1ba3`.
 - [x] Verify the production Swift app target is present under `FilmyCamera/`.
 - [x] Exercise the production `FilmRecipe.builtIns` and `FilmRenderer.render` APIs from XCTest.
 - [x] Confirm the generated Xcode project exposes the `FilmyCamera` scheme, unit tests, and UI tests.
@@ -22,13 +23,14 @@
 
 - [x] Run `xcodegen generate` from a clean checkout.
 - [x] Run the credential-free release project preflight (`scripts/release/validate-project.sh`).
-- [x] Run the iPhone Simulator build and XCTest workflow locally; the current local evidence is 67 unit/renderer tests plus 3 UI tests (70 total) on both iOS 18.5 and iOS 26.5 simulator runtimes.
-- [x] Re-run the hosted Xcode 16.4 workflow for this production-hardening pass and verify the exact merged SHA.
+- [x] Run the iPhone Simulator build and XCTest workflow locally; the current evidence is 78 unit tests plus 3 UI tests on iPhone 17 Pro Simulator running iOS 26.5.
+- [x] Record the current hosted hardening evidence: [PR #55](https://github.com/dheeraj5612/filmy-camera/pull/55) and [run 31744901211](https://github.com/dheeraj5612/filmy-camera/actions/runs/31744901211) for branch `codex/security-hardening-20260813` at HEAD `2ed1ba3`.
 - [x] Keep release-script syntax, ShellCheck, and fail-closed upload-preparation checks in CI.
 - [ ] Run a Release archive for a generic iOS device destination; verify the signed archive and app on a physical iPhone before upload.
 - [x] Validate `Info.plist`, launch behavior, app icon, version `1.0.0`, and build number `1`.
 - [ ] Run App Store Connect upload validation and retain the archive plus dSYM/ symbol artifacts.
-- [x] App Store metadata draft prepared; final App Store Connect pricing, availability, screenshots, legal copy, and support contact remain open.
+- [x] App Store metadata draft prepared.
+- [ ] Finalize App Store Connect metadata decisions: pricing, availability, screenshots, legal copy, and support contact.
 - [x] App Privacy answer matrix reviewed against the source tree in `docs/app-store/app-privacy.md`; entering the answers in App Store Connect remains an account-owner step.
 - [ ] Produce required device screenshots and an optional preview video.
 - [x] Confirm the privacy policy, public support URL, and marketing URL are live.
@@ -76,9 +78,14 @@ The hosted workflow keeps the release-script gate on metadata and checklist chan
 
 ## Verified evidence
 
-- Latest app-code mainline: `255008fd82e0a3d8d834e256638f827a19390904`
-- Latest hardening commits: `fb51d6879a10146837ea3212ac698049eefed8fa` (headless release credential checks), `47c93dce619bcc031b89d2802fa91013c1c49c00` (CI workflow), `f6799ab9fbcb87b9b28c4d9569e4a13de27b7cfd` (Photos ownership/cache safety), and `1662f833f8909e1dd535a05075282ea230b1202b` (camera/review error states).
-- Latest app-code evidence: [run 31720714081](https://github.com/dheeraj5612/filmy-camera/actions/runs/31720714081) — green on exact merged SHA `255008fd82e0a3d8d834e256638f827a19390904`; Xcode 16.4 generated-project reproducibility, 65 unit/renderer tests, 3 UI tests, release preflight, artifact retention, ShellCheck, metadata validation, and fail-closed upload-preparation checks passed.
+- Current repository evidence: branch `codex/security-hardening-20260813`, HEAD `2ed1ba3`, with the latest UI polish and security/release hardening changes.
+- Current hosted evidence: [PR #55](https://github.com/dheeraj5612/filmy-camera/pull/55) and [run 31744901211](https://github.com/dheeraj5612/filmy-camera/actions/runs/31744901211).
+- Current local simulator evidence: 78 unit tests plus 3 UI tests passed on iPhone 17 Pro Simulator running iOS 26.5; camera shell, recipe details, Gallery, and Settings UI flows were visually reviewed.
+- Current UI hardening: the recipe-detail hero no longer duplicates the swatch label; recipe-editor section icons participate in layout; simulator fallback hides the unavailable live-preview accessibility target; and Photos permission badges remain readable at narrow widths. The modern darkroom/amber camera shell, recipe rail, accessibility labels, and touch-target work remain covered by the simulator gate.
+- Current security/release hardening: CI checkout credentials are not persisted; ShellCheck and XcodeGen are pinned and verified; the credential scan covers tracked files; local photo-cache orphan cleanup is reconciled; exported JPEG metadata uses an explicit privacy-safe allowlist; and archive project generation is reproducibility-checked.
+- Pre-PR #55 mainline: `27dbd3a353c6171aa9a33c95acf92f97fc955555`.
+- Historical hardening commits: `fb51d6879a10146837ea3212ac698049eefed8fa` (headless release credential checks), `47c93dce619bcc031b89d2802fa91013c1c49c00` (CI workflow), `f6799ab9fbcb87b9b28c4d9569e4a13de27b7cfd` (Photos ownership/cache safety), and `1662f833f8909e1dd535a05075282ea230b1202b` (camera/review error states).
+- Historical app-code evidence: [run 31720714081](https://github.com/dheeraj5612/filmy-camera/actions/runs/31720714081) — green on the pre-hardening SHA `255008fd82e0a3d8d834e256638f827a19390904`; Xcode 16.4 generated-project reproducibility, 65 unit/renderer tests, 3 UI tests, release preflight, artifact retention, ShellCheck, metadata validation, and fail-closed upload-preparation checks passed.
 - Previous full iOS evidence: [run 31671146304](https://github.com/dheeraj5612/filmy-camera/actions/runs/31671146304) — green on exact code SHA `3ae90dd64e37d31e9ee6c1d84d223eec2fc3070a`; Xcode 16.4 generated-project reproducibility, 61 unit/renderer tests, 2 UI tests, release preflight, artifact retention, ShellCheck, metadata validation, and fail-closed upload-preparation checks passed.
 - Prior exact mainline evidence remains [run 31662942583](https://github.com/dheeraj5612/filmy-camera/actions/runs/31662942583) on SHA `0067f437fab079c8c09d7436de8eae86c58804e8`.
 - Exposure-control PR: [PR #39](https://github.com/dheeraj5612/filmy-camera/pull/39) — merged after green hosted checks; adds bounded ±2 EV compensation, quantized one-third-stop adjustment, full touch targets, VoiceOver adjustment actions, and CI coverage for the required release gate.
@@ -90,7 +97,7 @@ The hosted workflow keeps the release-script gate on metadata and checklist chan
 - Previous mainline evidence run: [31653949298](https://github.com/dheeraj5612/filmy-camera/actions/runs/31653949298) — green on exact SHA `a1da1b7fb7ec9b8d46f04db4d6516924a1517045` before the branded launch-screen update.
 - Previous main evidence run: [31650845960](https://github.com/dheeraj5612/filmy-camera/actions/runs/31650845960) — green on exact SHA `0306526e7fc9f323dc159140a0032e7d600e76e4` after the earlier release evidence update.
 - Previous mainline baseline: [31647529461](https://github.com/dheeraj5612/filmy-camera/actions/runs/31647529461) — green Xcode 16.4 simulator build before this production-hardening pass.
-- Current local simulator verification: 67 unit/renderer tests plus 3 UI tests passed on both iOS 18.5 and iOS 26.5; camera-stop authorization state, onboarding handoff, hardware-selection state, native YUV preview-format selection with BGRA fallback, session-scoped preview/capture grain parity, sRGB export boundary, recipe provenance metadata, gallery zoom gestures with VoiceOver adjustment/reset actions, fail-closed asset ownership/cache path checks, typed toast outcomes, review dismissal guard, gallery/settings UI flow, renderer-backed recipe thumbnails, Tune flow, capture-review handoff, Photos authorization policy, privacy/support links, grouped accessibility semantics, stable 48pt permission actions, Reduce Motion onboarding behavior, and contrast-safe overlays were verified.
+- Historical local simulator verification: 67 unit/renderer tests plus 3 UI tests passed on both iOS 18.5 and iOS 26.5; camera-stop authorization state, onboarding handoff, hardware-selection state, native YUV preview-format selection with BGRA fallback, session-scoped preview/capture grain parity, sRGB export boundary, recipe provenance metadata, gallery zoom gestures with VoiceOver adjustment/reset actions, fail-closed asset ownership/cache path checks, typed toast outcomes, review dismissal guard, gallery/settings UI flow, renderer-backed recipe thumbnails, Tune flow, capture-review handoff, Photos authorization policy, privacy/support links, grouped accessibility semantics, stable 48pt permission actions, Reduce Motion onboarding behavior, and contrast-safe overlays were verified.
 - Local release project preflight: `scripts/release/validate-project.sh` passed for bundle `com.dheeraj.filmycamera`, version `1.0.0 (1)`, the privacy manifest, the 1024×1024 icon, and all expected schemes/tests.
 - Current local simulator: iPhone 17 Pro, iOS 26.5 — camera shell, recipe editor, Gallery/Settings navigation, accessibility tree, screenshots, and simulator capture fallback verified.
 - Historical unsigned archive: `/tmp/filmycamera-rc-20260812-ui-deterministic.xcarchive` — contains dSYM and `PrivacyInfo.xcprivacy`, but predates current main; rebuild and pin a current archive before release use.
