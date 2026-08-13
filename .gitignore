@@ -6,6 +6,7 @@ DerivedData/
 .derived-hardening/
 .derived-hardening26/
 .derived-review2/
+.derived-launch/
 .ci/
 *.xcuserstate
 xcuserdata/

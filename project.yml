@@ -41,6 +41,8 @@ targets:
         NSCameraUsageDescription: Filmy Camera uses the camera to preview and capture photos with your selected film recipe.
         NSPhotoLibraryAddUsageDescription: Filmy Camera saves finished photos to your Photos library when you choose Save to Photos.
         NSPhotoLibraryUsageDescription: Filmy Camera reads your recent photos so you can review them in the in-app gallery.
+        UILaunchScreen:
+          UIColorName: LaunchBackground
     scheme:
       gatherCoverageData: false
       testTargets:
