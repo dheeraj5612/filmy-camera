@@ -326,6 +326,7 @@ struct RecipeSwatch: View {
     let recipe: FilmRecipe
     var isSelected = false
     var compact = false
+    var showsLabel = true
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var thumbnailData: Data?
@@ -353,29 +354,31 @@ struct RecipeSwatch: View {
             )
         }
         .overlay(alignment: .bottomLeading) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(recipe.name)
-                    .font(.system(size: compact ? 12 : 13, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .lineLimit(compact ? 1 : 2)
-                    .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 0.72 : 0.84)
-                    .allowsTightening(true)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                if !compact {
-                    Text(recipe.descriptor)
-                        .font(.system(size: 9, weight: .medium, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.82))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.72)
+            if showsLabel {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(recipe.name)
+                        .font(.system(size: compact ? 12 : 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .lineLimit(compact ? 1 : 2)
+                        .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 0.72 : 0.84)
                         .allowsTightening(true)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if !compact {
+                        Text(recipe.descriptor)
+                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.82))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
+                            .allowsTightening(true)
+                    }
                 }
+                .padding(compact ? 10 : 12)
+                .background(
+                    Color.black.opacity(0.22),
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                )
             }
-            .padding(compact ? 10 : 12)
-            .background(
-                Color.black.opacity(0.22),
-                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-            )
         }
         .clipShape(RoundedRectangle(cornerRadius: compact ? 14 : 18, style: .continuous))
         .overlay {

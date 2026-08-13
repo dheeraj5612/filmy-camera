@@ -209,7 +209,7 @@ struct RecipeDetailView: View {
 
     private var hero: some View {
         ZStack(alignment: .bottomLeading) {
-            RecipeSwatch(recipe: draft, compact: false)
+            RecipeSwatch(recipe: draft, compact: false, showsLabel: false)
                 .frame(maxWidth: .infinity)
                 .frame(height: 232)
 
