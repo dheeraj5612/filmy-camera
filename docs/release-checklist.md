@@ -70,13 +70,16 @@ scripts/release/prepare-upload.sh --upload
 
 The archive wrapper generates the project and creates a Release archive for a generic iOS device. The upload-preparation wrapper is read-only by default, validates the archive and local signing material before export, requires explicit `--export` or `--upload` modes, and keeps App Store Connect keys outside the repository. It fails closed unless the archive and exported IPA have the expected bundle/version, distribution signature, provisioning profile, dSYM, and privacy manifest. It never stores credentials in the repository or CI logs.
 
+For headless provisioning, `archive-device.sh --allow-provisioning-updates` accepts the same `FILMY_ASC_KEY_ID`, `FILMY_ASC_ISSUER_ID`, and `FILMY_ASC_KEY_PATH` environment variables as the upload wrapper. Partial credentials and repository-local key paths are rejected before Xcode runs.
+
 The hosted workflow keeps the release-script gate on metadata and checklist changes, while the simulator build lane runs only when binary-affecting files change. Unknown or manually dispatched scopes fail open so required validation is never silently skipped.
 
 ## Verified evidence
 
-- Latest merged mainline: `3ae90dd64e37d31e9ee6c1d84d223eec2fc3070a`
+- Latest merged mainline: `13d75d32eaa227be15f25f5f496244796573fdb7`
 - Latest hardening commits: `47c93dce619bcc031b89d2802fa91013c1c49c00` (CI workflow), `f6799ab9fbcb87b9b28c4d9569e4a13de27b7cfd` (Photos ownership/cache safety), and `1662f833f8909e1dd535a05075282ea230b1202b` (camera/review error states).
-- Latest mainline evidence: [run 31671146304](https://github.com/dheeraj5612/filmy-camera/actions/runs/31671146304) — green on exact merged SHA `3ae90dd64e37d31e9ee6c1d84d223eec2fc3070a`; Xcode 16.4 generated-project reproducibility, 61 unit/renderer tests, 2 UI tests, release preflight, artifact retention, ShellCheck, metadata validation, and fail-closed upload-preparation checks passed.
+- Latest mainline evidence: [run 31672012988](https://github.com/dheeraj5612/filmy-camera/actions/runs/31672012988) — green on exact merged SHA `13d75d32eaa227be15f25f5f496244796573fdb7`; release scripts passed and the simulator lane was intentionally skipped for this checklist-only change.
+- Latest full iOS evidence: [run 31671146304](https://github.com/dheeraj5612/filmy-camera/actions/runs/31671146304) — green on exact code SHA `3ae90dd64e37d31e9ee6c1d84d223eec2fc3070a`; Xcode 16.4 generated-project reproducibility, 61 unit/renderer tests, 2 UI tests, release preflight, artifact retention, ShellCheck, metadata validation, and fail-closed upload-preparation checks passed.
 - Prior exact mainline evidence remains [run 31662942583](https://github.com/dheeraj5612/filmy-camera/actions/runs/31662942583) on SHA `0067f437fab079c8c09d7436de8eae86c58804e8`.
 - Exposure-control PR: [PR #39](https://github.com/dheeraj5612/filmy-camera/pull/39) — merged after green hosted checks; adds bounded ±2 EV compensation, quantized one-third-stop adjustment, full touch targets, VoiceOver adjustment actions, and CI coverage for the required release gate.
 - Current mainline evidence GitHub Actions run: [31662479936](https://github.com/dheeraj5612/filmy-camera/actions/runs/31662479936) — green on exact main SHA `d2fdbf7ff480eb309a6ffb1ab5b4ac181de5a454`; Xcode 16.4 generated-project reproducibility, 50 unit/renderer tests, 2 UI tests, release preflight, artifact/log retention, ShellCheck, metadata validation, and the fail-closed upload-preparation lane passed.
