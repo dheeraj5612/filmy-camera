@@ -492,6 +492,22 @@ struct ToastView: View {
         }
     }
 
+    private var tintOpacity: Double {
+        style == .error ? 0.16 : 0.08
+    }
+
+    private var borderOpacity: Double {
+        style == .error ? 0.72 : 0.42
+    }
+
+    private var borderWidth: CGFloat {
+        style == .error ? 1.5 : 1
+    }
+
+    private var accessibilityLabel: String {
+        "\(style.accessibilityTitle): \(message)"
+    }
+
     var body: some View {
         HStack(spacing: 9) {
             Image(systemName: symbolName)
@@ -503,10 +519,12 @@ struct ToastView: View {
         .padding(.horizontal, 15)
         .padding(.vertical, 12)
         .background(.ultraThinMaterial, in: Capsule())
-        .overlay { Capsule().stroke(Color.white.opacity(0.18), lineWidth: 1) }
+        .overlay { Capsule().fill(symbolColor.opacity(tintOpacity)) }
+        .overlay { Capsule().stroke(symbolColor.opacity(borderOpacity), lineWidth: borderWidth) }
         .shadow(color: .black.opacity(0.28), radius: 16, y: 7)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(message)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityAddTraits(.isStaticText)
     }
 }
 

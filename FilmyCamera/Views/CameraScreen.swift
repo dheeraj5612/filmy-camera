@@ -179,7 +179,7 @@ struct CameraScreen: View {
                 )
                 .presentationDetents([.large])
                 .presentationDragIndicator(.hidden)
-                .interactiveDismissDisabled(viewModel.reviewImage != nil)
+                .interactiveDismissDisabled(viewModel.reviewImage != nil || viewModel.isSaving)
             }
         }
         .onAppear { updateCameraActivity() }
@@ -228,6 +228,7 @@ struct CameraScreen: View {
         Binding(
             get: { viewModel.reviewImage != nil },
             set: { isPresented in
+                guard !viewModel.isSaving else { return }
                 if !isPresented {
                     viewModel.discardReview()
                 }

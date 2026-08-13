@@ -1,4 +1,5 @@
 import XCTest
+@preconcurrency import AVFoundation
 @testable import FilmyCamera
 
 @MainActor
@@ -28,6 +29,71 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         XCTAssertEqual(Set(cases.map(\.rawValue)).count, cases.count)
         XCTAssertEqual(CameraService.Availability.permissionDenied.rawValue, "permissionDenied")
         XCTAssertEqual(CameraService.Availability.needsRecovery.rawValue, "needsRecovery")
+    }
+
+    func testStoppingPreservesDeniedAuthorizationBeforeHardwareFallback() {
+        XCTAssertEqual(
+            CameraService.availabilityAfterStopping(
+                authorizationStatus: .denied,
+                hasCameraDevice: false,
+                previousAvailability: .starting
+            ),
+            .permissionDenied
+        )
+        XCTAssertEqual(
+            CameraService.availabilityAfterStopping(
+                authorizationStatus: .restricted,
+                hasCameraDevice: false,
+                previousAvailability: .paused
+            ),
+            .permissionDenied
+        )
+    }
+
+    func testStoppingPreservesUnavailableRecoveryStateForAuthorizedCamera() {
+        XCTAssertEqual(
+            CameraService.availabilityAfterStopping(
+                authorizationStatus: .authorized,
+                hasCameraDevice: true,
+                previousAvailability: .unavailable
+            ),
+            .unavailable
+        )
+        XCTAssertEqual(
+            CameraService.availabilityAfterStopping(
+                authorizationStatus: .authorized,
+                hasCameraDevice: true,
+                previousAvailability: .needsRecovery
+            ),
+            .needsRecovery
+        )
+    }
+
+    func testStoppingUsesLifecycleStateForAvailableCameraAndSimulator() {
+        XCTAssertEqual(
+            CameraService.availabilityAfterStopping(
+                authorizationStatus: .authorized,
+                hasCameraDevice: true,
+                previousAvailability: .running
+            ),
+            .paused
+        )
+        XCTAssertEqual(
+            CameraService.availabilityAfterStopping(
+                authorizationStatus: .authorized,
+                hasCameraDevice: false,
+                previousAvailability: .running
+            ),
+            .simulator
+        )
+        XCTAssertEqual(
+            CameraService.availabilityAfterStopping(
+                authorizationStatus: .notDetermined,
+                hasCameraDevice: true,
+                previousAvailability: .starting
+            ),
+            .idle
+        )
     }
 
     func testStalePreviewOwnerCannotRemoveNewerFrameHandler() {

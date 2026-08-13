@@ -29,6 +29,32 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         case unavailable
     }
 
+    /// Resolves the state a stopped session should expose without turning a
+    /// lifecycle pause into a permission decision. Authorization is checked
+    /// before hardware availability so a denied camera remains denied even
+    /// when the device currently has no usable camera input.
+    public static func availabilityAfterStopping(
+        authorizationStatus: AVAuthorizationStatus,
+        hasCameraDevice: Bool,
+        previousAvailability: Availability
+    ) -> Availability {
+        switch authorizationStatus {
+        case .denied, .restricted:
+            return .permissionDenied
+        case .notDetermined:
+            return hasCameraDevice ? .idle : .simulator
+        case .authorized:
+            switch previousAvailability {
+            case .unavailable, .needsRecovery:
+                return previousAvailability
+            default:
+                return hasCameraDevice ? .paused : .simulator
+            }
+        @unknown default:
+            return .unavailable
+        }
+    }
+
     /// The still-photo flash request. `off` is intentionally the default so
     /// opening the camera never fires the flash without an explicit choice.
     public enum FlashMode: Int, CaseIterable, Equatable, Sendable {
@@ -156,6 +182,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private var isConfigured = false
     private var wantsToRun = false
     private var authorizationRequestInFlight = false
+    private var sessionAvailability: Availability = .idle
     private var pendingPhotoCompletion: PhotoCompletion?
     private var pendingPhotoCapturedAt: Date?
     private var configuredPhotoDimensions = CMVideoDimensions(width: 0, height: 0)
@@ -241,6 +268,12 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         sessionQueue.async { [weak self] in
             guard let self else { return }
             self.wantsToRun = false
+            let previousAvailability = self.sessionAvailability
+            let nextAvailability = Self.availabilityAfterStopping(
+                authorizationStatus: AVCaptureDevice.authorizationStatus(for: .video),
+                hasCameraDevice: self.defaultCameraDevice() != nil,
+                previousAvailability: previousAvailability
+            )
             if self.session.isRunning {
                 self.session.stopRunning()
             }
@@ -249,24 +282,20 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             self.publishFocusExposureLocked(false)
             self.publishRunning(false)
 
-            // Stopping the session is a lifecycle event, not a permission
-            // decision. Preserve a denied state so Settings cannot report
-            // camera access as allowed merely because the user changed tabs.
-            if !self.isConfigured && self.defaultCameraDevice() == nil {
-                self.publishAvailability(.simulator)
+            self.publishAvailability(nextAvailability)
+            switch nextAvailability {
+            case .permissionDenied:
+                self.publishStatus("Camera access is disabled in Settings.")
+            case .simulator:
                 self.publishStatus("Camera unavailable in Simulator. Use an iPhone to preview and capture.")
-            } else {
-                switch AVCaptureDevice.authorizationStatus(for: .video) {
-                case .denied, .restricted:
-                    self.publishAvailability(.permissionDenied)
-                    self.publishStatus("Camera access is disabled in Settings.")
-                case .notDetermined:
-                    self.publishAvailability(.idle)
-                    self.publishStatus("Camera is ready")
-                default:
-                    self.publishAvailability(.paused)
-                    self.publishStatus("Camera paused")
-                }
+            case .idle:
+                self.publishStatus("Camera is ready")
+            case .unavailable:
+                self.publishStatus("Camera access is unavailable.")
+            case .needsRecovery:
+                self.publishStatus("Camera needs to be reopened.")
+            default:
+                self.publishStatus("Camera paused")
             }
         }
     }
@@ -533,6 +562,31 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
     private func requestAuthorizationAndStartOnQueue() {
         guard wantsToRun else { return }
+
+        let authorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
+        switch authorizationStatus {
+        case .denied, .restricted:
+            if session.isRunning {
+                session.stopRunning()
+            }
+            resetCaptureCapabilitiesOnQueue()
+            publishRunning(false)
+            publishAvailability(.permissionDenied)
+            publishStatus("Camera access is disabled in Settings.")
+            return
+        case .authorized, .notDetermined:
+            break
+        @unknown default:
+            if session.isRunning {
+                session.stopRunning()
+            }
+            resetCaptureCapabilitiesOnQueue()
+            publishRunning(false)
+            publishAvailability(.unavailable)
+            publishStatus("Camera access is unavailable.")
+            return
+        }
+
         guard !session.isRunning else {
             if let device = activeDevice() {
                 refreshCaptureCapabilitiesOnQueue(for: device)
@@ -556,7 +610,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             return
         }
 
-        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        switch authorizationStatus {
         case .authorized:
             configureAndStartOnQueue()
         case .notDetermined:
@@ -577,7 +631,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                             self.publishAvailability(.paused)
                             self.publishStatus("Camera paused")
                         }
-                    } else if self.wantsToRun {
+                    } else {
                         self.publishRunning(false)
                         self.publishAvailability(.permissionDenied)
                         self.publishStatus("Camera access is required to preview and capture.")
@@ -1101,6 +1155,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func publishAvailability(_ availability: Availability) {
+        sessionAvailability = availability
         publishOnMain { [weak self] in
             self?.availability = availability
         }

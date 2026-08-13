@@ -127,5 +127,6 @@ struct CaptureReviewView: View {
             .padding(.top, 14)
             .padding(.bottom, 18)
         }
+        .interactiveDismissDisabled(isSaving)
     }
 }

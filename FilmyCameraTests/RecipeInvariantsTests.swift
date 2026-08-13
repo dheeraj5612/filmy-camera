@@ -316,6 +316,16 @@ final class RecipeInvariantsTests: XCTestCase {
         XCTAssertEqual(toastStyle, .error)
     }
 
+    func testToastStylesExposeDistinctAccessibleOutcomes() {
+        XCTAssertEqual(CameraViewModel.ToastStyle.success.accessibilityTitle, "Success")
+        XCTAssertEqual(CameraViewModel.ToastStyle.error.accessibilityTitle, "Error")
+        XCTAssertEqual(CameraViewModel.ToastStyle.info.accessibilityTitle, "Info")
+        XCTAssertNotEqual(
+            CameraViewModel.ToastStyle.success.accessibilityTitle,
+            CameraViewModel.ToastStyle.error.accessibilityTitle
+        )
+    }
+
     func testSchemaTwoRecordWithCurrentLookingProvenanceFailsCurrentAudit() throws {
         let original = FilmRecipe.builtIns[0]
         let encoded = try JSONEncoder().encode(original)
