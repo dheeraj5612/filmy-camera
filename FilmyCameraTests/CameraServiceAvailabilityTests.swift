@@ -303,6 +303,13 @@ final class CameraServiceAvailabilityTests: XCTestCase {
             2,
             accuracy: 0.0001
         )
+
+        let telephotoTitleMagnification = CameraService.normalizedUserZoomFactor(
+            hardwareZoomFactor: 4,
+            wideReferenceHardwareZoomFactor: 2
+        )
+        XCTAssertEqual(telephotoTitleMagnification, 2.0, accuracy: 0.0001)
+
         XCTAssertEqual(
             CameraService.normalizedUserZoomFactor(
                 hardwareZoomFactor: .nan,

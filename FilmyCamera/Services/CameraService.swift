@@ -1515,9 +1515,15 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         return devices.enumerated().compactMap { index, lensDevice in
             guard seenIDs.insert(lensDevice.uniqueID).inserted else { return nil }
             let zoomFactor = max(zoomFactors[index], 0.1)
+            let titleZoomFactor = device.isVirtualDevice
+                ? Self.normalizedUserZoomFactor(
+                    hardwareZoomFactor: zoomFactor,
+                    wideReferenceHardwareZoomFactor: wideReferenceZoomFactorOnQueue(for: device)
+                )
+                : zoomFactor
             return LensOption(
                 id: lensDevice.uniqueID,
-                title: Self.lensTitle(for: lensDevice, zoomFactor: zoomFactor),
+                title: Self.lensTitle(for: lensDevice, zoomFactor: titleZoomFactor),
                 detail: Self.lensDetail(for: lensDevice),
                 zoomFactor: zoomFactor,
                 position: position
