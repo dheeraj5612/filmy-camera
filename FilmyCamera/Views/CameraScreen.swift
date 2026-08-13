@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import UIKit
 
@@ -99,7 +100,7 @@ struct CameraScreen: View {
                     }
             }
 
-            if !shouldShowCameraEmptyState {
+            if !shouldShowCameraEmptyState || isUITesting {
                 VStack(spacing: 8) {
                     if camera.flashAvailability != .unsupported {
                         FlashControl(
@@ -228,6 +229,10 @@ struct CameraScreen: View {
 
     private var shouldShowCameraEmptyState: Bool {
         !camera.isRunning
+    }
+
+    private var isUITesting: Bool {
+        ProcessInfo.processInfo.arguments.contains("-ui-testing")
     }
 
     private var reviewPresentation: Binding<Bool> {

@@ -37,11 +37,9 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertTrue(reset.isHittable, "Reset recipe controls should be reachable")
 
         let exposure = app.descendants(matching: .any)["exposure-control"]
-        if exposure.waitForExistence(timeout: 1) {
-            assertMinimumHitTarget(exposure, named: "Exposure control")
-            XCTAssertFalse(app.buttons["Decrease exposure compensation"].exists)
-            XCTAssertFalse(app.buttons["Increase exposure compensation"].exists)
-        }
+        assertMinimumAccessibilityFrame(exposure, named: "Exposure control")
+        XCTAssertFalse(app.buttons["Decrease exposure compensation"].exists)
+        XCTAssertFalse(app.buttons["Increase exposure compensation"].exists)
         attachScreenshot(named: "recipe-details")
     }
 
@@ -81,6 +79,12 @@ final class FilmyCameraUITests: XCTestCase {
     private func assertMinimumHitTarget(_ element: XCUIElement, named: String) {
         XCTAssertTrue(element.waitForExistence(timeout: 5), named + " should exist")
         XCTAssertTrue(element.isHittable, named + " should be hittable")
+        XCTAssertGreaterThanOrEqual(element.frame.width, 44, named + " needs a 44pt width")
+        XCTAssertGreaterThanOrEqual(element.frame.height, 44, named + " needs a 44pt height")
+    }
+
+    private func assertMinimumAccessibilityFrame(_ element: XCUIElement, named: String) {
+        XCTAssertTrue(element.waitForExistence(timeout: 5), named + " should exist")
         XCTAssertGreaterThanOrEqual(element.frame.width, 44, named + " needs a 44pt width")
         XCTAssertGreaterThanOrEqual(element.frame.height, 44, named + " needs a 44pt height")
     }
