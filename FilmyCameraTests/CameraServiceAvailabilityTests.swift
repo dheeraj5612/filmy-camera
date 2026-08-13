@@ -49,6 +49,22 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         XCTAssertEqual(camera.flashAvailability, .unsupported)
         XCTAssertFalse(camera.lowLightBoostSupported)
         XCTAssertFalse(camera.isLowLightBoostEnabled)
+        XCTAssertEqual(camera.exposureBias, 0)
+    }
+
+    func testExposureBiasClampsNonFiniteAndOutOfRangeValues() {
+        XCTAssertEqual(CameraService.clampedExposureBias(.nan), 0)
+        XCTAssertEqual(CameraService.clampedExposureBias(.infinity), 0)
+        XCTAssertEqual(CameraService.clampedExposureBias(-5), -2)
+        XCTAssertEqual(CameraService.clampedExposureBias(5), 2)
+        XCTAssertEqual(
+            CameraService.clampedExposureBias(5, lowerBound: -1, upperBound: 1),
+            1
+        )
+        XCTAssertEqual(
+            CameraService.clampedExposureBias(-5, lowerBound: 1, upperBound: -1),
+            -1
+        )
     }
 
     func testFlashModesPreserveAVFoundationRawValuesAndCycleOrder() {
