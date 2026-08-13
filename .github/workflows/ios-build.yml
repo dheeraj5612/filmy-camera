@@ -10,6 +10,7 @@ on:
       - "FilmyCameraUITests/**"
       - "FilmyCamera.xcodeproj/**"
       - "scripts/release/**"
+      - "docs/app-store/**"
       - "docs/release-checklist.md"
       - "project.yml"
       - ".github/workflows/ios-build.yml"
@@ -254,7 +255,7 @@ jobs:
           shellcheck --severity=warning scripts/release/*.sh
           scripts/release/validate-store-metadata.sh
 
-          if git grep -n -I -E -e '-----BEGIN (OPENSSH|RSA|EC|PRIVATE) KEY-----|AuthKey_[A-Za-z0-9]{10,}\.p8|FILMY_ASC_KEY_ID=[A-Za-z0-9]{10}|FILMY_ASC_ISSUER_ID=[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}' -- \
+          if git grep -q -I -E -e '-----BEGIN (OPENSSH|RSA|EC|PRIVATE) KEY-----|AuthKey_[A-Za-z0-9]{10,}\.p8|FILMY_ASC_KEY_ID=[A-Za-z0-9]{10}|FILMY_ASC_ISSUER_ID=[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}' -- \
             ':!scripts/release/prepare-upload.sh' ':!.github/workflows/ios-build.yml'; then
             echo "Potential credential material found in tracked release files." >&2
             exit 1

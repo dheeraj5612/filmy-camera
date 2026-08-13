@@ -284,12 +284,17 @@ public final class FilmRenderer {
 
         let shadow = clamp(recipe.shadowTone, lower: -1, upper: 1)
         let highlight = clamp(recipe.highlightTone, lower: -1, upper: 1)
+        // The public camera convention uses positive tone values for a harder
+        // curve: highlights and shadows move down. Keep that polarity in the
+        // model instead of silently inverting the user's control.
+        let shadowDelta = -shadow
+        let highlightDelta = -highlight
         let points: [(CGFloat, CGFloat)] = [
-            (0, clamp(0 + shadow * 0.10, lower: 0, upper: 1)),
-            (0.25, clamp(0.25 + shadow * 0.055, lower: 0, upper: 1)),
-            (0.50, clamp(0.50 + (shadow + highlight) * 0.018, lower: 0, upper: 1)),
-            (0.75, clamp(0.75 + highlight * 0.055, lower: 0, upper: 1)),
-            (1, clamp(1 + highlight * 0.10, lower: 0, upper: 1))
+            (0, clamp(0 + shadowDelta * 0.10, lower: 0, upper: 1)),
+            (0.25, clamp(0.25 + shadowDelta * 0.055, lower: 0, upper: 1)),
+            (0.50, clamp(0.50 + (shadowDelta + highlightDelta) * 0.018, lower: 0, upper: 1)),
+            (0.75, clamp(0.75 + highlightDelta * 0.055, lower: 0, upper: 1)),
+            (1, clamp(1 + highlightDelta * 0.10, lower: 0, upper: 1))
         ]
 
         toneCurve.setValue(output, forKey: kCIInputImageKey)
@@ -313,7 +318,11 @@ public final class FilmRenderer {
         }
 
         filter.setValue(image, forKey: kCIInputImageKey)
-        filter.setValue(-amount, forKey: "inputHighlightAmount")
+        // CIHighlightShadowAdjust uses 1 as the identity highlight amount and
+        // lower values for stronger protection. The recipe value is a
+        // monotonic strength, so invert it before crossing the API boundary.
+        let highlightAmount = clamp(1 - amount, lower: 0, upper: 1)
+        filter.setValue(highlightAmount, forKey: "inputHighlightAmount")
         filter.setValue(amount * 0.18, forKey: "inputShadowAmount")
         return filter.outputImage?.cropped(to: image.extent) ?? image
     }
@@ -329,9 +338,11 @@ public final class FilmRenderer {
 
         // CITemperatureAndTint works in Kelvin/tint units. The model keeps
         // recipe controls normalized so they are easy to expose as sliders.
+        // Core Image's tint axis is positive toward green; the recipe model
+        // follows camera terminology where positive tint means magenta.
         let target = CIVector(
             x: 6500 - clamp(recipe.temperatureShift, lower: -1, upper: 1) * 1800,
-            y: clamp(recipe.tintShift, lower: -1, upper: 1) * 120
+            y: -clamp(recipe.tintShift, lower: -1, upper: 1) * 120
         )
         filter.setValue(image, forKey: kCIInputImageKey)
         filter.setValue(immutableResources.neutralWhiteBalance, forKey: "inputNeutral")
@@ -484,8 +495,8 @@ public final class FilmRenderer {
         let qualityScale: CGFloat = quality == .preview ? 0.88 : 1
         let noise = grainTexture
             .transformed(by: CGAffineTransform(
-                scaleX: qualityScale / grainSize,
-                y: qualityScale / grainSize
+                scaleX: qualityScale * grainSize,
+                y: qualityScale * grainSize
             ))
             .transformed(by: CGAffineTransform(translationX: phaseX, y: phaseY))
             .applyingFilter("CIAffineTile")
@@ -607,10 +618,14 @@ public final class FilmRenderer {
         let luma = red * 0.2126 + green * 0.7152 + blue * 0.0722
         let chroma = max(red, max(green, blue)) - min(red, min(green, blue))
         let hue = rgbHue(red: red, green: green, blue: blue, chroma: chroma)
-        let blueHueWeight = max(
-            hueSectorWeight(hue, center: 0.58, halfWidth: 0.15),
-            hueSectorWeight(hue, center: 0.68, halfWidth: 0.14)
-        )
+        // Keep the broad cool response and the dedicated blue response on
+        // separate, smoothly feathered hue masks. This prevents FX Blue from
+        // being an alias for blueResponse and leaves cyan/teal available to
+        // the general cool control.
+        let cyanBlueWeight = hueSectorWeight(hue, center: 0.56, halfWidth: 0.14)
+        let deepBlueWeight = hueSectorWeight(hue, center: 0.68, halfWidth: 0.12)
+        let blueResponseHueWeight = cyanBlueWeight * (1 - deepBlueWeight)
+        let fxBlueHueWeight = deepBlueWeight
         let warmHueWeight = max(
             hueSectorWeight(hue, center: 0.00, halfWidth: 0.14),
             hueSectorWeight(hue, center: 0.13, halfWidth: 0.14)
@@ -637,7 +652,7 @@ public final class FilmRenderer {
                 hueSectorWeight(hue, center: 0.30, halfWidth: 0.17),
                 max(
                     hueSectorWeight(hue, center: 0.48, halfWidth: 0.16),
-                    blueHueWeight
+                    max(cyanBlueWeight, deepBlueWeight)
                 )
             )
         )
@@ -651,13 +666,18 @@ public final class FilmRenderer {
         mappedBlue = mix(mappedBlue, luma + (mappedBlue - luma) * 0.72, compression)
 
         // Blue-response controls primarily affect cool shadows/highlights,
-        // keeping skin and warm midtones stable.
-        let blueInfluence = Float(clamp(recipe.blueResponse + recipe.fxBlue * 0.72, lower: -1, upper: 1))
-        let blueWeight = blueInfluence
+        // while FX Blue is a separate deep-blue/highlight response.
+        let blueResponseWeight = Float(clamp(recipe.blueResponse, lower: -1, upper: 1))
             * (1 - luma)
             * chroma
-            * blueHueWeight
+            * blueResponseHueWeight
             * 0.42
+        let fxBlueWeight = Float(clamp(recipe.fxBlue, lower: -1, upper: 1))
+            * smoothstep(0.18, 0.92, luma)
+            * chroma
+            * fxBlueHueWeight
+            * 0.42
+        let blueWeight = blueResponseWeight + fxBlueWeight
         mappedBlue += blueWeight
         mappedRed -= blueWeight * 0.16
         mappedGreen += blueWeight * 0.04

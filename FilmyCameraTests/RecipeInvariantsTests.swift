@@ -123,6 +123,29 @@ final class RecipeInvariantsTests: XCTestCase {
         XCTAssertEqual(decoded.provenance, FilmRecipe.currentProvenance)
     }
 
+    @MainActor
+    func testPersistedOverridesMigrateToCurrentNamesAndUserProvenance() throws {
+        let original = FilmRecipe.builtIns[1]
+        let encoded = try JSONEncoder().encode(original)
+        var legacyObject = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        legacyObject["schemaVersion"] = 2
+        legacyObject["name"] = "Classic Chrome"
+        let legacyData = try JSONSerialization.data(withJSONObject: legacyObject)
+        let overrides = try JSONEncoder().encode([
+            original.id: try JSONDecoder().decode(FilmRecipe.self, from: legacyData)
+        ])
+
+        UserDefaults.standard.set(original.id, forKey: selectedRecipeKey)
+        UserDefaults.standard.set(overrides, forKey: recipeOverridesKey)
+
+        let viewModel = CameraViewModel()
+
+        XCTAssertEqual(viewModel.selectedRecipe.name, "Muted Color")
+        XCTAssertEqual(viewModel.selectedRecipe.provenance.source, .userModified)
+        XCTAssertEqual(viewModel.selectedRecipe.provenance.parentRecipeID, original.id)
+        XCTAssertEqual(viewModel.selectedRecipe.schemaVersion, FilmRecipe.currentSchemaVersion)
+    }
+
     func testBuiltInRecipesExposeCompleteApproximationProvenance() {
         for recipe in FilmRecipe.builtIns {
             XCTAssertEqual(recipe.schemaVersion, FilmRecipe.currentSchemaVersion, recipe.id)
@@ -238,7 +261,14 @@ final class RecipeInvariantsTests: XCTestCase {
         let reloadedRecipe = await reloadedModel.selectedRecipe
         let isCustomizedBeforeReset = await reloadedModel.isCustomized(original)
 
-        XCTAssertEqual(reloadedRecipe, customized)
+        XCTAssertEqual(reloadedRecipe.exposure, customized.exposure)
+        XCTAssertEqual(reloadedRecipe.tone, customized.tone)
+        XCTAssertEqual(reloadedRecipe.grain, customized.grain)
+        XCTAssertEqual(reloadedRecipe.palette, customized.palette)
+        XCTAssertEqual(reloadedRecipe.provenance.source, .userModified)
+        XCTAssertEqual(reloadedRecipe.provenance.parentRecipeID, original.id)
+        XCTAssertEqual(reloadedRecipe.provenance.rendererVersion, FilmRecipe.rendererVersion)
+        XCTAssertTrue(reloadedRecipe.provenance.isComplete)
         XCTAssertTrue(isCustomizedBeforeReset)
 
         await reloadedModel.reset(recipeID: original.id)

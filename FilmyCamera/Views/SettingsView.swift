@@ -7,7 +7,7 @@ struct SettingsView: View {
     @ObservedObject var photoLibrary: PhotoLibraryService
 
     private let privacyPolicyURL = URL(string: "https://dheeraj5612.github.io/filmycam-legal/privacy-policy.html")!
-    private let supportURL = URL(string: "https://github.com/dheeraj5612/filmy-camera/issues")!
+    private let supportURL = URL(string: "https://dheeraj5612.github.io/filmycam-legal/support.html")!
 
     @AppStorage("showGrid") private var showGrid = true
     @AppStorage("hapticsEnabled") private var hapticsEnabled = true
@@ -21,6 +21,7 @@ struct SettingsView: View {
                     introCard
                     captureSettings
                     permissions
+                    localCache
                     about
                 }
                 .padding(.horizontal, 18)
@@ -174,7 +175,7 @@ struct SettingsView: View {
                             .foregroundStyle(FilmyTheme.accent)
                     }
 
-                    Text("Recipe names use public Fujifilm-style vocabulary for orientation. Filmy Camera is an independent camera experience; it does not include Fujifilm firmware or proprietary calibration data.")
+                    Text("Recipe names are original, camera-inspired descriptions. Filmy Camera is an independent experience; it does not include camera firmware, proprietary LUTs, or calibration data.")
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundStyle(FilmyTheme.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -185,7 +186,7 @@ struct SettingsView: View {
                         Image(systemName: "lock.fill")
                             .font(.system(size: 10, weight: .bold))
                             .foregroundStyle(FilmyTheme.mint)
-                        Text("Your frames stay in your Photos library.")
+                        Text("Your frames save to Photos; local copies are temporary and removable.")
                             .font(.system(size: 11, weight: .semibold, design: .rounded))
                             .foregroundStyle(FilmyTheme.mint)
                     }
@@ -210,6 +211,45 @@ struct SettingsView: View {
                     .foregroundStyle(FilmyTheme.accent)
                     .lineLimit(1)
                     .minimumScaleFactor(0.78)
+                }
+            }
+        }
+    }
+
+    private var localCache: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            Text("ON-DEVICE ROLL")
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .tracking(1.3)
+                .foregroundStyle(FilmyTheme.tertiary)
+
+            GlassCard(padding: 15) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: "externaldrive.fill")
+                            .foregroundStyle(FilmyTheme.accent)
+                            .frame(width: 22)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Offline roll cache")
+                                .font(.system(size: 14, weight: .bold, design: .rounded))
+                                .foregroundStyle(FilmyTheme.primary)
+                            Text("A temporary local copy keeps your roll visible when Photos access is limited. It is private, excluded from backup, and capped at 250 MB.")
+                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                                .foregroundStyle(FilmyTheme.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    Divider().overlay(FilmyTheme.line)
+
+                    Button("Clear local cache") {
+                        photoLibrary.clearLocalRollCache()
+                    }
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(FilmyTheme.accent)
+                    .disabled(!photoLibrary.hasLocalCache)
+                    .accessibilityIdentifier("clear-local-cache")
                 }
             }
         }

@@ -39,7 +39,7 @@ Keep the final keyword field at or below Apple's 100-character limit after local
 
 ## URLs and contact
 
-- **Support URL:** `https://github.com/dheeraj5612/filmy-camera/issues`
+- **Support URL:** `https://dheeraj5612.github.io/filmycam-legal/support.html`
 - **Marketing URL:** `https://github.com/dheeraj5612/filmy-camera` (optional)
 - **Privacy policy URL:** `https://dheeraj5612.github.io/filmycam-legal/privacy-policy.html`
 
@@ -49,7 +49,7 @@ Meet Filmy Camera: a focused camera experience with curated film-style recipes, 
 
 ## App Review notes
 
-Filmy Camera is a camera-only photo app. Camera access is requested when the camera screen is used; Photos access is requested only when saving or reading the in-app recent grid. The simulator cannot provide camera hardware, so review the capture flow on a physical iPhone. No account or login is required.
+Filmy Camera is a camera-only photo app. Camera access is requested when the camera screen is used; Photos access is requested only when saving or explicitly browsing the in-app recent grid. The simulator cannot provide camera hardware, so review the capture flow on a physical iPhone. No account or login is required.
 
 ## Screenshot plan
 

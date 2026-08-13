@@ -3,6 +3,9 @@
 # Xcode
 build/
 DerivedData/
+.derived-hardening/
+.derived-hardening26/
+.derived-review2/
 .ci/
 *.xcuserstate
 xcuserdata/

@@ -81,8 +81,9 @@ The product disclosure is therefore narrow and testable: the looks are
 original approximations inspired by public controls, not pixel-identical
 Fujifilm camera output; the app is not affiliated with or endorsed by
 Fujifilm; and no proprietary LUT, firmware, or camera calibration data is
-included. The user-facing Fujifilm-style names remain unchanged for the
-requested compatibility vocabulary.
+included. The current build uses original descriptive names in the user
+interface; internal recipe identifiers retain the public control mapping for
+continuity, but no exact-match claim is made.
 
 First-party references:
 

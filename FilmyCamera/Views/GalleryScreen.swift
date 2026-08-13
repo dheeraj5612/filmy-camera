@@ -250,9 +250,11 @@ private struct GalleryDetailView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var image: UIImage?
+    @State private var shareURL: URL?
     @State private var isShowingShareSheet = false
     @State private var isShowingDeleteConfirmation = false
     @State private var isDeleting = false
+    @State private var isPreparingShare = false
     @State private var actionErrorMessage: String?
 
     var body: some View {
@@ -306,9 +308,14 @@ private struct GalleryDetailView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(photoLibrary.metadata(for: asset).map { "Selected gallery photo, \($0.recipe.name)" } ?? "Selected gallery photo")
-        .sheet(isPresented: $isShowingShareSheet) {
-            if let image {
-                ShareSheet(items: [image])
+        .sheet(isPresented: $isShowingShareSheet, onDismiss: {
+            if let shareURL {
+                photoLibrary.removeTemporaryShare(at: shareURL)
+            }
+            shareURL = nil
+        }) {
+            if let shareURL {
+                ShareSheet(items: [shareURL])
                     .presentationDetents([.medium, .large])
             }
         }
@@ -352,17 +359,23 @@ private struct GalleryDetailView: View {
             Spacer()
 
             Button {
-                isShowingShareSheet = true
+                shareFrame()
             } label: {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 14, weight: .bold))
+                Group {
+                    if isPreparingShare {
+                        ProgressView().tint(.white)
+                    } else {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 14, weight: .bold))
+                    }
+                }
                     .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
                     .background(FilmyTheme.panel, in: Circle())
             }
             .accessibilityLabel("Share frame")
-            .disabled(image == nil || isDeleting)
+            .disabled(image == nil || isDeleting || isPreparingShare)
 
-            if asset.isPhotosAsset && photoLibrary.canDeletePhotos {
+            if photoLibrary.canDelete(asset: asset) {
                 Button {
                     isShowingDeleteConfirmation = true
                 } label: {
@@ -391,6 +404,21 @@ private struct GalleryDetailView: View {
             case .failure(let error):
                 actionErrorMessage = error.localizedDescription
             }
+        }
+    }
+
+    private func shareFrame() {
+        guard !isPreparingShare else { return }
+        isPreparingShare = true
+        Task { @MainActor in
+            let url = await photoLibrary.shareURL(for: asset)
+            isPreparingShare = false
+            guard let url else {
+                actionErrorMessage = "The original frame could not be prepared for sharing. Try again in a moment."
+                return
+            }
+            shareURL = url
+            isShowingShareSheet = true
         }
     }
 }

@@ -116,7 +116,22 @@ final class CameraViewModel: ObservableObject {
               let savedRecipes = try? JSONDecoder().decode([String: FilmRecipe].self, from: data) else {
             return
         }
-        recipeOverrides = savedRecipes
+
+        var migratedRecipes: [String: FilmRecipe] = [:]
+        for savedRecipe in savedRecipes.values {
+            guard let parent = FilmRecipe.builtIns.first(where: { $0.id == savedRecipe.id }) else {
+                continue
+            }
+            var migratedRecipe = parent
+            migratedRecipe.applyControlValues(from: savedRecipe)
+            migratedRecipe.markUserModified(parentRecipeID: parent.id)
+            migratedRecipes[parent.id] = migratedRecipe
+        }
+        recipeOverrides = migratedRecipes
+
+        if migratedRecipes != savedRecipes {
+            persistRecipeOverrides()
+        }
     }
 
     var selectedRecipe: FilmRecipe {
@@ -134,7 +149,9 @@ final class CameraViewModel: ObservableObject {
     }
 
     func update(recipe: FilmRecipe) {
-        recipeOverrides[recipe.id] = recipe
+        var customizedRecipe = recipe
+        customizedRecipe.markUserModified(parentRecipeID: originalRecipe(for: recipe.id).id)
+        recipeOverrides[recipe.id] = customizedRecipe
         persistRecipeOverrides()
     }
 
@@ -173,6 +190,11 @@ final class CameraViewModel: ObservableObject {
                     return
                 }
 
+                // The review sheet is a deliberate pause in the camera flow.
+                // Stop the capture session as soon as the still is safely in
+                // memory; it will be restarted after save or retake.
+                camera.stop()
+
                 DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                     let renderedPhoto = autoreleasepool {
                         Self.render(
@@ -191,6 +213,11 @@ final class CameraViewModel: ObservableObject {
                         guard let self else { return }
                         self.isCapturing = false
                         guard let renderedPhoto else {
+                            // The review sheet never appears on a render
+                            // failure, so explicitly resume the active camera
+                            // session instead of waiting for another lifecycle
+                            // event or tab transition.
+                            camera.start()
                             self.showToast("The selected look could not be rendered. Try the capture again.")
                             return
                         }

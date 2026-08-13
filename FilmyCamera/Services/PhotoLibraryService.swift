@@ -1,4 +1,5 @@
 import Combine
+import Foundation
 @preconcurrency import Photos
 import PhotosUI
 import ImageIO
@@ -74,12 +75,15 @@ enum PhotoLibraryAuthorizationPolicy {
 
 enum PhotoLibraryServiceError: LocalizedError, Sendable {
     case accessDenied
+    case notOwned
     case changeFailed
 
     var errorDescription: String? {
         switch self {
         case .accessDenied:
             return "Photos access is needed to manage this frame. Enable it in Settings, then try again."
+        case .notOwned:
+            return "Filmy Camera can only remove frames that it created. This frame was left in Photos."
         case .changeFailed:
             return "Photos could not update this frame. Try again in a moment."
         }
@@ -161,6 +165,7 @@ final class PhotoLibraryService: ObservableObject {
 
     @Published private(set) var assets: [PHAsset] = []
     @Published private(set) var localSavedFrames: [LocalSavedFrame] = []
+    @Published private(set) var hasLocalCache = false
     @Published private(set) var authorizationStatus: PHAuthorizationStatus
     @Published private(set) var addOnlyAuthorizationStatus: PHAuthorizationStatus
     @Published private(set) var isLoading = false
@@ -170,6 +175,8 @@ final class PhotoLibraryService: ObservableObject {
     private let savedFrameMetadataKey = "filmyCamera.savedFrameMetadata"
     private let savedFrameResourcesKey = "filmyCamera.savedFrameResources"
     private let localFramesDirectoryName = "FilmyCameraFrames"
+    private let shareDirectoryName = "FilmyCameraShare"
+    private let localCacheMaxBytes = 250 * 1024 * 1024
     private let isUITesting: Bool
 
     private(set) var metadataByAssetIdentifier: [String: SavedFrameMetadata]
@@ -183,6 +190,9 @@ final class PhotoLibraryService: ObservableObject {
         } else {
             authorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
             addOnlyAuthorizationStatus = PHPhotoLibrary.authorizationStatus(for: .addOnly)
+            migrateLocalFrameCacheIfNeeded()
+            trimLocalCacheToBudget()
+            pruneTemporaryShareFiles()
             refreshCachedFrames(excluding: [])
         }
     }
@@ -193,6 +203,11 @@ final class PhotoLibraryService: ObservableObject {
 
     var canDeletePhotos: Bool {
         !isUITesting && PhotoLibraryAuthorizationPolicy.canRead(authorizationStatus)
+    }
+
+    func canDelete(asset: PhotoLibraryGalleryAsset) -> Bool {
+        guard case .photos(let photoAsset) = asset else { return false }
+        return canDeletePhotos && savedAssetIdentifiers.contains(photoAsset.localIdentifier)
     }
 
     var galleryAssets: [PhotoLibraryGalleryAsset] {
@@ -247,18 +262,13 @@ final class PhotoLibraryService: ObservableObject {
         let options = PHFetchOptions()
         options.fetchLimit = 60
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-        if authorizationStatus == .authorized, let album = appAlbum() {
-            let result = PHAsset.fetchAssets(in: album, options: options)
-            let albumAssets = result.objects(at: IndexSet(integersIn: 0..<result.count))
-            let knownAssets = fetchSavedAssets(options: options, reconcileMissing: true)
-            let albumIdentifiers = Set(albumAssets.map(\.localIdentifier))
-            assets = Array((albumAssets + knownAssets.filter { !albumIdentifiers.contains($0.localIdentifier) }).prefix(60))
-        } else {
-            assets = Array(fetchSavedAssets(
-                options: options,
-                reconcileMissing: authorizationStatus == .authorized
-            ).prefix(60))
-        }
+        // The album is only an organizational convenience. Never treat every
+        // asset in a user-created album with the same title as an app-owned
+        // frame; ownership is the persisted local identifier recorded at save.
+        assets = Array(fetchSavedAssets(
+            options: options,
+            reconcileMissing: authorizationStatus == .authorized
+        ).prefix(60))
         refreshCachedFrames(excluding: Set(assets.map(\.localIdentifier)))
     }
 
@@ -378,6 +388,10 @@ final class PhotoLibraryService: ObservableObject {
         }
 
         let assetIdentifier = asset.localIdentifier
+        guard savedAssetIdentifiers.contains(assetIdentifier) else {
+            completion(.failure(.notOwned))
+            return
+        }
         PHPhotoLibrary.shared().performChanges {
             PHAssetChangeRequest.deleteAssets([asset] as NSArray)
         } completionHandler: { [weak self] success, _ in
@@ -532,6 +546,10 @@ final class PhotoLibraryService: ObservableObject {
                 pixelHeight: resource.pixelHeight
             )
         }
+        hasLocalCache = savedAssetIdentifiers.contains { identifier in
+            guard let resource = resources[identifier] else { return false }
+            return FileManager.default.fileExists(atPath: localFrameURL(for: resource.filename).path)
+        }
     }
 
     private func cacheFrame(identifier: String, imageData: Data?, fallbackImage: UIImage) {
@@ -547,7 +565,9 @@ final class PhotoLibraryService: ObservableObject {
                 at: directoryURL,
                 withIntermediateDirectories: true
             )
+            protectLocalResource(at: directoryURL)
             try data.write(to: resourceURL, options: .atomic)
+            protectLocalResource(at: resourceURL)
 
             var resources = savedFrameResources
             if let previousResource = resources[identifier], previousResource.filename != filename {
@@ -561,6 +581,7 @@ final class PhotoLibraryService: ObservableObject {
                 pixelHeight: pixelHeight
             )
             savedFrameResources = resources
+            trimLocalCacheToBudget()
         } catch {
             // The Photos write remains the source-of-truth save operation. A
             // cache failure must not make the user retry and create a duplicate.
@@ -572,9 +593,15 @@ final class PhotoLibraryService: ObservableObject {
         guard let resource = resources.removeValue(forKey: identifier) else { return }
         try? FileManager.default.removeItem(at: localFrameURL(for: resource.filename))
         savedFrameResources = resources
+        refreshCachedFrames(excluding: Set(assets.map(\.localIdentifier)))
     }
 
     private var localFramesDirectoryURL: URL? {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent(localFramesDirectoryName, isDirectory: true)
+    }
+
+    private var legacyLocalFramesDirectoryURL: URL? {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
             .appendingPathComponent(localFramesDirectoryName, isDirectory: true)
     }
@@ -582,6 +609,165 @@ final class PhotoLibraryService: ObservableObject {
     private func localFrameURL(for filename: String) -> URL {
         localFramesDirectoryURL?.appendingPathComponent(filename, isDirectory: false)
             ?? URL(fileURLWithPath: filename)
+    }
+
+    private func migrateLocalFrameCacheIfNeeded() {
+        guard let legacyURL = legacyLocalFramesDirectoryURL,
+              let currentURL = localFramesDirectoryURL,
+              legacyURL != currentURL,
+              FileManager.default.fileExists(atPath: legacyURL.path) else {
+            return
+        }
+
+        do {
+            try FileManager.default.createDirectory(
+                at: currentURL,
+                withIntermediateDirectories: true
+            )
+            let files = try FileManager.default.contentsOfDirectory(
+                at: legacyURL,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            )
+            for fileURL in files {
+                let destination = currentURL.appendingPathComponent(fileURL.lastPathComponent)
+                if !FileManager.default.fileExists(atPath: destination.path) {
+                    try FileManager.default.moveItem(at: fileURL, to: destination)
+                }
+            }
+            try? FileManager.default.removeItem(at: legacyURL)
+            protectLocalResource(at: currentURL)
+        } catch {
+            // A cache migration is best effort. Photos remains the source of
+            // truth and the new cache can be rebuilt on the next save.
+        }
+    }
+
+    private func protectLocalResource(at url: URL) {
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        var mutableURL = url
+        try? mutableURL.setResourceValues(values)
+        try? FileManager.default.setAttributes(
+            [.protectionKey: FileProtectionType.complete],
+            ofItemAtPath: url.path
+        )
+    }
+
+    private func trimLocalCacheToBudget() {
+        var resources = savedFrameResources
+        var totalBytes = 0
+        var didRemoveResource = false
+
+        // savedAssetIdentifiers is newest-first, so evict the oldest local
+        // copies first while retaining the Photos originals.
+        for identifier in savedAssetIdentifiers {
+            guard let resource = resources[identifier] else { continue }
+            let url = localFrameURL(for: resource.filename)
+            let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+            let byteCount = (attributes?[.size] as? NSNumber)?.intValue ?? 0
+            guard byteCount > 0 else {
+                resources.removeValue(forKey: identifier)
+                didRemoveResource = true
+                continue
+            }
+
+            if totalBytes + byteCount > localCacheMaxBytes {
+                try? FileManager.default.removeItem(at: url)
+                resources.removeValue(forKey: identifier)
+                didRemoveResource = true
+            } else {
+                totalBytes += byteCount
+            }
+        }
+
+        if didRemoveResource {
+            savedFrameResources = resources
+        }
+        refreshCachedFrames(excluding: Set(assets.map(\.localIdentifier)))
+    }
+
+    func clearLocalRollCache() {
+        for resource in savedFrameResources.values {
+            try? FileManager.default.removeItem(at: localFrameURL(for: resource.filename))
+        }
+        savedFrameResources = [:]
+        refreshCachedFrames(excluding: Set(assets.map(\.localIdentifier)))
+    }
+
+    func removeTemporaryShare(at url: URL) {
+        guard let directoryURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent(shareDirectoryName, isDirectory: true) else {
+            return
+        }
+
+        let directoryPath = directoryURL.standardizedFileURL.path
+        let filePath = url.standardizedFileURL.path
+        guard filePath.hasPrefix(directoryPath + "/") else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    func shareURL(for asset: PhotoLibraryGalleryAsset) async -> URL? {
+        switch asset {
+        case .cached(let frame):
+            guard let filename = savedFrameResources[frame.assetIdentifier]?.filename else { return nil }
+            let url = localFrameURL(for: filename)
+            return FileManager.default.fileExists(atPath: url.path) ? url : nil
+
+        case .photos(let photoAsset):
+            let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+            let resources = PHAssetResource.assetResources(for: photoAsset)
+            guard PhotoLibraryAuthorizationPolicy.canRead(status),
+                  savedAssetIdentifiers.contains(photoAsset.localIdentifier),
+                  let resource = resources.first(where: { $0.type == .photo }) ?? resources.first,
+                  let cachesURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+                return nil
+            }
+
+            let directoryURL = cachesURL.appendingPathComponent(shareDirectoryName, isDirectory: true)
+            let destinationURL = directoryURL.appendingPathComponent(
+                "\(UUID().uuidString).jpg",
+                isDirectory: false
+            )
+            do {
+                try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+                protectLocalResource(at: directoryURL)
+                let options = PHAssetResourceRequestOptions()
+                options.isNetworkAccessAllowed = true
+                let manager = PHAssetResourceManager.default()
+                return await withCheckedContinuation { continuation in
+                    manager.writeData(for: resource, toFile: destinationURL, options: options) { [weak self] error in
+                        Task { @MainActor in
+                            guard error == nil else {
+                                try? FileManager.default.removeItem(at: destinationURL)
+                                continuation.resume(returning: nil)
+                                return
+                            }
+                            self?.protectLocalResource(at: destinationURL)
+                            continuation.resume(returning: destinationURL)
+                        }
+                    }
+                }
+            } catch {
+                return nil
+            }
+        }
+    }
+
+    private func pruneTemporaryShareFiles() {
+        guard let directoryURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent(shareDirectoryName, isDirectory: true),
+              let files = try? FileManager.default.contentsOfDirectory(
+                  at: directoryURL,
+                  includingPropertiesForKeys: nil,
+                  options: [.skipsHiddenFiles]
+              ) else {
+            return
+        }
+
+        for fileURL in files {
+            try? FileManager.default.removeItem(at: fileURL)
+        }
     }
 
     private static func loadMetadata(forKey key: String) -> [String: SavedFrameMetadata] {
