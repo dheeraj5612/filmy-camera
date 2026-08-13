@@ -22,7 +22,10 @@ struct RecipePickerView: View {
                         .buttonStyle(.plain)
                         .accessibilityLabel("\(recipe.name), \(recipe.descriptor)")
                         .accessibilityValue(selectedRecipeID == recipe.id ? "Selected" : "Not selected")
-                        .accessibilityHint("Double tap to select this look. Long press for recipe details.")
+                        .accessibilityHint("Double tap to select this look. Use the View recipe details action for more information.")
+                        .accessibilityAction(named: "View recipe details") {
+                            onOpenDetail(recipe)
+                        }
                         .accessibilityAddTraits(selectedRecipeID == recipe.id ? .isSelected : [])
                         .contextMenu {
                             Button {

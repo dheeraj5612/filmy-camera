@@ -795,6 +795,49 @@ final class RendererOutputBoundsTests: XCTestCase {
         }
     }
 
+    func testPreviewPhotoAndExportUseIdenticalPixelsForFixedRecipePhase() {
+        let extent = CGRect(x: 0, y: 0, width: 64, height: 48)
+        let input = resolutionFixture(size: extent.size)
+        var recipe = FilmRecipe.builtIns[7]
+        recipe.exposure = 0.35
+        recipe.clarity = -0.42
+        recipe.grain = 0.58
+        recipe.grainSize = 1.25
+        recipe.vignette = 0.44
+        recipe.halation = 0.52
+        let phase = CGPoint(x: 173.5, y: 61.25)
+        let context = CIContext(options: [
+            .useSoftwareRenderer: true,
+            .cacheIntermediates: false
+        ])
+
+        let outputs = [FilmRenderer.Quality.preview, .photo, .export].map { quality in
+            renderFloatPixels(
+                FilmRenderer.render(
+                    input,
+                    recipe: recipe,
+                    quality: quality,
+                    grainSeed: 0x1234,
+                    grainPhase: phase
+                ),
+                extent: extent,
+                context: context
+            )
+        }
+
+        guard let reference = outputs.first else {
+            return XCTFail("Expected renderer output for the preview quality")
+        }
+        for (index, output) in outputs.dropFirst().enumerated() {
+            XCTAssertEqual(output.count, reference.count)
+            XCTAssertLessThan(
+                meanAbsoluteRGBDifference(reference, output),
+                0.0001,
+                "Quality tier \(index + 1) changed the recipe pixels"
+            )
+        }
+    }
+
     func testRecipeThumbnailUsesTheRendererAndRequestedSize() {
         let size = CGSize(width: 120, height: 80)
         let image = FilmRenderer.thumbnail(for: FilmRecipe.builtIns[1], size: size)

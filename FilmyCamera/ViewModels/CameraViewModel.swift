@@ -289,6 +289,10 @@ final class CameraViewModel: ObservableObject {
         toastTask?.cancel()
         toastMessage = message
         toastStyle = style
+        UIAccessibility.post(
+            notification: .announcement,
+            argument: "\(style.accessibilityTitle): \(message)"
+        )
         toastTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(2.4))
             guard !Task.isCancelled else { return }

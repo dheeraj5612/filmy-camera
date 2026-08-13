@@ -44,6 +44,7 @@ struct SettingsView: View {
                         Image(systemName: "camera.aperture")
                             .font(.system(size: 24, weight: .semibold))
                             .foregroundStyle(FilmyTheme.accent)
+                            .accessibilityHidden(true)
                     }
                     .frame(width: 54, height: 54)
 
@@ -75,6 +76,7 @@ struct SettingsView: View {
         HStack(spacing: 5) {
             Image(systemName: systemName)
                 .font(.caption2.weight(.bold))
+                .accessibilityHidden(true)
             Text(title)
                 .font(.caption2.weight(.bold))
                 .tracking(0.7)
@@ -203,6 +205,7 @@ struct SettingsView: View {
                     Image(systemName: "externaldrive.fill")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(FilmyTheme.accent)
+                        .accessibilityHidden(true)
                         .frame(width: 34, height: 34)
                         .background(FilmyTheme.accent.opacity(0.11), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
@@ -245,6 +248,7 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                 .foregroundStyle(photoLibrary.hasLocalCache ? FilmyTheme.accent : FilmyTheme.tertiary)
                 .buttonStyle(.plain)
+                .disabled(!photoLibrary.hasLocalCache)
                 .contentShape(Rectangle())
                 .accessibilityIdentifier("clear-local-cache")
                 .accessibilityValue(photoLibrary.hasLocalCache ? "Available" : "Empty")
@@ -324,6 +328,7 @@ struct SettingsView: View {
                     .foregroundStyle(FilmyTheme.accent)
                     .frame(width: 30, height: 30)
                     .background(FilmyTheme.accent.opacity(0.11), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(eyebrow.uppercased())
@@ -365,12 +370,14 @@ struct SettingsView: View {
                 Image(systemName: systemName)
                     .font(.subheadline.weight(.semibold))
                     .frame(width: 24)
+                    .accessibilityHidden(true)
                 Text(title)
                     .font(.subheadline.weight(.bold))
                     .multilineTextAlignment(.leading)
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.bold))
+                    .accessibilityHidden(true)
             }
             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
         }
@@ -392,12 +399,14 @@ struct SettingsView: View {
                 Image(systemName: systemName)
                     .font(.subheadline.weight(.semibold))
                     .frame(width: 24)
+                    .accessibilityHidden(true)
                 Text(title)
                     .font(.subheadline.weight(.bold))
                     .multilineTextAlignment(.leading)
                 Spacer(minLength: 8)
                 Image(systemName: "arrow.up.right")
                     .font(.caption.weight(.bold))
+                    .accessibilityHidden(true)
             }
             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
         }
@@ -518,6 +527,7 @@ private struct ControlRoomRow<Accessory: View>: View {
                 .foregroundStyle(FilmyTheme.accent)
                 .frame(width: 34, height: 34)
                 .background(FilmyTheme.accent.opacity(0.11), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)

@@ -36,7 +36,9 @@ struct CameraScreen: View {
                             focusPoint = CGPoint(x: proxy.size.width / 2, y: proxy.size.height / 2)
                         }
                     }
-                    .accessibilityIdentifier("camera-preview")
+                    .accessibilityIdentifier(
+                        shouldShowCameraEmptyState ? "camera-preview-unavailable" : "camera-preview"
+                    )
                     .accessibilityHidden(shouldShowCameraEmptyState)
                     .gesture(
                         SpatialTapGesture().onEnded { value in
@@ -557,7 +559,9 @@ struct CameraScreen: View {
                 selectedRecipeID: $viewModel.selectedRecipeID,
                 onOpenDetail: { recipeForDetail = $0 }
             )
-            .frame(height: 80)
+            // The rail cards are 82pt tall with 4pt vertical scroll padding;
+            // reserve the full 90pt footprint so labels are not clipped.
+            .frame(minHeight: 90)
 
             HStack(alignment: .center, spacing: 16) {
                 CameraActionButton(

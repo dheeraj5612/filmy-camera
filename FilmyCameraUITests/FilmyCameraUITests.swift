@@ -45,6 +45,21 @@ final class FilmyCameraUITests: XCTestCase {
         attachScreenshot(named: "recipe-details")
     }
 
+    #if targetEnvironment(simulator)
+    func testSimulatorFallbackExposesReadableStateWithoutPreviewAction() throws {
+        XCTAssertTrue(app.staticTexts["Preview mode"].waitForExistence(timeout: 8))
+        XCTAssertTrue(
+            app.staticTexts["Shoot this look on an iPhone."].waitForExistence(timeout: 5)
+        )
+
+        let cameraPreview = app.descendants(matching: .any)["camera-preview"]
+        XCTAssertFalse(
+            cameraPreview.isHittable,
+            "The unavailable camera preview must not remain an actionable target"
+        )
+    }
+    #endif
+
     func testGalleryAndSettingsNavigation() throws {
         let gallery = app.buttons["roll-tab"]
         assertMinimumHitTarget(gallery, named: "Roll")

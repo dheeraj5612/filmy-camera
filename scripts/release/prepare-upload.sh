@@ -9,7 +9,8 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root_dir="$(cd "${script_dir}/../.." && pwd)"
 bundle_id="com.dheeraj.filmycamera"
-team_id="AQW5C8DEEG"
+project_spec="${root_dir}/project.yml"
+team_id="$(sed -n 's/^[[:space:]]*DEVELOPMENT_TEAM:[[:space:]]*\([^[:space:]]*\)[[:space:]]*$/\1/p' "${project_spec}" | head -n 1)"
 
 archive_path="${FILMY_ARCHIVE_PATH:-${root_dir}/build/FilmyCamera.xcarchive}"
 export_path="${FILMY_EXPORT_PATH:-${root_dir}/build/export}"

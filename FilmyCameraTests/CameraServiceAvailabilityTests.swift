@@ -96,6 +96,38 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         )
     }
 
+    func testNotDeterminedAuthorizationWithoutHardwareResolvesToSimulatorState() {
+        XCTAssertEqual(
+            CameraService.availabilityAfterStopping(
+                authorizationStatus: .notDetermined,
+                hasCameraDevice: false,
+                previousAvailability: .starting
+            ),
+            .simulator
+        )
+    }
+
+    func testPhotoCallbackMustMatchPendingCaptureIdentity() {
+        XCTAssertTrue(
+            CameraService.acceptsPhotoCallback(
+                pendingUniqueID: 12,
+                callbackUniqueID: 12
+            )
+        )
+        XCTAssertFalse(
+            CameraService.acceptsPhotoCallback(
+                pendingUniqueID: 12,
+                callbackUniqueID: 13
+            )
+        )
+        XCTAssertFalse(
+            CameraService.acceptsPhotoCallback(
+                pendingUniqueID: nil,
+                callbackUniqueID: 12
+            )
+        )
+    }
+
     func testStalePreviewOwnerCannotRemoveNewerFrameHandler() {
         let camera = CameraService()
         let olderHandler = camera.installFrameHandler { _ in }

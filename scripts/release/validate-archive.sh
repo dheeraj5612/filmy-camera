@@ -10,6 +10,7 @@ fi
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root_dir="$(cd "${script_dir}/../.." && pwd)"
 project_spec="${root_dir}/project.yml"
+expected_team="$(sed -n 's/^[[:space:]]*DEVELOPMENT_TEAM:[[:space:]]*\([^[:space:]]*\)[[:space:]]*$/\1/p' "${project_spec}" | head -n 1)"
 
 if [[ ! -d "${archive_path}" ]]; then
   echo "Archive not found: ${archive_path}" >&2
@@ -96,8 +97,8 @@ profile_expiration_epoch="$(date -j -f '%Y-%m-%d %H:%M:%S %z' "${profile_expirat
   exit 1
 }
 
-[[ "${profile_team_id}" == "AQW5C8DEEG" ]] || {
-  echo "Provisioning profile belongs to an unexpected team: ${profile_team_id}" >&2
+[[ -n "${expected_team}" && "${profile_team_id}" == "${expected_team}" ]] || {
+  echo "Provisioning profile belongs to an unexpected team: ${profile_team_id} (expected ${expected_team:-unknown})" >&2
   exit 1
 }
 
@@ -105,6 +106,11 @@ profile_expiration_epoch="$(date -j -f '%Y-%m-%d %H:%M:%S %z' "${profile_expirat
   echo "Distribution archive must disable get-task-allow" >&2
   exit 1
 }
+
+if /usr/libexec/PlistBuddy -c 'Print :ProvisionedDevices' "${profile_plist}" >/dev/null 2>&1; then
+  echo "App Store distribution archive must not contain ProvisionedDevices" >&2
+  exit 1
+fi
 
 [[ -n "${profile_expiration_epoch}" && "${profile_expiration_epoch}" -gt "$(date '+%s')" ]] || {
   echo "Embedded provisioning profile is expired or has an unreadable expiration date" >&2
