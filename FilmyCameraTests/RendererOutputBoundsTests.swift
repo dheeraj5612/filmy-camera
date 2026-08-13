@@ -554,6 +554,214 @@ final class RendererOutputBoundsTests: XCTestCase {
         )
     }
 
+    func testNegativeClarityUsesBlurBlendAndPositiveClarityRemainsActiveAtMultipleSizes() {
+        let context = CIContext(options: [
+            .useSoftwareRenderer: true,
+            .cacheIntermediates: false
+        ])
+        let sizes = [
+            CGSize(width: 256, height: 192),
+            CGSize(width: 1024, height: 768)
+        ]
+        let base = FilmRecipe(
+            id: "clarity-regression",
+            name: "Clarity regression",
+            subtitle: "Test",
+            grain: 0,
+            vignette: 0,
+            halation: 0
+        )
+        var softened = base
+        softened.clarity = -1
+        var sharpened = base
+        sharpened.clarity = 1
+
+        for size in sizes {
+            let extent = CGRect(origin: .zero, size: size)
+            let input = resolutionFixture(size: size)
+            let neutralPixels = renderFloatPixels(
+                FilmRenderer.render(input, recipe: base, quality: .photo),
+                extent: extent,
+                context: context
+            )
+            let softenedPixels = renderFloatPixels(
+                FilmRenderer.render(input, recipe: softened, quality: .photo),
+                extent: extent,
+                context: context
+            )
+            let sharpenedPixels = renderFloatPixels(
+                FilmRenderer.render(input, recipe: sharpened, quality: .photo),
+                extent: extent,
+                context: context
+            )
+
+            let softenedDistance = meanAbsoluteRGBDifference(neutralPixels, softenedPixels)
+            XCTAssertGreaterThan(
+                softenedDistance,
+                0.0005,
+                "Negative clarity was a no-op at \(size)"
+            )
+
+            let boundary = Int(size.width / 4)
+            let left = pixel(
+                softenedPixels,
+                width: Int(size.width),
+                x: boundary - 2,
+                y: Int(size.height / 2)
+            )
+            let right = pixel(
+                softenedPixels,
+                width: Int(size.width),
+                x: boundary + 2,
+                y: Int(size.height / 2)
+            )
+            let neutralLeft = pixel(
+                neutralPixels,
+                width: Int(size.width),
+                x: boundary - 2,
+                y: Int(size.height / 2)
+            )
+            let neutralRight = pixel(
+                neutralPixels,
+                width: Int(size.width),
+                x: boundary + 2,
+                y: Int(size.height / 2)
+            )
+            let sharpenedLeft = pixel(
+                sharpenedPixels,
+                width: Int(size.width),
+                x: boundary - 2,
+                y: Int(size.height / 2)
+            )
+            let sharpenedRight = pixel(
+                sharpenedPixels,
+                width: Int(size.width),
+                x: boundary + 2,
+                y: Int(size.height / 2)
+            )
+
+            let neutralContrast = abs(luma(neutralLeft) - luma(neutralRight))
+            let softenedContrast = abs(luma(left) - luma(right))
+            let sharpenedContrast = abs(luma(sharpenedLeft) - luma(sharpenedRight))
+            XCTAssertLessThan(
+                softenedContrast,
+                neutralContrast,
+                "Negative clarity did not reduce edge contrast at \(size)"
+            )
+            XCTAssertGreaterThan(
+                sharpenedContrast,
+                neutralContrast,
+                "Positive clarity stopped sharpening edges at \(size)"
+            )
+        }
+    }
+
+    func testVignetteUsesNormalizedRadiusWithCenterAndEdgeBehaviorAtMultipleSizes() {
+        let context = CIContext(options: [
+            .useSoftwareRenderer: true,
+            .cacheIntermediates: false
+        ])
+        let sizes = [
+            CGSize(width: 256, height: 192),
+            CGSize(width: 1024, height: 768)
+        ]
+        var recipe = FilmRecipe(
+            id: "vignette-regression",
+            name: "Vignette regression",
+            subtitle: "Test",
+            grain: 0,
+            halation: 0
+        )
+        recipe.vignette = 0.5
+
+        for size in sizes {
+            let extent = CGRect(origin: .zero, size: size)
+            let input = CIImage(
+                color: CIColor(red: 0.72, green: 0.72, blue: 0.72, alpha: 1)
+            ).cropped(to: extent)
+            let pixels = renderFloatPixels(
+                FilmRenderer.render(input, recipe: recipe, quality: .photo),
+                extent: extent,
+                context: context
+            )
+            let width = Int(size.width)
+            let center = pixel(
+                pixels,
+                width: width,
+                x: width / 2,
+                y: Int(size.height) / 2
+            )
+            let corner = pixel(pixels, width: width, x: 0, y: 0)
+            let centerLuma = luma(center)
+            let cornerLuma = luma(corner)
+
+            XCTAssertGreaterThan(
+                centerLuma - cornerLuma,
+                0.04,
+                "Vignette did not darken the edge at \(size)"
+            )
+            XCTAssertGreaterThan(
+                cornerLuma / centerLuma,
+                0.60,
+                "Vignette radius was treated as an over-large pixel value at \(size)"
+            )
+        }
+    }
+
+    func testResolutionNormalizedSpatialEffectsMatchAfterDownsamplingPhotoToPreviewSize() {
+        let previewSize = CGSize(width: 720, height: 540)
+        let photoSize = CGSize(width: 1440, height: 1080)
+        let previewExtent = CGRect(origin: .zero, size: previewSize)
+        var recipe = FilmRecipe(
+            id: "resolution-parity",
+            name: "Resolution parity",
+            subtitle: "Test",
+            sharpness: 0.35,
+            clarity: 0.72,
+            grain: 0.42,
+            grainSize: 1.15,
+            vignette: 0.5,
+            halation: 0.45
+        )
+        recipe.dynamicRange = .dr100
+
+        let previewInput = resolutionFixture(size: previewSize)
+        let photoInput = resolutionFixture(size: photoSize)
+        let previewOutput = FilmRenderer.render(
+            previewInput,
+            recipe: recipe,
+            quality: .preview,
+            grainSeed: 23
+        )
+        let photoOutput = FilmRenderer.render(
+            photoInput,
+            recipe: recipe,
+            quality: .photo,
+            grainSeed: 23
+        )
+        let downsampledPhoto = downsample(photoOutput, to: previewSize)
+        let context = CIContext(options: [
+            .useSoftwareRenderer: true,
+            .cacheIntermediates: false
+        ])
+        let previewPixels = renderFloatPixels(
+            previewOutput,
+            extent: previewExtent,
+            context: context
+        )
+        let downsampledPhotoPixels = renderFloatPixels(
+            downsampledPhoto,
+            extent: previewExtent,
+            context: context
+        )
+
+        XCTAssertLessThan(
+            meanAbsoluteRGBDifference(previewPixels, downsampledPhotoPixels),
+            0.045,
+            "Preview and downsampled photo diverged after spatial normalization"
+        )
+    }
+
     func testRecipeLookRemainsStableAcrossPreviewPhotoAndExportQuality() {
         let extent = CGRect(x: 0, y: 0, width: 64, height: 48)
         let input = CIImage(color: CIColor(red: 0.76, green: 0.34, blue: 0.16, alpha: 1))
@@ -637,5 +845,92 @@ final class RendererOutputBoundsTests: XCTestCase {
         }
 
         return pixels
+    }
+
+    private func resolutionFixture(size: CGSize) -> CIImage {
+        let extent = CGRect(origin: .zero, size: size)
+        var image = CIImage(
+            color: CIColor(red: 0.08, green: 0.10, blue: 0.12, alpha: 1)
+        ).cropped(to: extent)
+        let stripeCount = 8
+        for index in 0..<stripeCount {
+            let stripe = CGRect(
+                x: size.width * CGFloat(index) / CGFloat(stripeCount),
+                y: 0,
+                width: size.width / CGFloat(stripeCount) + 1,
+                height: size.height
+            )
+            let color = index.isMultiple(of: 2)
+                ? CIColor(red: 0.18, green: 0.22, blue: 0.28, alpha: 1)
+                : CIColor(red: 0.74, green: 0.43, blue: 0.16, alpha: 1)
+            image = CIImage(color: color)
+                .cropped(to: stripe)
+                .composited(over: image)
+        }
+
+        let highlightRects: [(CGRect, CIColor)] = [
+            (
+                CGRect(
+                    x: size.width * 0.12,
+                    y: size.height * 0.18,
+                    width: size.width * 0.18,
+                    height: size.height * 0.24
+                ),
+                CIColor(red: 0.98, green: 0.90, blue: 0.70, alpha: 1)
+            ),
+            (
+                CGRect(
+                    x: size.width * 0.62,
+                    y: size.height * 0.48,
+                    width: size.width * 0.22,
+                    height: size.height * 0.28
+                ),
+                CIColor(red: 0.92, green: 0.96, blue: 0.98, alpha: 1)
+            )
+        ]
+        for (rect, color) in highlightRects {
+            image = CIImage(color: color)
+                .cropped(to: rect)
+                .composited(over: image)
+        }
+        return image
+    }
+
+    private func downsample(_ image: CIImage, to size: CGSize) -> CIImage {
+        let scale = size.width / image.extent.width
+        return image
+            .applyingFilter("CILanczosScaleTransform", parameters: [
+                kCIInputScaleKey: scale,
+                kCIInputAspectRatioKey: 1
+            ])
+            .cropped(to: CGRect(origin: .zero, size: size))
+    }
+
+    private func pixel(
+        _ pixels: [Float],
+        width: Int,
+        x: Int,
+        y: Int
+    ) -> [Float] {
+        let index = (y * width + x) * 4
+        return Array(pixels[index..<(index + 4)])
+    }
+
+    private func luma(_ pixel: [Float]) -> Double {
+        0.2126 * Double(pixel[0])
+            + 0.7152 * Double(pixel[1])
+            + 0.0722 * Double(pixel[2])
+    }
+
+    private func meanAbsoluteRGBDifference(_ lhs: [Float], _ rhs: [Float]) -> Double {
+        var total = 0.0
+        var count = 0
+        for index in stride(from: 0, to: min(lhs.count, rhs.count), by: 4) {
+            for channel in 0..<3 {
+                total += abs(Double(lhs[index + channel]) - Double(rhs[index + channel]))
+                count += 1
+            }
+        }
+        return count == 0 ? 0 : total / Double(count)
     }
 }

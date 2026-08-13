@@ -135,6 +135,7 @@ public final class FilmRenderer {
     private static let cubeCache = CubeCache()
     private static let immutableResources = ImmutableResources()
     private static let sRGBColorSpace = CGColorSpace(name: CGColorSpace.sRGB)
+    private static let spatialReferenceDimension: CGFloat = 1080
 
     private static var contextOptions: [CIContextOption: Any] {
         var options: [CIContextOption: Any] = [
@@ -508,19 +509,40 @@ public final class FilmRenderer {
 
         if clarity > 0, let unsharp = CIFilter(name: "CIUnsharpMask") {
             unsharp.setValue(image, forKey: kCIInputImageKey)
-            unsharp.setValue(0.8 + clarity * 1.3, forKey: kCIInputRadiusKey)
+            unsharp.setValue(
+                spatialRadius(0.8 + clarity * 1.3, for: image.extent),
+                forKey: kCIInputRadiusKey
+            )
             unsharp.setValue(clarity * 0.85, forKey: kCIInputIntensityKey)
             return unsharp.outputImage?.cropped(to: image.extent) ?? image
         }
 
-        // Negative clarity reduces local edge contrast without smearing the
-        // whole frame. A signed unsharp mask keeps large tones in place while
-        // attenuating the high-frequency component around edges.
-        guard let unsharp = CIFilter(name: "CIUnsharpMask") else { return image }
-        unsharp.setValue(image, forKey: kCIInputImageKey)
-        unsharp.setValue(0.8 + abs(clarity) * 0.8, forKey: kCIInputRadiusKey)
-        unsharp.setValue(-abs(clarity) * 0.65, forKey: kCIInputIntensityKey)
-        return unsharp.outputImage?.cropped(to: image.extent) ?? image
+        // CIUnsharpMask's intensity contract is non-negative. A negative
+        // value is ignored by Core Image on current runtimes, so implement
+        // negative clarity as a supported local blur/original blend instead.
+        guard let blur = CIFilter(name: "CIGaussianBlur"),
+              let blend = CIFilter(name: "CIBlendWithAlphaMask") else {
+            return image
+        }
+
+        let extent = image.extent
+        blur.setValue(image.clampedToExtent(), forKey: kCIInputImageKey)
+        blur.setValue(
+            spatialRadius(0.9 + abs(clarity) * 1.8, for: extent),
+            forKey: kCIInputRadiusKey
+        )
+        guard let blurred = blur.outputImage?.cropped(to: extent) else {
+            return image
+        }
+
+        let blendAmount = CGFloat(abs(clarity) * 0.68)
+        let mask = CIImage(
+            color: CIColor(red: 1, green: 1, blue: 1, alpha: blendAmount)
+        ).cropped(to: extent)
+        blend.setValue(blurred, forKey: kCIInputImageKey)
+        blend.setValue(image, forKey: kCIInputBackgroundImageKey)
+        blend.setValue(mask, forKey: "inputMaskImage")
+        return blend.outputImage?.cropped(to: extent) ?? image
     }
 
     private static func applyDetailControls(
@@ -542,13 +564,19 @@ public final class FilmRenderer {
         if sharpness > 0.0001,
            let unsharp = CIFilter(name: "CIUnsharpMask") {
             unsharp.setValue(output, forKey: kCIInputImageKey)
-            unsharp.setValue(0.35 + sharpness * 0.65, forKey: kCIInputRadiusKey)
+            unsharp.setValue(
+                spatialRadius(0.35 + sharpness * 0.65, for: image.extent),
+                forKey: kCIInputRadiusKey
+            )
             unsharp.setValue(sharpness * 0.7, forKey: kCIInputIntensityKey)
             output = unsharp.outputImage?.cropped(to: image.extent) ?? output
         } else if sharpness < -0.0001,
                   let blur = CIFilter(name: "CIGaussianBlur") {
-            blur.setValue(output, forKey: kCIInputImageKey)
-            blur.setValue(abs(sharpness) * 0.35, forKey: kCIInputRadiusKey)
+            blur.setValue(output.clampedToExtent(), forKey: kCIInputImageKey)
+            blur.setValue(
+                spatialRadius(abs(sharpness) * 0.35, for: image.extent),
+                forKey: kCIInputRadiusKey
+            )
             output = blur.outputImage?.cropped(to: image.extent) ?? output
         }
 
@@ -558,7 +586,7 @@ public final class FilmRenderer {
     private static func applyGrain(
         to image: CIImage,
         recipe: FilmRecipe,
-        quality: Quality,
+        quality _: Quality,
         seed: UInt32
     ) -> CIImage {
         // Grain is part of the look, not a preview-only effect. Normalize the
@@ -573,20 +601,17 @@ public final class FilmRenderer {
         }
 
         let extent = image.extent
-        let referenceDimension = 1080.0
-        let outputDimension = max(Double(extent.width), Double(extent.height))
-        let resolutionScale = max(outputDimension / referenceDimension, 0.5)
+        let resolutionScale = resolutionScale(for: extent)
         let grainSize = max(
-            0.35,
-            min(recipe.grainSize * resolutionScale, 8.0)
+            CGFloat(0.35),
+            min(CGFloat(recipe.grainSize) * resolutionScale, CGFloat(8))
         )
         let phaseX = CGFloat(seed & 0x1FF)
         let phaseY = CGFloat((seed >> 9) & 0x1FF)
-        let qualityScale: CGFloat = quality == .preview ? 0.88 : 1
         let noise = grainTexture
             .transformed(by: CGAffineTransform(
-                scaleX: qualityScale * grainSize,
-                y: qualityScale * grainSize
+                scaleX: grainSize,
+                y: grainSize
             ))
             .transformed(by: CGAffineTransform(translationX: phaseX, y: phaseY))
             .applyingFilter("CIAffineTile")
@@ -624,8 +649,17 @@ public final class FilmRenderer {
 
         let extent = image.extent
         vignette.setValue(image, forKey: kCIInputImageKey)
-        vignette.setValue(intensity * 1.35, forKey: kCIInputIntensityKey)
-        vignette.setValue(max(extent.width, extent.height) * 0.62, forKey: kCIInputRadiusKey)
+        // CIVignette's radius is a normalized 0...2 value, not a pixel
+        // distance. Keep the radius in that contract so a 4K still does not
+        // silently clamp to the same result as every smaller preview frame.
+        vignette.setValue(
+            clamp(intensity * 1.35, lower: 0, upper: 1),
+            forKey: kCIInputIntensityKey
+        )
+        vignette.setValue(
+            clamp(0.8 + intensity * 1.2, lower: 0, upper: 2),
+            forKey: kCIInputRadiusKey
+        )
         return vignette.outputImage?.cropped(to: extent) ?? image
     }
 
@@ -638,9 +672,7 @@ public final class FilmRenderer {
         guard amount > 0.0001 else { return image }
 
         let extent = image.extent
-        let referenceDimension = 1080.0
-        let outputDimension = max(Double(extent.width), Double(extent.height))
-        let resolutionScale = max(outputDimension / referenceDimension, 0.5)
+        let resolutionScale = resolutionScale(for: extent)
         let highlightMask = image
             .applyingFilter("CIColorControls", parameters: [
                 kCIInputSaturationKey: 0,
@@ -668,6 +700,24 @@ public final class FilmRenderer {
                 kCIInputBackgroundImageKey: image
             ])
             .cropped(to: extent)
+    }
+
+    /// Returns the scale needed to keep pixel-radius effects visually stable
+    /// when the same composition moves between a preview drawable and a
+    /// full-resolution still. The lower bound keeps tiny deterministic
+    /// fixtures and thumbnail-sized inputs from reducing every blur to a
+    /// sub-pixel no-op.
+    private static func resolutionScale(for extent: CGRect) -> CGFloat {
+        let outputDimension = max(extent.width, extent.height)
+        guard outputDimension.isFinite, outputDimension > 0 else { return 1 }
+        return max(outputDimension / spatialReferenceDimension, 0.5)
+    }
+
+    private static func spatialRadius(
+        _ referencePixels: CGFloat,
+        for extent: CGRect
+    ) -> CGFloat {
+        max(0.01, referencePixels * resolutionScale(for: extent))
     }
 
     private static func makeCubeData(
