@@ -118,6 +118,39 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         XCTAssertEqual(camera.exposureBias, 0)
     }
 
+    func testCameraHardwareSelectionDefaultsToSafePreviewState() {
+        let camera = CameraService()
+
+        XCTAssertEqual(camera.cameraPosition, .back)
+        XCTAssertEqual(camera.availableCameraPositions, [])
+        XCTAssertEqual(camera.availableLenses, [])
+        XCTAssertNil(camera.selectedLensID)
+        XCTAssertEqual(camera.minZoomFactor, 1)
+        XCTAssertEqual(camera.maxZoomFactor, 1)
+    }
+
+    func testCameraHardwareMetadataIsStableAndHashable() {
+        let wide = CameraService.LensOption(
+            id: "wide",
+            title: "1×",
+            detail: "Wide",
+            zoomFactor: 1,
+            position: .back
+        )
+        let sameWide = CameraService.LensOption(
+            id: "wide",
+            title: "1×",
+            detail: "Wide",
+            zoomFactor: 1,
+            position: .back
+        )
+
+        XCTAssertEqual(CameraService.CameraPosition.allCases, [.back, .front])
+        XCTAssertEqual(wide, sameWide)
+        XCTAssertEqual(Set([wide]).count, 1)
+        XCTAssertEqual(CameraService.CameraPosition.front.title, "Front")
+    }
+
     func testExposureBiasClampsNonFiniteAndOutOfRangeValues() {
         XCTAssertEqual(CameraService.clampedExposureBias(.nan), 0)
         XCTAssertEqual(CameraService.clampedExposureBias(.infinity), 0)
