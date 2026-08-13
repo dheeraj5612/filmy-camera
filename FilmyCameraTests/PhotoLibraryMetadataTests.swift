@@ -97,4 +97,58 @@ final class PhotoLibraryMetadataTests: XCTestCase {
         XCTAssertNil(PhotoLibraryCachePath.fileURL(filename: "/tmp/frame.jpg", in: directory))
         XCTAssertNil(PhotoLibraryCachePath.fileURL(filename: "", in: directory))
     }
+
+    func testLocalCacheReconciliationRemovesOrphansButPreservesIndexedFiles() throws {
+        let fileManager = FileManager.default
+        let directory = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: directory) }
+
+        let indexedURL = directory.appendingPathComponent("indexed.jpg")
+        let orphanURL = directory.appendingPathComponent("orphan.jpg")
+        let hiddenOrphanURL = directory.appendingPathComponent(".orphan.jpg")
+        let nestedDirectory = directory.appendingPathComponent("nested", isDirectory: true)
+        let nestedFileURL = nestedDirectory.appendingPathComponent("nested.jpg")
+        try Data([1]).write(to: indexedURL)
+        try Data([2]).write(to: orphanURL)
+        try Data([3]).write(to: hiddenOrphanURL)
+        try fileManager.createDirectory(at: nestedDirectory, withIntermediateDirectories: true)
+        try Data([4]).write(to: nestedFileURL)
+
+        let result = PhotoLibraryCachePath.removeRegularFiles(
+            in: directory,
+            preservingFilenames: [indexedURL.lastPathComponent]
+        )
+
+        XCTAssertEqual(result?.removedFilenames, [orphanURL.lastPathComponent, hiddenOrphanURL.lastPathComponent])
+        XCTAssertTrue(fileManager.fileExists(atPath: indexedURL.path))
+        XCTAssertFalse(fileManager.fileExists(atPath: orphanURL.path))
+        XCTAssertFalse(fileManager.fileExists(atPath: hiddenOrphanURL.path))
+        XCTAssertTrue(fileManager.fileExists(atPath: nestedDirectory.path))
+        XCTAssertTrue(fileManager.fileExists(atPath: nestedFileURL.path))
+    }
+
+    func testLocalCacheCleanupKeepsRetryableFilesWhenDeletionFails() throws {
+        let fileManager = FileManager.default
+        let directory = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: directory) }
+
+        let retryableURL = directory.appendingPathComponent("retryable.jpg")
+        let removableURL = directory.appendingPathComponent("removable.jpg")
+        try Data([1]).write(to: retryableURL)
+        try Data([2]).write(to: removableURL)
+
+        let result = PhotoLibraryCachePath.removeRegularFiles(in: directory) { url in
+            if url.lastPathComponent == retryableURL.lastPathComponent {
+                throw NSError(domain: "PhotoLibraryMetadataTests", code: 1)
+            }
+            try fileManager.removeItem(at: url)
+        }
+
+        XCTAssertEqual(result?.failedFilenames, [retryableURL.lastPathComponent])
+        XCTAssertEqual(result?.removedFilenames, [removableURL.lastPathComponent])
+        XCTAssertTrue(fileManager.fileExists(atPath: retryableURL.path))
+        XCTAssertFalse(fileManager.fileExists(atPath: removableURL.path))
+    }
 }

@@ -128,6 +128,11 @@ enum PhotoLibraryAssetOwnership {
 }
 
 enum PhotoLibraryCachePath {
+    struct CleanupResult: Equatable {
+        let removedFilenames: Set<String>
+        let failedFilenames: Set<String>
+    }
+
     static func fileURL(filename: String, in directory: URL) -> URL? {
         guard !filename.isEmpty,
               filename != ".",
@@ -142,6 +147,52 @@ enum PhotoLibraryCachePath {
             .standardizedFileURL
         guard fileURL.deletingLastPathComponent() == directoryURL else { return nil }
         return fileURL
+    }
+
+    static func regularFileURLs(
+        in directory: URL,
+        fileManager: FileManager = .default
+    ) -> [URL]? {
+        guard fileManager.fileExists(atPath: directory.path) else { return [] }
+        guard let contents = try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: []
+        ) else {
+            return nil
+        }
+
+        return contents.filter { url in
+            (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+        }
+    }
+
+    static func removeRegularFiles(
+        in directory: URL,
+        preservingFilenames: Set<String> = [],
+        fileManager: FileManager = .default,
+        removeItem: ((URL) throws -> Void)? = nil
+    ) -> CleanupResult? {
+        guard let regularFiles = regularFileURLs(in: directory, fileManager: fileManager) else {
+            return nil
+        }
+
+        let remove = removeItem ?? { try fileManager.removeItem(at: $0) }
+        var removedFilenames = Set<String>()
+        var failedFilenames = Set<String>()
+        for fileURL in regularFiles where !preservingFilenames.contains(fileURL.lastPathComponent) {
+            do {
+                try remove(fileURL)
+                removedFilenames.insert(fileURL.lastPathComponent)
+            } catch {
+                failedFilenames.insert(fileURL.lastPathComponent)
+            }
+        }
+
+        return CleanupResult(
+            removedFilenames: removedFilenames,
+            failedFilenames: failedFilenames
+        )
     }
 }
 
@@ -246,6 +297,7 @@ final class PhotoLibraryService: ObservableObject {
             authorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
             addOnlyAuthorizationStatus = PHPhotoLibrary.authorizationStatus(for: .addOnly)
             migrateLocalFrameCacheIfNeeded()
+            reconcileLocalCache()
             trimLocalCacheToBudget()
             pruneTemporaryShareFiles()
             refreshCachedFrames(excluding: [])
@@ -610,11 +662,19 @@ final class PhotoLibraryService: ObservableObject {
 
     private func refreshCachedFrames(excluding excludedIdentifiers: Set<String>) {
         let resources = savedFrameResources
+        let regularFilenames: Set<String>
+        if let directoryURL = localFramesDirectoryURL,
+           let regularFiles = PhotoLibraryCachePath.regularFileURLs(in: directoryURL) {
+            regularFilenames = Set(regularFiles.map(\.lastPathComponent))
+        } else {
+            regularFilenames = []
+        }
         localSavedFrames = savedAssetIdentifiers.compactMap { identifier in
             guard !excludedIdentifiers.contains(identifier),
                   let resource = resources[identifier],
                   let resourceURL = localFrameURL(for: resource.filename),
-                  FileManager.default.fileExists(atPath: resourceURL.path) else {
+                  (regularFilenames.contains(resource.filename)
+                   || FileManager.default.fileExists(atPath: resourceURL.path)) else {
                 return nil
             }
             return LocalSavedFrame(
@@ -623,10 +683,14 @@ final class PhotoLibraryService: ObservableObject {
                 pixelHeight: resource.pixelHeight
             )
         }
-        hasLocalCache = savedAssetIdentifiers.contains { identifier in
-            guard let resource = resources[identifier],
-                  let resourceURL = localFrameURL(for: resource.filename) else { return false }
-            return FileManager.default.fileExists(atPath: resourceURL.path)
+        if let directoryURL = localFramesDirectoryURL {
+            if let regularFiles = PhotoLibraryCachePath.regularFileURLs(in: directoryURL) {
+                hasLocalCache = !regularFiles.isEmpty
+            } else {
+                hasLocalCache = FileManager.default.fileExists(atPath: directoryURL.path)
+            }
+        } else {
+            hasLocalCache = false
         }
     }
 
@@ -691,6 +755,20 @@ final class PhotoLibraryService: ObservableObject {
     private func localFrameURL(for filename: String) -> URL? {
         guard let directoryURL = localFramesDirectoryURL else { return nil }
         return PhotoLibraryCachePath.fileURL(filename: filename, in: directoryURL)
+    }
+
+    private func reconcileLocalCache() {
+        guard let directoryURL = localFramesDirectoryURL else { return }
+        let indexedFilenames = Set(
+            savedFrameResources.values.compactMap { localFrameURL(for: $0.filename)?.lastPathComponent }
+        )
+        // Reconcile every regular file in the cache directory, including files
+        // left behind before their resource index was persisted. Photos remains
+        // the source of truth; indexed local copies are retained for offline use.
+        _ = PhotoLibraryCachePath.removeRegularFiles(
+            in: directoryURL,
+            preservingFilenames: indexedFilenames
+        )
     }
 
     private func migrateLocalFrameCacheIfNeeded() {
@@ -765,9 +843,14 @@ final class PhotoLibraryService: ObservableObject {
             }
 
             if totalBytes + byteCount > localCacheMaxBytes {
-                try? FileManager.default.removeItem(at: url)
-                resources.removeValue(forKey: identifier)
-                didRemoveResource = true
+                do {
+                    try FileManager.default.removeItem(at: url)
+                    resources.removeValue(forKey: identifier)
+                    didRemoveResource = true
+                } catch {
+                    // Keep the mapping so startup can retry a failed eviction.
+                    totalBytes += byteCount
+                }
             } else {
                 protectLocalResource(at: url)
                 totalBytes += byteCount
@@ -780,13 +863,38 @@ final class PhotoLibraryService: ObservableObject {
         refreshCachedFrames(excluding: Set(assets.map(\.localIdentifier)))
     }
 
+    /// Removes only Filmy Camera's on-device cached copies, including orphaned
+    /// regular files. Photos originals and their saved ownership metadata are
+    /// never deleted. Failed file deletions retain their cache mappings so a
+    /// later clear can retry them.
     func clearLocalRollCache() {
-        for resource in savedFrameResources.values {
-            if let resourceURL = localFrameURL(for: resource.filename) {
-                try? FileManager.default.removeItem(at: resourceURL)
+        guard let directoryURL = localFramesDirectoryURL else {
+            savedFrameResources = [:]
+            refreshCachedFrames(excluding: Set(assets.map(\.localIdentifier)))
+            return
+        }
+
+        guard let result = PhotoLibraryCachePath.removeRegularFiles(in: directoryURL) else {
+            // Keep the index if the directory cannot be read so a later clear
+            // can retry the files that may still be present.
+            refreshCachedFrames(excluding: Set(assets.map(\.localIdentifier)))
+            return
+        }
+
+        var resources = savedFrameResources
+        for (identifier, resource) in resources {
+            guard let resourceURL = localFrameURL(for: resource.filename) else {
+                resources.removeValue(forKey: identifier)
+                continue
+            }
+
+            let filename = resourceURL.lastPathComponent
+            if result.removedFilenames.contains(filename)
+                || !FileManager.default.fileExists(atPath: resourceURL.path) {
+                resources.removeValue(forKey: identifier)
             }
         }
-        savedFrameResources = [:]
+        savedFrameResources = resources
         refreshCachedFrames(excluding: Set(assets.map(\.localIdentifier)))
     }
 
