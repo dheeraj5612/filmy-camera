@@ -43,6 +43,7 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Determine whether the iOS gate is needed
         id: scope
@@ -96,6 +97,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
       - name: Cache XcodeGen
         id: cache-xcodegen
@@ -260,6 +263,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
       - name: Select and verify Xcode 16.4
         shell: bash
@@ -274,8 +279,38 @@ jobs:
             exit 1
           }
 
-      - name: Install ShellCheck
-        run: brew install shellcheck
+      - name: Install pinned ShellCheck
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          shellcheck_version="v0.11.0"
+          case "$(uname -m)" in
+            arm64)
+              shellcheck_archive="shellcheck-${shellcheck_version}.darwin.aarch64.tar.gz"
+              shellcheck_sha256="339b930feb1ea764467013cc1f72d09cd6b869ebf1013296ba9055ab2ffbd26f"
+              ;;
+            x86_64)
+              shellcheck_archive="shellcheck-${shellcheck_version}.darwin.x86_64.tar.gz"
+              shellcheck_sha256="c2c15e08df0e8fbc374c335b230a7ee958c313fa5714817a59aa59f1aa594f51"
+              ;;
+            *)
+              echo "Unsupported macOS runner architecture: $(uname -m)" >&2
+              exit 1
+              ;;
+          esac
+
+          shellcheck_archive_path="${RUNNER_TEMP}/${shellcheck_archive}"
+          curl --fail --silent --show-error --location --retry 3 \
+            "https://github.com/koalaman/shellcheck/releases/download/${shellcheck_version}/${shellcheck_archive}" \
+            --output "${shellcheck_archive_path}"
+          echo "${shellcheck_sha256}  ${shellcheck_archive_path}" | shasum -a 256 --check
+
+          tar -xzf "${shellcheck_archive_path}" -C "${RUNNER_TEMP}"
+          shellcheck_bin="${RUNNER_TEMP}/shellcheck-${shellcheck_version}/shellcheck"
+          shellcheck_output="$(${shellcheck_bin} --version)"
+          grep -Fq "version: ${shellcheck_version#v}" <<<"${shellcheck_output}"
+          echo "${RUNNER_TEMP}/shellcheck-${shellcheck_version}" >> "${GITHUB_PATH}"
 
       - name: Validate release script syntax and safety
         shell: bash
@@ -300,12 +335,15 @@ jobs:
           [[ "${final_metadata_status}" -ne 0 ]]
           grep -Fq 'Final App Store metadata' <<<"${final_metadata_output}"
 
-          secret_pattern='-----BEGIN ([A-Z0-9]+ )*PRIVATE KEY-----|AuthKey_[A-Za-z0-9]{10,}\.p8|FILMY_ASC_KEY_ID=[A-Za-z0-9]{10}|FILMY_ASC_ISSUER_ID=[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}'
-          for private_key_header in \
-            '-----BEGIN PRIVATE KEY-----' \
-            '-----BEGIN OPENSSH PRIVATE KEY-----' \
-            '-----BEGIN RSA PRIVATE KEY-----' \
-            '-----BEGIN EC PRIVATE KEY-----'; do
+          private_key_regex="$(printf '%s' '-----BEGIN ' '([A-Z0-9]+ )*' 'PRIVATE KEY-----')"
+          auth_key_regex="$(printf '%s' 'Auth' 'Key_' '[A-Za-z0-9]{10,}' '\.p8')"
+          key_id_regex="$(printf '%s' 'FILMY_ASC_KEY' '_ID=' '[A-Za-z0-9]{10}')"
+          issuer_id_regex="$(printf '%s' 'FILMY_ASC_ISSUER' '_ID=' '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}')"
+          secret_pattern="${private_key_regex}|${auth_key_regex}|${key_id_regex}|${issuer_id_regex}"
+          private_key_prefix="-----BEGIN"
+          private_key_suffix=" PRIVATE KEY-----"
+          for private_key_modifier in '' OPENSSH RSA EC; do
+            private_key_header="${private_key_prefix}${private_key_modifier:+ ${private_key_modifier}}${private_key_suffix}"
             grep -E -q -e "${secret_pattern}" <<<"${private_key_header}" || {
               echo "Credential scan pattern regression for a private-key header; failing closed." >&2
               exit 1
@@ -313,7 +351,6 @@ jobs:
           done
           set +e
           git -c core.pager=cat grep --quiet -I -E -e "${secret_pattern}" -- \
-            ':!scripts/release/prepare-upload.sh' ':!.github/workflows/ios-build.yml' \
             >/dev/null 2>&1
           secret_scan_status="$?"
           set -e
