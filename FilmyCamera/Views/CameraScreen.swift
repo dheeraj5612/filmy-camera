@@ -205,8 +205,14 @@ struct CameraScreen: View {
 
                 Text("Choose a feeling. Make a frame.")
                     .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.62))
+                    .foregroundStyle(.white.opacity(0.78))
             }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                Color.black.opacity(0.46),
+                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+            )
 
             Spacer(minLength: 8)
 
@@ -344,7 +350,7 @@ struct CameraScreen: View {
                     Text("LOOKING THROUGH")
                         .font(.system(size: 11, weight: .bold, design: .rounded))
                         .tracking(1.2)
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(.white.opacity(0.76))
                     HStack(spacing: 7) {
                         Text(viewModel.selectedRecipe.name)
                         if viewModel.isCustomized(viewModel.selectedRecipe) {
@@ -360,6 +366,12 @@ struct CameraScreen: View {
                     .font(.system(.title3, design: .rounded).weight(.bold))
                         .foregroundStyle(.white)
                 }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(
+                    Color.black.opacity(0.42),
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                )
 
                 Spacer()
 
@@ -423,7 +435,7 @@ struct CameraScreen: View {
                     Text("PREVIEW MODE")
                         .font(.system(.caption2, design: .rounded).weight(.bold))
                         .tracking(1.1)
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(.white.opacity(0.76))
                         .lineLimit(1)
                         .minimumScaleFactor(0.68)
                         .allowsTightening(true)
@@ -438,6 +450,12 @@ struct CameraScreen: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .layoutPriority(1)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(
+                    Color.black.opacity(0.42),
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                )
 
                 CameraActionButton(
                     systemName: "slider.horizontal.3",
