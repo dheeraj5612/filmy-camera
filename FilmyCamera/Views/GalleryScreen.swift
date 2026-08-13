@@ -256,6 +256,9 @@ private struct GalleryDetailView: View {
     @State private var isDeleting = false
     @State private var isPreparingShare = false
     @State private var actionErrorMessage: String?
+    @State private var zoomScale: CGFloat = 1
+    @State private var imageOffset: CGSize = .zero
+    @State private var dragBaseOffset: CGSize = .zero
 
     var body: some View {
         ZStack {
@@ -266,6 +269,38 @@ private struct GalleryDetailView: View {
                     .resizable()
                     .scaledToFit()
                     .padding(16)
+                    .scaleEffect(zoomScale)
+                    .offset(imageOffset)
+                    .contentShape(Rectangle())
+                    .accessibilityHint("Pinch to zoom, drag while zoomed, or double tap to reset")
+                    .gesture(
+                        MagnificationGesture()
+                            .onChanged { value in
+                                zoomScale = min(max(value, 1), 4)
+                                if zoomScale == 1 {
+                                    imageOffset = .zero
+                                }
+                            }
+                            .onEnded { _ in
+                                if zoomScale <= 1.05 {
+                                    resetImageTransform()
+                                }
+                            }
+                    )
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 8)
+                            .onChanged { value in
+                                guard zoomScale > 1 else { return }
+                                imageOffset = CGSize(
+                                    width: dragBaseOffset.width + value.translation.width,
+                                    height: dragBaseOffset.height + value.translation.height
+                                )
+                            }
+                            .onEnded { _ in
+                                dragBaseOffset = imageOffset
+                            }
+                    )
+                    .onTapGesture(count: 2, perform: resetImageTransform)
             } else {
                 ProgressView().tint(FilmyTheme.accent)
             }
@@ -419,6 +454,14 @@ private struct GalleryDetailView: View {
             }
             shareURL = url
             isShowingShareSheet = true
+        }
+    }
+
+    private func resetImageTransform() {
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+            zoomScale = 1
+            imageOffset = .zero
+            dragBaseOffset = .zero
         }
     }
 }

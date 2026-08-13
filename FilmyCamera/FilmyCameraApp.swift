@@ -11,9 +11,13 @@ struct FilmyCameraApp: App {
         ProcessInfo.processInfo.arguments.contains("-ui-testing")
     }
 
+    private var isOnboardingUITesting: Bool {
+        ProcessInfo.processInfo.arguments.contains("-ui-testing-onboarding")
+    }
+
     var body: some Scene {
         WindowGroup {
-            if hasCompletedOnboarding || isUITesting {
+            if !isOnboardingUITesting && (hasCompletedOnboarding || isUITesting) {
                 ContentView(
                     camera: camera,
                     cameraViewModel: cameraViewModel,
