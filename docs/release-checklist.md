@@ -2,7 +2,7 @@
 
 ## Current workspace gate
 
-- [x] Current hardening branch is `codex/security-hardening-20260813` at HEAD `f472604abf3d4721399111b5899bc4abe21f22b6`.
+- [x] Current hardening branch is `codex/security-hardening-20260813` at HEAD `39f7f9b50d60acf73bdbb936d94be8e111770d12`.
 - [x] Reconcile the App Store signing configuration across `project.yml`, `FilmyCamera.xcodeproj/project.pbxproj`, `scripts/release/prepare-upload.sh`, `scripts/release/validate-archive.sh`, and `scripts/release/validate-project.sh` for Developer team `6ALSCF5GBV`.
 - [x] Verify the production Swift app target is present under `FilmyCamera/`.
 - [x] Exercise the production `FilmRecipe.builtIns` and `FilmRenderer.render` APIs from XCTest.
@@ -25,7 +25,7 @@
 - [x] Run `xcodegen generate` and verify generated-project reproducibility after reconciling the signing-team update.
 - [x] Run the credential-free release project preflight (`scripts/release/validate-project.sh`) against team `6ALSCF5GBV`.
 - [x] Run the iPhone Simulator build and XCTest workflow locally; 85 tests passed on iPhone 17 Pro Simulator running iOS 26.5.
-- [x] Record the current hosted hardening evidence: [PR #55](https://github.com/dheeraj5612/filmy-camera/pull/55) and [run 31750692162](https://github.com/dheeraj5612/filmy-camera/actions/runs/31750692162) for branch `codex/security-hardening-20260813` at HEAD `f472604abf3d4721399111b5899bc4abe21f22b6`; `change-scope`, `release-scripts`, and `build-and-test` all passed.
+- [x] Record the current hosted hardening evidence: [PR #55](https://github.com/dheeraj5612/filmy-camera/pull/55) and [run 31751099210](https://github.com/dheeraj5612/filmy-camera/actions/runs/31751099210) for branch `codex/security-hardening-20260813` at HEAD `39f7f9b50d60acf73bdbb936d94be8e111770d12`; `change-scope`, `release-scripts`, and `build-and-test` all passed.
 - [x] Keep release-script syntax, ShellCheck, and fail-closed upload-preparation checks in CI.
 - [ ] Run a signed Release archive for a generic iOS device destination and verify the app on a physical iPhone; the current unsigned archive fails validation because it has no embedded provisioning profile.
 - [x] Validate `Info.plist`, launch behavior, app icon, version `1.0.0`, and build number `1`.
@@ -79,8 +79,8 @@ The hosted workflow keeps the release-script gate on metadata and checklist chan
 
 ## Verified evidence
 
-- Current repository evidence: branch `codex/security-hardening-20260813` at committed HEAD `f472604abf3d4721399111b5899bc4abe21f22b6`, with the latest UI polish, capture identity hardening, accessibility coverage, and team-aligned release configuration.
-- Current hosted evidence: [PR #55](https://github.com/dheeraj5612/filmy-camera/pull/55) and [run 31750692162](https://github.com/dheeraj5612/filmy-camera/actions/runs/31750692162), both tied to committed HEAD `f472604abf3d4721399111b5899bc4abe21f22b6`; the PR remains open and draft.
+- Current repository evidence: branch `codex/security-hardening-20260813` at committed HEAD `39f7f9b50d60acf73bdbb936d94be8e111770d12`, with the latest UI polish, capture identity hardening, accessibility coverage, and team-aligned release configuration.
+- Current hosted evidence: [PR #55](https://github.com/dheeraj5612/filmy-camera/pull/55) and [run 31751099210](https://github.com/dheeraj5612/filmy-camera/actions/runs/31751099210), both tied to committed HEAD `39f7f9b50d60acf73bdbb936d94be8e111770d12`; the PR remains open and draft.
 - Current local simulator evidence: 85 tests passed on iPhone 17 Pro Simulator running iOS 26.5; camera shell, recipe details, Gallery, Settings navigation, simulator fallback, and renderer parity are covered.
 - Current UI hardening: the recipe-detail hero no longer duplicates the swatch label; recipe-editor section icons participate in layout; simulator fallback hides the unavailable live-preview accessibility target; and Photos permission badges remain readable at narrow widths. The modern darkroom/amber camera shell, recipe rail, accessibility labels, and touch-target work remain covered by the simulator gate.
 - Current security/release hardening: CI checkout credentials are not persisted; ShellCheck and XcodeGen are pinned and verified; the credential scan covers tracked files; local photo-cache orphan cleanup is reconciled; exported JPEG metadata uses an explicit privacy-safe allowlist; archive project generation is reproducibility-checked; App Store profiles are team-validated and reject development-device entitlements; and late photo callbacks cannot consume newer capture state.
