@@ -72,10 +72,11 @@ The archive wrapper generates the project and creates a Release archive for a ge
 
 ## Verified evidence
 
-- Last verified app-code mainline: `a1da1b7fb7ec9b8d46f04db4d6516924a1517045`
+- Last verified app-code mainline: `e18528a48c381837df697ba35a0caa10c3506b74`
 - Production-hardening PR: [PR #32](https://github.com/dheeraj5612/filmy-camera/pull/32) — merged after green hosted checks on the pushed branch SHA.
 - App-code merge GitHub Actions run: [31650506505](https://github.com/dheeraj5612/filmy-camera/actions/runs/31650506505) — green Xcode 16.4 simulator build; the 39 unit/renderer tests and 2 UI tests passed, with generated-project reproducibility, release preflight, artifact/log retention, ShellCheck, metadata validation, and the fail-closed upload-preparation lane.
-- Current `main` evidence GitHub Actions run: [31653949298](https://github.com/dheeraj5612/filmy-camera/actions/runs/31653949298) — green on exact SHA `a1da1b7fb7ec9b8d46f04db4d6516924a1517045`; Xcode 16.4 generated-project reproducibility, 43 unit/renderer tests, 2 UI tests, release preflight, artifact/log retention, ShellCheck, metadata validation, and the fail-closed upload-preparation lane passed.
+- Current `main` evidence GitHub Actions run: [31655106199](https://github.com/dheeraj5612/filmy-camera/actions/runs/31655106199) — green on exact SHA `e18528a48c381837df697ba35a0caa10c3506b74`; Xcode 16.4 generated-project reproducibility, 43 unit/renderer tests, 2 UI tests, release preflight, artifact/log retention, ShellCheck, metadata validation, and the fail-closed upload-preparation lane passed.
+- Previous mainline evidence run: [31653949298](https://github.com/dheeraj5612/filmy-camera/actions/runs/31653949298) — green on exact SHA `a1da1b7fb7ec9b8d46f04db4d6516924a1517045` before the branded launch-screen update.
 - Previous main evidence run: [31650845960](https://github.com/dheeraj5612/filmy-camera/actions/runs/31650845960) — green on exact SHA `0306526e7fc9f323dc159140a0032e7d600e76e4` after the earlier release evidence update.
 - Previous mainline baseline: [31647529461](https://github.com/dheeraj5612/filmy-camera/actions/runs/31647529461) — green Xcode 16.4 simulator build before this production-hardening pass.
 - Current local simulator verification: 43 unit/renderer tests plus 2 UI tests passed on iOS 18.5 and iOS 26.5; the gallery/settings UI flow, renderer-backed recipe thumbnails, Tune flow, capture-review handoff, typed camera availability states, flash availability contract, Photos authorization policy, VoiceOver focus action, privacy/support links, and accessibility tree were verified.
