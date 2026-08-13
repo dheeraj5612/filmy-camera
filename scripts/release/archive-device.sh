@@ -6,6 +6,9 @@ root_dir="$(cd "${script_dir}/../.." && pwd)"
 archive_path="${FILMY_ARCHIVE_PATH:-${root_dir}/build/FilmyCamera.xcarchive}"
 derived_data_path="${FILMY_DERIVED_DATA_PATH:-${root_dir}/build/DerivedData}"
 allow_provisioning_updates=false
+asc_key_id="${FILMY_ASC_KEY_ID:-}"
+asc_issuer_id="${FILMY_ASC_ISSUER_ID:-}"
+asc_key_path="${FILMY_ASC_KEY_PATH:-}"
 
 usage() {
   cat <<'EOF'
@@ -14,6 +17,11 @@ Usage:
 
 Options:
   --allow-provisioning-updates  Explicitly allow Xcode to contact Apple while archiving.
+
+When --allow-provisioning-updates is used, FILMY_ASC_KEY_ID,
+FILMY_ASC_ISSUER_ID, and FILMY_ASC_KEY_PATH may also be set to authenticate
+headless Xcode provisioning. The private key must be an absolute path outside
+the repository; its contents are never printed.
 EOF
 }
 
@@ -53,6 +61,27 @@ archive_args=(
 )
 if [[ "${allow_provisioning_updates}" == true ]]; then
   archive_args+=( -allowProvisioningUpdates )
+  if [[ -n "${asc_key_id}${asc_issuer_id}${asc_key_path}" ]]; then
+    [[ -n "${asc_key_id}" && -n "${asc_issuer_id}" && -n "${asc_key_path}" ]] || {
+      echo "FILMY_ASC_KEY_ID, FILMY_ASC_ISSUER_ID, and FILMY_ASC_KEY_PATH must be provided together" >&2
+      exit 64
+    }
+    [[ "${asc_key_path}" = /* && -f "${asc_key_path}" ]] || {
+      echo "FILMY_ASC_KEY_PATH must point to an existing absolute private-key file" >&2
+      exit 64
+    }
+    case "${asc_key_path}/" in
+      "${root_dir}/"*)
+        echo "FILMY_ASC_KEY_PATH must point outside the repository" >&2
+        exit 64
+        ;;
+    esac
+    archive_args+=(
+      -authenticationKeyIssuerID "${asc_issuer_id}"
+      -authenticationKeyID "${asc_key_id}"
+      -authenticationKeyPath "${asc_key_path}"
+    )
+  fi
 fi
 
 archive_args+=( archive )

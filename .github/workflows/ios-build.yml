@@ -300,7 +300,17 @@ jobs:
           [[ "${final_metadata_status}" -ne 0 ]]
           grep -Fq 'Final App Store metadata' <<<"${final_metadata_output}"
 
-          secret_pattern='-----BEGIN (OPENSSH|RSA|EC|PRIVATE) KEY-----|AuthKey_[A-Za-z0-9]{10,}\.p8|FILMY_ASC_KEY_ID=[A-Za-z0-9]{10}|FILMY_ASC_ISSUER_ID=[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}'
+          secret_pattern='-----BEGIN ([A-Z0-9]+ )*PRIVATE KEY-----|AuthKey_[A-Za-z0-9]{10,}\.p8|FILMY_ASC_KEY_ID=[A-Za-z0-9]{10}|FILMY_ASC_ISSUER_ID=[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}'
+          for private_key_header in \
+            '-----BEGIN PRIVATE KEY-----' \
+            '-----BEGIN OPENSSH PRIVATE KEY-----' \
+            '-----BEGIN RSA PRIVATE KEY-----' \
+            '-----BEGIN EC PRIVATE KEY-----'; do
+            grep -E -q -e "${secret_pattern}" <<<"${private_key_header}" || {
+              echo "Credential scan pattern regression for a private-key header; failing closed." >&2
+              exit 1
+            }
+          done
           set +e
           git -c core.pager=cat grep --quiet -I -E -e "${secret_pattern}" -- \
             ':!scripts/release/prepare-upload.sh' ':!.github/workflows/ios-build.yml' \
