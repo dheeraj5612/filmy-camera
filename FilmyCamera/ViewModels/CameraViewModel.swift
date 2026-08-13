@@ -337,6 +337,7 @@ final class CameraViewModel: ObservableObject {
 
         let grainPhase = Self.scaledGrainPhase(
             grainSeed,
+            grainSize: recipe.grainSize,
             previewSize: previewDrawableSize,
             stillSize: framedInput.extent.size
         )
@@ -368,11 +369,12 @@ final class CameraViewModel: ObservableObject {
     }
 
     /// FilmRenderer interprets grain phase in output pixels after scaling the
-    /// deterministic texture. Scale the preview phase into still pixels, but
-    /// keep the full value instead of wrapping it through the seed's 9-bit
-    /// storage range; the texture's actual period is 512 * grainSize.
+    /// deterministic texture. Match the renderer's effective texture scale
+    /// for both images so clamped large-grain recipes preserve the same
+    /// texture coordinates between preview and capture.
     nonisolated static func scaledGrainPhase(
         _ seed: UInt32,
+        grainSize: Double = 1,
         previewSize: CGSize,
         stillSize: CGSize
     ) -> CGPoint {
@@ -389,12 +391,36 @@ final class CameraViewModel: ObservableObject {
             return previewPhase
         }
 
-        let scale = stillDimension / previewDimension
+        let previewTextureScale = effectiveGrainTextureScale(
+            grainSize: grainSize,
+            imageSize: previewSize
+        )
+        let stillTextureScale = effectiveGrainTextureScale(
+            grainSize: grainSize,
+            imageSize: stillSize
+        )
+        let scale = stillTextureScale / previewTextureScale
         guard scale.isFinite, scale > 0 else { return previewPhase }
         return CGPoint(
             x: previewPhase.x * scale,
             y: previewPhase.y * scale
         )
+    }
+
+    /// Keep this in lockstep with FilmRenderer's private grain scale. The
+    /// phase is applied after the grain texture transform, so the effective
+    /// (including clamped) scale—not just the image-size ratio—is the mapping
+    /// that keeps preview and still coordinates aligned.
+    nonisolated static func effectiveGrainTextureScale(
+        grainSize: Double,
+        imageSize: CGSize
+    ) -> CGFloat {
+        let outputDimension = max(imageSize.width, imageSize.height)
+        guard outputDimension.isFinite, outputDimension > 0 else { return 1 }
+
+        let resolutionScale = max(outputDimension / 1080, 0.5)
+        let finiteGrainSize = grainSize.isFinite ? CGFloat(grainSize) : 1
+        return max(0.35, min(finiteGrainSize * resolutionScale, 8))
     }
 
     private nonisolated static func downsampledReviewImage(from data: Data) -> UIImage? {
