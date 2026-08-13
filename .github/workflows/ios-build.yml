@@ -10,6 +10,8 @@ on:
       - "FilmyCameraUITests/**"
       - "FilmyCamera.xcodeproj/**"
       - "scripts/release/**"
+      # App Store metadata is a release input; keep metadata-only commits in
+      # the push gate on main.
       - "docs/app-store/**"
       - "docs/release-checklist.md"
       - "project.yml"
@@ -77,6 +79,10 @@ jobs:
     if: needs.change-scope.outputs.ios_changed == 'true'
     runs-on: macos-15
     timeout-minutes: 30
+    # Xcode 16.4 ships iOS 18.5 on the hosted runner. Keep one stable lane so
+    # the required `build-and-test` check name does not become a matrix suffix.
+    env:
+      SIMULATOR_RUNTIME: "iOS 18.5"
 
     steps:
       - name: Check out repository
@@ -145,14 +151,28 @@ jobs:
         run: |
           set -euo pipefail
 
-          device_id="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ { print $2; exit }')"
+          if ! xcrun simctl list runtimes | grep -Fq -- "${SIMULATOR_RUNTIME} ("; then
+            echo "Required simulator runtime ${SIMULATOR_RUNTIME} is unavailable on this runner." >&2
+            xcrun simctl list runtimes >&2
+            exit 1
+          fi
+
+          device_id="$(
+            xcrun simctl list devices available |
+              awk -F '[()]' -v runtime_header="-- ${SIMULATOR_RUNTIME} --" '
+                $0 == runtime_header { in_runtime=1; next }
+                in_runtime && /^-- / { in_runtime=0 }
+                in_runtime && /iPhone/ { print $2; exit }
+              '
+          )"
           if [[ -z "${device_id}" ]]; then
-            echo "No available iPhone simulator was found." >&2
+            echo "No available iPhone simulator was found for ${SIMULATOR_RUNTIME}." >&2
             xcrun simctl list devices available >&2
             exit 1
           fi
 
           echo "device_id=${device_id}" >> "${GITHUB_OUTPUT}"
+          echo "Using ${SIMULATOR_RUNTIME} simulator ${device_id}"
           xcrun simctl boot "${device_id}" 2>/dev/null || true
           xcrun simctl bootstatus "${device_id}" -b
 
@@ -271,11 +291,25 @@ jobs:
           [[ "${final_metadata_status}" -ne 0 ]]
           grep -Fq 'Final App Store metadata' <<<"${final_metadata_output}"
 
-          if git grep -q -I -E -e '-----BEGIN (OPENSSH|RSA|EC|PRIVATE) KEY-----|AuthKey_[A-Za-z0-9]{10,}\.p8|FILMY_ASC_KEY_ID=[A-Za-z0-9]{10}|FILMY_ASC_ISSUER_ID=[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}' -- \
-            ':!scripts/release/prepare-upload.sh' ':!.github/workflows/ios-build.yml'; then
-            echo "Potential credential material found in tracked release files." >&2
-            exit 1
-          fi
+          secret_pattern='-----BEGIN (OPENSSH|RSA|EC|PRIVATE) KEY-----|AuthKey_[A-Za-z0-9]{10,}\.p8|FILMY_ASC_KEY_ID=[A-Za-z0-9]{10}|FILMY_ASC_ISSUER_ID=[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}'
+          set +e
+          git -c core.pager=cat grep --quiet -I -E -e "${secret_pattern}" -- \
+            ':!scripts/release/prepare-upload.sh' ':!.github/workflows/ios-build.yml' \
+            >/dev/null 2>&1
+          secret_scan_status="$?"
+          set -e
+          case "${secret_scan_status}" in
+            0)
+              echo "Potential credential material found in tracked release files; match details redacted." >&2
+              exit 1
+              ;;
+            1)
+              ;;
+            *)
+              echo "Credential scan failed closed; match details redacted." >&2
+              exit 1
+              ;;
+          esac
 
           help_output="$(scripts/release/prepare-upload.sh --help)"
           grep -Fq -- '--check' <<<"${help_output}"
