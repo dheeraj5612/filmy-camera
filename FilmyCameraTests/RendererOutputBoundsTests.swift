@@ -216,6 +216,23 @@ final class RendererOutputBoundsTests: XCTestCase {
         XCTAssertEqual(pixels[3], 0.35, accuracy: 0.02)
     }
 
+    func testOpaqueCopyReplacesSourceAlpha() {
+        let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
+        let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+        for sourceAlpha in [1.0, 0.35] {
+            let input = CIImage(color: CIColor(red: 0.42, green: 0.18, blue: 0.76, alpha: sourceAlpha))
+                .cropped(to: extent)
+            let pixels = renderFloatPixels(
+                FilmRenderer.opaqueImage(from: input),
+                extent: extent,
+                context: context
+            )
+
+            XCTAssertEqual(pixels.count, 4)
+            XCTAssertEqual(pixels[3], 1, accuracy: 0.001, "Source alpha \(sourceAlpha) was not replaced")
+        }
+    }
+
     func testFilmBaseChangesRenderedColorEvenWithSharedNumericControls() {
         let extent = CGRect(x: 0, y: 0, width: 16, height: 16)
         let input = CIImage(color: CIColor(red: 0.88, green: 0.42, blue: 0.16, alpha: 1))

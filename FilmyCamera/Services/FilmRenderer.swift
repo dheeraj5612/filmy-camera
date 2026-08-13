@@ -312,9 +312,13 @@ public final class FilmRenderer {
         return filter.outputImage?.cropped(to: image.extent) ?? image
     }
 
-    private static func opaqueImage(from image: CIImage) -> CIImage {
+    static func opaqueImage(from image: CIImage) -> CIImage {
         guard let filter = CIFilter(name: "CIColorMatrix") else { return image }
         filter.setValue(image, forKey: kCIInputImageKey)
+        // Replace alpha with 1 rather than adding a unit bias to the source
+        // alpha. The default alpha vector would otherwise turn an opaque
+        // source into alpha 2 before blend-based finishing effects run.
+        filter.setValue(immutableResources.zeroComponents, forKey: "inputAVector")
         filter.setValue(CIVector(x: 0, y: 0, z: 0, w: 1), forKey: "inputBiasVector")
         return filter.outputImage?.cropped(to: image.extent) ?? image
     }
