@@ -21,6 +21,17 @@ The architecture comparison was expanded against the repositories below. The rep
 
 Filmy Camera uses those patterns as independent design input and does not vendor or copy their source. Its capture service owns AVFoundation queues, its preview uses an MTKView/Core Image render path, and its still export runs the same recipe model at a higher quality tier.
 
+### Reproducibility record — 2026-08-13
+
+The comparison claims above are pinned to the following repository commits so a future review can distinguish a checked source snapshot from a moving default branch. The links are references only; no source is vendored into Filmy Camera.
+
+- [GPUImage3 `84466fc3`](https://github.com/BradLarson/GPUImage3/tree/84466fc344e1220238c1c07e94e91207caaabe51) — [README](https://github.com/BradLarson/GPUImage3/blob/84466fc344e1220238c1c07e94e91207caaabe51/README.md); live camera-to-Metal operation graph. Its README marks still-photo processing as incomplete, so it is not treated as a still-export reference.
+- [MetalPetal `f9b78897`](https://github.com/MetalPetal/MetalPetal/tree/f9b78897bd4214bb097f352a1bde0a4f4a1e2ddb) — [README](https://github.com/MetalPetal/MetalPetal/blob/f9b78897bd4214bb097f352a1bde0a4f4a1e2ddb/README.md); reusable GPU context, immutable image graph, and explicit color-space boundaries.
+- [FastttCamera `1721da41`](https://github.com/IFTTT/FastttCamera/tree/1721da415ef47f5190aee12f1db756bc98ac802d) — [README](https://github.com/IFTTT/FastttCamera/blob/1721da415ef47f5190aee12f1db756bc98ac802d/README.md); capture lifecycle and still-filter separation.
+- [NextLevel `2fa42500`](https://github.com/NextLevel/NextLevel/tree/2fa42500caf7edd7136d23b64d9ecb5684d93d07) — [README](https://github.com/NextLevel/NextLevel/blob/2fa42500caf7edd7136d23b64d9ecb5684d93d07/README.md); session state, interruptions, and media-output separation.
+
+The source snapshots were checked on 2026-08-13. Repository licenses and current upstream state still require a fresh review before adopting any dependency or asset; this app continues to use system frameworks and original renderer code.
+
 ## Recipe model
 
 Fujifilm's public manuals and support material describe the controls as a combination of film simulation, highlight/shadow tone, grain, Color Chrome, Color Chrome FX Blue, white balance shift, and tone curve. Filmy Camera represents those controls as data in `FilmRecipe` and applies them as:
@@ -39,6 +50,8 @@ The preview, still, and export paths now share a canonical 32³ recipe transform
 The Core Image context declares sRGB as both working and output space for the current SDR/JPEG product contract. The renderer clamps at the final SDR boundary and does not claim HDR preservation. Synthetic rail thumbnails are generated from deterministic color blocks through the same renderer, which keeps the UI preview honest without bundling an unlicensed photograph.
 
 The live viewfinder and still export share `CameraFrameLayout.aspectFillCrop`. Captured images are cropped to the same visible viewport before the recipe is rendered, and capture review is not presented if materialization fails. This makes composition parity testable even though physical-camera orientation, color profiles, and sensor calibration still require device QA.
+
+The live camera output prefers bi-planar video-range YUV buffers when AVFoundation exposes them, with a BGRA fallback for older or simulator implementations. The camera session owns a random grain phase that is passed to both the preview and capture render, keeping grain placement aligned within a session while deterministic thumbnails and tests retain the canonical zero seed.
 
 The [X-T5 image-quality menu](https://fujifilm-dsc.com/en-int/manual/x-t5/introduction/menu_list/) and [image-quality reference](https://fujifilm-dsc.com/en/manual/x-t5/menu_shooting/image_quality_setting/) are the first-party vocabulary reference for the model. They document film simulation, grain effect roughness/size, Color Chrome, Color Chrome FX Blue, dynamic range, white balance, tone curve, color, sharpness, high-ISO noise reduction, and clarity. They do not provide a transferable iPhone LUT or sensor calibration. Therefore the renderer intentionally claims a transparent, original approximation of the public controls—not identical Fujifilm hardware output.
 

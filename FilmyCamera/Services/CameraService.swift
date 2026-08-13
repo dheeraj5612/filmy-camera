@@ -102,6 +102,108 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
     }
 
+    /// Returns the constituent index that AVFoundation should be using for a
+    /// virtual device at the supplied zoom. An active constituent wins when
+    /// the hardware reports one; the switch-over thresholds are the fallback
+    /// because the active device can be temporarily unavailable during a
+    /// configuration transaction.
+    static func selectedVirtualLensIndex(
+        zoomFactor: CGFloat,
+        switchOverZoomFactors: [CGFloat],
+        constituentCount: Int,
+        activeConstituentIndex: Int? = nil
+    ) -> Int? {
+        guard constituentCount > 0 else { return nil }
+        if let activeConstituentIndex,
+           (0..<constituentCount).contains(activeConstituentIndex) {
+            return activeConstituentIndex
+        }
+        guard zoomFactor.isFinite else { return nil }
+
+        var selectedIndex = 0
+        for index in 1..<constituentCount {
+            guard switchOverZoomFactors.indices.contains(index - 1) else { break }
+            let switchOver = switchOverZoomFactors[index - 1]
+            guard switchOver.isFinite else { break }
+            if zoomFactor >= switchOver {
+                selectedIndex = index
+            }
+        }
+        return selectedIndex
+    }
+
+    /// Estimates the optical magnification of a standalone lens from its
+    /// field of view relative to the standard wide camera. FOV is angular,
+    /// so the tangent ratio is a closer approximation than a raw degree
+    /// ratio, especially for ultra-wide lenses.
+    static func standaloneLensMagnification(
+        wideFieldOfView: Float,
+        lensFieldOfView: Float
+    ) -> CGFloat? {
+        guard wideFieldOfView.isFinite,
+              lensFieldOfView.isFinite,
+              wideFieldOfView > 0,
+              lensFieldOfView > 0,
+              wideFieldOfView < 180,
+              lensFieldOfView < 180 else {
+            return nil
+        }
+
+        let wideTangent = tan(Double(wideFieldOfView) * .pi / 360)
+        let lensTangent = tan(Double(lensFieldOfView) * .pi / 360)
+        let magnification = wideTangent / lensTangent
+        guard magnification.isFinite, magnification > 0 else { return nil }
+        return CGFloat(magnification)
+    }
+
+    /// Converts AVFoundation's virtual-device zoom into the user-facing scale
+    /// whose 1× anchor is the standard wide constituent.
+    static func normalizedUserZoomFactor(
+        hardwareZoomFactor: CGFloat,
+        wideReferenceHardwareZoomFactor: CGFloat
+    ) -> CGFloat {
+        guard hardwareZoomFactor.isFinite else { return 1 }
+        guard wideReferenceHardwareZoomFactor.isFinite,
+              wideReferenceHardwareZoomFactor > 0 else {
+            return hardwareZoomFactor
+        }
+        return hardwareZoomFactor / wideReferenceHardwareZoomFactor
+    }
+
+    /// Converts a standalone camera's device-local zoom into the total
+    /// user-facing magnification relative to the standard wide camera.
+    static func standaloneUserFacingZoomFactor(
+        hardwareZoomFactor: CGFloat,
+        opticalMagnification: CGFloat
+    ) -> CGFloat {
+        guard hardwareZoomFactor.isFinite,
+              opticalMagnification.isFinite,
+              opticalMagnification > 0 else {
+            return hardwareZoomFactor.isFinite ? hardwareZoomFactor : 1
+        }
+        return hardwareZoomFactor * opticalMagnification
+    }
+
+    /// Converts a total user-facing magnification into the device-local zoom
+    /// needed by a standalone camera while retaining its optical scale.
+    static func standaloneHardwareZoomFactor(
+        userFacingZoomFactor: CGFloat,
+        opticalMagnification: CGFloat
+    ) -> CGFloat {
+        guard userFacingZoomFactor.isFinite,
+              opticalMagnification.isFinite,
+              opticalMagnification > 0 else {
+            return userFacingZoomFactor
+        }
+        return userFacingZoomFactor / opticalMagnification
+    }
+
+    static func shouldRestoreStandaloneLens(
+        origin: LensSelectionOrigin?
+    ) -> Bool {
+        origin == .standalone
+    }
+
     /// The still-photo flash request. `off` is intentionally the default so
     /// opening the camera never fires the flash without an explicit choice.
     public enum FlashMode: Int, CaseIterable, Equatable, Sendable {
@@ -192,6 +294,12 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
     public let session: AVCaptureSession
 
+    /// The grain phase used by both the live preview and the still renderer
+    /// for the current camera session. A session-scoped phase keeps the
+    /// preview and captured frame visually aligned without repeating the same
+    /// phase across app launches.
+    public let previewGrainSeed: UInt32
+
     @Published public private(set) var isRunning = false
     @Published public private(set) var statusMessage = "Camera is ready"
     @Published public private(set) var availability: Availability = .idle
@@ -243,6 +351,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private var requestedCameraPosition: CameraPosition = .back
     private var currentLensOptions: [LensOption] = []
     private var selectedLensIDs: [CameraPosition: String] = [:]
+    private var selectedLensOrigins: [CameraPosition: LensSelectionOrigin] = [:]
     private var selectedFlashMode: FlashMode = .off
     private var selectedExposureBias: Float = 0
     private var flashAvailabilityState: FlashAvailability = .unsupported
@@ -250,6 +359,15 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private var sessionObservers: [NSObjectProtocol] = []
     private var rotationAngle: CGFloat = 90
     private var lastDeliveredFrameSize: CGSize = .zero
+
+    /// Identifies whether a saved lens ID belongs to a virtual input's
+    /// constituent inventory or to a standalone physical input. A constituent
+    /// can also appear in discovery as a physical device, so the ID alone is
+    /// not enough to safely restore a session input.
+    enum LensSelectionOrigin: Equatable {
+        case virtual
+        case standalone
+    }
 
     private final class PhotoCompletionBox: @unchecked Sendable {
         let completion: PhotoCompletion
@@ -269,13 +387,17 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
     public override init() {
         self.session = AVCaptureSession()
+        self.previewGrainSeed = UInt32.random(in: UInt32.min...UInt32.max)
         super.init()
 
         sessionQueue.setSpecific(key: sessionQueueKey, value: ())
         frameDeliveryGate.owner = self
         videoOutput.alwaysDiscardsLateVideoFrames = true
+        let previewPixelFormat = Self.preferredPreviewPixelFormat(
+            available: videoOutput.availableVideoPixelFormatTypes
+        )
         videoOutput.videoSettings = [
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+            kCVPixelBufferPixelFormatTypeKey as String: previewPixelFormat
         ]
         videoOutput.setSampleBufferDelegate(self, queue: videoQueue)
         installSessionObservers()
@@ -757,7 +879,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             return
         }
 
-        guard let device = preferredCameraDeviceOnQueue(for: requestedCameraPosition) else {
+        guard let device = cameraDeviceForPositionOnQueue(requestedCameraPosition) else {
             resetCaptureCapabilitiesOnQueue()
             publishRunning(false)
             publishAvailability(.simulator)
@@ -816,6 +938,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         session.commitConfiguration()
 
         configureCaptureCapabilitiesOnQueue(for: device)
+        configureStartupLensOnQueue(for: device)
         refreshCameraInventoryOnQueue(for: device)
         configurePreviewFrameRate(for: device)
         configureOrientation()
@@ -917,7 +1040,47 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private func preferredCameraDeviceOnQueue(
         for position: CameraPosition
     ) -> AVCaptureDevice? {
-        discoveredCameraDevicesOnQueue(for: position).first
+        let devices = discoveredCameraDevicesOnQueue(for: position)
+        guard position == .back else { return devices.first }
+
+        // Prefer the system's virtual back camera when it exposes the normal
+        // wide constituent. A discovery session can otherwise return an
+        // ultra-wide device first, which changes the app's established 1×
+        // startup experience.
+        let preferredVirtualTypes: [AVCaptureDevice.DeviceType] = [
+            .builtInTripleCamera,
+            .builtInDualWideCamera,
+            .builtInDualCamera
+        ]
+        for deviceType in preferredVirtualTypes {
+            if let virtualDevice = devices.first(where: {
+                $0.deviceType == deviceType
+                    && $0.constituentDevices.contains {
+                        $0.deviceType == .builtInWideAngleCamera
+                    }
+            }) {
+                return virtualDevice
+            }
+        }
+
+        return devices.first(where: { $0.deviceType == .builtInWideAngleCamera })
+            ?? devices.first
+    }
+
+    /// Restores a previously selected standalone device only when that exact
+    /// device is about to become the session input. Virtual-device constituent
+    /// IDs are handled after the virtual input is active via its zoom state.
+    private func cameraDeviceForPositionOnQueue(
+        _ position: CameraPosition
+    ) -> AVCaptureDevice? {
+        let devices = discoveredCameraDevicesOnQueue(for: position)
+        if Self.shouldRestoreStandaloneLens(origin: selectedLensOrigins[position]),
+           let savedID = selectedLensIDs[position],
+           let savedDevice = devices.first(where: { $0.uniqueID == savedID }),
+           !savedDevice.isVirtualDevice {
+            return savedDevice
+        }
+        return preferredCameraDeviceOnQueue(for: position)
     }
 
     private func hasAnyCameraDeviceOnQueue() -> Bool {
@@ -937,14 +1100,14 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func setCameraPositionOnQueue(_ position: CameraPosition) {
-        guard let desiredDevice = preferredCameraDeviceOnQueue(for: position) else {
+        guard let desiredDevice = cameraDeviceForPositionOnQueue(position) else {
             publishStatus("Camera switching is available on iPhone.")
             publishAvailableCameraPositions([])
             return
         }
 
-        requestedCameraPosition = position
         guard isConfigured else {
+            requestedCameraPosition = position
             refreshCameraInventoryOnQueue(for: desiredDevice)
             publishCameraPosition(position)
             return
@@ -962,10 +1125,14 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             return
         }
 
+        // Commit the requested position only after the replacement input is
+        // installed. A failed swap must leave toggleCameraPosition pointed at
+        // the still-active camera.
+        requestedCameraPosition = position
         focusExposureLocked = false
         publishFocusExposureLocked(false)
         publishCameraPosition(position)
-        refreshCaptureCapabilitiesOnQueue(for: desiredDevice)
+        configureCaptureCapabilitiesOnQueue(for: desiredDevice)
         refreshCameraInventoryOnQueue(for: desiredDevice)
         configurePreviewFrameRate(for: desiredDevice)
         configureOrientation()
@@ -984,19 +1151,27 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
         let position = cameraPosition(for: device)
         guard option.position == position else { return }
-        selectedLensIDs[position] = option.id
 
         if device.isVirtualDevice {
-            setZoomOnQueue(option.zoomFactor)
+            // setZoomOnQueue publishes the active constituent selected by
+            // AVFoundation (or by its switch-over thresholds), not merely
+            // the option the user requested.
+            _ = setHardwareZoomOnQueue(option.zoomFactor)
+            return
+        }
+
+        if option.id == device.uniqueID {
+            // This option already describes the installed physical input, so
+            // no hardware transaction is needed before committing its ID.
+            selectedLensIDs[position] = device.uniqueID
+            selectedLensOrigins[position] = .standalone
             publishSelectedLensID(option.id)
             return
         }
 
-        guard option.id != device.uniqueID,
-              let alternateDevice = discoveredCameraDevicesOnQueue(for: position)
-                .first(where: { $0.uniqueID == option.id }) else {
-            setZoomOnQueue(option.zoomFactor)
-            publishSelectedLensID(option.id)
+        guard let alternateDevice = discoveredCameraDevicesOnQueue(for: position)
+            .first(where: { $0.uniqueID == option.id }) else {
+            publishStatus("That lens is unavailable right now.")
             return
         }
 
@@ -1004,38 +1179,119 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             publishStatus("That lens is unavailable right now.")
             return
         }
-        refreshCaptureCapabilitiesOnQueue(for: alternateDevice)
+
+        focusExposureLocked = false
+        publishFocusExposureLocked(false)
+        configureCaptureCapabilitiesOnQueue(for: alternateDevice)
         refreshCameraInventoryOnQueue(for: alternateDevice)
         configurePreviewFrameRate(for: alternateDevice)
-        publishSelectedLensID(option.id)
         publishStatus("\(option.title) lens ready")
     }
 
-    private func setZoomOnQueue(_ factor: CGFloat) {
-        guard let device = activeDevice() else { return }
+    @discardableResult
+    private func setZoomOnQueue(_ factor: CGFloat) -> Bool {
+        guard let device = activeDevice() else { return false }
+        let hardwareFactor = hardwareZoomFactorOnQueue(
+            for: device,
+            userFacingFactor: factor
+        )
+        return setHardwareZoomOnQueue(hardwareFactor)
+    }
+
+    @discardableResult
+    private func setHardwareZoomOnQueue(_ factor: CGFloat) -> Bool {
+        guard let device = activeDevice() else { return false }
         let lowerBound = device.minAvailableVideoZoomFactor
         let upperBound = min(device.maxAvailableVideoZoomFactor, 6)
         let nextFactor = min(max(factor, lowerBound), max(lowerBound, upperBound))
-        guard nextFactor.isFinite else { return }
+        guard nextFactor.isFinite else { return false }
 
         do {
             try device.lockForConfiguration()
             device.videoZoomFactor = nextFactor
             device.unlockForConfiguration()
-            publishZoomRange(
-                minimum: lowerBound,
-                maximum: max(lowerBound, upperBound)
+            let userFacingFactor = userFacingZoomFactorOnQueue(
+                for: device,
+                hardwareFactor: nextFactor
             )
-            publishZoom(nextFactor)
-            if let nearestLens = currentLensOptions.min(by: {
-                abs($0.zoomFactor - nextFactor) < abs($1.zoomFactor - nextFactor)
-            }) {
-                selectedLensIDs[cameraPosition(for: device)] = nearestLens.id
-                publishSelectedLensID(nearestLens.id)
+            publishZoomRange(
+                minimum: userFacingZoomFactorOnQueue(
+                    for: device,
+                    hardwareFactor: lowerBound
+                ),
+                maximum: userFacingZoomFactorOnQueue(
+                    for: device,
+                    hardwareFactor: max(lowerBound, upperBound)
+                )
+            )
+            publishZoom(userFacingFactor)
+            if let selectedID = activeLensOptionIDOnQueue(for: device, options: currentLensOptions) {
+                let position = cameraPosition(for: device)
+                selectedLensIDs[position] = selectedID
+                selectedLensOrigins[position] = device.isVirtualDevice
+                    ? .virtual
+                    : .standalone
+                publishSelectedLensID(selectedID)
             }
+            return true
         } catch {
             publishStatus("Zoom is unavailable right now.")
+            return false
         }
+    }
+
+    private func hardwareZoomFactorOnQueue(
+        for device: AVCaptureDevice,
+        userFacingFactor: CGFloat
+    ) -> CGFloat {
+        guard !device.isVirtualDevice else {
+            let reference = wideReferenceZoomFactorOnQueue(for: device)
+            guard userFacingFactor.isFinite, reference.isFinite else {
+                return userFacingFactor
+            }
+            return userFacingFactor * reference
+        }
+
+        return Self.standaloneHardwareZoomFactor(
+            userFacingZoomFactor: userFacingFactor,
+            opticalMagnification: standaloneOpticalMagnificationOnQueue(for: device)
+        )
+    }
+
+    private func standaloneOpticalMagnificationOnQueue(
+        for device: AVCaptureDevice
+    ) -> CGFloat {
+        guard !device.isVirtualDevice else { return 1 }
+
+        if let option = currentLensOptions.first(where: { $0.id == device.uniqueID }),
+           option.zoomFactor.isFinite,
+           option.zoomFactor > 0 {
+            return option.zoomFactor
+        }
+
+        let wideDevice = discoveredCameraDevicesOnQueue(for: cameraPosition(for: device))
+            .first(where: { $0.deviceType == .builtInWideAngleCamera })
+        return Self.standaloneLensMagnification(
+            wideFieldOfView: wideDevice?.activeFormat.videoFieldOfView ?? 0,
+            lensFieldOfView: device.activeFormat.videoFieldOfView
+        ) ?? Self.standaloneFallbackZoomFactor(for: device)
+    }
+
+    private func userFacingZoomFactorOnQueue(
+        for device: AVCaptureDevice,
+        hardwareFactor: CGFloat
+    ) -> CGFloat {
+        guard device.isVirtualDevice else {
+            return Self.standaloneUserFacingZoomFactor(
+                hardwareZoomFactor: hardwareFactor,
+                opticalMagnification: standaloneOpticalMagnificationOnQueue(for: device)
+            )
+        }
+
+        return Self.normalizedUserZoomFactor(
+            hardwareZoomFactor: hardwareFactor,
+            wideReferenceHardwareZoomFactor: wideReferenceZoomFactorOnQueue(for: device)
+        )
     }
 
     private func replaceCameraInputOnQueue(with device: AVCaptureDevice) -> Bool {
@@ -1064,6 +1320,73 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         return true
     }
 
+    private func configureStartupLensOnQueue(for device: AVCaptureDevice) {
+        guard device.isVirtualDevice else { return }
+        let startupZoom = wideReferenceZoomFactorOnQueue(for: device)
+
+        // The virtual device's first constituent can be ultra-wide. Set the
+        // hardware to the wide constituent before inventory is published so
+        // the first frame and the lens control both start at 1×.
+        _ = setHardwareZoomOnQueue(startupZoom)
+    }
+
+    private func wideReferenceZoomFactorOnQueue(
+        for device: AVCaptureDevice
+    ) -> CGFloat {
+        guard device.isVirtualDevice,
+              let wideIndex = device.constituentDevices.firstIndex(where: {
+                  $0.deviceType == .builtInWideAngleCamera
+              }) else {
+            return 1
+        }
+
+        if wideIndex == 0 {
+            return max(device.minAvailableVideoZoomFactor, 0.1)
+        }
+
+        let switchOvers = device.virtualDeviceSwitchOverVideoZoomFactors.map {
+            CGFloat(truncating: $0)
+        }
+        guard switchOvers.indices.contains(wideIndex - 1) else { return 1 }
+        return max(switchOvers[wideIndex - 1], device.minAvailableVideoZoomFactor)
+    }
+
+    private func activeLensOptionIDOnQueue(
+        for device: AVCaptureDevice,
+        options: [LensOption]
+    ) -> String? {
+        guard !options.isEmpty else { return nil }
+
+        if device.isVirtualDevice {
+            if let activeConstituent = device.activePrimaryConstituent,
+               let activeOption = options.first(where: {
+                   $0.id == activeConstituent.uniqueID
+               }) {
+                return activeOption.id
+            }
+
+            let activeIndex = device.constituentDevices.firstIndex {
+                $0.uniqueID == device.activePrimaryConstituent?.uniqueID
+            }
+            let switchOvers = device.virtualDeviceSwitchOverVideoZoomFactors.map {
+                CGFloat(truncating: $0)
+            }
+            guard let selectedIndex = Self.selectedVirtualLensIndex(
+                zoomFactor: device.videoZoomFactor,
+                switchOverZoomFactors: switchOvers,
+                constituentCount: device.constituentDevices.count,
+                activeConstituentIndex: activeIndex
+            ),
+            device.constituentDevices.indices.contains(selectedIndex) else {
+                return nil
+            }
+            let selectedID = device.constituentDevices[selectedIndex].uniqueID
+            return options.first(where: { $0.id == selectedID })?.id
+        }
+
+        return options.first(where: { $0.id == device.uniqueID })?.id
+    }
+
     private func refreshCameraInventoryOnQueue(for device: AVCaptureDevice) {
         let position = cameraPosition(for: device)
         let availablePositions = CameraPosition.allCases.filter {
@@ -1072,17 +1395,16 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         let options = makeLensOptionsOnQueue(for: device, position: position)
         currentLensOptions = options
 
-        let selectedID: String?
-        if let savedID = selectedLensIDs[position], options.contains(where: { $0.id == savedID }) {
-            selectedID = savedID
-        } else {
-            selectedID = options.min(by: {
-                abs($0.zoomFactor - device.videoZoomFactor)
-                    < abs($1.zoomFactor - device.videoZoomFactor)
-            })?.id
-        }
+        // Never restore a saved ID merely because it is present in the
+        // inventory. The active input/constituent is the source of truth;
+        // this prevents a saved rear telephoto from being shown while the
+        // session is actually using the rear wide camera.
+        let selectedID = activeLensOptionIDOnQueue(for: device, options: options)
         if let selectedID {
             selectedLensIDs[position] = selectedID
+            selectedLensOrigins[position] = device.isVirtualDevice
+                ? .virtual
+                : .standalone
         }
 
         publishAvailableCameraPositions(availablePositions)
@@ -1090,10 +1412,21 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         publishCameraPosition(position)
         publishSelectedLensID(selectedID)
         publishZoomRange(
-            minimum: device.minAvailableVideoZoomFactor,
-            maximum: min(device.maxAvailableVideoZoomFactor, 6)
+            minimum: userFacingZoomFactorOnQueue(
+                for: device,
+                hardwareFactor: device.minAvailableVideoZoomFactor
+            ),
+            maximum: userFacingZoomFactorOnQueue(
+                for: device,
+                hardwareFactor: min(device.maxAvailableVideoZoomFactor, 6)
+            )
         )
-        publishZoom(device.videoZoomFactor)
+        publishZoom(
+            userFacingZoomFactorOnQueue(
+                for: device,
+                hardwareFactor: device.videoZoomFactor
+            )
+        )
     }
 
     private func makeLensOptionsOnQueue(
@@ -1118,7 +1451,15 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             }
         } else {
             devices = discoveredCameraDevicesOnQueue(for: position)
-            zoomFactors = Array(repeating: 1, count: devices.count)
+            let wideDevice = devices.first(where: {
+                $0.deviceType == .builtInWideAngleCamera
+            })
+            zoomFactors = devices.map { lensDevice in
+                Self.standaloneLensMagnification(
+                    wideFieldOfView: wideDevice?.activeFormat.videoFieldOfView ?? 0,
+                    lensFieldOfView: lensDevice.activeFormat.videoFieldOfView
+                ) ?? Self.standaloneFallbackZoomFactor(for: lensDevice)
+            }
         }
 
         var seenIDs = Set<String>()
@@ -1135,6 +1476,19 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
     }
 
+    private static func standaloneFallbackZoomFactor(
+        for device: AVCaptureDevice
+    ) -> CGFloat {
+        switch device.deviceType {
+        case .builtInUltraWideCamera:
+            return 0.5
+        case .builtInWideAngleCamera:
+            return 1
+        default:
+            return 1
+        }
+    }
+
     private static func lensTitle(
         for device: AVCaptureDevice,
         zoomFactor: CGFloat
@@ -1144,6 +1498,9 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             return "0.5×"
         case .builtInWideAngleCamera:
             return "1×"
+        case .builtInTelephotoCamera:
+            guard zoomFactor > 1.05 else { return "Tele" }
+            return String(format: "%.1f×", zoomFactor)
         default:
             return String(format: "%.1f×", zoomFactor)
         }
@@ -1527,7 +1884,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func publishZoomRange(minimum: CGFloat, maximum: CGFloat) {
-        let safeMinimum = minimum.isFinite ? max(minimum, 1) : 1
+        let safeMinimum = minimum.isFinite ? max(minimum, 0.1) : 1
         let safeMaximum = maximum.isFinite ? max(maximum, safeMinimum) : safeMinimum
         publishOnMain { [weak self] in
             self?.minZoomFactor = safeMinimum
@@ -1611,6 +1968,19 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             x: min(max(point.x, 0), 1),
             y: min(max(point.y, 0), 1)
         )
+    }
+
+    /// Prefer the camera's native bi-planar YUV video buffers. They avoid an
+    /// intermediate BGRA conversion on physical devices while retaining a
+    /// BGRA fallback for older hardware and simulator implementations.
+    static func preferredPreviewPixelFormat(available: [OSType]) -> OSType {
+        if available.contains(kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange) {
+            return kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+        }
+        if available.contains(kCVPixelFormatType_420YpCbCr8BiPlanarFullRange) {
+            return kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+        }
+        return kCVPixelFormatType_32BGRA
     }
 }
 

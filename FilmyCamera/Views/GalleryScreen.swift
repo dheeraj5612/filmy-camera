@@ -17,17 +17,25 @@ struct GalleryScreen: View {
     var body: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 18) {
                     SectionHeading(
-                        eyebrow: "Your roll",
+                        eyebrow: "The archive",
                         title: "Roll",
-                        trailing: photoLibrary.galleryAssets.isEmpty ? nil : "\(photoLibrary.galleryAssets.count) recent"
+                        trailing: photoLibrary.galleryAssets.isEmpty ? nil : "\(photoLibrary.galleryAssets.count) frames"
                     )
 
+                    Text("A contact sheet for the frames worth keeping.")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(FilmyTheme.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if !photoLibrary.galleryAssets.isEmpty {
+                        archiveSummary
+                    }
                     galleryContent
                 }
                 .padding(.horizontal, 18)
-                .padding(.top, 18)
+                .padding(.top, 20)
                 .padding(.bottom, 28)
             }
             .background(FilmyTheme.background.ignoresSafeArea())
@@ -65,6 +73,50 @@ struct GalleryScreen: View {
         }
     }
 
+    private var archiveSummary: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(FilmyTheme.accent.opacity(0.14))
+                Image(systemName: "rectangle.on.rectangle.angled")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(FilmyTheme.accent)
+            }
+            .frame(width: 42, height: 42)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("CONTACT SHEET")
+                    .font(.caption2.weight(.bold))
+                    .tracking(1.1)
+                    .foregroundStyle(FilmyTheme.accent)
+                Text("Recent frames, recipe by recipe")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(FilmyTheme.primary)
+            }
+
+            Spacer(minLength: 10)
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("\(photoLibrary.galleryAssets.count)")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(FilmyTheme.primary)
+                Text("FRAMES")
+                    .font(.caption2.weight(.bold))
+                    .tracking(0.9)
+                    .foregroundStyle(FilmyTheme.tertiary)
+            }
+        }
+        .padding(14)
+        .background(FilmyTheme.panel.opacity(0.76), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(FilmyTheme.line, lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Contact sheet")
+        .accessibilityValue("\(photoLibrary.galleryAssets.count) frames")
+    }
+
     private func clearSelectionIfUnavailable() {
         guard let selectedAsset,
               !photoLibrary.galleryAssets.contains(where: { $0.id == selectedAsset.id }) else {
@@ -80,7 +132,7 @@ struct GalleryScreen: View {
         case .authorized, .notDetermined:
             if photoLibrary.galleryAssets.isEmpty {
                 if photoLibrary.authorizationStatus == .notDetermined {
-                    EmptyStateCard(
+                    RollEmptyState(
                         systemName: "photo.badge.plus",
                         title: "Give your roll a home",
                         message: "Allow photo access to show the frames you have made with Filmy Camera.",
@@ -88,7 +140,7 @@ struct GalleryScreen: View {
                         action: requestReadAccess
                     )
                 } else {
-                    EmptyStateCard(
+                    RollEmptyState(
                         systemName: "photo.on.rectangle.angled",
                         title: "Your frames will live here",
                         message: "Capture a moment with a recipe and it will appear in this quiet little roll."
@@ -100,7 +152,7 @@ struct GalleryScreen: View {
         case .limited:
             VStack(alignment: .leading, spacing: 14) {
                 if photoLibrary.galleryAssets.isEmpty {
-                    EmptyStateCard(
+                    RollEmptyState(
                         systemName: "photo.on.rectangle.angled",
                         title: "Your selected roll is empty",
                         message: "Filmy Camera can only show frames saved by Filmy Camera that you allow it to read."
@@ -108,11 +160,11 @@ struct GalleryScreen: View {
                 } else {
                     galleryGrid
                 }
-                manageLimitedAccessButton
+                limitedAccessControl
             }
         case .denied, .restricted:
             if photoLibrary.galleryAssets.isEmpty {
-                EmptyStateCard(
+                RollEmptyState(
                     systemName: "lock.slash",
                     title: "Photo access is off",
                     message: "Enable Photos access in Settings to see your saved frames.",
@@ -121,15 +173,12 @@ struct GalleryScreen: View {
                 )
             } else {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Showing frames saved by Filmy Camera. Enable Photos read access to refresh them from your library.")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundStyle(FilmyTheme.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    archiveAccessNotice
                     galleryGrid
                 }
             }
         @unknown default:
-            EmptyStateCard(
+            RollEmptyState(
                 systemName: "photo",
                 title: "Gallery unavailable",
                 message: "Filmy Camera could not read the photo library right now."
@@ -137,35 +186,106 @@ struct GalleryScreen: View {
         }
     }
 
-    private var manageLimitedAccessButton: some View {
+    private var limitedAccessControl: some View {
         Button {
             photoLibrary.presentLimitedLibraryPicker()
         } label: {
-            Label("Manage access to saved frames", systemImage: "checkmark.circle")
-                .font(.system(size: 13, weight: .bold, design: .rounded))
-                .foregroundStyle(FilmyTheme.accent)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 12) {
+                Image(systemName: "checkmark.circle")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(FilmyTheme.mint)
+                    .frame(width: 24)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Manage access to saved frames")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(FilmyTheme.primary)
+                    Text("Choose which frames the Roll can see")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(FilmyTheme.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(FilmyTheme.accent)
+            }
+            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .background(FilmyTheme.panel.opacity(0.76), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(FilmyTheme.line, lineWidth: 1)
         }
         .accessibilityHint("Choose which saved Filmy Camera frames can be viewed in the Roll")
     }
 
     private var galleryGrid: some View {
-        LazyVGrid(columns: columns, spacing: 8) {
-            ForEach(photoLibrary.galleryAssets) { asset in
-                Button {
-                    selectedAsset = asset
-                    isShowingPhoto = true
-                } label: {
-                    GalleryThumbnail(asset: asset, photoLibrary: photoLibrary)
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(alignment: .lastTextBaseline) {
+                Text("RECENT FRAMES")
+                    .font(.caption2.weight(.bold))
+                    .tracking(1.2)
+                    .foregroundStyle(FilmyTheme.tertiary)
+                Spacer(minLength: 8)
+                Text("Newest first")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(FilmyTheme.secondary)
+            }
+
+            GlassCard(padding: 10) {
+                LazyVGrid(columns: columns, spacing: 10) {
+                    ForEach(photoLibrary.galleryAssets) { asset in
+                        Button {
+                            selectedAsset = asset
+                            isShowingPhoto = true
+                        } label: {
+                            GalleryThumbnail(asset: asset, photoLibrary: photoLibrary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(
+                            photoLibrary.metadata(for: asset).map {
+                                "Photo in your gallery, \($0.recipe.name)"
+                            } ?? "Photo in your gallery"
+                        )
+                    }
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(
-                    photoLibrary.metadata(for: asset).map {
-                        "Photo in your gallery, \($0.recipe.name)"
-                    } ?? "Photo in your gallery"
-                )
             }
         }
+    }
+
+    private var archiveAccessNotice: some View {
+        HStack(alignment: .top, spacing: 11) {
+            Image(systemName: "lock.open")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(FilmyTheme.accent)
+                .frame(width: 28, height: 28)
+                .background(FilmyTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Showing your saved frames")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(FilmyTheme.primary)
+                Text("Enable Photos read access to refresh this archive from your library.")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(FilmyTheme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(13)
+        .background(FilmyTheme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(FilmyTheme.accent.opacity(0.28), lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Showing frames saved by Filmy Camera")
+        .accessibilityValue("Enable Photos read access to refresh your archive")
     }
 
     private func openSystemSettings() {
@@ -199,31 +319,32 @@ private struct GalleryThumbnail: View {
             }
         }
         .aspectRatio(
-            CGFloat(max(asset.pixelWidth, 1)) / CGFloat(max(asset.pixelHeight, 1)),
+            0.78,
             contentMode: .fit
         )
-        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .stroke(Color.white.opacity(0.13), lineWidth: 1)
         }
         .overlay(alignment: .bottomLeading) {
             if let metadata = photoLibrary.metadata(for: asset) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(metadata.recipe.name)
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .font(.caption.weight(.bold))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.72)
                     Text(metadata.capturedAt, format: .dateTime.month(.abbreviated).day().hour().minute())
-                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .font(.caption2.weight(.medium))
                         .foregroundStyle(.white.opacity(0.72))
                 }
                 .foregroundStyle(.white)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 8)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background {
                     LinearGradient(
-                        colors: [.clear, Color.black.opacity(0.72)],
+                        colors: [.clear, Color.black.opacity(0.78)],
                         startPoint: .top,
                         endPoint: .bottom
                     )
@@ -244,6 +365,61 @@ private struct GalleryThumbnail: View {
     }
 }
 
+private struct RollEmptyState: View {
+    let systemName: String
+    let title: String
+    let message: String
+    var actionTitle: String?
+    var action: (() -> Void)?
+
+    var body: some View {
+        GlassCard(padding: 18) {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(alignment: .top, spacing: 14) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 15, style: .continuous)
+                            .fill(FilmyTheme.accent.opacity(0.14))
+                        Image(systemName: systemName)
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(FilmyTheme.accent)
+                    }
+                    .frame(width: 52, height: 52)
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(title)
+                            .font(.title3.weight(.bold))
+                            .foregroundStyle(FilmyTheme.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(message)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(FilmyTheme.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                HStack(alignment: .top, spacing: 9) {
+                    Image(systemName: "film.stack")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(FilmyTheme.mint)
+                    Text("Finished frames stay here with their recipe and capture time.")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(FilmyTheme.mint)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if let actionTitle, let action {
+                    Button(actionTitle, action: action)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(FilmyTheme.background)
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .background(FilmyTheme.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .accessibilityHint("Opens the relevant permission settings")
+                }
+            }
+        }
+    }
+}
+
 private struct GalleryDetailView: View {
     let asset: PhotoLibraryGalleryAsset
     @ObservedObject var photoLibrary: PhotoLibraryService
@@ -257,6 +433,7 @@ private struct GalleryDetailView: View {
     @State private var isPreparingShare = false
     @State private var actionErrorMessage: String?
     @State private var zoomScale: CGFloat = 1
+    @State private var pinchBaseZoom: CGFloat?
     @State private var imageOffset: CGSize = .zero
     @State private var dragBaseOffset: CGSize = .zero
 
@@ -272,16 +449,37 @@ private struct GalleryDetailView: View {
                     .scaleEffect(zoomScale)
                     .offset(imageOffset)
                     .contentShape(Rectangle())
+                    .accessibilityLabel("Photo")
+                    .accessibilityValue(zoomScale > 1 ? "Zoomed \(Int(zoomScale * 100)) percent" : "Fit to screen")
                     .accessibilityHint("Pinch to zoom, drag while zoomed, or double tap to reset")
+                    .accessibilityAdjustableAction { direction in
+                        switch direction {
+                        case .increment:
+                            zoomScale = min(zoomScale + 0.5, 4)
+                        case .decrement:
+                            zoomScale = max(zoomScale - 0.5, 1)
+                        @unknown default:
+                            break
+                        }
+                        if zoomScale == 1 {
+                            resetImageTransform()
+                        }
+                    }
+                    .accessibilityAction(named: "Reset zoom", resetImageTransform)
                     .gesture(
                         MagnificationGesture()
                             .onChanged { value in
-                                zoomScale = min(max(value, 1), 4)
+                                let baseZoom = pinchBaseZoom ?? zoomScale
+                                if pinchBaseZoom == nil {
+                                    pinchBaseZoom = zoomScale
+                                }
+                                zoomScale = min(max(baseZoom * value, 1), 4)
                                 if zoomScale == 1 {
                                     imageOffset = .zero
                                 }
                             }
                             .onEnded { _ in
+                                pinchBaseZoom = nil
                                 if zoomScale <= 1.05 {
                                     resetImageTransform()
                                 }
@@ -460,6 +658,7 @@ private struct GalleryDetailView: View {
     private func resetImageTransform() {
         withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
             zoomScale = 1
+            pinchBaseZoom = nil
             imageOffset = .zero
             dragBaseOffset = .zero
         }

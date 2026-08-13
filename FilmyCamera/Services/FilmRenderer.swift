@@ -137,6 +137,11 @@ public final class FilmRenderer {
     private static let sRGBColorSpace = CGColorSpace(name: CGColorSpace.sRGB)
     private static let spatialReferenceDimension: CGFloat = 1080
 
+    /// A default is still useful for deterministic thumbnails and tests. Live
+    /// camera sessions supply their own phase through CameraService so the
+    /// preview and captured still use the same grain arrangement.
+    public static let canonicalGrainSeed: UInt32 = 0
+
     private static var contextOptions: [CIContextOption: Any] {
         var options: [CIContextOption: Any] = [
             .cacheIntermediates: false
@@ -233,7 +238,8 @@ public final class FilmRenderer {
         _ image: CIImage,
         recipe: FilmRecipe,
         quality: Quality = .preview,
-        grainSeed: UInt32 = 0
+        grainSeed: UInt32 = canonicalGrainSeed,
+        grainPhase: CGPoint? = nil
     ) -> CIImage {
         guard !image.extent.isEmpty else { return image }
 
@@ -253,7 +259,13 @@ public final class FilmRenderer {
         output = applyColorCube(to: output, recipe: safeRecipe, quality: quality)
         output = applyDetailControls(to: output, recipe: safeRecipe)
         output = applyClarity(to: output, recipe: safeRecipe)
-        output = applyGrain(to: output, recipe: safeRecipe, quality: quality, seed: grainSeed)
+        output = applyGrain(
+            to: output,
+            recipe: safeRecipe,
+            quality: quality,
+            seed: grainSeed,
+            phase: grainPhase
+        )
         output = applyVignette(to: output, recipe: safeRecipe)
         output = applyHalation(to: output, recipe: safeRecipe, quality: quality)
         output = clampOutput(toNormalizedRange: output)
@@ -597,7 +609,8 @@ public final class FilmRenderer {
         to image: CIImage,
         recipe: FilmRecipe,
         quality _: Quality,
-        seed: UInt32
+        seed: UInt32,
+        phase: CGPoint?
     ) -> CIImage {
         // Grain is part of the look, not a preview-only effect. Normalize the
         // procedural frequency to a reference image size so the same recipe
@@ -616,14 +629,26 @@ public final class FilmRenderer {
             CGFloat(0.35),
             min(CGFloat(recipe.grainSize) * resolutionScale, CGFloat(8))
         )
-        let phaseX = CGFloat(seed & 0x1FF)
-        let phaseY = CGFloat((seed >> 9) & 0x1FF)
+        // A seed stores a compact 9-bit phase for the live preview. Capture
+        // callers may provide a scaled phase instead; do not force that
+        // phase back through the seed bit width because the texture's actual
+        // repetition period is 512 * grainSize after scaling.
+        let resolvedPhase = phase ?? CGPoint(
+            x: CGFloat(seed & 0x1FF),
+            y: CGFloat((seed >> 9) & 0x1FF)
+        )
+        guard resolvedPhase.x.isFinite, resolvedPhase.y.isFinite else {
+            return image
+        }
         let noise = grainTexture
             .transformed(by: CGAffineTransform(
                 scaleX: grainSize,
                 y: grainSize
             ))
-            .transformed(by: CGAffineTransform(translationX: phaseX, y: phaseY))
+            .transformed(by: CGAffineTransform(
+                translationX: resolvedPhase.x,
+                y: resolvedPhase.y
+            ))
             .applyingFilter("CIAffineTile")
             .cropped(to: extent)
             .applyingFilter("CIColorControls", parameters: [
