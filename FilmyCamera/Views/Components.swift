@@ -48,6 +48,10 @@ struct SectionHeading: View {
                     .foregroundStyle(FilmyTheme.secondary)
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(title))
+        .accessibilityValue(Text(trailing ?? ""))
+        .accessibilityAddTraits(.isHeader)
     }
 }
 
@@ -149,6 +153,7 @@ struct FlashControl: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
+                .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
                 .background(Color.black.opacity(0.46), in: Capsule())
                 .overlay { Capsule().stroke(Color.white.opacity(0.16), lineWidth: 1) }
         }
@@ -248,7 +253,6 @@ struct ExposureControl: View {
         HStack(spacing: 2) {
             adjustmentButton(
                 systemName: "minus",
-                label: "Decrease exposure compensation",
                 direction: .decrement
             )
 
@@ -259,7 +263,6 @@ struct ExposureControl: View {
 
             adjustmentButton(
                 systemName: "plus",
-                label: "Increase exposure compensation",
                 direction: .increment
             )
         }
@@ -267,7 +270,7 @@ struct ExposureControl: View {
         .padding(.vertical, 2)
         .background(Color.black.opacity(0.46), in: Capsule())
         .overlay { Capsule().stroke(Color.white.opacity(0.16), lineWidth: 1) }
-        .accessibilityElement(children: .contain)
+        .accessibilityElement(children: .ignore)
         .accessibilityIdentifier("exposure-control")
         .accessibilityLabel("Exposure compensation")
         .accessibilityValue(accessibilityValueText)
@@ -279,7 +282,6 @@ struct ExposureControl: View {
 
     private func adjustmentButton(
         systemName: String,
-        label: String,
         direction: AccessibilityAdjustmentDirection
     ) -> some View {
         Button {
@@ -292,8 +294,7 @@ struct ExposureControl: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(label)
-        .accessibilityHint("Adjusts exposure in one third-stop increments.")
+        .accessibilityHidden(true)
     }
 }
 
@@ -311,6 +312,7 @@ struct FocusLockControl: View {
             .foregroundStyle(isLocked ? FilmyTheme.background : .white)
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
+            .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
             .background(isLocked ? FilmyTheme.accent : Color.black.opacity(0.46), in: Capsule())
             .overlay { Capsule().stroke(Color.white.opacity(isLocked ? 0 : 0.16), lineWidth: 1) }
         }
@@ -345,7 +347,7 @@ struct RecipeSwatch: View {
         }
         .overlay {
             LinearGradient(
-                colors: [.clear, .black.opacity(0.72)],
+                colors: [.clear, .black.opacity(0.82)],
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -363,13 +365,17 @@ struct RecipeSwatch: View {
                 if !compact {
                     Text(recipe.descriptor)
                         .font(.system(size: 9, weight: .medium, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(.white.opacity(0.82))
                         .lineLimit(1)
                         .minimumScaleFactor(0.72)
                         .allowsTightening(true)
                 }
             }
             .padding(compact ? 10 : 12)
+            .background(
+                Color.black.opacity(0.22),
+                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+            )
         }
         .clipShape(RoundedRectangle(cornerRadius: compact ? 14 : 18, style: .continuous))
         .overlay {
@@ -562,6 +568,7 @@ struct EmptyStateCard: View {
                         .foregroundStyle(FilmyTheme.background)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)
+                        .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
                         .background(FilmyTheme.accent, in: Capsule())
                         .accessibilityHint("Opens the relevant permission settings")
                 }
@@ -663,7 +670,9 @@ struct PreviewPlaceholder: View {
                         .foregroundStyle(FilmyTheme.background)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)
+                        .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
                         .background(FilmyTheme.accent, in: Capsule())
+                        .accessibilityIdentifier(actionTitle == "Open Settings" ? "camera-permission-action" : "camera-recovery-action")
                         .accessibilityHint(actionTitle == "Open Settings" ? "Opens Filmy Camera permissions" : "Attempts to resume the camera")
                 }
             }

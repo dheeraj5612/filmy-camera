@@ -64,6 +64,7 @@ struct SettingsView: View {
                 .font(.system(size: 10, weight: .bold, design: .rounded))
                 .tracking(1.3)
                 .foregroundStyle(FilmyTheme.tertiary)
+                .accessibilityAddTraits(.isHeader)
 
             GlassCard(padding: 15) {
                 VStack(spacing: 18) {
@@ -102,6 +103,7 @@ struct SettingsView: View {
                 .font(.system(size: 10, weight: .bold, design: .rounded))
                 .tracking(1.3)
                 .foregroundStyle(FilmyTheme.tertiary)
+                .accessibilityAddTraits(.isHeader)
 
             GlassCard(padding: 15) {
                 VStack(spacing: 18) {
@@ -121,7 +123,9 @@ struct SettingsView: View {
                         Button("Open System Settings", action: openSystemSettings)
                             .font(.system(size: 13, weight: .bold, design: .rounded))
                             .foregroundStyle(FilmyTheme.accent)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .frame(maxWidth: .infinity, minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .accessibilityIdentifier("camera-permission-settings")
                             .accessibilityHint("Opens Filmy Camera camera permissions")
                     }
 
@@ -140,7 +144,9 @@ struct SettingsView: View {
                         Button("Open System Settings", action: openSystemSettings)
                             .font(.system(size: 13, weight: .bold, design: .rounded))
                             .foregroundStyle(FilmyTheme.accent)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .frame(maxWidth: .infinity, minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .accessibilityIdentifier("photos-permission-settings")
                             .accessibilityHint("Opens Filmy Camera permissions")
                     } else if photoLibrary.authorizationStatus == .notDetermined {
                         Divider().overlay(FilmyTheme.line)
@@ -149,7 +155,9 @@ struct SettingsView: View {
                         }
                         .font(.system(size: 13, weight: .bold, design: .rounded))
                         .foregroundStyle(FilmyTheme.accent)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(maxWidth: .infinity, minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .accessibilityIdentifier("photos-permission-action")
                     }
                 }
             }
@@ -162,6 +170,7 @@ struct SettingsView: View {
                 .font(.system(size: 10, weight: .bold, design: .rounded))
                 .tracking(1.3)
                 .foregroundStyle(FilmyTheme.tertiary)
+                .accessibilityAddTraits(.isHeader)
 
             GlassCard(padding: 15) {
                 VStack(alignment: .leading, spacing: 13) {
@@ -199,6 +208,8 @@ struct SettingsView: View {
                                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                         }
                         .accessibilityIdentifier("privacy-policy-link")
+                        .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
+                        .contentShape(Rectangle())
 
                         Spacer(minLength: 8)
 
@@ -207,6 +218,8 @@ struct SettingsView: View {
                                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                         }
                         .accessibilityIdentifier("support-link")
+                        .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
                     .foregroundStyle(FilmyTheme.accent)
                     .lineLimit(1)
@@ -222,6 +235,7 @@ struct SettingsView: View {
                 .font(.system(size: 10, weight: .bold, design: .rounded))
                 .tracking(1.3)
                 .foregroundStyle(FilmyTheme.tertiary)
+                .accessibilityAddTraits(.isHeader)
 
             GlassCard(padding: 15) {
                 VStack(alignment: .leading, spacing: 12) {
@@ -248,6 +262,8 @@ struct SettingsView: View {
                     }
                     .font(.system(size: 13, weight: .bold, design: .rounded))
                     .foregroundStyle(FilmyTheme.accent)
+                    .frame(maxWidth: .infinity, minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
+                    .contentShape(Rectangle())
                     .disabled(!photoLibrary.hasLocalCache)
                     .accessibilityIdentifier("clear-local-cache")
                 }
