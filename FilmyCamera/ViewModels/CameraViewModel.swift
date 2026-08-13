@@ -324,11 +324,12 @@ final class CameraViewModel: ObservableObject {
             quality: .photo,
             grainSeed: grainSeed
         )
-        guard let output = FilmRenderer.sharedContext.createCGImage(filtered, from: filtered.extent) else { return nil }
+        guard let output = FilmRenderer.outputCGImage(filtered, from: filtered.extent) else { return nil }
         guard let data = PhotoOutputEncoder.jpegData(
             for: output,
             sourceData: sourceData,
-            capturedAt: capturedAt
+            capturedAt: capturedAt,
+            recipe: recipe
         ) else {
             return nil
         }
