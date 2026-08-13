@@ -115,7 +115,7 @@ struct CameraScreen: View {
                     }
 
                     ExposureControl(value: camera.exposureBias) { direction in
-                        let delta: Float = direction == .increment ? 0.3 : -0.3
+                        let delta: Float = direction == .increment ? (1.0 / 3.0) : -(1.0 / 3.0)
                         camera.setExposureBias(camera.exposureBias + delta)
                     }
 

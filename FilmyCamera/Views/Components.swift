@@ -288,7 +288,7 @@ struct ExposureControl: View {
             Image(systemName: systemName)
                 .font(.system(size: 10, weight: .black))
                 .foregroundStyle(.white.opacity(0.86))
-                .frame(width: 32, height: 32)
+                .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

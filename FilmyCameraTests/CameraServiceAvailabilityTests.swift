@@ -67,6 +67,13 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         )
     }
 
+    func testExposureBiasQuantizesToSymmetricThirdStops() {
+        XCTAssertEqual(CameraService.quantizedExposureBias(0.3), 1.0 / 3.0, accuracy: 0.0001)
+        XCTAssertEqual(CameraService.quantizedExposureBias(-0.3), -1.0 / 3.0, accuracy: 0.0001)
+        XCTAssertEqual(CameraService.quantizedExposureBias(2.0 / 3.0 + 1.0 / 3.0), 1, accuracy: 0.0001)
+        XCTAssertEqual(CameraService.quantizedExposureBias(.nan), 0)
+    }
+
     func testFlashModesPreserveAVFoundationRawValuesAndCycleOrder() {
         XCTAssertEqual(CameraService.FlashMode.off.rawValue, 0)
         XCTAssertEqual(CameraService.FlashMode.on.rawValue, 1)

@@ -485,7 +485,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                     return
                 }
                 let nextBias = Self.clampedExposureBias(
-                    bias,
+                    Self.quantizedExposureBias(bias),
                     lowerBound: bounds.lower,
                     upperBound: bounds.upper
                 )
@@ -509,6 +509,13 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         let lower = min(lowerBound, upperBound)
         let upper = max(lowerBound, upperBound)
         return min(max(value, lower), upper)
+    }
+
+    /// Snaps camera compensation to real one-third-stop increments so repeated
+    /// touch adjustments stay symmetric and always return cleanly to neutral.
+    public static func quantizedExposureBias(_ value: Float) -> Float {
+        guard value.isFinite else { return 0 }
+        return (value * 3).rounded() / 3
     }
 
     private static func exposureBiasBounds(
@@ -852,7 +859,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
 
         selectedExposureBias = Self.clampedExposureBias(
-            selectedExposureBias,
+            Self.quantizedExposureBias(selectedExposureBias),
             lowerBound: bounds.lower,
             upperBound: bounds.upper
         )
@@ -879,7 +886,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             return
         }
         let bias = Self.clampedExposureBias(
-            selectedExposureBias,
+            Self.quantizedExposureBias(selectedExposureBias),
             lowerBound: bounds.lower,
             upperBound: bounds.upper
         )
