@@ -69,7 +69,7 @@ range is not presented as a Fujifilm hardware scale, and validation reports
 out-of-range drafts without rewriting them. The renderer remains defensive and
 clamps at its own output boundary.
 
-`FilmRecipe` persistence is versioned. Current records use schema version 2
+`FilmRecipe` persistence is versioned. Current records use schema version 3
 and serialize `Provenance` with the two first-party references above. The
 record states `originalParametricApproximation` and
 `notCalibratedToFujifilmHardware`; there is intentionally no exact-match,
