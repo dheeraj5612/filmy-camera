@@ -255,12 +255,19 @@ jobs:
           shellcheck --severity=warning scripts/release/*.sh
           scripts/release/validate-store-metadata.sh
 
+          draft_fixture="${RUNNER_TEMP}/filmycamera-draft-metadata.md"
+          sed \
+            -e 's/^Status:.*/Status: draft/' \
+            -e 's/^- \*\*Price:\*\*.*/- **Price:** Confirm with the product owner/' \
+            -e 's/^- \*\*Availability:\*\*.*/- **Availability:** Confirm countries\/regions/' \
+            docs/app-store/metadata-en-US.md > "${draft_fixture}"
+
           set +e
-          final_metadata_output="$(scripts/release/validate-store-metadata.sh --final 2>&1)"
+          final_metadata_output="$(scripts/release/validate-store-metadata.sh --final "${draft_fixture}" 2>&1)"
           final_metadata_status="$?"
           set -e
           [[ "${final_metadata_status}" -ne 0 ]]
-          grep -Fq 'Status: final' <<<"${final_metadata_output}"
+          grep -Fq 'Final App Store metadata' <<<"${final_metadata_output}"
 
           if git grep -q -I -E -e '-----BEGIN (OPENSSH|RSA|EC|PRIVATE) KEY-----|AuthKey_[A-Za-z0-9]{10,}\.p8|FILMY_ASC_KEY_ID=[A-Za-z0-9]{10}|FILMY_ASC_ISSUER_ID=[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}' -- \
             ':!scripts/release/prepare-upload.sh' ':!.github/workflows/ios-build.yml'; then

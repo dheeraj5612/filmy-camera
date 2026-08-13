@@ -106,7 +106,7 @@ if [[ "${final_mode}" == true ]]; then
 
   for label in "Price" "Availability"; do
     value="$(field_value "${label}")"
-    if [[ -z "${value}" || "${value}" == *"Confirm with the product owner"* || "${value}" == *"["* || "${value}" == *"]"* ]]; then
+    if [[ -z "${value}" || "${value}" == *"Confirm "* || "${value}" == *"["* || "${value}" == *"]"* ]]; then
       echo "Final App Store metadata must resolve ${label}" >&2
       failures=$((failures + 1))
     fi
