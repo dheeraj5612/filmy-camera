@@ -116,7 +116,22 @@ final class CameraViewModel: ObservableObject {
               let savedRecipes = try? JSONDecoder().decode([String: FilmRecipe].self, from: data) else {
             return
         }
-        recipeOverrides = savedRecipes
+
+        var migratedRecipes: [String: FilmRecipe] = [:]
+        for savedRecipe in savedRecipes.values {
+            guard let parent = FilmRecipe.builtIns.first(where: { $0.id == savedRecipe.id }) else {
+                continue
+            }
+            var migratedRecipe = parent
+            migratedRecipe.applyControlValues(from: savedRecipe)
+            migratedRecipe.markUserModified(parentRecipeID: parent.id)
+            migratedRecipes[parent.id] = migratedRecipe
+        }
+        recipeOverrides = migratedRecipes
+
+        if migratedRecipes != savedRecipes {
+            persistRecipeOverrides()
+        }
     }
 
     var selectedRecipe: FilmRecipe {
@@ -198,6 +213,11 @@ final class CameraViewModel: ObservableObject {
                         guard let self else { return }
                         self.isCapturing = false
                         guard let renderedPhoto else {
+                            // The review sheet never appears on a render
+                            // failure, so explicitly resume the active camera
+                            // session instead of waiting for another lifecycle
+                            // event or tab transition.
+                            camera.start()
                             self.showToast("The selected look could not be rendered. Try the capture again.")
                             return
                         }

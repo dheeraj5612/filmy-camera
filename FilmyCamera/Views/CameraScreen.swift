@@ -279,7 +279,9 @@ struct CameraScreen: View {
     }
 
     private func updateCameraActivity() {
-        if scenePhase == .active && isCameraTabActive {
+        if viewModel.reviewImage != nil {
+            camera.stop()
+        } else if scenePhase == .active && isCameraTabActive {
             camera.start()
         } else {
             camera.stop()

@@ -248,7 +248,7 @@ struct SettingsView: View {
                     }
                     .font(.system(size: 13, weight: .bold, design: .rounded))
                     .foregroundStyle(FilmyTheme.accent)
-                    .disabled(photoLibrary.localSavedFrames.isEmpty)
+                    .disabled(!photoLibrary.hasLocalCache)
                     .accessibilityIdentifier("clear-local-cache")
                 }
             }

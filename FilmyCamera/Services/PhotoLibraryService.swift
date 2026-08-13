@@ -165,6 +165,7 @@ final class PhotoLibraryService: ObservableObject {
 
     @Published private(set) var assets: [PHAsset] = []
     @Published private(set) var localSavedFrames: [LocalSavedFrame] = []
+    @Published private(set) var hasLocalCache = false
     @Published private(set) var authorizationStatus: PHAuthorizationStatus
     @Published private(set) var addOnlyAuthorizationStatus: PHAuthorizationStatus
     @Published private(set) var isLoading = false
@@ -190,6 +191,8 @@ final class PhotoLibraryService: ObservableObject {
             authorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
             addOnlyAuthorizationStatus = PHPhotoLibrary.authorizationStatus(for: .addOnly)
             migrateLocalFrameCacheIfNeeded()
+            trimLocalCacheToBudget()
+            pruneTemporaryShareFiles()
             refreshCachedFrames(excluding: [])
         }
     }
@@ -543,6 +546,10 @@ final class PhotoLibraryService: ObservableObject {
                 pixelHeight: resource.pixelHeight
             )
         }
+        hasLocalCache = savedAssetIdentifiers.contains { identifier in
+            guard let resource = resources[identifier] else { return false }
+            return FileManager.default.fileExists(atPath: localFrameURL(for: resource.filename).path)
+        }
     }
 
     private func cacheFrame(identifier: String, imageData: Data?, fallbackImage: UIImage) {
@@ -586,6 +593,7 @@ final class PhotoLibraryService: ObservableObject {
         guard let resource = resources.removeValue(forKey: identifier) else { return }
         try? FileManager.default.removeItem(at: localFrameURL(for: resource.filename))
         savedFrameResources = resources
+        refreshCachedFrames(excluding: Set(assets.map(\.localIdentifier)))
     }
 
     private var localFramesDirectoryURL: URL? {
@@ -673,8 +681,9 @@ final class PhotoLibraryService: ObservableObject {
             }
         }
 
-        guard didRemoveResource else { return }
-        savedFrameResources = resources
+        if didRemoveResource {
+            savedFrameResources = resources
+        }
         refreshCachedFrames(excluding: Set(assets.map(\.localIdentifier)))
     }
 
@@ -684,6 +693,18 @@ final class PhotoLibraryService: ObservableObject {
         }
         savedFrameResources = [:]
         refreshCachedFrames(excluding: Set(assets.map(\.localIdentifier)))
+    }
+
+    func removeTemporaryShare(at url: URL) {
+        guard let directoryURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent(shareDirectoryName, isDirectory: true) else {
+            return
+        }
+
+        let directoryPath = directoryURL.standardizedFileURL.path
+        let filePath = url.standardizedFileURL.path
+        guard filePath.hasPrefix(directoryPath + "/") else { return }
+        try? FileManager.default.removeItem(at: url)
     }
 
     func shareURL(for asset: PhotoLibraryGalleryAsset) async -> URL? {
@@ -730,6 +751,22 @@ final class PhotoLibraryService: ObservableObject {
             } catch {
                 return nil
             }
+        }
+    }
+
+    private func pruneTemporaryShareFiles() {
+        guard let directoryURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent(shareDirectoryName, isDirectory: true),
+              let files = try? FileManager.default.contentsOfDirectory(
+                  at: directoryURL,
+                  includingPropertiesForKeys: nil,
+                  options: [.skipsHiddenFiles]
+              ) else {
+            return
+        }
+
+        for fileURL in files {
+            try? FileManager.default.removeItem(at: fileURL)
         }
     }
 

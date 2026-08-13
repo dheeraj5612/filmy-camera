@@ -195,6 +195,35 @@ final class RendererOutputBoundsTests: XCTestCase {
         XCTAssertGreaterThan(distance, 0.01)
     }
 
+    func testDynamicRangeStrengthIncreasesProtectionForHigherModes() {
+        let extent = CGRect(x: 0, y: 0, width: 4, height: 4)
+        let input = CIImage(color: CIColor(red: 0.96, green: 0.96, blue: 0.96, alpha: 1))
+            .cropped(to: extent)
+        let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+
+        let dr200 = FilmRecipe(
+            id: "test-dr200",
+            name: "DR200",
+            subtitle: "Test",
+            dynamicRange: .dr200
+        )
+        var dr400 = dr200
+        dr400.dynamicRange = .dr400
+
+        let dr200Pixels = renderFloatPixels(
+            FilmRenderer.render(input, recipe: dr200, quality: .photo),
+            extent: extent,
+            context: context
+        )
+        let dr400Pixels = renderFloatPixels(
+            FilmRenderer.render(input, recipe: dr400, quality: .photo),
+            extent: extent,
+            context: context
+        )
+
+        XCTAssertLessThan(dr400Pixels[0], dr200Pixels[0])
+    }
+
     func testMonochromeFiltersUseDistinctChannelMixes() {
         let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
         let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])

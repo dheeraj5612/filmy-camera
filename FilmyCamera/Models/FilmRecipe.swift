@@ -631,6 +631,29 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         )
     }
 
+    /// Copies only editable renderer controls from a persisted recipe onto a
+    /// current built-in parent. Identity, descriptive text, schema, and
+    /// provenance stay owned by the current parent and migration layer.
+    mutating func applyControlValues(from source: FilmRecipe) {
+        exposure = source.exposure
+        tone = source.tone
+        saturation = source.saturation
+        contrast = source.contrast
+        dynamicRange = source.dynamicRange
+        whiteBalance = source.whiteBalance
+        colorChrome = source.colorChrome
+        blueResponse = source.blueResponse
+        fxBlue = source.fxBlue
+        sharpness = source.sharpness
+        noiseReduction = source.noiseReduction
+        clarity = source.clarity
+        grain = source.grain
+        grainSize = source.grainSize
+        vignette = source.vignette
+        halation = source.halation
+        palette = source.palette
+    }
+
     private enum CodingKeys: String, CodingKey {
         case schemaVersion
         case provenance

@@ -318,11 +318,11 @@ public final class FilmRenderer {
         }
 
         filter.setValue(image, forKey: kCIInputImageKey)
-        // CIHighlightShadowAdjust accepts a normalized 0...1 amount. Negative
-        // values are outside the Core Image contract and can be ignored or
-        // produce platform-dependent output. A positive value protects the
-        // highlights by moving them toward the midtones.
-        filter.setValue(amount, forKey: "inputHighlightAmount")
+        // CIHighlightShadowAdjust uses 1 as the identity highlight amount and
+        // lower values for stronger protection. The recipe value is a
+        // monotonic strength, so invert it before crossing the API boundary.
+        let highlightAmount = clamp(1 - amount, lower: 0, upper: 1)
+        filter.setValue(highlightAmount, forKey: "inputHighlightAmount")
         filter.setValue(amount * 0.18, forKey: "inputShadowAmount")
         return filter.outputImage?.cropped(to: image.extent) ?? image
     }

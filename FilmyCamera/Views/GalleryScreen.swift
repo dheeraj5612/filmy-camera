@@ -308,7 +308,12 @@ private struct GalleryDetailView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(photoLibrary.metadata(for: asset).map { "Selected gallery photo, \($0.recipe.name)" } ?? "Selected gallery photo")
-        .sheet(isPresented: $isShowingShareSheet, onDismiss: { shareURL = nil }) {
+        .sheet(isPresented: $isShowingShareSheet, onDismiss: {
+            if let shareURL {
+                photoLibrary.removeTemporaryShare(at: shareURL)
+            }
+            shareURL = nil
+        }) {
             if let shareURL {
                 ShareSheet(items: [shareURL])
                     .presentationDetents([.medium, .large])
