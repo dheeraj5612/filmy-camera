@@ -210,6 +210,7 @@ struct SettingsView: View {
                         .accessibilityIdentifier("privacy-policy-link")
                         .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
                         .contentShape(Rectangle())
+                        .accessibilityElement(children: .combine)
 
                         Spacer(minLength: 8)
 
@@ -220,6 +221,7 @@ struct SettingsView: View {
                         .accessibilityIdentifier("support-link")
                         .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
                         .contentShape(Rectangle())
+                        .accessibilityElement(children: .combine)
                     }
                     .foregroundStyle(FilmyTheme.accent)
                     .lineLimit(1)

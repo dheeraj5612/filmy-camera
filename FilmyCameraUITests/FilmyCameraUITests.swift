@@ -44,14 +44,14 @@ final class FilmyCameraUITests: XCTestCase {
     }
 
     func testGalleryAndSettingsNavigation() throws {
-        let gallery = app.buttons["Roll"]
+        let gallery = app.buttons["roll-tab"]
         assertMinimumHitTarget(gallery, named: "Roll")
         gallery.tap()
 
         XCTAssertTrue(app.staticTexts["Photo access is off"].waitForExistence(timeout: 5))
         attachScreenshot(named: "gallery-empty-state")
 
-        let settings = app.buttons["Settings"]
+        let settings = app.buttons["settings-tab"]
         assertMinimumHitTarget(settings, named: "Settings tab")
         settings.tap()
 
