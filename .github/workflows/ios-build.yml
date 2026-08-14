@@ -486,6 +486,10 @@ jobs:
           grep -Fq -- '--check' <<<"${help_output}"
           grep -Fq -- '--upload' <<<"${help_output}"
 
+          ipa_help_output="$(scripts/release/validate-ipa.sh --help)"
+          grep -Fq -- '--ipa' <<<"${ipa_help_output}"
+          grep -Fq -- '--archive' <<<"${ipa_help_output}"
+
           set +e
           check_output="$(env -u FILMY_ASC_KEY_ID -u FILMY_ASC_ISSUER_ID -u FILMY_ASC_KEY_PATH scripts/release/prepare-upload.sh --check 2>&1)"
           check_status="$?"

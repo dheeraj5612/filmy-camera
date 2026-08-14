@@ -70,9 +70,12 @@ scripts/release/validate-archive.sh build/FilmyCamera.xcarchive
 scripts/release/prepare-upload.sh --check
 scripts/release/prepare-upload.sh --export
 scripts/release/prepare-upload.sh --upload
+# When an IPA has already been exported:
+scripts/release/validate-ipa.sh --ipa build/export-<source-sha>/FilmyCamera.ipa \
+  --archive build/FilmyCamera-<source-sha>-signed.xcarchive
 ```
 
-The archive wrapper requires a clean checkout, generates the project, refuses a pre-existing destination, and creates a Release archive for a generic iOS device stamped with the exact source SHA. The upload-preparation wrapper is read-only by default, validates the archive provenance and local signing material before export, requires explicit `--export` or `--upload` modes, and keeps App Store Connect keys outside the repository. It fails closed unless the archive and exported IPA have the expected bundle/version, distribution signature, provisioning profile, dSYM, privacy manifest, and current source revision. It never stores credentials in the repository or CI logs.
+The archive wrapper requires a clean checkout, generates the project, refuses a pre-existing destination, and creates a Release archive for a generic iOS device stamped with the exact source SHA. The upload-preparation wrapper is read-only by default, validates the archive provenance and local signing material before export, requires explicit `--export` or `--upload` modes, and keeps App Store Connect keys outside the repository. The standalone IPA validator independently checks an exported IPA against its exact validated archive, including bundle/version/build parity, App Store provisioning, distribution signing, dSYM/privacy-manifest presence, and source provenance. These gates never store credentials in the repository or CI logs.
 
 For headless provisioning, `archive-device.sh --allow-provisioning-updates` accepts the same `FILMY_ASC_KEY_ID`, `FILMY_ASC_ISSUER_ID`, and `FILMY_ASC_KEY_PATH` environment variables as the upload wrapper. Partial credentials and repository-local key paths are rejected before Xcode runs.
 
