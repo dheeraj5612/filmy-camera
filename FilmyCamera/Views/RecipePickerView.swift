@@ -229,7 +229,7 @@ struct RecipeDetailView: View {
 
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("LOOK / \(recipe.base.uppercased())")
+                    Text("REFERENCE / \(recipe.filmBase.officialName)")
                         .font(.system(.caption2, design: .monospaced).weight(.bold))
                         .tracking(1.1)
                         .foregroundStyle(.white.opacity(0.78))
@@ -279,6 +279,13 @@ struct RecipeDetailView: View {
             Text(recipe.name)
                 .font(.system(.largeTitle, design: .rounded).weight(.bold))
                 .foregroundStyle(FilmyTheme.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text("Camera reference · \(recipe.filmBase.officialName)")
+                .font(.system(.caption, design: .monospaced).weight(.bold))
+                .tracking(0.7)
+                .foregroundStyle(FilmyTheme.accent)
+                .textCase(.uppercase)
                 .fixedSize(horizontal: false, vertical: true)
 
             Text(draft.detail)
@@ -411,7 +418,11 @@ struct RecipeDetailView: View {
         case .color:
             VStack(spacing: 14) {
                 RecipeSliderRow(title: "Color", value: binding(\.saturation), range: 0...2, format: "%.2f")
-                RecipeSliderRow(title: "Color Chrome", value: binding(\.colorChrome), range: 0...1, format: "%.2f")
+                RecipeChoiceRow(title: "Color Chrome", selection: colorChromeLevelBinding) {
+                    ForEach(FilmRecipe.ColorChromeLevel.allCases, id: \.self) { level in
+                        Text(level.displayName).tag(level)
+                    }
+                }
                 RecipeChoiceRow(title: "FX Blue", selection: fxBlueLevelBinding) {
                     ForEach(FilmRecipe.FXBlueLevel.allCases, id: \.self) { level in
                         Text(level.displayName).tag(level)
@@ -428,8 +439,16 @@ struct RecipeDetailView: View {
             }
         case .finish:
             VStack(spacing: 14) {
-                RecipeSliderRow(title: "Grain", value: binding(\.grain), range: 0...1, format: "%.2f")
-                RecipeSliderRow(title: "Grain size", value: binding(\.grainSize), range: 0.35...2.5, format: "%.2f")
+                RecipeChoiceRow(title: "Grain Effect", selection: grainEffectLevelBinding) {
+                    ForEach(FilmRecipe.GrainEffectLevel.allCases, id: \.self) { level in
+                        Text(level.displayName).tag(level)
+                    }
+                }
+                RecipeChoiceRow(title: "Grain Size", selection: grainSizeLevelBinding) {
+                    ForEach(FilmRecipe.GrainSizeLevel.allCases, id: \.self) { level in
+                        Text(level.displayName).tag(level)
+                    }
+                }
                 RecipeSliderRow(title: "Vignette", value: binding(\.vignette), range: 0...1, format: "%.2f")
                 RecipeSliderRow(title: "Halation", value: binding(\.halation), range: 0...1, format: "%.2f")
             }
@@ -461,6 +480,36 @@ struct RecipeDetailView: View {
             get: { draft.fxBlueLevel },
             set: { newValue in
                 draft.fxBlueLevel = newValue
+                onUpdate?(draft)
+            }
+        )
+    }
+
+    private var colorChromeLevelBinding: Binding<FilmRecipe.ColorChromeLevel> {
+        Binding(
+            get: { draft.colorChromeLevel },
+            set: { newValue in
+                draft.colorChromeLevel = newValue
+                onUpdate?(draft)
+            }
+        )
+    }
+
+    private var grainEffectLevelBinding: Binding<FilmRecipe.GrainEffectLevel> {
+        Binding(
+            get: { draft.grainEffectLevel },
+            set: { newValue in
+                draft.grainEffectLevel = newValue
+                onUpdate?(draft)
+            }
+        )
+    }
+
+    private var grainSizeLevelBinding: Binding<FilmRecipe.GrainSizeLevel> {
+        Binding(
+            get: { draft.grainSizeLevel },
+            set: { newValue in
+                draft.grainSizeLevel = newValue
                 onUpdate?(draft)
             }
         )

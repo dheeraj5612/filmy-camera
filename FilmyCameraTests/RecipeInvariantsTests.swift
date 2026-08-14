@@ -63,6 +63,14 @@ final class RecipeInvariantsTests: XCTestCase {
         XCTAssertTrue(builtInBases.contains(.monochrome))
     }
 
+    func testPublicFilmVocabularyHasCanonicalNamesAndSepiaCoverage() {
+        for base in FilmRecipe.FilmBase.allCases {
+            XCTAssertFalse(base.officialName.isEmpty, base.rawValue)
+        }
+        XCTAssertTrue(FilmRecipe.builtIns.contains { $0.filmBase == .sepia })
+        XCTAssertEqual(FilmRecipe.FilmBase.sepia.officialName, "SEPIA")
+    }
+
     func testBuiltInRecipeControlsStayWithinNormalizedEditorBounds() {
         for recipe in FilmRecipe.builtIns {
             XCTAssertTrue(FilmRecipe.DynamicRange.allCases.contains(recipe.dynamicRange), recipe.id)
@@ -204,6 +212,30 @@ final class RecipeInvariantsTests: XCTestCase {
         let decoded = try JSONDecoder().decode(FilmRecipe.self, from: JSONEncoder().encode(recipe))
         XCTAssertEqual(decoded.fxBlue, 0.5)
         XCTAssertEqual(decoded.fxBlueLevel, .weak)
+    }
+
+    func testColorChromeAndGrainUsePublicDiscreteControlBridges() throws {
+        XCTAssertEqual(FilmRecipe.ColorChromeLevel(scalarValue: 0), .off)
+        XCTAssertEqual(FilmRecipe.ColorChromeLevel(scalarValue: 0.5), .weak)
+        XCTAssertEqual(FilmRecipe.ColorChromeLevel(scalarValue: 1), .strong)
+        XCTAssertEqual(FilmRecipe.GrainEffectLevel(scalarValue: 0), .off)
+        XCTAssertEqual(FilmRecipe.GrainEffectLevel(scalarValue: 0.5), .weak)
+        XCTAssertEqual(FilmRecipe.GrainEffectLevel(scalarValue: 1), .strong)
+        XCTAssertEqual(FilmRecipe.GrainSizeLevel(scalarValue: 0.8), .small)
+        XCTAssertEqual(FilmRecipe.GrainSizeLevel(scalarValue: 1.2), .large)
+
+        var recipe = FilmRecipe.builtIns[0]
+        recipe.colorChromeLevel = .strong
+        recipe.grainEffectLevel = .weak
+        recipe.grainSizeLevel = .large
+        XCTAssertEqual(recipe.colorChrome, 1)
+        XCTAssertEqual(recipe.grain, 0.5)
+        XCTAssertEqual(recipe.grainSize, 1.5)
+
+        let decoded = try JSONDecoder().decode(FilmRecipe.self, from: JSONEncoder().encode(recipe))
+        XCTAssertEqual(decoded.colorChromeLevel, .strong)
+        XCTAssertEqual(decoded.grainEffectLevel, .weak)
+        XCTAssertEqual(decoded.grainSizeLevel, .large)
     }
 
     func testLegacyRecipeWithoutProvenanceRemainsReadableButFailsAudit() throws {

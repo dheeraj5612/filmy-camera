@@ -43,6 +43,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         case nostalgicNegative
         case realaAce
         case monochrome
+        case sepia
 
         public var displayName: String {
             switch self {
@@ -62,6 +63,28 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             case .nostalgicNegative: return "Memory Negative"
             case .realaAce: return "Natural Negative"
             case .monochrome: return "Fine Monochrome"
+            case .sepia: return "Sepia Archive"
+            }
+        }
+
+        /// Canonical public Fujifilm vocabulary retained separately from the
+        /// product's more inviting recipe names.
+        public var officialName: String {
+            switch self {
+            case .standard, .provia: return "PROVIA/STANDARD"
+            case .classicChrome: return "CLASSIC CHROME"
+            case .velvia: return "Velvia/VIVID"
+            case .astia: return "ASTIA/SOFT"
+            case .proNegative: return "PRO Neg. Hi"
+            case .proNegStandard: return "PRO Neg. Std"
+            case .eterna: return "ETERNA/CINEMA"
+            case .eternaBleachBypass: return "ETERNA BLEACH BYPASS"
+            case .acros, .acrosYellow, .acrosRed, .acrosGreen: return "ACROS"
+            case .classicNegative: return "CLASSIC Neg."
+            case .nostalgicNegative: return "NOSTALGIC Neg."
+            case .realaAce: return "REALA ACE"
+            case .monochrome: return "MONOCHROME"
+            case .sepia: return "SEPIA"
             }
         }
 
@@ -162,6 +185,98 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             } else {
                 self = .off
             }
+        }
+    }
+
+    /// Fujifilm-style Color Chrome strength, bridged to the renderer's
+    /// normalized scalar for persistence compatibility.
+    public enum ColorChromeLevel: Int, CaseIterable, Codable, Hashable, Sendable {
+        case off
+        case weak
+        case strong
+
+        public var displayName: String {
+            switch self {
+            case .off: return "Off"
+            case .weak: return "Weak"
+            case .strong: return "Strong"
+            }
+        }
+
+        public var scalarValue: Double {
+            switch self {
+            case .off: return 0
+            case .weak: return 0.5
+            case .strong: return 1
+            }
+        }
+
+        public init(scalarValue: Double) {
+            if scalarValue >= 0.75 {
+                self = .strong
+            } else if scalarValue > 0 {
+                self = .weak
+            } else {
+                self = .off
+            }
+        }
+    }
+
+    /// Fujifilm-style Grain Effect roughness, bridged to the renderer's
+    /// normalized scalar for persistence compatibility.
+    public enum GrainEffectLevel: Int, CaseIterable, Codable, Hashable, Sendable {
+        case off
+        case weak
+        case strong
+
+        public var displayName: String {
+            switch self {
+            case .off: return "Off"
+            case .weak: return "Weak"
+            case .strong: return "Strong"
+            }
+        }
+
+        public var scalarValue: Double {
+            switch self {
+            case .off: return 0
+            case .weak: return 0.5
+            case .strong: return 1
+            }
+        }
+
+        public init(scalarValue: Double) {
+            if scalarValue >= 0.75 {
+                self = .strong
+            } else if scalarValue > 0 {
+                self = .weak
+            } else {
+                self = .off
+            }
+        }
+    }
+
+    /// Fujifilm's two public grain-size choices.
+    public enum GrainSizeLevel: Int, CaseIterable, Codable, Hashable, Sendable {
+        case small
+        case large
+
+        public var displayName: String {
+            switch self {
+            case .small: return "Small"
+            case .large: return "Large"
+            }
+        }
+
+        public var scalarValue: Double {
+            switch self {
+            case .small: return 0.75
+            case .large: return 1.5
+            }
+        }
+
+        public init(scalarValue: Double) {
+            self = scalarValue >= 1.0 ? .large : .small
         }
     }
 
@@ -423,7 +538,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             case .contrast:
                 return "Contrast multiplier; 1.0 is neutral."
             case .colorChrome:
-                return "Normalized strength of the original saturated-color tone-compression approximation."
+                return "Three-state Color Chrome control: Off, Weak, or Strong."
             case .blueResponse:
                 return "Signed normalized blue-channel response used by the original approximation."
             case .fxBlue:
@@ -439,9 +554,9 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             case .clarity:
                 return "Signed normalized local-definition adjustment."
             case .grain:
-                return "Normalized grain roughness amount; zero leaves this stage off."
+                return "Three-state Grain Effect control: Off, Weak, or Strong."
             case .grainSize:
-                return "Normalized relative grain scale; 1.0 is the reference size."
+                return "Two-state Grain Size control: Small or Large."
             case .vignette:
                 return "Normalized edge-darkening amount."
             case .halation:
@@ -597,6 +712,10 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     public var dynamicRange: DynamicRange
     public var whiteBalance: WhiteBalanceShift
     public var colorChrome: Double
+    public var colorChromeLevel: ColorChromeLevel {
+        get { ColorChromeLevel(scalarValue: colorChrome) }
+        set { colorChrome = newValue.scalarValue }
+    }
     public var blueResponse: Double
     public var fxBlue: Double
     public var fxBlueLevel: FXBlueLevel {
@@ -607,7 +726,15 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     public var noiseReduction: Double
     public var clarity: Double
     public var grain: Double
+    public var grainEffectLevel: GrainEffectLevel {
+        get { GrainEffectLevel(scalarValue: grain) }
+        set { grain = newValue.scalarValue }
+    }
     public var grainSize: Double
+    public var grainSizeLevel: GrainSizeLevel {
+        get { GrainSizeLevel(scalarValue: grainSize) }
+        set { grainSize = newValue.scalarValue }
+    }
     public var vignette: Double
     public var halation: Double
     public var palette: Palette
@@ -1054,6 +1181,32 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
                 greenBias: 0,
                 blueBias: 0,
                 redGreenMix: 0,
+                greenBlueMix: 0,
+                blueRedMix: 0,
+                saturation: 0
+            )
+        ),
+        FilmRecipe(
+            id: "sepia-archive",
+            name: "Sepia Archive",
+            subtitle: "Warm monochrome / paper tone",
+            filmBase: .sepia,
+            tone: Tone(highlight: 0.02, shadow: -0.06),
+            saturation: 0,
+            contrast: 1.04,
+            dynamicRange: .dr200,
+            sharpness: 0.06,
+            noiseReduction: 0.02,
+            clarity: 0.04,
+            grain: 0.18,
+            grainSize: 0.86,
+            vignette: 0.12,
+            halation: 0.02,
+            palette: Palette(
+                redBias: 0.02,
+                greenBias: 0.004,
+                blueBias: -0.02,
+                redGreenMix: 0.004,
                 greenBlueMix: 0,
                 blueRedMix: 0,
                 saturation: 0

@@ -922,6 +922,12 @@ public final class FilmRenderer {
             saturate(0.72)
             mappedRed += 0.006 * highlightWeight
             mappedBlue += 0.008 * shadowWeight
+        case .sepia:
+            // Original warm-monochrome approximation for the public Sepia
+            // vocabulary; this is not Fujifilm calibration data.
+            mappedRed = luma * 1.06
+            mappedGreen = luma * 0.91
+            mappedBlue = luma * 0.72
         case .acros, .acrosYellow, .acrosRed, .acrosGreen, .monochrome:
             mappedRed = luma
             mappedGreen = luma

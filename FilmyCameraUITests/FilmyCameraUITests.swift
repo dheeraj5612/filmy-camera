@@ -42,6 +42,8 @@ final class FilmyCameraUITests: XCTestCase {
         assertMinimumAccessibilityFrame(exposure, named: "Exposure control")
         let fxBlue = app.descendants(matching: .any)["fx-blue-control"]
         XCTAssertTrue(fxBlue.waitForExistence(timeout: 5), "FX Blue control should be discoverable")
+        let colorChrome = app.descendants(matching: .any)["recipe-choice-Color Chrome"]
+        XCTAssertTrue(colorChrome.waitForExistence(timeout: 5), "Color Chrome control should be discoverable")
         XCTAssertFalse(app.buttons["Decrease exposure compensation"].exists)
         XCTAssertFalse(app.buttons["Increase exposure compensation"].exists)
         attachScreenshot(named: "recipe-details")

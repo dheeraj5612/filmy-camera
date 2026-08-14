@@ -25,6 +25,7 @@ extension FilmRecipe {
         case "eterna-cinema": return "Low saturation, soft shadows, and a forgiving cinema-inspired curve for moving light."
         case "eterna-bleach-bypass": return "Desaturated color, lifted blacks, and crisp highlights for a graphic, silver-rich cinema mood."
         case "acros-monochrome": return "Fine grain and tonal depth for graphic scenes where light, shape, and texture do the talking."
+        case "sepia-archive": return "Warm monochrome, paper-like highlights, and a quiet archival finish for images that should feel found."
         case "classic-negative": return "Warm highlights, restrained greens, and a textured negative feel for street scenes and quiet rooms."
         case "nostalgic-negative": return "Amber light, softened blues, and gentle contrast for a memory-like everyday palette."
         case "reala-ace": return "Natural color, open shadows, and a clean negative finish that lets the scene stay itself."
@@ -40,6 +41,7 @@ extension FilmRecipe {
         case .astia: return "person.crop.square.filled.and.at.rectangle"
         case .eterna, .eternaBleachBypass: return "film.stack"
         case .acros, .acrosYellow, .acrosRed, .acrosGreen, .monochrome: return "circle.lefthalf.filled"
+        case .sepia: return "clock.arrow.circlepath"
         case .standard, .provia: return "camera.aperture"
         }
     }
@@ -64,6 +66,8 @@ extension FilmRecipe {
             return [Color(red: 0.10, green: 0.14, blue: 0.16), Color(red: 0.38, green: 0.43, blue: 0.41), Color(red: 0.82, green: 0.78, blue: 0.67)]
         case "acros-monochrome":
             return [Color(white: 0.08), Color(white: 0.38), Color(white: 0.84)]
+        case "sepia-archive":
+            return [Color(red: 0.16, green: 0.10, blue: 0.06), Color(red: 0.56, green: 0.38, blue: 0.24), Color(red: 0.88, green: 0.72, blue: 0.52)]
         case "classic-negative":
             return [Color(red: 0.13, green: 0.21, blue: 0.22), Color(red: 0.69, green: 0.44, blue: 0.30), Color(red: 0.92, green: 0.73, blue: 0.51)]
         case "nostalgic-negative":
@@ -79,8 +83,8 @@ extension FilmRecipe {
         [
             ("Tone", contrast >= 1.08 ? "Hard" : contrast <= 0.96 ? "Soft" : "Balanced"),
             ("Color", saturation >= 1.08 ? "Rich" : saturation <= 0.9 ? "Muted" : "Natural"),
-            ("Grain", grain >= 0.18 ? "Strong" : grain > 0 ? "Fine" : "Off"),
-            ("Chrome", colorChrome >= 0.5 ? "Deep" : colorChrome > 0 ? "Subtle" : "Off")
+            ("Grain", grainEffectLevel.displayName),
+            ("Chrome", colorChromeLevel.displayName)
         ]
     }
 }
