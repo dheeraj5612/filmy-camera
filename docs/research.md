@@ -105,3 +105,38 @@ First-party references:
 
 - [FUJIFILM X-T5 Image Quality Setting](https://fujifilm-dsc.com/en/manual/x-t5/menu_shooting/image_quality_setting/)
 - [FUJIFILM Film Simulation overview](https://www.fujifilm-x.com/en-us/products/film-simulation/)
+
+## Live open-source review — 2026-08-14
+
+The implementation review was refreshed against current upstream repositories
+and Apple's filtered-camera sample. The result reinforces the existing choice
+to keep the app dependency-free:
+
+- [IFTTT/FastttCamera](https://github.com/IFTTT/FastttCamera) (MIT) remains a
+  useful reference for capture lifecycle, orientation, crop, focus/exposure,
+  and lookup-filter separation, but its Objective-C/CocoaPods foundation is
+  not a good new dependency.
+- [BradLarson/GPUImage3](https://github.com/BradLarson/GPUImage3) (BSD-3-Clause)
+  demonstrates a composable Swift/Metal source → operation → consumer graph;
+  its README still calls out incomplete still-photo processing, so it is a
+  reference rather than the still-export foundation.
+- [MetalPetal/MetalPetal](https://github.com/MetalPetal/MetalPetal) (MIT) is
+  the strongest reusable render-graph alternative: immutable image promises,
+  reusable context, custom kernels, color lookup, caching, and explicit color
+  boundaries. Its examples and documentation have separate licensing notes.
+- [NextLevel/NextLevel](https://github.com/NextLevel/NextLevel) (MIT) is a
+  useful capture-state reference for interruptions, depth, RAW, and output
+  callbacks, but its broad dependency surface is unnecessary for the current
+  app's AVFoundation service.
+- [yangKJ/Harbeth](https://github.com/yangKJ/Harbeth) (MIT) is a benchmark
+  candidate for Metal/CUBE/LUT plumbing, not an adopted dependency until API
+  stability, performance, and every transitive asset are reviewed.
+
+Apple's [AVCamFilter sample](https://developer.apple.com/documentation/avfoundation/avcamfilter-applying-filters-to-a-capture-stream)
+continues to support the chosen architecture: keep camera session work off the
+main thread, process pixel buffers through a reusable Core Image/Metal context,
+and use the same deterministic recipe graph for preview and still output.
+The public Fujifilm material still defines the user-facing recipe controls, not
+the sensor/ISP transfer functions or a general-purpose LUT. Model-specific
+downloadable LUTs and community profiles therefore remain excluded from the
+commercial bundle without explicit redistribution rights and calibration data.
