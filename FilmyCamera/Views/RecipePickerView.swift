@@ -4,11 +4,28 @@ struct RecipePickerView: View {
     let recipes: [FilmRecipe]
     @Binding var selectedRecipeID: String
     let onOpenDetail: (FilmRecipe) -> Void
+    let compact: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
+    init(
+        recipes: [FilmRecipe],
+        selectedRecipeID: Binding<String>,
+        onOpenDetail: @escaping (FilmRecipe) -> Void,
+        compact: Bool = false
+    ) {
+        self.recipes = recipes
+        _selectedRecipeID = selectedRecipeID
+        self.onOpenDetail = onOpenDetail
+        self.compact = compact
+    }
+
     private var recipeTileSize: CGSize {
-        dynamicTypeSize.isAccessibilitySize
+        if compact {
+            return CGSize(width: 132, height: 80)
+        }
+
+        return dynamicTypeSize.isAccessibilitySize
             ? CGSize(width: 174, height: 138)
             : CGSize(width: 142, height: 86)
     }

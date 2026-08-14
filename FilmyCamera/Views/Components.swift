@@ -758,7 +758,20 @@ struct PreviewPlaceholder: View {
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
-            .overlay(Color.black.opacity(0.46))
+
+            // Keep the simulator and unavailable-camera states visually useful
+            // without presenting a synthetic image as live camera output. This
+            // is the same renderer-backed scene used by the recipe rail, so a
+            // user can still see how the selected look is meant to feel before
+            // moving to a physical iPhone.
+            if isSimulator {
+                RecipeSwatch(recipe: recipe, compact: false, showsLabel: false)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay(Color.black.opacity(0.18))
+                    .accessibilityHidden(true)
+            }
+
+            Color.black.opacity(isSimulator ? 0.30 : 0.46)
 
             VStack(spacing: 14) {
                 Image(systemName: isSimulator ? "iphone.gen3" : "camera.fill")

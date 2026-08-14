@@ -182,10 +182,52 @@ struct CameraScreen: View {
     @ViewBuilder
     private func cameraChrome(for size: CGSize) -> some View {
         if size.width > size.height {
-            landscapeCameraChrome
+            if dynamicTypeSize.isAccessibilitySize {
+                compactLandscapeCameraChrome
+            } else {
+                landscapeCameraChrome
+            }
+        } else if dynamicTypeSize.isAccessibilitySize {
+            compactPortraitCameraChrome
         } else {
             portraitCameraChrome
         }
+    }
+
+    private var compactPortraitCameraChrome: some View {
+        VStack(spacing: 9) {
+            compactHeader
+
+            if !shouldShowCameraEmptyState || isUITesting {
+                cameraUtilityRail
+            }
+
+            Spacer(minLength: 0)
+            compactActionPlate
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
+        .dynamicTypeSize(.large ... .accessibility1)
+    }
+
+    private var compactLandscapeCameraChrome: some View {
+        HStack(alignment: .bottom, spacing: 10) {
+            compactHeader
+                .frame(maxWidth: 260)
+
+            if !shouldShowCameraEmptyState || isUITesting {
+                cameraUtilityRail
+                    .frame(maxWidth: 260)
+            }
+
+            Spacer(minLength: 0)
+            compactActionPlate
+                .frame(maxWidth: 360)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .dynamicTypeSize(.large ... .accessibility1)
     }
 
     private var portraitCameraChrome: some View {
@@ -282,6 +324,81 @@ struct CameraScreen: View {
         .accessibilityLabel(
             "Filmy Camera. \(viewModel.selectedRecipe.name). \(camera.statusMessage)"
         )
+    }
+
+    private var compactHeader: some View {
+        HStack(spacing: 8) {
+            ZStack {
+                Circle()
+                    .fill(FilmyTheme.accent.opacity(0.15))
+                Circle()
+                    .stroke(FilmyTheme.accent.opacity(0.35), lineWidth: 1)
+                    .padding(3)
+                Image(systemName: "camera.aperture")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(FilmyTheme.accent)
+            }
+            .frame(width: 30, height: 30)
+
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
+                    Text("FILMY CAMERA")
+                        .font(.system(size: 14, weight: .black, design: .rounded))
+                        .tracking(1.2)
+                        .foregroundStyle(.white)
+
+                    Text(sessionLabel)
+                        .font(.system(size: 10, weight: .black, design: .rounded))
+                        .tracking(0.6)
+                        .foregroundStyle(camera.isRunning ? FilmyTheme.mint : FilmyTheme.accent)
+                }
+
+                Text(viewModel.selectedRecipe.name)
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.62))
+                    .lineLimit(1)
+            }
+            .layoutPriority(1)
+
+            Spacer(minLength: 4)
+            compactStatusPill
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(Color.black.opacity(0.2), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.white.opacity(0.16), lineWidth: 1)
+        }
+        // Keep the compact header's individual stock and product labels
+        // discoverable at large Dynamic Type sizes. The parent still exposes
+        // the combined status below, while VoiceOver can reach the selected
+        // look without depending on a specific wrapping shape.
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(
+            "Filmy Camera. \(viewModel.selectedRecipe.name). \(camera.statusMessage)"
+        )
+    }
+
+    private var compactStatusPill: some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(camera.isRunning ? FilmyTheme.mint : FilmyTheme.accent)
+                .frame(width: 6, height: 6)
+
+            Text(camera.availability == .simulator ? "Preview" : sessionLabel.capitalized)
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .foregroundStyle(FilmyTheme.primary)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 9)
+        .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
+        .background(Color.black.opacity(0.42), in: Capsule())
+        .overlay { Capsule().stroke(Color.white.opacity(0.14), lineWidth: 1) }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Camera status")
+        .accessibilityValue(camera.statusMessage)
     }
 
     private var cameraUtilityRail: some View {
@@ -977,6 +1094,101 @@ struct CameraScreen: View {
         // document. Cap its visual scale one step below the largest Dynamic
         // Type sizes so every capture, Roll, and Tune action remains reachable.
         .dynamicTypeSize(.large ... .accessibility1)
+    }
+
+    private var compactActionPlate: some View {
+        VStack(spacing: 9) {
+            HStack(spacing: 8) {
+                Text("FILM STOCK")
+                    .font(.system(size: 10, weight: .black, design: .rounded))
+                    .tracking(1.3)
+                    .foregroundStyle(FilmyTheme.accent)
+
+                Text(viewModel.selectedRecipe.name)
+                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .foregroundStyle(FilmyTheme.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.76)
+
+                Spacer(minLength: 4)
+            }
+
+            RecipePickerView(
+                recipes: FilmRecipe.builtIns,
+                selectedRecipeID: $viewModel.selectedRecipeID,
+                onOpenDetail: { recipeForDetail = $0 },
+                compact: true
+            )
+
+            if shouldShowCameraEmptyState {
+                HStack(spacing: 10) {
+                    CameraActionButton(
+                        systemName: "square.grid.2x2",
+                        title: "Roll",
+                        accessibilityLabel: "Open roll",
+                        action: onOpenGallery
+                    )
+
+                    compactCaptureNotice
+                        .frame(maxWidth: .infinity)
+
+                    CameraActionButton(
+                        systemName: "slider.horizontal.3",
+                        title: "Tune",
+                        accessibilityLabel: "Tune \(viewModel.selectedRecipe.name)",
+                        action: { recipeForDetail = viewModel.selectedRecipe }
+                    )
+                }
+            } else {
+                HStack(spacing: 10) {
+                    CameraActionButton(
+                        systemName: "square.grid.2x2",
+                        title: "Roll",
+                        accessibilityLabel: "Open roll",
+                        action: onOpenGallery
+                    )
+
+                    Spacer(minLength: 0)
+
+                    CaptureButton(isCapturing: viewModel.isCapturing) {
+                        if hapticsEnabled {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        }
+                        viewModel.capture(camera: camera)
+                    }
+
+                    Spacer(minLength: 0)
+
+                    CameraActionButton(
+                        systemName: "slider.horizontal.3",
+                        title: "Tune",
+                        accessibilityLabel: "Tune \(viewModel.selectedRecipe.name)",
+                        action: { recipeForDetail = viewModel.selectedRecipe }
+                    )
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 11)
+        .padding(.bottom, 10)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(FilmyTheme.plateGradient, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.white.opacity(0.17), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.3), radius: 24, y: 10)
+    }
+
+    private var compactCaptureNotice: some View {
+        Label("Capture is available on a physical iPhone", systemImage: "iphone")
+            .font(.system(size: 11, weight: .semibold, design: .rounded))
+            .foregroundStyle(.white.opacity(0.62))
+            .multilineTextAlignment(.center)
+            .lineLimit(2)
+            .minimumScaleFactor(0.78)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityElement(children: .combine)
     }
 }
 

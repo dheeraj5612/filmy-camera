@@ -85,6 +85,14 @@ final class FilmyCameraUITests: XCTestCase {
         let roll = accessibilityApp.buttons["Open roll"]
         assertMinimumHitTarget(roll, named: "Accessibility-size Roll")
 
+        let cameraTab = accessibilityApp.buttons["camera-tab"]
+        assertMinimumHitTarget(cameraTab, named: "Accessibility-size Camera tab")
+        XCTAssertLessThan(
+            roll.frame.maxY,
+            cameraTab.frame.minY,
+            "Accessibility-size camera actions must remain above the tab bar"
+        )
+
         let tune = accessibilityApp.buttons.matching(
             NSPredicate(format: "label BEGINSWITH 'Tune '")
         ).firstMatch
@@ -94,6 +102,7 @@ final class FilmyCameraUITests: XCTestCase {
             "Capture is available on a physical iPhone"
         ]
         XCTAssertTrue(captureNotice.waitForExistence(timeout: 5))
+        attachScreenshot(named: "accessibility-camera-shell")
     }
     #endif
 
