@@ -289,8 +289,9 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         }
     }
 
-    /// Fujifilm-style Color Chrome strength, bridged to the renderer's
-    /// normalized scalar for persistence compatibility.
+    /// Fujifilm-style Color Chrome strength. Built-in looks use only these
+    /// public camera states; the scalar bridge remains intentionally tolerant
+    /// so older user-authored recipes with intermediate values still decode.
     public enum ColorChromeLevel: Int, CaseIterable, Codable, Hashable, Sendable {
         case off
         case weak
@@ -323,8 +324,9 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         }
     }
 
-    /// Fujifilm-style Grain Effect roughness, bridged to the renderer's
-    /// normalized scalar for persistence compatibility.
+    /// Fujifilm-style Grain Effect roughness. Built-in looks use only the
+    /// public Off/Weak/Strong states; intermediate legacy values remain
+    /// renderable for user-authored recipes.
     public enum GrainEffectLevel: Int, CaseIterable, Codable, Hashable, Sendable {
         case off
         case weak
@@ -357,7 +359,8 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         }
     }
 
-    /// Fujifilm's two public grain-size choices.
+    /// Fujifilm's two public grain-size choices. The built-in library stores
+    /// these canonical scalars instead of arbitrary intermediate strengths.
     public enum GrainSizeLevel: Int, CaseIterable, Codable, Hashable, Sendable {
         case small
         case large
@@ -1164,14 +1167,14 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             contrast: 1.00,
             dynamicRange: .dr100,
             whiteBalance: WhiteBalanceShift(),
-            colorChrome: 0.18,
+            colorChrome: 0.5,
             blueResponse: 0.02,
             fxBlue: 0.00,
             sharpness: 0.02,
             noiseReduction: 0.01,
             clarity: 0.02,
-            grain: 0.08,
-            grainSize: 0.78,
+            grain: 0.5,
+            grainSize: 0.75,
             vignette: 0.04,
             halation: 0.01,
             palette: Palette(
@@ -1194,14 +1197,14 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             contrast: 1.06,
             dynamicRange: .dr200,
             whiteBalance: WhiteBalanceShift(temperature: 0.02, tint: -0.01),
-            colorChrome: 0.72,
+            colorChrome: 0.5,
             blueResponse: 0.18,
-            fxBlue: 0.16,
+            fxBlue: 0.5,
             sharpness: 0.04,
             noiseReduction: 0.01,
             clarity: 0.10,
-            grain: 0.16,
-            grainSize: 1.0,
+            grain: 0.5,
+            grainSize: 1.5,
             vignette: 0.12,
             halation: 0.04,
             palette: Palette(
@@ -1224,14 +1227,14 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             contrast: 1.12,
             dynamicRange: .dr100,
             whiteBalance: WhiteBalanceShift(temperature: 0.04, tint: -0.02),
-            colorChrome: 0.86,
+            colorChrome: 1.0,
             blueResponse: 0.34,
-            fxBlue: 0.34,
+            fxBlue: 0.5,
             sharpness: 0.16,
             noiseReduction: 0.01,
             clarity: 0.18,
-            grain: 0.12,
-            grainSize: 0.85,
+            grain: 0.5,
+            grainSize: 0.75,
             vignette: 0.10,
             halation: 0.02,
             palette: Palette(
@@ -1254,14 +1257,14 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             contrast: 0.96,
             dynamicRange: .dr200,
             whiteBalance: WhiteBalanceShift(temperature: 0.03, tint: 0.02),
-            colorChrome: 0.34,
+            colorChrome: 0.5,
             blueResponse: 0.04,
-            fxBlue: 0.05,
+            fxBlue: 0.5,
             sharpness: -0.02,
             noiseReduction: 0.03,
             clarity: 0.02,
-            grain: 0.10,
-            grainSize: 0.90,
+            grain: 0.5,
+            grainSize: 0.75,
             vignette: 0.08,
             halation: 0.03,
             palette: Palette(
@@ -1284,14 +1287,14 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             contrast: 1.08,
             dynamicRange: .dr200,
             whiteBalance: WhiteBalanceShift(temperature: 0.01, tint: 0.01),
-            colorChrome: 0.28,
+            colorChrome: 0.5,
             blueResponse: 0.02,
-            fxBlue: 0.02,
+            fxBlue: 0.5,
             sharpness: 0.12,
             noiseReduction: 0.03,
             clarity: 0.16,
-            grain: 0.11,
-            grainSize: 0.78,
+            grain: 0.5,
+            grainSize: 0.75,
             vignette: 0.06,
             halation: 0.01,
             palette: Palette(
@@ -1314,14 +1317,14 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             contrast: 0.91,
             dynamicRange: .dr400,
             whiteBalance: WhiteBalanceShift(temperature: -0.02, tint: -0.01),
-            colorChrome: 0.20,
+            colorChrome: 0.5,
             blueResponse: -0.06,
-            fxBlue: -0.06,
+            fxBlue: 0.0,
             sharpness: -0.04,
             noiseReduction: 0.05,
             clarity: -0.04,
-            grain: 0.18,
-            grainSize: 1.15,
+            grain: 0.5,
+            grainSize: 1.5,
             vignette: 0.16,
             halation: 0.10,
             palette: Palette(
@@ -1350,8 +1353,8 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             sharpness: 0.10,
             noiseReduction: 0.02,
             clarity: 0.12,
-            grain: 0.14,
-            grainSize: 0.72,
+            grain: 0.5,
+            grainSize: 0.75,
             vignette: 0.14,
             halation: 0.02,
             palette: Palette(
@@ -1376,8 +1379,8 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             sharpness: 0.06,
             noiseReduction: 0.02,
             clarity: 0.04,
-            grain: 0.18,
-            grainSize: 0.86,
+            grain: 0.5,
+            grainSize: 0.75,
             vignette: 0.12,
             halation: 0.02,
             palette: Palette(
@@ -1402,8 +1405,8 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             sharpness: 0.10,
             noiseReduction: 0.02,
             clarity: 0.11,
-            grain: 0.15,
-            grainSize: 0.76,
+            grain: 0.5,
+            grainSize: 0.75,
             vignette: 0.14,
             halation: 0.01,
             palette: Palette(saturation: 0)
@@ -1420,8 +1423,8 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             sharpness: 0.10,
             noiseReduction: 0.02,
             clarity: 0.10,
-            grain: 0.15,
-            grainSize: 0.78,
+            grain: 0.5,
+            grainSize: 0.75,
             vignette: 0.14,
             halation: 0.01,
             palette: Palette(saturation: 0)
@@ -1438,8 +1441,8 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             sharpness: 0.12,
             noiseReduction: 0.02,
             clarity: 0.14,
-            grain: 0.17,
-            grainSize: 0.82,
+            grain: 0.5,
+            grainSize: 0.75,
             vignette: 0.16,
             halation: 0.01,
             palette: Palette(saturation: 0)
@@ -1456,8 +1459,8 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             sharpness: 0.08,
             noiseReduction: 0.02,
             clarity: 0.08,
-            grain: 0.14,
-            grainSize: 0.76,
+            grain: 0.5,
+            grainSize: 0.75,
             vignette: 0.13,
             halation: 0.01,
             palette: Palette(saturation: 0)
@@ -1472,14 +1475,14 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             contrast: 1.04,
             dynamicRange: .dr200,
             whiteBalance: WhiteBalanceShift(temperature: 0.03, tint: 0.01),
-            colorChrome: 0.56,
+            colorChrome: 0.5,
             blueResponse: 0.24,
-            fxBlue: 0.20,
+            fxBlue: 0.5,
             sharpness: 0.02,
             noiseReduction: 0.02,
             clarity: 0.06,
-            grain: 0.20,
-            grainSize: 1.12,
+            grain: 0.5,
+            grainSize: 1.5,
             vignette: 0.14,
             halation: 0.06,
             palette: Palette(
@@ -1502,14 +1505,14 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             contrast: 1.02,
             dynamicRange: .dr200,
             whiteBalance: WhiteBalanceShift(temperature: 0.08, tint: 0.01),
-            colorChrome: 0.58,
+            colorChrome: 0.5,
             blueResponse: 0.30,
-            fxBlue: 0.26,
+            fxBlue: 0.5,
             sharpness: 0.01,
             noiseReduction: 0.02,
             clarity: 0.03,
-            grain: 0.24,
-            grainSize: 1.35,
+            grain: 0.5,
+            grainSize: 1.5,
             vignette: 0.18,
             halation: 0.12,
             palette: Palette(
@@ -1532,14 +1535,14 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             contrast: 1.18,
             dynamicRange: .dr400,
             whiteBalance: WhiteBalanceShift(temperature: -0.02, tint: -0.02),
-            colorChrome: 0.10,
+            colorChrome: 0.5,
             blueResponse: 0.08,
-            fxBlue: 0.10,
+            fxBlue: 0.5,
             sharpness: 0.16,
             noiseReduction: 0.02,
             clarity: 0.14,
-            grain: 0.22,
-            grainSize: 1.18,
+            grain: 0.5,
+            grainSize: 1.5,
             vignette: 0.18,
             halation: 0.04,
             palette: Palette(
@@ -1562,14 +1565,14 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             contrast: 0.94,
             dynamicRange: .dr200,
             whiteBalance: WhiteBalanceShift(temperature: 0.02, tint: 0.02),
-            colorChrome: 0.18,
+            colorChrome: 0.5,
             blueResponse: 0.02,
-            fxBlue: 0.02,
+            fxBlue: 0.5,
             sharpness: -0.02,
             noiseReduction: 0.04,
             clarity: -0.04,
-            grain: 0.12,
-            grainSize: 0.84,
+            grain: 0.5,
+            grainSize: 0.75,
             vignette: 0.08,
             halation: 0.03,
             palette: Palette(
@@ -1592,14 +1595,14 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             contrast: 1.00,
             dynamicRange: .dr200,
             whiteBalance: WhiteBalanceShift(temperature: 0.01, tint: 0.01),
-            colorChrome: 0.18,
+            colorChrome: 0.5,
             blueResponse: 0.14,
-            fxBlue: 0.12,
+            fxBlue: 0.5,
             sharpness: 0.02,
             noiseReduction: 0.02,
             clarity: 0.02,
-            grain: 0.10,
-            grainSize: 0.90,
+            grain: 0.5,
+            grainSize: 0.75,
             vignette: 0.06,
             halation: 0.02,
             palette: Palette(

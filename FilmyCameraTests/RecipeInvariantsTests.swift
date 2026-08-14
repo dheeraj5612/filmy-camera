@@ -87,6 +87,22 @@ final class RecipeInvariantsTests: XCTestCase {
         }
     }
 
+    func testBuiltInRecipesUseDiscretePublicStrengthStates() {
+        let strengthStates: Set<Double> = [
+            FilmRecipe.ColorChromeLevel.off.scalarValue,
+            FilmRecipe.ColorChromeLevel.weak.scalarValue,
+            FilmRecipe.ColorChromeLevel.strong.scalarValue
+        ]
+        let grainSizes = Set(FilmRecipe.GrainSizeLevel.allCases.map(\.scalarValue))
+
+        for recipe in FilmRecipe.builtIns {
+            XCTAssertTrue(strengthStates.contains(recipe.colorChrome), recipe.id)
+            XCTAssertTrue(strengthStates.contains(recipe.fxBlue), recipe.id)
+            XCTAssertTrue(strengthStates.contains(recipe.grain), recipe.id)
+            XCTAssertTrue(grainSizes.contains(recipe.grainSize), recipe.id)
+        }
+    }
+
     func testBuiltInRecipeControlsAreFinite() {
         for recipe in FilmRecipe.builtIns {
             let values = [
