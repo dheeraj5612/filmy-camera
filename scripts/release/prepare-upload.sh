@@ -159,6 +159,14 @@ plist_value() {
   /usr/libexec/PlistBuddy -c "Print :${key}" "${plist_path}" 2>/dev/null
 }
 
+profile_expiration_epoch() {
+  local expiration_date="$1"
+  date -j -f '%Y-%m-%d %H:%M:%S %z' "${expiration_date}" '+%s' 2>/dev/null \
+    || date -j -f '%Y-%m-%dT%H:%M:%SZ' "${expiration_date}" '+%s' 2>/dev/null \
+    || date -j -f '%a %b %d %H:%M:%S %Z %Y' "${expiration_date}" '+%s' 2>/dev/null \
+    || true
+}
+
 run_project_preflight() {
   "${script_dir}/validate-project.sh"
 }
@@ -176,6 +184,7 @@ has_distribution_identity() {
 
 has_installed_app_store_profile() {
   local user_home="${HOME:-}"
+  local profile_dirs
   local profile_dir
   local profile_path
   local decoded_profile
@@ -186,27 +195,32 @@ has_installed_app_store_profile() {
 
   [[ -n "${user_home}" ]] || return 1
   command -v security >/dev/null 2>&1 || return 1
-  profile_dir="${user_home}/Library/MobileDevice/Provisioning Profiles"
-  [[ -d "${profile_dir}" ]] || return 1
+  profile_dirs=(
+    "${user_home}/Library/MobileDevice/Provisioning Profiles"
+    "${user_home}/Library/Developer/Xcode/UserData/Provisioning Profiles"
+  )
   decoded_profile="$(new_temp_file)"
 
-  for profile_path in "${profile_dir}"/*.mobileprovision "${profile_dir}"/*.provisionprofile; do
-    [[ -f "${profile_path}" ]] || continue
-    if ! security cms -D -i "${profile_path}" -o "${decoded_profile}" 2>/dev/null; then
-      continue
-    fi
-    application_identifier="$(plist_value 'Entitlements:application-identifier' "${decoded_profile}" 2>/dev/null || true)"
-    get_task_allow="$(plist_value 'Entitlements:get-task-allow' "${decoded_profile}" 2>/dev/null || true)"
-    expiration_date="$(/usr/libexec/PlistBuddy -c 'Print :ExpirationDate' "${decoded_profile}" 2>/dev/null || true)"
-    expiration_epoch="$(date -j -f '%Y-%m-%d %H:%M:%S %z' "${expiration_date}" '+%s' 2>/dev/null || true)"
-    [[ "${application_identifier}" == "${team_id}.${bundle_id}" ]] || continue
-    [[ "${get_task_allow}" == false ]] || continue
-    [[ -n "${expiration_epoch}" && "${expiration_epoch}" -gt "$(date '+%s')" ]] || continue
-    # App Store profiles do not contain a ProvisionedDevices entitlement.
-    if /usr/libexec/PlistBuddy -c 'Print :ProvisionedDevices' "${decoded_profile}" >/dev/null 2>&1; then
-      continue
-    fi
-    return 0
+  for profile_dir in "${profile_dirs[@]}"; do
+    [[ -d "${profile_dir}" ]] || continue
+    for profile_path in "${profile_dir}"/*.mobileprovision "${profile_dir}"/*.provisionprofile; do
+      [[ -f "${profile_path}" ]] || continue
+      if ! security cms -D -i "${profile_path}" -o "${decoded_profile}" 2>/dev/null; then
+        continue
+      fi
+      application_identifier="$(plist_value 'Entitlements:application-identifier' "${decoded_profile}" 2>/dev/null || true)"
+      get_task_allow="$(plist_value 'Entitlements:get-task-allow' "${decoded_profile}" 2>/dev/null || true)"
+      expiration_date="$(/usr/libexec/PlistBuddy -c 'Print :ExpirationDate' "${decoded_profile}" 2>/dev/null || true)"
+      expiration_epoch="$(profile_expiration_epoch "${expiration_date}")"
+      [[ "${application_identifier}" == "${team_id}.${bundle_id}" ]] || continue
+      [[ "${get_task_allow}" == false ]] || continue
+      [[ -n "${expiration_epoch}" && "${expiration_epoch}" -gt "$(date '+%s')" ]] || continue
+      # App Store profiles do not contain a ProvisionedDevices entitlement.
+      if /usr/libexec/PlistBuddy -c 'Print :ProvisionedDevices' "${decoded_profile}" >/dev/null 2>&1; then
+        continue
+      fi
+      return 0
+    done
   done
 
   return 1
@@ -385,7 +399,7 @@ validate_exported_ipa() {
   profile_bundle_id="${application_identifier#*.}"
   get_task_allow="$(plist_value 'Entitlements:get-task-allow' "${decoded_profile}" 2>/dev/null || true)"
   expiration_date="$(plist_value ExpirationDate "${decoded_profile}" 2>/dev/null || true)"
-  expiration_epoch="$(date -j -f '%Y-%m-%d %H:%M:%S %z' "${expiration_date}" '+%s' 2>/dev/null || true)"
+  expiration_epoch="$(profile_expiration_epoch "${expiration_date}")"
   [[ "${profile_team_id}" == "${team_id}" && "${profile_bundle_id}" == "${bundle_id}" ]] || {
     echo "Exported IPA provisioning profile does not match the production app" >&2
     return 1
