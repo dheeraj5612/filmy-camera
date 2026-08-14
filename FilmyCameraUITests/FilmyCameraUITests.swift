@@ -51,6 +51,14 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertTrue(whiteBalance.waitForExistence(timeout: 5), "White balance mode should be discoverable")
         XCTAssertFalse(app.buttons["Decrease exposure compensation"].exists)
         XCTAssertFalse(app.buttons["Increase exposure compensation"].exists)
+
+        let referenceCard = app.descendants(matching: .any)["public-reference-settings"]
+        scrollToHittable(referenceCard, in: app)
+        XCTAssertTrue(
+            app.staticTexts["PUBLIC REFERENCE"].waitForExistence(timeout: 5),
+            "Recipe details should expose the public reference settings"
+        )
+        XCTAssertTrue(app.staticTexts["DR200"].exists)
         attachScreenshot(named: "recipe-details")
     }
 

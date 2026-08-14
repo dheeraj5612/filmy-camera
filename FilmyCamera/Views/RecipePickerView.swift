@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 struct RecipePickerView: View {
@@ -246,6 +247,10 @@ struct RecipeDetailView: View {
                         editor
                     }
 
+                    if publicReferenceEntry != nil {
+                        publicReferenceCard
+                    }
+
                     Button {
                         commitDraft()
                         onSelect()
@@ -393,6 +398,105 @@ struct RecipeDetailView: View {
             RoundedRectangle(cornerRadius: 19, style: .continuous)
                 .stroke(FilmyTheme.line, lineWidth: 1)
         }
+    }
+
+    private var publicReferenceEntry: FilmRecipeReferenceCatalog.Entry? {
+        FilmRecipeReferenceCatalog.entries.first { $0.currentRecipeID == recipe.id }
+    }
+
+    private var publicReferenceRows: [(String, String)] {
+        guard let controls = publicReferenceEntry?.publicControls else { return [] }
+
+        var rows: [(String, String)] = [
+            ("Film simulation", controls.filmSimulation.replacingOccurrences(of: "_", with: " ").uppercased()),
+            ("Dynamic range", controls.dynamicRange.uppercased()),
+            ("Highlights", signed(controls.highlightTone)),
+            ("Shadows", signed(controls.shadowTone)),
+            ("Color", signed(controls.color)),
+            ("Color Chrome", pretty(controls.colorChromeEffect)),
+            ("FX Blue", pretty(controls.colorChromeFXBlue)),
+            ("Sharpness", signed(controls.sharpness)),
+            ("Noise reduction", signed(controls.noiseReduction)),
+            ("Clarity", signed(controls.clarity)),
+            ("Grain", "\(pretty(controls.grainEffect)) / \(pretty(controls.grainSize))"),
+            ("White balance", pretty(controls.whiteBalance)),
+            ("WB shift", "\(signed(controls.whiteBalanceShiftRed))R / \(signed(controls.whiteBalanceShiftBlue))B"),
+            ("Exposure", String(format: "%+.1f EV", controls.exposureCompensationEV))
+        ]
+
+        if let kelvin = controls.colorTemperatureKelvin {
+            rows.append(("Temperature", "\(kelvin) K"))
+        }
+
+        return rows
+    }
+
+    private var publicReferenceCard: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("PUBLIC REFERENCE")
+                        .font(.system(.caption2, design: .rounded).weight(.black))
+                        .tracking(1.2)
+                        .foregroundStyle(FilmyTheme.accent)
+
+                    Text("\(publicReferenceEntry?.canonicalPublicName ?? recipe.filmBase.officialName) controls")
+                        .font(.system(.subheadline, design: .rounded).weight(.bold))
+                        .foregroundStyle(FilmyTheme.primary)
+                }
+
+                Spacer(minLength: 10)
+
+                Text("\(publicReferenceRows.count) values")
+                    .font(.system(.caption2, design: .monospaced).weight(.bold))
+                    .foregroundStyle(FilmyTheme.tertiary)
+            }
+
+            LazyVGrid(
+                columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)],
+                alignment: .leading,
+                spacing: 1
+            ) {
+                ForEach(publicReferenceRows, id: \.0) { row in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(row.0.uppercased())
+                            .font(.system(.caption2, design: .rounded).weight(.bold))
+                            .tracking(0.6)
+                            .foregroundStyle(FilmyTheme.tertiary)
+
+                        Text(row.1)
+                            .font(.system(.subheadline, design: .monospaced).weight(.bold))
+                            .foregroundStyle(FilmyTheme.primary)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.72)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                    .padding(.horizontal, 11)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("\(row.0): \(row.1)")
+                }
+            }
+
+            Text("Reference values preserve the public camera-style recipe. Filmy Camera translates them to an original iPhone rendering; they are not a pixel-identical hardware calibration.")
+                .font(.system(.caption, design: .rounded).weight(.medium))
+                .foregroundStyle(FilmyTheme.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 21, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 21, style: .continuous)
+                .stroke(FilmyTheme.line, lineWidth: 1)
+        }
+        .accessibilityIdentifier("public-reference-settings")
+    }
+
+    private func signed(_ value: Int) -> String {
+        value > 0 ? "+\(value)" : "\(value)"
+    }
+
+    private func pretty(_ value: String) -> String {
+        value.replacingOccurrences(of: "_", with: " ").capitalized
     }
 
     private var editor: some View {
