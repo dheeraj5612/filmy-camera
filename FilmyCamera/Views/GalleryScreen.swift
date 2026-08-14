@@ -143,7 +143,7 @@ struct GalleryScreen: View {
                 Spacer(minLength: 12)
                 archiveMetric(
                     title: "SOURCE",
-                    value: photoLibrary.authorizationStatus == .limited ? "LIMITED PHOTOS" : "PHOTOS"
+                    value: archiveSourceLabel
                 )
             }
         }
@@ -164,6 +164,23 @@ struct GalleryScreen: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Contact sheet")
         .accessibilityValue("\(photoLibrary.galleryAssets.count) frames")
+    }
+
+    private var archiveSourceLabel: String {
+        let assets = photoLibrary.galleryAssets
+        let hasPhotosAssets = assets.contains(where: \.isPhotosAsset)
+        let hasCachedAssets = assets.contains(where: { !$0.isPhotosAsset })
+
+        switch (hasPhotosAssets, hasCachedAssets) {
+        case (true, true):
+            return "PHOTOS + CACHE"
+        case (true, false):
+            return photoLibrary.authorizationStatus == .limited ? "LIMITED PHOTOS" : "PHOTOS"
+        case (false, true):
+            return "LOCAL CACHE"
+        case (false, false):
+            return "—"
+        }
     }
 
     private func archiveMetric(title: String, value: String) -> some View {
