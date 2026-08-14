@@ -430,6 +430,11 @@ struct RecipeDetailView: View {
                         Text(range.displayName).tag(range)
                     }
                 }
+                RecipeChoiceRow(title: "D Range Priority", selection: dRangePriorityBinding) {
+                    ForEach(FilmRecipe.DRangePriority.allCases, id: \.self) { priority in
+                        Text(priority.displayName).tag(priority)
+                    }
+                }
             }
         case .color:
             VStack(spacing: 14) {
@@ -444,8 +449,28 @@ struct RecipeDetailView: View {
                         Text(level.displayName).tag(level)
                     }
                 }
+                RecipeChoiceRow(title: "White balance", selection: whiteBalanceModeBinding) {
+                    ForEach(FilmRecipe.WhiteBalanceMode.allCases, id: \.self) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
                 RecipeSliderRow(title: "Warmth", value: binding(\.whiteBalance.temperature), range: -1...1, format: "%+.2f")
                 RecipeSliderRow(title: "Tint", value: binding(\.whiteBalance.tint), range: -1...1, format: "%+.2f")
+
+                if draft.filmBase.monochromeFilter != nil {
+                    RecipeSliderRow(
+                        title: "Monochromatic warm-cool",
+                        value: binding(\.monochromaticColor.warmCool),
+                        range: -1...1,
+                        format: "%+.2f"
+                    )
+                    RecipeSliderRow(
+                        title: "Monochromatic green-magenta",
+                        value: binding(\.monochromaticColor.greenMagenta),
+                        range: -1...1,
+                        format: "%+.2f"
+                    )
+                }
             }
         case .texture:
             VStack(spacing: 14) {
@@ -490,6 +515,24 @@ struct RecipeDetailView: View {
             get: { draft.dynamicRange },
             set: { newValue in
                 draft.dynamicRange = newValue
+            }
+        )
+    }
+
+    private var dRangePriorityBinding: Binding<FilmRecipe.DRangePriority> {
+        Binding(
+            get: { draft.dRangePriority },
+            set: { newValue in
+                draft.dRangePriority = newValue
+            }
+        )
+    }
+
+    private var whiteBalanceModeBinding: Binding<FilmRecipe.WhiteBalanceMode> {
+        Binding(
+            get: { draft.whiteBalance.mode },
+            set: { newValue in
+                draft.whiteBalance.mode = newValue
             }
         )
     }

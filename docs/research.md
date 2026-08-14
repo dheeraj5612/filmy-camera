@@ -34,10 +34,10 @@ The source snapshots were checked on 2026-08-13. Repository licenses and current
 
 ## Recipe model
 
-Fujifilm's public manuals and support material describe the controls as a combination of film simulation, highlight/shadow tone, grain, Color Chrome, Color Chrome FX Blue, white balance shift, and tone curve. Filmy Camera represents those controls as data in `FilmRecipe` and applies them as:
+Fujifilm's public manuals and support material describe the controls as a combination of film simulation, highlight/shadow tone, grain, Color Chrome, Color Chrome FX Blue, white balance, dynamic range, D Range Priority, monochromatic color, and tone curve. Filmy Camera represents those controls as data in `FilmRecipe` and applies them as:
 
 1. Exposure and tone controls.
-2. Temperature/tint white-balance shift.
+2. White-balance mode plus temperature/tint shift.
 3. A generated 3D color cube for palette/cross-channel response.
 4. Grain and vignette finishing stages.
 
@@ -53,7 +53,7 @@ The live viewfinder and still export share `CameraFrameLayout.aspectFillCrop`. C
 
 The live camera output prefers bi-planar video-range YUV buffers when AVFoundation exposes them, with a BGRA fallback for older or simulator implementations. The camera session owns a random grain phase that is passed to both the preview and capture render, keeping grain placement aligned within a session while deterministic thumbnails and tests retain the canonical zero seed.
 
-The [X-T5 image-quality menu](https://fujifilm-dsc.com/en-int/manual/x-t5/introduction/menu_list/) and [image-quality reference](https://fujifilm-dsc.com/en/manual/x-t5/menu_shooting/image_quality_setting/) are the first-party vocabulary reference for the model. They document film simulation, grain effect roughness/size, Color Chrome, Color Chrome FX Blue, dynamic range, white balance, tone curve, color, sharpness, high-ISO noise reduction, and clarity. They do not provide a transferable iPhone LUT or sensor calibration. Therefore the renderer intentionally claims a transparent, original approximation of the public controls—not identical Fujifilm hardware output.
+The [X-T5 image-quality menu](https://fujifilm-dsc.com/en-int/manual/x-t5/introduction/menu_list/) and [image-quality reference](https://fujifilm-dsc.com/en/manual/x-t5/menu_shooting/image_quality_setting/) are the first-party vocabulary reference for the model. They document film simulation, grain effect roughness/size, Color Chrome, Color Chrome FX Blue, dynamic range, D Range Priority, white balance modes, monochromatic color axes, tone curve, color, sharpness, high-ISO noise reduction, and clarity. They do not provide a transferable iPhone LUT or sensor calibration. Therefore the renderer intentionally claims a transparent, original approximation of the public controls—not identical Fujifilm hardware output.
 
 ## Calibration and licensing boundary
 
@@ -70,8 +70,9 @@ The current renderer therefore remains an original, inspectable Core Image/Metal
 The recipe model now treats the public terminology boundary as an explicit
 product contract. The first-party X-T5 manual uses the following control
 groups: Film Simulation, Grain Effect (roughness and size), Color Chrome Effect,
-Color Chrome FX Blue, White Balance, Dynamic Range, Tone Curve, Color,
-Sharpness, High ISO NR, and Clarity. It also documents ACROS and monochrome
+Color Chrome FX Blue, White Balance, Dynamic Range, D Range Priority, Tone
+Curve, Color, Sharpness, High ISO NR, and Clarity. It also documents
+monochromatic warm/cool and green/magenta axes plus ACROS and monochrome
 yellow, red, and green filter options. Filmy Camera uses those names as
 interoperable vocabulary, while its numeric values remain app-defined
 normalized parameters.
@@ -82,7 +83,7 @@ range is not presented as a Fujifilm hardware scale, and validation reports
 out-of-range drafts without rewriting them. The renderer remains defensive and
 clamps at its own output boundary.
 
-`FilmRecipe` persistence is versioned. Current records use schema version 3
+`FilmRecipe` persistence is versioned. Current records use schema version 4
 and serialize `Provenance` with the two first-party references above. The
 record states `originalParametricApproximation` and
 `notCalibratedToFujifilmHardware`; there is intentionally no exact-match,

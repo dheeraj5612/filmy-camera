@@ -50,6 +50,7 @@ The analog character comes from tone, color, grain, and halation. The interface 
 - Increased recipe-card focus, simplified the selected `LIVE` badge, and aligned the film-stock header with the recipe rail.
 - Added bounded Dynamic Type handling for decorative onboarding chrome and compact simulator fallback copy, while preserving large hit targets and existing accessibility identifiers.
 - Replaced misleading continuous sliders for Color Chrome, FX Blue, and Grain Effect with discrete `Off / Weak / Strong` choices, and exposed Fujifilm-style `Small / Large` Grain Size choices while keeping scalar persistence backward-compatible.
+- Added public `AUTO / DR100 / DR200 / DR400` dynamic-range choices, `D Range Priority`, named white-balance modes, and monochromatic warm/cool plus green/magenta axes. Older recipe records default these newly modeled fields to neutral values during migration.
 
 The revamp was built and reviewed on the iPhone 17 Pro simulator. The camera screenshot is intentionally a simulator fallback state; it proves the shell and unavailable-camera hierarchy, not physical-device camera output.
 

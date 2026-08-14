@@ -9,8 +9,9 @@ import SwiftUI
 public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     /// Version of the persisted recipe envelope. Version 1 was the implicit
     /// pre-provenance format; version 2 records provenance explicitly; version
-    /// 3 records user edits and renderer compatibility metadata.
-    public static let currentSchemaVersion = 3
+    /// 3 records user edits and renderer compatibility metadata; version 4
+    /// adds the canonical camera mode controls introduced by the fidelity pass.
+    public static let currentSchemaVersion = 4
     public static let rendererVersion = "core-image-parametric-v1"
 
     /// The product-level disclosure that accompanies every current recipe.
@@ -136,17 +137,111 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     /// capture/render intent; JPEG input cannot recover highlights that were
     /// already clipped by the source camera.
     public enum DynamicRange: Int, CaseIterable, Codable, Hashable, Sendable {
+        case auto = 0
         case dr100 = 100
         case dr200 = 200
         case dr400 = 400
 
-        public var displayName: String { "DR\(rawValue)" }
+        public var displayName: String {
+            switch self {
+            case .auto: return "AUTO"
+            case .dr100, .dr200, .dr400: return "DR\(rawValue)"
+            }
+        }
 
         var highlightProtection: Double {
             switch self {
+            case .auto: return 0.10
             case .dr100: return 0
             case .dr200: return 0.16
             case .dr400: return 0.30
+            }
+        }
+    }
+
+    /// Public D Range Priority modes. Hardware cameras use this setting to
+    /// automatically balance highlight and shadow protection; the renderer
+    /// applies a deterministic approximation because an iPhone JPEG cannot
+    /// recover clipped sensor data or inspect the camera's ISO decision.
+    public enum DRangePriority: String, CaseIterable, Codable, Hashable, Sendable {
+        case auto
+        case strong
+        case weak
+        case off
+
+        public var displayName: String {
+            switch self {
+            case .auto: return "AUTO"
+            case .strong: return "Strong"
+            case .weak: return "Weak"
+            case .off: return "Off"
+            }
+        }
+
+        var highlightProtection: Double {
+            switch self {
+            case .auto: return 0.12
+            case .strong: return 0.24
+            case .weak: return 0.12
+            case .off: return 0
+            }
+        }
+    }
+
+    /// White-balance choices exposed by current Fujifilm image-quality menus.
+    /// The app keeps a normalized manual shift alongside the mode so recipes
+    /// remain editable without pretending to own a camera's custom-metered
+    /// Kelvin value.
+    public enum WhiteBalanceMode: String, CaseIterable, Codable, Hashable, Sendable {
+        case auto
+        case whitePriority
+        case ambiencePriority
+        case daylight
+        case shade
+        case fluorescent1
+        case fluorescent2
+        case fluorescent3
+        case custom1
+        case custom2
+        case custom3
+        case colorTemperature
+
+        public var displayName: String {
+            switch self {
+            case .auto: return "AUTO"
+            case .whitePriority: return "White priority"
+            case .ambiencePriority: return "Ambience priority"
+            case .daylight: return "Daylight"
+            case .shade: return "Shade"
+            case .fluorescent1: return "Fluorescent 1"
+            case .fluorescent2: return "Fluorescent 2"
+            case .fluorescent3: return "Fluorescent 3"
+            case .custom1: return "Custom 1"
+            case .custom2: return "Custom 2"
+            case .custom3: return "Custom 3"
+            case .colorTemperature: return "Color temperature"
+            }
+        }
+
+        /// Original normalized offsets used when a mode has a stable visual
+        /// bias. AUTO and custom slots defer entirely to the editable shifts.
+        var temperatureBias: Double {
+            switch self {
+            case .ambiencePriority: return 0.04
+            case .shade: return 0.12
+            case .fluorescent1: return -0.03
+            case .fluorescent2: return -0.08
+            case .fluorescent3: return -0.12
+            default: return 0
+            }
+        }
+
+        var tintBias: Double {
+            switch self {
+            case .fluorescent1: return 0.01
+            case .fluorescent2: return 0.02
+            case .fluorescent3: return 0.03
+            default: return 0
             }
         }
     }
@@ -442,6 +537,8 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         case fxBlue
         case temperature
         case tint
+        case monochromaticWarmCool
+        case monochromaticGreenMagenta
         case sharpness
         case noiseReduction
         case clarity
@@ -469,6 +566,8 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             case .fxBlue: return "Color Chrome FX Blue"
             case .temperature: return "White balance temperature shift"
             case .tint: return "White balance tint shift"
+            case .monochromaticWarmCool: return "Monochromatic warm-cool"
+            case .monochromaticGreenMagenta: return "Monochromatic green-magenta"
             case .sharpness: return "Sharpness"
             case .noiseReduction: return "High ISO noise reduction"
             case .clarity: return "Clarity"
@@ -497,7 +596,8 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             case .colorChrome, .blueResponse, .fxBlue, .noiseReduction, .grain, .vignette, .halation:
                 return .normalizedStrength
             case .temperature, .tint, .sharpness, .clarity, .paletteRedBias, .paletteGreenBias,
-                 .paletteBlueBias, .paletteRedGreenMix, .paletteGreenBlueMix, .paletteBlueRedMix:
+                 .paletteBlueBias, .paletteRedGreenMix, .paletteGreenBlueMix, .paletteBlueRedMix,
+                 .monochromaticWarmCool, .monochromaticGreenMagenta:
                 return .normalizedOffset
             case .grainSize:
                 return .normalizedSize
@@ -515,6 +615,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             case .colorChrome: return 0.0...1.0
             case .blueResponse, .fxBlue: return -1.0...1.0
             case .temperature, .tint: return -1.0...1.0
+            case .monochromaticWarmCool, .monochromaticGreenMagenta: return -1.0...1.0
             case .sharpness, .clarity: return -1.0...1.0
             case .noiseReduction: return 0.0...1.0
             case .grain: return 0.0...1.0
@@ -547,6 +648,10 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
                 return "Normalized white-balance temperature shift; positive values warm the image."
             case .tint:
                 return "Normalized white-balance tint shift; positive values move toward magenta."
+            case .monochromaticWarmCool:
+                return "Normalized ACROS or MONOCHROME warm-to-cool color axis."
+            case .monochromaticGreenMagenta:
+                return "Normalized ACROS or MONOCHROME green-to-magenta color axis."
             case .sharpness:
                 return "Signed normalized edge-definition adjustment."
             case .noiseReduction:
@@ -582,6 +687,8 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             case .fxBlue: return recipe.fxBlue
             case .temperature: return recipe.whiteBalance.temperature
             case .tint: return recipe.whiteBalance.tint
+            case .monochromaticWarmCool: return recipe.monochromaticColor.warmCool
+            case .monochromaticGreenMagenta: return recipe.monochromaticColor.greenMagenta
             case .sharpness: return recipe.sharpness
             case .noiseReduction: return recipe.noiseReduction
             case .clarity: return recipe.clarity
@@ -687,15 +794,48 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         }
     }
 
+    /// Fujifilm's monochromatic color axes are represented as normalized
+    /// warm/cool and green/magenta shifts. They only affect monochrome bases;
+    /// keeping them in the recipe makes the control contract explicit rather
+    /// than silently dropping the setting from an edited look.
+    public struct MonochromaticColor: Codable, Hashable, Sendable {
+        public var warmCool: Double
+        public var greenMagenta: Double
+
+        public init(warmCool: Double = 0, greenMagenta: Double = 0) {
+            self.warmCool = warmCool
+            self.greenMagenta = greenMagenta
+        }
+    }
+
     public struct WhiteBalanceShift: Codable, Hashable, Sendable {
+        public var mode: WhiteBalanceMode
         /// A normalized temperature shift. Positive values warm the image.
         public var temperature: Double
         /// A normalized tint shift. Positive values move toward magenta.
         public var tint: Double
 
-        public init(temperature: Double = 0, tint: Double = 0) {
+        public init(
+            temperature: Double = 0,
+            tint: Double = 0,
+            mode: WhiteBalanceMode = .auto
+        ) {
+            self.mode = mode
             self.temperature = temperature
             self.tint = tint
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case mode
+            case temperature
+            case tint
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            mode = try container.decodeIfPresent(WhiteBalanceMode.self, forKey: .mode) ?? .auto
+            temperature = try container.decodeIfPresent(Double.self, forKey: .temperature) ?? 0
+            tint = try container.decodeIfPresent(Double.self, forKey: .tint) ?? 0
         }
     }
 
@@ -710,7 +850,9 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     public var saturation: Double
     public var contrast: Double
     public var dynamicRange: DynamicRange
+    public var dRangePriority: DRangePriority
     public var whiteBalance: WhiteBalanceShift
+    public var monochromaticColor: MonochromaticColor
     public var colorChrome: Double
     public var colorChromeLevel: ColorChromeLevel {
         get { ColorChromeLevel(scalarValue: colorChrome) }
@@ -749,7 +891,9 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         saturation: Double = 1,
         contrast: Double = 1,
         dynamicRange: DynamicRange = .dr100,
+        dRangePriority: DRangePriority = .off,
         whiteBalance: WhiteBalanceShift = WhiteBalanceShift(),
+        monochromaticColor: MonochromaticColor = MonochromaticColor(),
         colorChrome: Double = 0,
         blueResponse: Double = 0,
         fxBlue: Double = 0,
@@ -773,7 +917,9 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         self.saturation = saturation
         self.contrast = contrast
         self.dynamicRange = dynamicRange
+        self.dRangePriority = dRangePriority
         self.whiteBalance = whiteBalance
+        self.monochromaticColor = monochromaticColor
         self.colorChrome = colorChrome
         self.blueResponse = blueResponse
         self.fxBlue = fxBlue
@@ -810,7 +956,9 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         saturation = source.saturation
         contrast = source.contrast
         dynamicRange = source.dynamicRange
+        dRangePriority = source.dRangePriority
         whiteBalance = source.whiteBalance
+        monochromaticColor = source.monochromaticColor
         colorChrome = source.colorChrome
         blueResponse = source.blueResponse
         fxBlue = source.fxBlue
@@ -836,7 +984,9 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         case saturation
         case contrast
         case dynamicRange
+        case dRangePriority
         case whiteBalance
+        case monochromaticColor
         case colorChrome
         case blueResponse
         case fxBlue
@@ -867,7 +1017,9 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         saturation = try container.decode(Double.self, forKey: .saturation)
         contrast = try container.decode(Double.self, forKey: .contrast)
         dynamicRange = try container.decode(DynamicRange.self, forKey: .dynamicRange)
+        dRangePriority = try container.decodeIfPresent(DRangePriority.self, forKey: .dRangePriority) ?? .off
         whiteBalance = try container.decode(WhiteBalanceShift.self, forKey: .whiteBalance)
+        monochromaticColor = try container.decodeIfPresent(MonochromaticColor.self, forKey: .monochromaticColor) ?? MonochromaticColor()
         colorChrome = try container.decode(Double.self, forKey: .colorChrome)
         blueResponse = try container.decode(Double.self, forKey: .blueResponse)
         fxBlue = try container.decode(Double.self, forKey: .fxBlue)
@@ -894,7 +1046,9 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         try container.encode(saturation, forKey: .saturation)
         try container.encode(contrast, forKey: .contrast)
         try container.encode(dynamicRange, forKey: .dynamicRange)
+        try container.encode(dRangePriority, forKey: .dRangePriority)
         try container.encode(whiteBalance, forKey: .whiteBalance)
+        try container.encode(monochromaticColor, forKey: .monochromaticColor)
         try container.encode(colorChrome, forKey: .colorChrome)
         try container.encode(blueResponse, forKey: .blueResponse)
         try container.encode(fxBlue, forKey: .fxBlue)

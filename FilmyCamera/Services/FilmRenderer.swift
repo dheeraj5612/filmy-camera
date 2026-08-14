@@ -297,7 +297,12 @@ public final class FilmRenderer {
         safe.contrast = value(recipe.contrast, .contrast, neutral: 1)
         safe.whiteBalance = FilmRecipe.WhiteBalanceShift(
             temperature: value(recipe.whiteBalance.temperature, .temperature, neutral: 0),
-            tint: value(recipe.whiteBalance.tint, .tint, neutral: 0)
+            tint: value(recipe.whiteBalance.tint, .tint, neutral: 0),
+            mode: recipe.whiteBalance.mode
+        )
+        safe.monochromaticColor = FilmRecipe.MonochromaticColor(
+            warmCool: value(recipe.monochromaticColor.warmCool, .monochromaticWarmCool, neutral: 0),
+            greenMagenta: value(recipe.monochromaticColor.greenMagenta, .monochromaticGreenMagenta, neutral: 0)
         )
         safe.colorChrome = value(recipe.colorChrome, .colorChrome, neutral: 0)
         safe.blueResponse = value(recipe.blueResponse, .blueResponse, neutral: 0)
@@ -422,7 +427,10 @@ public final class FilmRenderer {
         to image: CIImage,
         recipe: FilmRecipe
     ) -> CIImage {
-        let amount = recipe.dynamicRange.highlightProtection
+        let amount = max(
+            recipe.dynamicRange.highlightProtection,
+            recipe.dRangePriority.highlightProtection
+        )
         guard amount > 0.0001,
               let filter = CIFilter(name: "CIHighlightShadowAdjust") else {
             return image
@@ -442,7 +450,9 @@ public final class FilmRenderer {
         to image: CIImage,
         recipe: FilmRecipe
     ) -> CIImage {
-        guard abs(recipe.temperatureShift) > 0.0001 || abs(recipe.tintShift) > 0.0001,
+        let temperatureShift = recipe.temperatureShift + recipe.whiteBalance.mode.temperatureBias
+        let tintShift = recipe.tintShift + recipe.whiteBalance.mode.tintBias
+        guard abs(temperatureShift) > 0.0001 || abs(tintShift) > 0.0001,
               let filter = CIFilter(name: "CITemperatureAndTint") else {
             return image
         }
@@ -452,8 +462,8 @@ public final class FilmRenderer {
         // Core Image's tint axis is positive toward green; the recipe model
         // follows camera terminology where positive tint means magenta.
         let target = CIVector(
-            x: 6500 - clamp(recipe.temperatureShift, lower: -1, upper: 1) * 1800,
-            y: -clamp(recipe.tintShift, lower: -1, upper: 1) * 120
+            x: 6500 - clamp(temperatureShift, lower: -1, upper: 1) * 1800,
+            y: -clamp(tintShift, lower: -1, upper: 1) * 120
         )
         filter.setValue(image, forKey: kCIInputImageKey)
         filter.setValue(immutableResources.neutralWhiteBalance, forKey: "inputNeutral")
@@ -471,10 +481,18 @@ public final class FilmRenderer {
         }
 
         let weights = monochromeFilter.channelWeights
+        let warmCool = clamp(recipe.monochromaticColor.warmCool, lower: -1, upper: 1)
+        let greenMagenta = clamp(recipe.monochromaticColor.greenMagenta, lower: -1, upper: 1)
+        let adjustedWeights = (
+            red: weights.red + warmCool * 0.10 + greenMagenta * 0.05,
+            green: weights.green - greenMagenta * 0.04,
+            blue: weights.blue - warmCool * 0.10 - greenMagenta * 0.01
+        )
+        let total = max(adjustedWeights.red + adjustedWeights.green + adjustedWeights.blue, 0.001)
         let vector = CIVector(
-            x: weights.red,
-            y: weights.green,
-            z: weights.blue,
+            x: adjustedWeights.red / total,
+            y: adjustedWeights.green / total,
+            z: adjustedWeights.blue / total,
             w: 0
         )
         filter.setValue(image, forKey: kCIInputImageKey)

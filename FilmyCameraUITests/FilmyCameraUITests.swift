@@ -44,6 +44,10 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertTrue(fxBlue.waitForExistence(timeout: 5), "FX Blue control should be discoverable")
         let colorChrome = app.descendants(matching: .any)["recipe-choice-Color Chrome"]
         XCTAssertTrue(colorChrome.waitForExistence(timeout: 5), "Color Chrome control should be discoverable")
+        let dRangePriority = app.descendants(matching: .any)["recipe-choice-D Range Priority"]
+        XCTAssertTrue(dRangePriority.waitForExistence(timeout: 5), "D Range Priority should be discoverable")
+        let whiteBalance = app.descendants(matching: .any)["recipe-choice-White balance"]
+        XCTAssertTrue(whiteBalance.waitForExistence(timeout: 5), "White balance mode should be discoverable")
         XCTAssertFalse(app.buttons["Decrease exposure compensation"].exists)
         XCTAssertFalse(app.buttons["Increase exposure compensation"].exists)
         attachScreenshot(named: "recipe-details")

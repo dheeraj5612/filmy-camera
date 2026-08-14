@@ -98,6 +98,8 @@ final class RecipeInvariantsTests: XCTestCase {
                 Double(recipe.dynamicRange.rawValue),
                 recipe.whiteBalance.temperature,
                 recipe.whiteBalance.tint,
+                recipe.monochromaticColor.warmCool,
+                recipe.monochromaticColor.greenMagenta,
                 recipe.colorChrome,
                 recipe.blueResponse,
                 recipe.fxBlue,
@@ -212,6 +214,59 @@ final class RecipeInvariantsTests: XCTestCase {
         let decoded = try JSONDecoder().decode(FilmRecipe.self, from: JSONEncoder().encode(recipe))
         XCTAssertEqual(decoded.fxBlue, 0.5)
         XCTAssertEqual(decoded.fxBlueLevel, .weak)
+    }
+
+    func testCanonicalCameraModeContractsExposePublicOptionSets() throws {
+        XCTAssertEqual(
+            FilmRecipe.DynamicRange.allCases.map(\.displayName),
+            ["AUTO", "DR100", "DR200", "DR400"]
+        )
+        XCTAssertEqual(
+            FilmRecipe.DRangePriority.allCases.map(\.displayName),
+            ["AUTO", "Strong", "Weak", "Off"]
+        )
+        XCTAssertTrue(FilmRecipe.WhiteBalanceMode.allCases.contains(.ambiencePriority))
+        XCTAssertTrue(FilmRecipe.WhiteBalanceMode.allCases.contains(.colorTemperature))
+
+        var recipe = FilmRecipe.builtIns.first(where: { $0.filmBase == .acros })!
+        recipe.dynamicRange = .auto
+        recipe.dRangePriority = .strong
+        recipe.whiteBalance.mode = .shade
+        recipe.monochromaticColor = FilmRecipe.MonochromaticColor(
+            warmCool: 0.4,
+            greenMagenta: -0.3
+        )
+
+        let decoded = try JSONDecoder().decode(
+            FilmRecipe.self,
+            from: JSONEncoder().encode(recipe)
+        )
+        XCTAssertEqual(decoded.dynamicRange, .auto)
+        XCTAssertEqual(decoded.dRangePriority, .strong)
+        XCTAssertEqual(decoded.whiteBalance.mode, .shade)
+        XCTAssertEqual(decoded.monochromaticColor, recipe.monochromaticColor)
+    }
+
+    func testPreV4RecipeDefaultsNewCameraModesWithoutBreakingMigration() throws {
+        let original = FilmRecipe.builtIns[0]
+        let encoded = try JSONEncoder().encode(original)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object["schemaVersion"] = 3
+        object.removeValue(forKey: "dRangePriority")
+        object.removeValue(forKey: "monochromaticColor")
+        let oldWhiteBalance = try XCTUnwrap(object["whiteBalance"] as? [String: Any])
+        object["whiteBalance"] = [
+            "temperature": oldWhiteBalance["temperature"] as Any,
+            "tint": oldWhiteBalance["tint"] as Any
+        ]
+
+        let decoded = try JSONDecoder().decode(
+            FilmRecipe.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+        XCTAssertEqual(decoded.dRangePriority, .off)
+        XCTAssertEqual(decoded.whiteBalance.mode, .auto)
+        XCTAssertEqual(decoded.monochromaticColor, .init())
     }
 
     func testColorChromeAndGrainUsePublicDiscreteControlBridges() throws {
