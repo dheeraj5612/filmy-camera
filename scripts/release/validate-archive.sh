@@ -109,7 +109,11 @@ profile_team_id="${application_identifier%%.*}"
 profile_bundle_id="${application_identifier#*.}"
 profile_get_task_allow="$(profile_value get-task-allow)"
 profile_expiration="$(/usr/libexec/PlistBuddy -c 'Print :ExpirationDate' "${profile_plist}" 2>/dev/null || true)"
-profile_expiration_epoch="$(date -j -f '%Y-%m-%d %H:%M:%S %z' "${profile_expiration}" '+%s' 2>/dev/null || true)"
+profile_expiration_epoch="$(
+  date -j -f '%Y-%m-%d %H:%M:%S %z' "${profile_expiration}" '+%s' 2>/dev/null \
+    || date -j -f '%Y-%m-%dT%H:%M:%SZ' "${profile_expiration}" '+%s' 2>/dev/null \
+    || true
+)"
 
 [[ "${profile_bundle_id}" == "${bundle_id}" ]] || {
   echo "Provisioning profile bundle identifier does not match app: ${profile_bundle_id}" >&2

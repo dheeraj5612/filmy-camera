@@ -141,10 +141,11 @@ validate_asc_credentials() {
     echo "FILMY_ASC_KEY_PATH must be owned by the current user" >&2
     exit 64
   }
-  command -v openssl >/dev/null 2>&1 && openssl pkey -in "${canonical_key_path}" -noout -passin pass: >/dev/null 2>&1 || {
+  if ! command -v openssl >/dev/null 2>&1 \
+    || ! openssl pkey -in "${canonical_key_path}" -noout -passin pass: >/dev/null 2>&1; then
     echo "FILMY_ASC_KEY_PATH must be a readable unencrypted private key" >&2
     exit 64
-  }
+  fi
 
   asc_key_path="${canonical_key_path}"
 }
