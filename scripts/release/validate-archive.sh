@@ -10,11 +10,36 @@ fi
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root_dir="$(cd "${script_dir}/../.." && pwd)"
 project_spec="${root_dir}/project.yml"
+expected_team="$(sed -n 's/^[[:space:]]*DEVELOPMENT_TEAM:[[:space:]]*\([^[:space:]]*\)[[:space:]]*$/\1/p' "${project_spec}" | head -n 1)"
+source_sha_path=""
+source_revision=""
 
 if [[ ! -d "${archive_path}" ]]; then
   echo "Archive not found: ${archive_path}" >&2
   exit 1
 fi
+
+source_revision="$(git -C "${root_dir}" rev-parse --verify HEAD 2>/dev/null)" || {
+  echo "Unable to determine the current source revision" >&2
+  exit 1
+}
+
+[[ -z "$(git -C "${root_dir}" status --porcelain --untracked-files=all)" ]] || {
+  echo "Archive validation requires a clean source checkout" >&2
+  exit 1
+}
+
+source_sha_path="${archive_path}/FilmyCamera.source-sha"
+[[ -f "${source_sha_path}" ]] || {
+  echo "Archive has no source revision provenance" >&2
+  exit 1
+}
+
+archive_source_revision="$(<"${source_sha_path}")"
+[[ "${archive_source_revision}" == "${source_revision}" ]] || {
+  echo "Archive source revision does not match the current checkout" >&2
+  exit 1
+}
 
 app_path="${archive_path}/Products/Applications/FilmyCamera.app"
 info_plist="${app_path}/Info.plist"
@@ -84,7 +109,12 @@ profile_team_id="${application_identifier%%.*}"
 profile_bundle_id="${application_identifier#*.}"
 profile_get_task_allow="$(profile_value get-task-allow)"
 profile_expiration="$(/usr/libexec/PlistBuddy -c 'Print :ExpirationDate' "${profile_plist}" 2>/dev/null || true)"
-profile_expiration_epoch="$(date -j -f '%Y-%m-%d %H:%M:%S %z' "${profile_expiration}" '+%s' 2>/dev/null || true)"
+profile_expiration_epoch="$(
+  date -j -f '%Y-%m-%d %H:%M:%S %z' "${profile_expiration}" '+%s' 2>/dev/null \
+    || date -j -f '%Y-%m-%dT%H:%M:%SZ' "${profile_expiration}" '+%s' 2>/dev/null \
+    || date -j -f '%a %b %d %H:%M:%S %Z %Y' "${profile_expiration}" '+%s' 2>/dev/null \
+    || true
+)"
 
 [[ "${profile_bundle_id}" == "${bundle_id}" ]] || {
   echo "Provisioning profile bundle identifier does not match app: ${profile_bundle_id}" >&2
@@ -96,8 +126,8 @@ profile_expiration_epoch="$(date -j -f '%Y-%m-%d %H:%M:%S %z' "${profile_expirat
   exit 1
 }
 
-[[ "${profile_team_id}" == "AQW5C8DEEG" ]] || {
-  echo "Provisioning profile belongs to an unexpected team: ${profile_team_id}" >&2
+[[ -n "${expected_team}" && "${profile_team_id}" == "${expected_team}" ]] || {
+  echo "Provisioning profile belongs to an unexpected team: ${profile_team_id} (expected ${expected_team:-unknown})" >&2
   exit 1
 }
 
@@ -105,6 +135,11 @@ profile_expiration_epoch="$(date -j -f '%Y-%m-%d %H:%M:%S %z' "${profile_expirat
   echo "Distribution archive must disable get-task-allow" >&2
   exit 1
 }
+
+if /usr/libexec/PlistBuddy -c 'Print :ProvisionedDevices' "${profile_plist}" >/dev/null 2>&1; then
+  echo "App Store distribution archive must not contain ProvisionedDevices" >&2
+  exit 1
+fi
 
 [[ -n "${profile_expiration_epoch}" && "${profile_expiration_epoch}" -gt "$(date '+%s')" ]] || {
   echo "Embedded provisioning profile is expired or has an unreadable expiration date" >&2

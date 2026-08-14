@@ -20,6 +20,7 @@ final class FilmyCameraUITests: XCTestCase {
         assertMinimumHitTarget(cameraTab, named: "Camera tab")
         XCTAssertTrue(app.staticTexts["FILMY CAMERA"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["Natural Standard"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["CURRENT LOOK"].waitForExistence(timeout: 5))
 
         let classicChrome = app.buttons.matching(
             NSPredicate(format: "label BEGINSWITH 'Muted Color'")
@@ -40,10 +41,111 @@ final class FilmyCameraUITests: XCTestCase {
 
         let exposure = app.descendants(matching: .any)["exposure-control"]
         assertMinimumAccessibilityFrame(exposure, named: "Exposure control")
+        let fxBlue = app.descendants(matching: .any)["fx-blue-control"]
+        XCTAssertTrue(fxBlue.waitForExistence(timeout: 5), "FX Blue control should be discoverable")
+        let colorChrome = app.descendants(matching: .any)["recipe-choice-Color Chrome"]
+        XCTAssertTrue(colorChrome.waitForExistence(timeout: 5), "Color Chrome control should be discoverable")
+        let dRangePriority = app.descendants(matching: .any)["recipe-choice-D Range Priority"]
+        XCTAssertTrue(dRangePriority.waitForExistence(timeout: 5), "D Range Priority should be discoverable")
+        let whiteBalance = app.descendants(matching: .any)["recipe-choice-White balance"]
+        XCTAssertTrue(whiteBalance.waitForExistence(timeout: 5), "White balance mode should be discoverable")
         XCTAssertFalse(app.buttons["Decrease exposure compensation"].exists)
         XCTAssertFalse(app.buttons["Increase exposure compensation"].exists)
+
+        let referenceCard = app.descendants(matching: .any)["public-reference-settings"]
+        scrollToHittable(referenceCard, in: app)
+        XCTAssertTrue(
+            app.staticTexts["PUBLIC REFERENCE"].waitForExistence(timeout: 5),
+            "Recipe details should expose the public reference settings"
+        )
+        XCTAssertTrue(app.staticTexts["DR200"].exists)
         attachScreenshot(named: "recipe-details")
     }
+
+    #if targetEnvironment(simulator)
+    func testSimulatorFallbackExposesReadableStateWithoutPreviewAction() throws {
+        XCTAssertTrue(app.staticTexts["Preview mode"].waitForExistence(timeout: 8))
+        XCTAssertTrue(
+            app.staticTexts["Shoot this look on an iPhone."].waitForExistence(timeout: 5)
+        )
+
+        let cameraPreview = app.descendants(matching: .any)["camera-preview"]
+        XCTAssertFalse(
+            cameraPreview.isHittable,
+            "The unavailable camera preview must not remain an actionable target"
+        )
+    }
+
+    func testAccessibilitySizeCameraShellKeepsRecipeControlsReachable() throws {
+        let accessibilityApp = MainActor.assumeIsolated {
+            let accessibilityApp = XCUIApplication()
+            accessibilityApp.launchArguments = [
+                "-ui-testing",
+                "-UIPreferredContentSizeCategoryName",
+                "UICTContentSizeCategoryAccessibilityXXXL"
+            ]
+            accessibilityApp.launch()
+            return accessibilityApp
+        }
+        defer { accessibilityApp.terminate() }
+
+        XCTAssertTrue(accessibilityApp.staticTexts["FILM STOCK"].waitForExistence(timeout: 8))
+
+        let roll = accessibilityApp.buttons["Open roll"]
+        assertMinimumHitTarget(roll, named: "Accessibility-size Roll")
+
+        let cameraTab = accessibilityApp.buttons["camera-tab"]
+        assertMinimumHitTarget(cameraTab, named: "Accessibility-size Camera tab")
+        XCTAssertLessThan(
+            roll.frame.maxY,
+            cameraTab.frame.minY,
+            "Accessibility-size camera actions must remain above the tab bar"
+        )
+
+        let tune = accessibilityApp.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH 'Tune '")
+        ).firstMatch
+        assertMinimumHitTarget(tune, named: "Accessibility-size Tune")
+
+        let captureNotice = accessibilityApp.staticTexts[
+            "Capture is available on a physical iPhone"
+        ]
+        XCTAssertTrue(captureNotice.waitForExistence(timeout: 5))
+        attachScreenshot(named: "accessibility-camera-shell")
+    }
+
+    func testViewfinderFirstChromePreviewKeepsCameraQuiet() throws {
+        let previewApp = MainActor.assumeIsolated {
+            let previewApp = XCUIApplication()
+            previewApp.launchArguments = [
+                "-ui-testing",
+                "-ui-testing-viewfinder-chrome"
+            ]
+            previewApp.launch()
+            return previewApp
+        }
+        defer { previewApp.terminate() }
+
+        XCTAssertTrue(previewApp.staticTexts["CURRENT LOOK"].waitForExistence(timeout: 8))
+
+        let roll = previewApp.buttons["Open roll"]
+        assertMinimumHitTarget(roll, named: "Viewfinder preview Roll")
+
+        let controlsToggle = previewApp.buttons["Show camera controls"]
+        assertMinimumHitTarget(controlsToggle, named: "Viewfinder preview controls toggle")
+
+        let capture = previewApp.buttons["Capture unavailable in Preview mode"]
+        XCTAssertTrue(capture.waitForExistence(timeout: 5))
+        XCTAssertFalse(capture.isEnabled, "Simulator preview must not expose a fake capture action")
+        XCTAssertGreaterThanOrEqual(capture.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(capture.frame.height, 44)
+
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "viewfinder-first-chrome-preview"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+    #endif
 
     func testGalleryAndSettingsNavigation() throws {
         let gallery = app.buttons["roll-tab"]
@@ -76,6 +178,10 @@ final class FilmyCameraUITests: XCTestCase {
         let photosPermission = app.buttons["photos-permission-settings"]
         scrollBackToHittable(photosPermission, in: app)
         assertMinimumHitTarget(photosPermission, named: "Photos permission settings")
+
+        let photosSavePermission = app.buttons["photos-save-permission-settings"]
+        scrollBackToHittable(photosSavePermission, in: app)
+        assertMinimumHitTarget(photosSavePermission, named: "Photos save permission settings")
 
         let clearCache = app.buttons["clear-local-cache"]
         XCTAssertTrue(clearCache.waitForExistence(timeout: 5))

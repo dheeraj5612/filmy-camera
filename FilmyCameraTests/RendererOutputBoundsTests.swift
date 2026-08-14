@@ -344,6 +344,37 @@ final class RendererOutputBoundsTests: XCTestCase {
         XCTAssertLessThan(dr400Pixels[0], dr200Pixels[0])
     }
 
+    func testDRangePriorityAddsDeterministicHighlightProtection() {
+        let extent = CGRect(x: 0, y: 0, width: 4, height: 4)
+        let input = CIImage(color: CIColor(red: 0.96, green: 0.96, blue: 0.96, alpha: 1))
+            .cropped(to: extent)
+        let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+        let base = FilmRecipe(
+            id: "test-drp",
+            name: "D Range Priority",
+            subtitle: "Test",
+            dynamicRange: .dr100,
+            grain: 0,
+            vignette: 0,
+            halation: 0
+        )
+        var strong = base
+        strong.dRangePriority = .strong
+
+        let basePixels = renderFloatPixels(
+            FilmRenderer.render(input, recipe: base, quality: .photo),
+            extent: extent,
+            context: context
+        )
+        let strongPixels = renderFloatPixels(
+            FilmRenderer.render(input, recipe: strong, quality: .photo),
+            extent: extent,
+            context: context
+        )
+
+        XCTAssertLessThan(strongPixels[0], basePixels[0])
+    }
+
     func testMonochromeFiltersUseDistinctChannelMixes() {
         let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
         let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
@@ -380,6 +411,104 @@ final class RendererOutputBoundsTests: XCTestCase {
             zip(values[1], values[2]).map { abs(Double($0.0) - Double($0.1)) }.reduce(0, +)
         ]
         XCTAssertTrue(distances.allSatisfy { $0 > 0.005 })
+    }
+
+    func testMonochromaticWarmCoolAxisMovesTintInDeclaredDirectionAcrossBases() {
+        let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
+        let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+        let source = CIImage(color: CIColor(red: 0.76, green: 0.25, blue: 0.12, alpha: 1))
+            .cropped(to: extent)
+        let bases: [FilmRecipe.FilmBase] = [.acros, .monochrome, .sepia]
+
+        for filmBase in bases {
+            let base = FilmRecipe(
+                id: "mono-warm-cool-\(filmBase.rawValue)",
+                name: filmBase.displayName,
+                subtitle: "Test",
+                filmBase: filmBase,
+                saturation: 0,
+                grain: 0,
+                vignette: 0,
+                halation: 0,
+                palette: FilmRecipe.Palette(saturation: 0)
+            )
+            var neutral = base
+            neutral.monochromaticColor = .init()
+            var warm = base
+            warm.monochromaticColor.warmCool = 1
+            var cool = base
+            cool.monochromaticColor.warmCool = -1
+
+            func redBlueBias(_ recipe: FilmRecipe) -> Double {
+                let pixel = renderFloatPixels(
+                    FilmRenderer.render(source, recipe: recipe, quality: .photo),
+                    extent: extent,
+                    context: context
+                )
+                return Double(pixel[0]) - Double(pixel[2])
+            }
+
+            let neutralBias = redBlueBias(neutral)
+            XCTAssertGreaterThan(
+                redBlueBias(warm),
+                neutralBias + 0.01,
+                "Positive warm-cool axis was not warmer for \(filmBase.rawValue)"
+            )
+            XCTAssertLessThan(
+                redBlueBias(cool),
+                neutralBias - 0.01,
+                "Negative warm-cool axis was not cooler for \(filmBase.rawValue)"
+            )
+        }
+    }
+
+    func testMonochromaticGreenMagentaAxisMovesTintInDeclaredDirectionAcrossBases() {
+        let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
+        let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+        let source = CIImage(color: CIColor(red: 0.76, green: 0.25, blue: 0.12, alpha: 1))
+            .cropped(to: extent)
+        let bases: [FilmRecipe.FilmBase] = [.acros, .monochrome, .sepia]
+
+        for filmBase in bases {
+            let base = FilmRecipe(
+                id: "mono-green-magenta-\(filmBase.rawValue)",
+                name: filmBase.displayName,
+                subtitle: "Test",
+                filmBase: filmBase,
+                saturation: 0,
+                grain: 0,
+                vignette: 0,
+                halation: 0,
+                palette: FilmRecipe.Palette(saturation: 0)
+            )
+            var neutral = base
+            neutral.monochromaticColor = .init()
+            var magenta = base
+            magenta.monochromaticColor.greenMagenta = 1
+            var green = base
+            green.monochromaticColor.greenMagenta = -1
+
+            func magentaBias(_ recipe: FilmRecipe) -> Double {
+                let pixel = renderFloatPixels(
+                    FilmRenderer.render(source, recipe: recipe, quality: .photo),
+                    extent: extent,
+                    context: context
+                )
+                return (Double(pixel[0]) + Double(pixel[2])) * 0.5 - Double(pixel[1])
+            }
+
+            let neutralBias = magentaBias(neutral)
+            XCTAssertGreaterThan(
+                magentaBias(magenta),
+                neutralBias + 0.01,
+                "Positive green-magenta axis was not more magenta for \(filmBase.rawValue)"
+            )
+            XCTAssertLessThan(
+                magentaBias(green),
+                neutralBias - 0.01,
+                "Negative green-magenta axis was not greener for \(filmBase.rawValue)"
+            )
+        }
     }
 
     func testGrainIsStableAcrossRepeatedRenders() {
@@ -477,6 +606,32 @@ final class RendererOutputBoundsTests: XCTestCase {
         XCTAssertGreaterThan(blueDistance, warmDistance + 0.001)
     }
 
+    func testLegacyNegativeFXBlueRendersAsOff() {
+        let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
+        let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+        let input = CIImage(color: CIColor(red: 0.08, green: 0.18, blue: 0.90, alpha: 1)).cropped(to: extent)
+        var off = FilmRecipe.builtIns[0]
+        off.fxBlue = 0
+        var legacy = off
+        legacy.fxBlue = -1
+
+        let offPixels = renderFloatPixels(
+            FilmRenderer.render(input, recipe: off, quality: .photo),
+            extent: extent,
+            context: context
+        )
+        let legacyPixels = renderFloatPixels(
+            FilmRenderer.render(input, recipe: legacy, quality: .photo),
+            extent: extent,
+            context: context
+        )
+
+        let difference = zip(offPixels, legacyPixels)
+            .map { abs(Double($0.0) - Double($0.1)) }
+            .reduce(0, +)
+        XCTAssertLessThan(difference, 0.0001)
+    }
+
     func testPositiveToneValuesHardenTheCorrespondingCurveRegions() {
         let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
         let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
@@ -552,6 +707,34 @@ final class RendererOutputBoundsTests: XCTestCase {
             Double(magentaPixel[0]) - Double(magentaPixel[1]),
             Double(greenPixel[0]) - Double(greenPixel[1])
         )
+    }
+
+    func testPersistedKelvinWhiteBalanceChangesRenderedOutput() {
+        let extent = CGRect(x: 0, y: 0, width: 2, height: 2)
+        let input = CIImage(color: CIColor(red: 0.56, green: 0.42, blue: 0.30, alpha: 1))
+            .cropped(to: extent)
+        let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+        var warm = FilmRecipe.builtIns[0]
+        warm.whiteBalance.mode = .colorTemperature
+        warm.whiteBalance.kelvin = 2500
+        var cool = warm
+        cool.whiteBalance.kelvin = 10000
+
+        let warmPixels = renderFloatPixels(
+            FilmRenderer.render(input, recipe: warm, quality: .photo),
+            extent: extent,
+            context: context
+        )
+        let coolPixels = renderFloatPixels(
+            FilmRenderer.render(input, recipe: cool, quality: .photo),
+            extent: extent,
+            context: context
+        )
+
+        let distance = zip(warmPixels, coolPixels)
+            .map { abs(Double($0.0) - Double($0.1)) }
+            .reduce(0, +)
+        XCTAssertGreaterThan(distance, 0.001)
     }
 
     func testNegativeClarityUsesBlurBlendAndPositiveClarityRemainsActiveAtMultipleSizes() {
@@ -791,6 +974,49 @@ final class RendererOutputBoundsTests: XCTestCase {
                 meanAbsoluteDifference,
                 0.035,
                 "Quality tier changed the look too much"
+            )
+        }
+    }
+
+    func testPreviewPhotoAndExportUseIdenticalPixelsForFixedRecipePhase() {
+        let extent = CGRect(x: 0, y: 0, width: 64, height: 48)
+        let input = resolutionFixture(size: extent.size)
+        var recipe = FilmRecipe.builtIns[7]
+        recipe.exposure = 0.35
+        recipe.clarity = -0.42
+        recipe.grain = 0.58
+        recipe.grainSize = 1.25
+        recipe.vignette = 0.44
+        recipe.halation = 0.52
+        let phase = CGPoint(x: 173.5, y: 61.25)
+        let context = CIContext(options: [
+            .useSoftwareRenderer: true,
+            .cacheIntermediates: false
+        ])
+
+        let outputs = [FilmRenderer.Quality.preview, .photo, .export].map { quality in
+            renderFloatPixels(
+                FilmRenderer.render(
+                    input,
+                    recipe: recipe,
+                    quality: quality,
+                    grainSeed: 0x1234,
+                    grainPhase: phase
+                ),
+                extent: extent,
+                context: context
+            )
+        }
+
+        guard let reference = outputs.first else {
+            return XCTFail("Expected renderer output for the preview quality")
+        }
+        for (index, output) in outputs.dropFirst().enumerated() {
+            XCTAssertEqual(output.count, reference.count)
+            XCTAssertLessThan(
+                meanAbsoluteRGBDifference(reference, output),
+                0.0001,
+                "Quality tier \(index + 1) changed the recipe pixels"
             )
         }
     }

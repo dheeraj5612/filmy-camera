@@ -346,6 +346,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private var sessionAvailability: Availability = .idle
     private var pendingPhotoCompletion: PhotoCompletion?
     private var pendingPhotoCapturedAt: Date?
+    private var pendingPhotoUniqueID: Int64?
     private var configuredPhotoDimensions = CMVideoDimensions(width: 0, height: 0)
     private var focusExposureLocked = false
     private var requestedCameraPosition: CameraPosition = .back
@@ -420,6 +421,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             pendingCompletion = self.pendingPhotoCompletion
             self.pendingPhotoCompletion = nil
             self.pendingPhotoCapturedAt = nil
+            self.pendingPhotoUniqueID = nil
             self.pendingPhotoFlashFallback = false
         }
         if DispatchQueue.getSpecific(key: sessionQueueKey) == nil {
@@ -1854,9 +1856,6 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             effectiveFlashMode = .off
         }
 
-        pendingPhotoCompletion = completion
-        pendingPhotoCapturedAt = Date()
-        pendingPhotoFlashFallback = requestedFlashMode != .off && effectiveFlashMode == .off
         let settings = AVCapturePhotoSettings()
         switch effectiveFlashMode {
         case .off:
@@ -1870,14 +1869,29 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         if configuredPhotoDimensions.width > 0, configuredPhotoDimensions.height > 0 {
             settings.maxPhotoDimensions = configuredPhotoDimensions
         }
+        pendingPhotoCompletion = completion
+        pendingPhotoCapturedAt = Date()
+        pendingPhotoUniqueID = settings.uniqueID
+        pendingPhotoFlashFallback = requestedFlashMode != .off && effectiveFlashMode == .off
         photoOutput.capturePhoto(with: settings, delegate: self)
     }
 
-    private func finishPhotoOnQueue(_ photo: CapturedPhoto?) {
+    private func finishPhotoOnQueue(_ photo: CapturedPhoto?, uniqueID: Int64) {
+        guard Self.acceptsPhotoCallback(
+            pendingUniqueID: pendingPhotoUniqueID,
+            callbackUniqueID: uniqueID
+        ) else {
+            // AVCapturePhotoOutput may deliver a late callback after a
+            // cancellation or interruption. Never let it consume state for a
+            // newer request.
+            return
+        }
+
         let completion = pendingPhotoCompletion
         let flashFallback = pendingPhotoFlashFallback
         pendingPhotoCompletion = nil
         pendingPhotoCapturedAt = nil
+        pendingPhotoUniqueID = nil
         pendingPhotoFlashFallback = false
         guard let completion else { return }
 
@@ -1895,6 +1909,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         guard let completion = pendingPhotoCompletion else { return }
         pendingPhotoCompletion = nil
         pendingPhotoCapturedAt = nil
+        pendingPhotoUniqueID = nil
         pendingPhotoFlashFallback = false
         publishStatus(status)
         publishPhoto(nil, completion: completion)
@@ -2037,6 +2052,13 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
         return kCVPixelFormatType_32BGRA
     }
+
+    static func acceptsPhotoCallback(
+        pendingUniqueID: Int64?,
+        callbackUniqueID: Int64
+    ) -> Bool {
+        pendingUniqueID == callbackUniqueID
+    }
 }
 
 extension CameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
@@ -2087,6 +2109,7 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
             data = nil
         }
         let dimensions = photo.resolvedSettings.photoDimensions
+        let uniqueID = photo.resolvedSettings.uniqueID
 
         // Photo delegate callbacks are not required to arrive on our session
         // queue, so serialize completion state before hopping to main.
@@ -2099,7 +2122,7 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
                     dimensions: dimensions
                 )
             }
-            self.finishPhotoOnQueue(capturedPhoto)
+            self.finishPhotoOnQueue(capturedPhoto, uniqueID: uniqueID)
         }
     }
 }

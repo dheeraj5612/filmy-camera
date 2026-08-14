@@ -7,6 +7,8 @@ struct SettingsView: View {
     @ObservedObject var camera: CameraService
     @ObservedObject var photoLibrary: PhotoLibraryService
 
+    @Environment(\.scenePhase) private var scenePhase
+
     private let privacyPolicyURL = URL(string: "https://dheeraj5612.github.io/filmycam-legal/privacy-policy.html")!
     private let supportURL = URL(string: "https://dheeraj5612.github.io/filmycam-legal/support.html")!
 
@@ -15,22 +17,30 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 25) {
-                    SectionHeading(eyebrow: "Control room", title: "Settings")
+            ZStack {
+                FilmyPageBackground()
 
-                    introCard
-                    captureSettings
-                    permissions
-                    localCache
-                    about
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 25) {
+                        SectionHeading(eyebrow: "Control room", title: "Settings")
+
+                        introCard
+                        captureSettings
+                        permissions
+                        localCache
+                        about
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 20)
+                    .padding(.bottom, 32)
                 }
-                .padding(.horizontal, 18)
-                .padding(.top, 20)
-                .padding(.bottom, 32)
             }
-            .background(FilmyTheme.background.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
+        }
+        .onAppear { refreshPermissionState() }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            refreshPermissionState()
         }
     }
 
@@ -44,6 +54,7 @@ struct SettingsView: View {
                         Image(systemName: "camera.aperture")
                             .font(.system(size: 24, weight: .semibold))
                             .foregroundStyle(FilmyTheme.accent)
+                            .accessibilityHidden(true)
                     }
                     .frame(width: 54, height: 54)
 
@@ -75,6 +86,7 @@ struct SettingsView: View {
         HStack(spacing: 5) {
             Image(systemName: systemName)
                 .font(.caption2.weight(.bold))
+                .accessibilityHidden(true)
             Text(title)
                 .font(.caption2.weight(.bold))
                 .tracking(0.7)
@@ -165,7 +177,8 @@ struct SettingsView: View {
             ) {
                 PermissionBadge(
                     title: photoStatusTitle,
-                    isEnabled: photoLibrary.authorizationStatus == .authorized || photoLibrary.authorizationStatus == .limited
+                    isEnabled: PhotoLibraryAuthorizationPolicy.canRead(photoLibrary.authorizationStatus)
+                        || photoLibrary.canSaveToPhotos
                 )
             }
 
@@ -188,6 +201,27 @@ struct SettingsView: View {
                     action: requestPhotoAccess
                 )
             }
+
+            if photoLibrary.addOnlyAuthorizationStatus == .denied
+                || photoLibrary.addOnlyAuthorizationStatus == .restricted {
+                settingsDivider
+                settingsAction(
+                    title: "Allow saving frames",
+                    systemName: "arrow.up.right.square",
+                    identifier: "photos-save-permission-settings",
+                    hint: "Opens Filmy Camera Photos permissions for saving frames",
+                    action: openSystemSettings
+                )
+            } else if photoLibrary.addOnlyAuthorizationStatus == .notDetermined {
+                settingsDivider
+                settingsAction(
+                    title: "Allow saving frames",
+                    systemName: "photo.badge.plus",
+                    identifier: "photos-save-permission-request",
+                    hint: "Requests Photos access needed to save finished frames",
+                    action: requestSaveAccess
+                )
+            }
         }
     }
 
@@ -203,6 +237,7 @@ struct SettingsView: View {
                     Image(systemName: "externaldrive.fill")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(FilmyTheme.accent)
+                        .accessibilityHidden(true)
                         .frame(width: 34, height: 34)
                         .background(FilmyTheme.accent.opacity(0.11), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
@@ -245,6 +280,7 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                 .foregroundStyle(photoLibrary.hasLocalCache ? FilmyTheme.accent : FilmyTheme.tertiary)
                 .buttonStyle(.plain)
+                .disabled(!photoLibrary.hasLocalCache)
                 .contentShape(Rectangle())
                 .accessibilityIdentifier("clear-local-cache")
                 .accessibilityValue(photoLibrary.hasLocalCache ? "Available" : "Empty")
@@ -266,7 +302,7 @@ struct SettingsView: View {
                         .font(.title3.weight(.bold))
                         .foregroundStyle(FilmyTheme.primary)
                     Spacer(minLength: 8)
-                    Text("VERSION 1.0")
+                    Text("VERSION \(appVersion)")
                         .font(.caption2.weight(.bold))
                         .tracking(0.9)
                         .foregroundStyle(FilmyTheme.accent)
@@ -324,6 +360,7 @@ struct SettingsView: View {
                     .foregroundStyle(FilmyTheme.accent)
                     .frame(width: 30, height: 30)
                     .background(FilmyTheme.accent.opacity(0.11), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(eyebrow.uppercased())
@@ -365,12 +402,14 @@ struct SettingsView: View {
                 Image(systemName: systemName)
                     .font(.subheadline.weight(.semibold))
                     .frame(width: 24)
+                    .accessibilityHidden(true)
                 Text(title)
                     .font(.subheadline.weight(.bold))
                     .multilineTextAlignment(.leading)
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.bold))
+                    .accessibilityHidden(true)
             }
             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
         }
@@ -392,12 +431,14 @@ struct SettingsView: View {
                 Image(systemName: systemName)
                     .font(.subheadline.weight(.semibold))
                     .frame(width: 24)
+                    .accessibilityHidden(true)
                 Text(title)
                     .font(.subheadline.weight(.bold))
                     .multilineTextAlignment(.leading)
                 Spacer(minLength: 8)
                 Image(systemName: "arrow.up.right")
                     .font(.caption.weight(.bold))
+                    .accessibilityHidden(true)
             }
             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
         }
@@ -408,17 +449,21 @@ struct SettingsView: View {
     }
 
     private var photoStatusTitle: String {
-        switch photoLibrary.authorizationStatus {
-        case .authorized: return "ALLOWED"
-        case .limited: return "LIMITED"
-        case .denied, .restricted: return "OFF"
-        case .notDetermined: return "ASK"
-        @unknown default: return "CHECK"
+        let canRead = PhotoLibraryAuthorizationPolicy.canRead(photoLibrary.authorizationStatus)
+        let canAdd = photoLibrary.canSaveToPhotos
+        switch (canRead, canAdd, photoLibrary.authorizationStatus, photoLibrary.addOnlyAuthorizationStatus) {
+        case (true, true, .authorized, _): return "ALLOWED"
+        case (true, true, .limited, _): return "LIMITED"
+        case (false, true, _, _): return "SAVE ONLY"
+        case (_, false, .notDetermined, _), (_, false, _, .notDetermined): return "ASK"
+        case (false, false, .denied, _), (false, false, .restricted, _): return "OFF"
+        default: return "CHECK"
         }
     }
 
     private var cameraPermissionNeedsSettings: Bool {
-        camera.availability == .permissionDenied
+        let status = AVCaptureDevice.authorizationStatus(for: .video)
+        return status == .denied || status == .restricted
     }
 
     private var cameraPermissionNeedsRequest: Bool {
@@ -428,14 +473,16 @@ struct SettingsView: View {
     }
 
     private var cameraStatusTitle: String {
-        switch camera.availability {
-        case .running: return "LIVE"
-        case .simulator: return "SIMULATOR"
-        case .permissionDenied: return "OFF"
-        case .requestingPermission: return "ASKING"
-        case .starting, .idle: return "ASK"
-        case .paused: return "ALLOWED"
-        case .interrupted, .needsRecovery, .unavailable: return "CHECK"
+        if camera.availability == .simulator { return "SIMULATOR" }
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            return camera.availability == .running ? "LIVE" : "ALLOWED"
+        case .notDetermined:
+            return camera.availability == .requestingPermission ? "ASKING" : "ASK"
+        case .denied, .restricted:
+            return "OFF"
+        @unknown default:
+            return "CHECK"
         }
     }
 
@@ -444,29 +491,59 @@ struct SettingsView: View {
     }
 
     private var cameraStatusDetail: String {
-        switch camera.availability {
-        case .running: return "Live preview is ready to capture."
-        case .simulator: return "Simulator-safe preview mode"
-        case .permissionDenied: return "Enable camera access in Settings to preview and capture."
-        case .requestingPermission: return "Waiting for camera permission."
-        case .starting, .idle: return "Ask when you are ready to capture."
-        case .paused: return "Camera access is enabled; preview is paused."
-        case .interrupted, .needsRecovery, .unavailable: return camera.statusMessage
+        if camera.availability == .simulator { return "Simulator-safe preview mode" }
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            switch camera.availability {
+            case .running: return "Live preview is ready to capture."
+            case .paused: return "Camera access is enabled; preview is paused."
+            case .interrupted, .needsRecovery, .unavailable: return camera.statusMessage
+            default: return "Camera access is enabled. Open Camera to begin preview."
+            }
+        case .notDetermined:
+            return camera.availability == .requestingPermission
+                ? "Waiting for camera permission."
+                : "Ask when you are ready to capture."
+        case .denied, .restricted:
+            return "Enable camera access in Settings to preview and capture."
+        @unknown default:
+            return "Camera permission status is unavailable."
         }
     }
 
     private var photoStatusDetail: String {
-        switch photoLibrary.authorizationStatus {
-        case .authorized: return "Read and save access is enabled."
-        case .limited: return "Limited access is enabled for selected photos."
-        case .denied, .restricted: return "Enable Photos access to save and view your roll."
-        case .notDetermined: return "Ask when you are ready to build your roll."
-        @unknown default: return "Photo access status is unavailable."
+        let canRead = PhotoLibraryAuthorizationPolicy.canRead(photoLibrary.authorizationStatus)
+        let canAdd = photoLibrary.canSaveToPhotos
+        switch (canRead, canAdd) {
+        case (true, true):
+            return photoLibrary.authorizationStatus == .limited
+                ? "Limited access is enabled for selected photos; new frames can still be saved."
+                : "Read and save access is enabled."
+        case (false, true):
+            return "Save access is enabled; allow Photos access to view the Roll."
+        case (true, false):
+            return "The Roll is available; allow add access to save new frames."
+        default:
+            return "Ask when you are ready to build your roll."
         }
+    }
+
+    private var appVersion: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
+        return "\(version) (\(build))"
+    }
+
+    private func refreshPermissionState() {
+        photoLibrary.refresh()
     }
 
     private func requestPhotoAccess() {
         Task { _ = await photoLibrary.requestAccessIfNeeded() }
+    }
+
+    private func requestSaveAccess() {
+        Task { _ = await photoLibrary.requestSaveAccessIfNeeded() }
     }
 
     private func requestCameraAccess() {
@@ -518,6 +595,7 @@ private struct ControlRoomRow<Accessory: View>: View {
                 .foregroundStyle(FilmyTheme.accent)
                 .frame(width: 34, height: 34)
                 .background(FilmyTheme.accent.opacity(0.11), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)

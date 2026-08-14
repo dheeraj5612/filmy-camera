@@ -63,6 +63,14 @@ final class RecipeInvariantsTests: XCTestCase {
         XCTAssertTrue(builtInBases.contains(.monochrome))
     }
 
+    func testPublicFilmVocabularyHasCanonicalNamesAndSepiaCoverage() {
+        for base in FilmRecipe.FilmBase.allCases {
+            XCTAssertFalse(base.officialName.isEmpty, base.rawValue)
+        }
+        XCTAssertTrue(FilmRecipe.builtIns.contains { $0.filmBase == .sepia })
+        XCTAssertEqual(FilmRecipe.FilmBase.sepia.officialName, "SEPIA")
+    }
+
     func testBuiltInRecipeControlsStayWithinNormalizedEditorBounds() {
         for recipe in FilmRecipe.builtIns {
             XCTAssertTrue(FilmRecipe.DynamicRange.allCases.contains(recipe.dynamicRange), recipe.id)
@@ -79,6 +87,22 @@ final class RecipeInvariantsTests: XCTestCase {
         }
     }
 
+    func testBuiltInRecipesUseDiscretePublicStrengthStates() {
+        let strengthStates: Set<Double> = [
+            FilmRecipe.ColorChromeLevel.off.scalarValue,
+            FilmRecipe.ColorChromeLevel.weak.scalarValue,
+            FilmRecipe.ColorChromeLevel.strong.scalarValue
+        ]
+        let grainSizes = Set(FilmRecipe.GrainSizeLevel.allCases.map(\.scalarValue))
+
+        for recipe in FilmRecipe.builtIns {
+            XCTAssertTrue(strengthStates.contains(recipe.colorChrome), recipe.id)
+            XCTAssertTrue(strengthStates.contains(recipe.fxBlue), recipe.id)
+            XCTAssertTrue(strengthStates.contains(recipe.grain), recipe.id)
+            XCTAssertTrue(grainSizes.contains(recipe.grainSize), recipe.id)
+        }
+    }
+
     func testBuiltInRecipeControlsAreFinite() {
         for recipe in FilmRecipe.builtIns {
             let values = [
@@ -88,8 +112,11 @@ final class RecipeInvariantsTests: XCTestCase {
                 recipe.saturation,
                 recipe.contrast,
                 Double(recipe.dynamicRange.rawValue),
+                recipe.whiteBalance.kelvin,
                 recipe.whiteBalance.temperature,
                 recipe.whiteBalance.tint,
+                recipe.monochromaticColor.warmCool,
+                recipe.monochromaticColor.greenMagenta,
                 recipe.colorChrome,
                 recipe.blueResponse,
                 recipe.fxBlue,
@@ -185,6 +212,107 @@ final class RecipeInvariantsTests: XCTestCase {
         XCTAssertEqual(FilmRecipe.Control.grainSize.unit, .normalizedSize)
         XCTAssertEqual(FilmRecipe.Control.exposure.editorRange, -2.0...2.0)
         XCTAssertEqual(FilmRecipe.Control.grainSize.editorRange, 0.35...2.5)
+    }
+
+    func testFXBlueUsesPublicThreeStateControlAndLegacyScalarBridge() throws {
+        XCTAssertEqual(FilmRecipe.FXBlueLevel.allCases.map(\.displayName), ["Off", "Weak", "Strong"])
+        XCTAssertEqual(FilmRecipe.FXBlueLevel.off.scalarValue, 0)
+        XCTAssertEqual(FilmRecipe.FXBlueLevel.weak.scalarValue, 0.5)
+        XCTAssertEqual(FilmRecipe.FXBlueLevel.strong.scalarValue, 1)
+        XCTAssertEqual(FilmRecipe.FXBlueLevel(scalarValue: -0.5), .off)
+        XCTAssertEqual(FilmRecipe.FXBlueLevel(scalarValue: 0.5), .weak)
+        XCTAssertEqual(FilmRecipe.FXBlueLevel(scalarValue: 0.9), .strong)
+
+        var recipe = FilmRecipe.builtIns[0]
+        recipe.fxBlueLevel = .weak
+        XCTAssertEqual(recipe.fxBlue, 0.5)
+        XCTAssertEqual(recipe.fxBlueLevel, .weak)
+
+        let decoded = try JSONDecoder().decode(FilmRecipe.self, from: JSONEncoder().encode(recipe))
+        XCTAssertEqual(decoded.fxBlue, 0.5)
+        XCTAssertEqual(decoded.fxBlueLevel, .weak)
+    }
+
+    func testCanonicalCameraModeContractsExposePublicOptionSets() throws {
+        XCTAssertEqual(
+            FilmRecipe.DynamicRange.allCases.map(\.displayName),
+            ["AUTO", "DR100", "DR200", "DR400"]
+        )
+        XCTAssertEqual(
+            FilmRecipe.DRangePriority.allCases.map(\.displayName),
+            ["AUTO", "Strong", "Weak", "Off"]
+        )
+        XCTAssertTrue(FilmRecipe.WhiteBalanceMode.allCases.contains(.ambiencePriority))
+        XCTAssertTrue(FilmRecipe.WhiteBalanceMode.allCases.contains(.colorTemperature))
+        XCTAssertTrue(FilmRecipe.WhiteBalanceMode.allCases.contains(.incandescent))
+        XCTAssertTrue(FilmRecipe.WhiteBalanceMode.allCases.contains(.underwater))
+
+        var recipe = FilmRecipe.builtIns.first(where: { $0.filmBase == .acros })!
+        recipe.dynamicRange = .auto
+        recipe.dRangePriority = .strong
+        recipe.whiteBalance.mode = .colorTemperature
+        recipe.whiteBalance.kelvin = 3200
+        recipe.monochromaticColor = FilmRecipe.MonochromaticColor(
+            warmCool: 0.4,
+            greenMagenta: -0.3
+        )
+
+        let decoded = try JSONDecoder().decode(
+            FilmRecipe.self,
+            from: JSONEncoder().encode(recipe)
+        )
+        XCTAssertEqual(decoded.dynamicRange, .auto)
+        XCTAssertEqual(decoded.dRangePriority, .strong)
+        XCTAssertEqual(decoded.whiteBalance.mode, .colorTemperature)
+        XCTAssertEqual(decoded.whiteBalance.kelvin, 3200)
+        XCTAssertEqual(decoded.monochromaticColor, recipe.monochromaticColor)
+    }
+
+    func testPreV4RecipeDefaultsNewCameraModesWithoutBreakingMigration() throws {
+        let original = FilmRecipe.builtIns[0]
+        let encoded = try JSONEncoder().encode(original)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object["schemaVersion"] = 3
+        object.removeValue(forKey: "dRangePriority")
+        object.removeValue(forKey: "monochromaticColor")
+        let oldWhiteBalance = try XCTUnwrap(object["whiteBalance"] as? [String: Any])
+        object["whiteBalance"] = [
+            "temperature": oldWhiteBalance["temperature"] as Any,
+            "tint": oldWhiteBalance["tint"] as Any
+        ]
+
+        let decoded = try JSONDecoder().decode(
+            FilmRecipe.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+        XCTAssertEqual(decoded.dRangePriority, .off)
+        XCTAssertEqual(decoded.whiteBalance.mode, .auto)
+        XCTAssertEqual(decoded.whiteBalance.kelvin, 6500)
+        XCTAssertEqual(decoded.monochromaticColor, .init())
+    }
+
+    func testColorChromeAndGrainUsePublicDiscreteControlBridges() throws {
+        XCTAssertEqual(FilmRecipe.ColorChromeLevel(scalarValue: 0), .off)
+        XCTAssertEqual(FilmRecipe.ColorChromeLevel(scalarValue: 0.5), .weak)
+        XCTAssertEqual(FilmRecipe.ColorChromeLevel(scalarValue: 1), .strong)
+        XCTAssertEqual(FilmRecipe.GrainEffectLevel(scalarValue: 0), .off)
+        XCTAssertEqual(FilmRecipe.GrainEffectLevel(scalarValue: 0.5), .weak)
+        XCTAssertEqual(FilmRecipe.GrainEffectLevel(scalarValue: 1), .strong)
+        XCTAssertEqual(FilmRecipe.GrainSizeLevel(scalarValue: 0.8), .small)
+        XCTAssertEqual(FilmRecipe.GrainSizeLevel(scalarValue: 1.2), .large)
+
+        var recipe = FilmRecipe.builtIns[0]
+        recipe.colorChromeLevel = .strong
+        recipe.grainEffectLevel = .weak
+        recipe.grainSizeLevel = .large
+        XCTAssertEqual(recipe.colorChrome, 1)
+        XCTAssertEqual(recipe.grain, 0.5)
+        XCTAssertEqual(recipe.grainSize, 1.5)
+
+        let decoded = try JSONDecoder().decode(FilmRecipe.self, from: JSONEncoder().encode(recipe))
+        XCTAssertEqual(decoded.colorChromeLevel, .strong)
+        XCTAssertEqual(decoded.grainEffectLevel, .weak)
+        XCTAssertEqual(decoded.grainSizeLevel, .large)
     }
 
     func testLegacyRecipeWithoutProvenanceRemainsReadableButFailsAudit() throws {

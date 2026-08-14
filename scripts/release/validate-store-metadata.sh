@@ -21,7 +21,7 @@ field_value() {
   local label="$1"
   local value
   value="$(sed -n "s/^- \*\*${label}:\*\*[[:space:]]*//p" "${metadata_file}" | head -n 1)"
-  printf '%s\n' "${value}" | sed -E 's/^`([^`]*)`.*/\1/; s/^`//; s/`$//'
+  printf '%s\n' "${value}" | sed -E 's/^\x60([^\x60]*)\x60.*/\1/; s/^\x60//; s/\x60$//'
 }
 
 character_count() {

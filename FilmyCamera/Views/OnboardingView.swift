@@ -104,7 +104,7 @@ struct OnboardingView: View {
                 .accessibilityHidden(true)
 
                 Text("FILMY CAMERA")
-                    .font(.system(.caption, design: .rounded).weight(.black))
+                    .font(.system(size: 12, weight: .black, design: .rounded))
                     .tracking(1.8)
                     .foregroundStyle(FilmyTheme.primary)
                     .lineLimit(1)
@@ -131,6 +131,7 @@ struct OnboardingView: View {
         }
         .padding(.horizontal, 20)
         .padding(.top, 8)
+        .dynamicTypeSize(.xSmall ... .xxxLarge)
     }
 
     private func pageView(_ page: Page) -> some View {
@@ -313,6 +314,10 @@ struct OnboardingView: View {
         }
         .shadow(color: page.accent.opacity(0.1), radius: 24, y: 12)
         .accessibilityHidden(true)
+        // The viewfinder card is decorative and already has an accessible
+        // semantic explanation below it. Keep its typography bounded so a
+        // large-text setting cannot make the fixed visual chrome collide.
+        .dynamicTypeSize(.xSmall ... .xxxLarge)
     }
 
     private func onboardingMetric(title: String, value: String) -> some View {

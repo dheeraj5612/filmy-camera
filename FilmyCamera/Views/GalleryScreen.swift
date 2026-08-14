@@ -16,29 +16,32 @@ struct GalleryScreen: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 18) {
-                    SectionHeading(
-                        eyebrow: "The archive",
-                        title: "Roll",
-                        trailing: photoLibrary.galleryAssets.isEmpty ? nil : "\(photoLibrary.galleryAssets.count) frames"
-                    )
+            ZStack {
+                FilmyPageBackground()
 
-                    Text("A contact sheet for the frames worth keeping.")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(FilmyTheme.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 18) {
+                        SectionHeading(
+                            eyebrow: "The archive",
+                            title: "Roll",
+                            trailing: photoLibrary.galleryAssets.isEmpty ? nil : "\(photoLibrary.galleryAssets.count) frames"
+                        )
 
-                    if !photoLibrary.galleryAssets.isEmpty {
-                        archiveSummary
+                        Text("A contact sheet for the frames worth keeping.")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(FilmyTheme.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        if !photoLibrary.galleryAssets.isEmpty {
+                            archiveSummary
+                        }
+                        galleryContent
                     }
-                    galleryContent
+                    .padding(.horizontal, 18)
+                    .padding(.top, 20)
+                    .padding(.bottom, 28)
                 }
-                .padding(.horizontal, 18)
-                .padding(.top, 20)
-                .padding(.bottom, 28)
             }
-            .background(FilmyTheme.background.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
             .refreshable {
                 photoLibrary.refresh()
@@ -258,24 +261,33 @@ struct GalleryScreen: View {
     }
 
     private var archiveAccessNotice: some View {
-        HStack(alignment: .top, spacing: 11) {
-            Image(systemName: "lock.open")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(FilmyTheme.accent)
-                .frame(width: 28, height: 28)
-                .background(FilmyTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(alignment: .top, spacing: 11) {
+                Image(systemName: "lock.open")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(FilmyTheme.accent)
+                    .frame(width: 28, height: 28)
+                    .background(FilmyTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Showing your saved frames")
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(FilmyTheme.primary)
-                Text("Enable Photos read access to refresh this archive from your library.")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(FilmyTheme.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Showing your saved frames")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(FilmyTheme.primary)
+                    Text("Enable Photos read access to refresh this archive from your library.")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(FilmyTheme.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
             }
 
-            Spacer(minLength: 0)
+            Button("Open Photos Settings", action: openSystemSettings)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(FilmyTheme.accent)
+                .frame(minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
+                .accessibilityIdentifier("gallery-photos-permission-settings")
+                .accessibilityHint("Opens Filmy Camera Photos permissions")
         }
         .padding(13)
         .background(FilmyTheme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -425,6 +437,7 @@ private struct GalleryDetailView: View {
     @ObservedObject var photoLibrary: PhotoLibraryService
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var image: UIImage?
     @State private var shareURL: URL?
     @State private var isShowingShareSheet = false
@@ -656,7 +669,16 @@ private struct GalleryDetailView: View {
     }
 
     private func resetImageTransform() {
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+        var transaction = Transaction()
+        transaction.animation = reduceMotion
+            ? nil
+            : .spring(response: 0.28, dampingFraction: 0.82)
+        // A nil animation does not override every animation inherited from a
+        // parent transaction. Disable animations explicitly for Reduce Motion
+        // so double-tap, VoiceOver, and pinch resets all behave consistently.
+        transaction.disablesAnimations = reduceMotion
+
+        withTransaction(transaction) {
             zoomScale = 1
             pinchBaseZoom = nil
             imageOffset = .zero

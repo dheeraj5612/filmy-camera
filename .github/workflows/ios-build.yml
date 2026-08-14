@@ -29,6 +29,7 @@ permissions:
 env:
   XCODEGEN_VERSION: 2.45.4
   XCODEGEN_SHA256: 090ec29491aad50aec10631bf6e62253fed733c50f3aab0f5ffc86bc170bdbef
+  XCODEGEN_BINARY_SHA256: 6aa2b4da95304b343bea12890c59f9655aa428c08b351d57d592cfab4e88a9f1
 
 jobs:
   change-scope:
@@ -43,6 +44,7 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Determine whether the iOS gate is needed
         id: scope
@@ -92,17 +94,20 @@ jobs:
     # the required `build-and-test` check name does not become a matrix suffix.
     env:
       SIMULATOR_RUNTIME: "iOS 18.5"
+      SIMULATOR_DEVICE_NAME: "iPhone 16 Pro"
 
     steps:
       - name: Check out repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
       - name: Cache XcodeGen
         id: cache-xcodegen
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: .ci/xcodegen
-          key: xcodegen-${{ runner.os }}-${{ runner.arch }}-${{ env.XCODEGEN_VERSION }}-${{ env.XCODEGEN_SHA256 }}
+          key: xcodegen-${{ runner.os }}-${{ runner.arch }}-${{ env.XCODEGEN_VERSION }}-${{ env.XCODEGEN_SHA256 }}-${{ env.XCODEGEN_BINARY_SHA256 }}
 
       - name: Install XcodeGen
         if: steps.cache-xcodegen.outputs.cache-hit != 'true'
@@ -120,11 +125,19 @@ jobs:
           mkdir -p .ci
           unzip -q "${archive_path}" -d .ci
 
-      - name: Add XcodeGen to PATH
+      - name: Add XcodeGen to PATH and verify pin
         run: |
           set -euo pipefail
-          echo "${GITHUB_WORKSPACE}/.ci/xcodegen/bin" >> "${GITHUB_PATH}"
-          "${GITHUB_WORKSPACE}/.ci/xcodegen/bin/xcodegen" --version
+          xcodegen_dir="${GITHUB_WORKSPACE}/.ci/xcodegen/bin"
+          xcodegen_path="${xcodegen_dir}/xcodegen"
+          [[ -x "${xcodegen_path}" && ! -L "${xcodegen_path}" ]] || {
+            echo "Pinned XcodeGen executable is missing or is a symlink" >&2
+            exit 1
+          }
+          echo "${XCODEGEN_BINARY_SHA256}  ${xcodegen_path}" | shasum -a 256 --check
+          xcodegen_version_output="$("${xcodegen_path}" --version 2>&1)"
+          grep -Fxq "Version: ${XCODEGEN_VERSION}" <<<"${xcodegen_version_output}"
+          echo "${xcodegen_dir}" >> "${GITHUB_PATH}"
 
       - name: Select and verify Xcode 16.4
         shell: bash
@@ -168,33 +181,52 @@ jobs:
 
           device_id="$(
             xcrun simctl list devices available |
-              awk -F '[()]' -v runtime_header="-- ${SIMULATOR_RUNTIME} --" '
+              awk -F '[()]' -v runtime_header="-- ${SIMULATOR_RUNTIME} --" -v wanted_device="${SIMULATOR_DEVICE_NAME}" '
                 $0 == runtime_header { in_runtime=1; next }
                 in_runtime && /^-- / { in_runtime=0 }
-                in_runtime && /iPhone/ { print $2; exit }
+                in_runtime {
+                  device_name=$1
+                  sub(/^[[:space:]]+/, "", device_name)
+                  sub(/[[:space:]]+$/, "", device_name)
+                  if (device_name == wanted_device) { print $2; exit }
+                }
               '
           )"
           if [[ -z "${device_id}" ]]; then
-            echo "No available iPhone simulator was found for ${SIMULATOR_RUNTIME}." >&2
+            echo "No ${SIMULATOR_DEVICE_NAME} simulator was found for ${SIMULATOR_RUNTIME}." >&2
             xcrun simctl list devices available >&2
             exit 1
           fi
 
-          echo "device_id=${device_id}" >> "${GITHUB_OUTPUT}"
-          echo "Using ${SIMULATOR_RUNTIME} simulator ${device_id}"
+          case "$(uname -m)" in
+            arm64|x86_64)
+              simulator_arch="$(uname -m)"
+              ;;
+            *)
+              echo "Unsupported runner architecture for simulator tests: $(uname -m)" >&2
+              exit 1
+              ;;
+          esac
+
+          {
+            echo "device_id=${device_id}"
+            echo "simulator_arch=${simulator_arch}"
+            echo "destination=platform=iOS Simulator,id=${device_id},arch=${simulator_arch}"
+          } >> "${GITHUB_OUTPUT}"
+          echo "Using ${SIMULATOR_DEVICE_NAME} on ${SIMULATOR_RUNTIME} simulator ${device_id} (${simulator_arch})"
           xcrun simctl boot "${device_id}" 2>/dev/null || true
           xcrun simctl bootstatus "${device_id}" -b
 
       - name: Build and run unit tests on iPhone simulator
         shell: bash
         env:
-          DEVICE_ID: ${{ steps.simulator.outputs.device_id }}
+          DESTINATION: ${{ steps.simulator.outputs.destination }}
         run: |
           set -o pipefail
           xcodebuild \
             -project FilmyCamera.xcodeproj \
             -scheme FilmyCamera \
-            -destination "platform=iOS Simulator,id=${DEVICE_ID}" \
+            -destination "${DESTINATION}" \
             -derivedDataPath "${RUNNER_TEMP}/FilmyCameraDerivedData" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
@@ -209,13 +241,13 @@ jobs:
       - name: Run UI tests on iPhone simulator
         shell: bash
         env:
-          DEVICE_ID: ${{ steps.simulator.outputs.device_id }}
+          DESTINATION: ${{ steps.simulator.outputs.destination }}
         run: |
           set -o pipefail
           xcodebuild \
             -project FilmyCamera.xcodeproj \
             -scheme FilmyCamera \
-            -destination "platform=iOS Simulator,id=${DEVICE_ID}" \
+            -destination "${DESTINATION}" \
             -derivedDataPath "${RUNNER_TEMP}/FilmyCameraDerivedData" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
@@ -227,6 +259,69 @@ jobs:
             -quiet \
             test 2>&1 | tee "${RUNNER_TEMP}/filmycamera-ui-test.log"
 
+      - name: Record test artifact provenance
+        if: always()
+        shell: bash
+        env:
+          DEVICE_ID: ${{ steps.simulator.outputs.device_id }}
+          SIMULATOR_ARCH: ${{ steps.simulator.outputs.simulator_arch }}
+        run: |
+          set -euo pipefail
+
+          provenance_path="${RUNNER_TEMP}/filmycamera-test-provenance.txt"
+          xcode_version="$(xcodebuild -version 2>/dev/null | tr '\n' ' ' || true)"
+          xcodegen_path="${GITHUB_WORKSPACE}/.ci/xcodegen/bin/xcodegen"
+          xcodegen_version="unavailable"
+          xcodegen_sha256="unavailable"
+          if [[ -x "${xcodegen_path}" ]]; then
+            xcodegen_version="$("${xcodegen_path}" --version 2>/dev/null | tr '\n' ' ' || true)"
+            xcodegen_sha256="$(shasum -a 256 "${xcodegen_path}" 2>/dev/null | awk '{ print $1 }' || true)"
+          fi
+
+          {
+            printf 'provenance_schema=1\n'
+            printf 'repository=%s\n' "${GITHUB_REPOSITORY}"
+            printf 'commit=%s\n' "${GITHUB_SHA}"
+            printf 'workflow=%s\n' "${GITHUB_WORKFLOW}"
+            printf 'run_id=%s\n' "${GITHUB_RUN_ID}"
+            printf 'runner=%s/%s\n' "${RUNNER_OS}" "${RUNNER_ARCH}"
+            printf 'xcode=%s\n' "${xcode_version:-unavailable}"
+            printf 'developer_dir=%s\n' "${DEVELOPER_DIR:-unavailable}"
+            printf 'simulator_runtime=%s\n' "${SIMULATOR_RUNTIME}"
+            printf 'simulator_device_name=%s\n' "${SIMULATOR_DEVICE_NAME}"
+            printf 'simulator_device_id=%s\n' "${DEVICE_ID:-unavailable}"
+            printf 'simulator_arch=%s\n' "${SIMULATOR_ARCH:-unavailable}"
+            printf 'xcodegen_version=%s\n' "${xcodegen_version:-unavailable}"
+            printf 'xcodegen_sha256=%s\n' "${xcodegen_sha256:-unavailable}"
+          } > "${provenance_path}"
+
+          for artifact_path in \
+            "${RUNNER_TEMP}/filmycamera-unit-test.log" \
+            "${RUNNER_TEMP}/filmycamera-ui-test.log"; do
+            if [[ -f "${artifact_path}" ]]; then
+              printf 'artifact_sha256=%s:%s\n' \
+                "$(basename "${artifact_path}")" \
+                "$(shasum -a 256 "${artifact_path}" | awk '{ print $1 }')" \
+                >> "${provenance_path}"
+            else
+              printf 'artifact_missing=%s\n' "$(basename "${artifact_path}")" >> "${provenance_path}"
+            fi
+          done
+
+          for result_path in \
+            "${RUNNER_TEMP}/FilmyCameraUnit.xcresult" \
+            "${RUNNER_TEMP}/FilmyCameraUI.xcresult"; do
+            if [[ -d "${result_path}" ]]; then
+              result_file_count="$(find "${result_path}" -type f | wc -l | tr -d ' ')"
+              result_size_kib="$(du -sk "${result_path}" | awk '{ print $1 }')"
+              printf 'result_bundle=%s:files=%s:size_kib=%s\n' \
+                "$(basename "${result_path}")" "${result_file_count}" "${result_size_kib}" \
+                >> "${provenance_path}"
+            else
+              printf 'result_bundle_missing=%s\n' "$(basename "${result_path}")" >> "${provenance_path}"
+            fi
+          done
+
       - name: Upload build and test logs
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -234,6 +329,14 @@ jobs:
           name: filmycamera-xcodebuild-logs
           path: "${{ runner.temp }}/filmycamera-*.log"
           if-no-files-found: warn
+
+      - name: Upload test artifact provenance
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: filmycamera-test-provenance-${{ github.run_id }}
+          path: "${{ runner.temp }}/filmycamera-test-provenance.txt"
+          if-no-files-found: error
 
       - name: Upload XCTest result bundle on failure
         if: always()
@@ -256,10 +359,20 @@ jobs:
     if: needs.change-scope.result == 'success'
     runs-on: macos-15
     timeout-minutes: 10
+    env:
+      SHELLCHECK_VERSION: "v0.11.0"
 
     steps:
       - name: Check out repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Cache pinned ShellCheck archive
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: .ci/shellcheck
+          key: shellcheck-${{ runner.os }}-${{ runner.arch }}-${{ env.SHELLCHECK_VERSION }}-${{ hashFiles('.github/workflows/ios-build.yml') }}
 
       - name: Select and verify Xcode 16.4
         shell: bash
@@ -274,8 +387,45 @@ jobs:
             exit 1
           }
 
-      - name: Install ShellCheck
-        run: brew install shellcheck
+      - name: Install pinned ShellCheck
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          shellcheck_version="${SHELLCHECK_VERSION}"
+          case "$(uname -m)" in
+            arm64)
+              shellcheck_archive="shellcheck-${shellcheck_version}.darwin.aarch64.tar.gz"
+              shellcheck_sha256="339b930feb1ea764467013cc1f72d09cd6b869ebf1013296ba9055ab2ffbd26f"
+              ;;
+            x86_64)
+              shellcheck_archive="shellcheck-${shellcheck_version}.darwin.x86_64.tar.gz"
+              shellcheck_sha256="c2c15e08df0e8fbc374c335b230a7ee958c313fa5714817a59aa59f1aa594f51"
+              ;;
+            *)
+              echo "Unsupported macOS runner architecture: $(uname -m)" >&2
+              exit 1
+              ;;
+          esac
+
+          shellcheck_cache_dir="${GITHUB_WORKSPACE}/.ci/shellcheck"
+          mkdir -p "${shellcheck_cache_dir}"
+          shellcheck_archive_path="${shellcheck_cache_dir}/${shellcheck_archive}"
+          if [[ ! -f "${shellcheck_archive_path}" ]]; then
+            shellcheck_download_path="${shellcheck_archive_path}.tmp"
+            rm -f "${shellcheck_download_path}"
+            curl --fail --silent --show-error --location --retry 3 \
+              "https://github.com/koalaman/shellcheck/releases/download/${shellcheck_version}/${shellcheck_archive}" \
+              --output "${shellcheck_download_path}"
+            mv "${shellcheck_download_path}" "${shellcheck_archive_path}"
+          fi
+          echo "${shellcheck_sha256}  ${shellcheck_archive_path}" | shasum -a 256 --check
+
+          tar -xzf "${shellcheck_archive_path}" -C "${RUNNER_TEMP}"
+          shellcheck_bin="${RUNNER_TEMP}/shellcheck-${shellcheck_version}/shellcheck"
+          shellcheck_output="$(${shellcheck_bin} --version)"
+          grep -Fq "version: ${shellcheck_version#v}" <<<"${shellcheck_output}"
+          echo "${RUNNER_TEMP}/shellcheck-${shellcheck_version}" >> "${GITHUB_PATH}"
 
       - name: Validate release script syntax and safety
         shell: bash
@@ -300,12 +450,15 @@ jobs:
           [[ "${final_metadata_status}" -ne 0 ]]
           grep -Fq 'Final App Store metadata' <<<"${final_metadata_output}"
 
-          secret_pattern='-----BEGIN ([A-Z0-9]+ )*PRIVATE KEY-----|AuthKey_[A-Za-z0-9]{10,}\.p8|FILMY_ASC_KEY_ID=[A-Za-z0-9]{10}|FILMY_ASC_ISSUER_ID=[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}'
-          for private_key_header in \
-            '-----BEGIN PRIVATE KEY-----' \
-            '-----BEGIN OPENSSH PRIVATE KEY-----' \
-            '-----BEGIN RSA PRIVATE KEY-----' \
-            '-----BEGIN EC PRIVATE KEY-----'; do
+          private_key_regex="$(printf '%s' '-----BEGIN ' '([A-Z0-9]+ )*' 'PRIVATE KEY-----')"
+          auth_key_regex="$(printf '%s' 'Auth' 'Key_' '[A-Za-z0-9]{10,}' '\.p8')"
+          key_id_regex="$(printf '%s' 'FILMY_ASC_KEY' '_ID=' '[A-Za-z0-9]{10}')"
+          issuer_id_regex="$(printf '%s' 'FILMY_ASC_ISSUER' '_ID=' '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}')"
+          secret_pattern="${private_key_regex}|${auth_key_regex}|${key_id_regex}|${issuer_id_regex}"
+          private_key_prefix="-----BEGIN"
+          private_key_suffix=" PRIVATE KEY-----"
+          for private_key_modifier in '' OPENSSH RSA EC; do
+            private_key_header="${private_key_prefix}${private_key_modifier:+ ${private_key_modifier}}${private_key_suffix}"
             grep -E -q -e "${secret_pattern}" <<<"${private_key_header}" || {
               echo "Credential scan pattern regression for a private-key header; failing closed." >&2
               exit 1
@@ -313,7 +466,6 @@ jobs:
           done
           set +e
           git -c core.pager=cat grep --quiet -I -E -e "${secret_pattern}" -- \
-            ':!scripts/release/prepare-upload.sh' ':!.github/workflows/ios-build.yml' \
             >/dev/null 2>&1
           secret_scan_status="$?"
           set -e
@@ -333,6 +485,10 @@ jobs:
           help_output="$(scripts/release/prepare-upload.sh --help)"
           grep -Fq -- '--check' <<<"${help_output}"
           grep -Fq -- '--upload' <<<"${help_output}"
+
+          ipa_help_output="$(scripts/release/validate-ipa.sh --help)"
+          grep -Fq -- '--ipa' <<<"${ipa_help_output}"
+          grep -Fq -- '--archive' <<<"${ipa_help_output}"
 
           set +e
           check_output="$(env -u FILMY_ASC_KEY_ID -u FILMY_ASC_ISSUER_ID -u FILMY_ASC_KEY_PATH scripts/release/prepare-upload.sh --check 2>&1)"

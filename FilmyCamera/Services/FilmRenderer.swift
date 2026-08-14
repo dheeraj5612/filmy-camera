@@ -28,15 +28,14 @@ public final class FilmRenderer {
         }
     }
 
-    // Xcode 16.4's SDK does not mark MTLDevice as Sendable. This singleton is
-    // intentionally shared by the renderer and preview as an immutable handle.
+    // Xcode 16.4's SDK annotations do not model these immutable handles as
+    // Sendable. They are initialized once and never mutated after creation.
+    // Keep the explicit opt-out until the minimum hosted toolchain catches up.
     public nonisolated(unsafe) static let metalDevice: MTLDevice? = MTLCreateSystemDefaultDevice()
 
     /// A reusable GPU-backed context for callers that need to materialize the
     /// rendered CIImage. It falls back to Core Image's software renderer on a
     /// simulator or Mac without a Metal device.
-    // CIContext is likewise a shared Core Image resource whose SDK type is not
-    // Sendable on the release toolchain; callers keep image work off the UI.
     public nonisolated(unsafe) static let sharedContext: CIContext = {
         if let metalDevice {
             return CIContext(
@@ -257,6 +256,7 @@ public final class FilmRenderer {
         output = applyMonochromeFilter(to: output, recipe: safeRecipe)
         output = applyColorControls(to: output, recipe: safeRecipe)
         output = applyColorCube(to: output, recipe: safeRecipe, quality: quality)
+        output = applyMonochromaticColorAxes(to: output, recipe: safeRecipe)
         output = applyDetailControls(to: output, recipe: safeRecipe)
         output = applyClarity(to: output, recipe: safeRecipe)
         output = applyGrain(
@@ -298,11 +298,20 @@ public final class FilmRenderer {
         safe.contrast = value(recipe.contrast, .contrast, neutral: 1)
         safe.whiteBalance = FilmRecipe.WhiteBalanceShift(
             temperature: value(recipe.whiteBalance.temperature, .temperature, neutral: 0),
-            tint: value(recipe.whiteBalance.tint, .tint, neutral: 0)
+            tint: value(recipe.whiteBalance.tint, .tint, neutral: 0),
+            mode: recipe.whiteBalance.mode,
+            kelvin: value(recipe.whiteBalance.kelvin, .colorTemperature, neutral: 6500)
+        )
+        safe.monochromaticColor = FilmRecipe.MonochromaticColor(
+            warmCool: value(recipe.monochromaticColor.warmCool, .monochromaticWarmCool, neutral: 0),
+            greenMagenta: value(recipe.monochromaticColor.greenMagenta, .monochromaticGreenMagenta, neutral: 0)
         )
         safe.colorChrome = value(recipe.colorChrome, .colorChrome, neutral: 0)
         safe.blueResponse = value(recipe.blueResponse, .blueResponse, neutral: 0)
-        safe.fxBlue = value(recipe.fxBlue, .fxBlue, neutral: 0)
+        // FX Blue is a public Off/Weak/Strong control. Older saved recipes
+        // could contain a signed negative scalar; preserve their readability
+        // but normalize those legacy values to the current Off state.
+        safe.fxBlue = max(value(recipe.fxBlue, .fxBlue, neutral: 0), 0)
         safe.sharpness = value(recipe.sharpness, .sharpness, neutral: 0)
         safe.noiseReduction = value(recipe.noiseReduction, .noiseReduction, neutral: 0)
         safe.clarity = value(recipe.clarity, .clarity, neutral: 0)
@@ -420,7 +429,10 @@ public final class FilmRenderer {
         to image: CIImage,
         recipe: FilmRecipe
     ) -> CIImage {
-        let amount = recipe.dynamicRange.highlightProtection
+        let amount = max(
+            recipe.dynamicRange.highlightProtection,
+            recipe.dRangePriority.highlightProtection
+        )
         guard amount > 0.0001,
               let filter = CIFilter(name: "CIHighlightShadowAdjust") else {
             return image
@@ -440,18 +452,27 @@ public final class FilmRenderer {
         to image: CIImage,
         recipe: FilmRecipe
     ) -> CIImage {
-        guard abs(recipe.temperatureShift) > 0.0001 || abs(recipe.tintShift) > 0.0001,
+        let temperatureShift = recipe.temperatureShift + recipe.whiteBalance.mode.temperatureBias
+        let tintShift = recipe.tintShift + recipe.whiteBalance.mode.tintBias
+        let baseKelvin = clamp(recipe.whiteBalance.kelvin, lower: 2500, upper: 10000)
+        let targetKelvin = clamp(
+            baseKelvin - clamp(temperatureShift, lower: -1, upper: 1) * 1800,
+            lower: 2500,
+            upper: 10000
+        )
+        guard abs(targetKelvin - 6500) > 0.0001 || abs(tintShift) > 0.0001,
               let filter = CIFilter(name: "CITemperatureAndTint") else {
             return image
         }
 
         // CITemperatureAndTint works in Kelvin/tint units. The model keeps
-        // recipe controls normalized so they are easy to expose as sliders.
+        // fine-tuning controls normalized so they are easy to expose as
+        // sliders, while the explicit Color Temperature mode stores Kelvin.
         // Core Image's tint axis is positive toward green; the recipe model
         // follows camera terminology where positive tint means magenta.
         let target = CIVector(
-            x: 6500 - clamp(recipe.temperatureShift, lower: -1, upper: 1) * 1800,
-            y: -clamp(recipe.tintShift, lower: -1, upper: 1) * 120
+            x: targetKelvin,
+            y: -clamp(tintShift, lower: -1, upper: 1) * 120
         )
         filter.setValue(image, forKey: kCIInputImageKey)
         filter.setValue(immutableResources.neutralWhiteBalance, forKey: "inputNeutral")
@@ -481,6 +502,88 @@ public final class FilmRenderer {
         filter.setValue(vector, forKey: "inputBVector")
         filter.setValue(immutableResources.alphaVector, forKey: "inputAVector")
         return filter.outputImage?.cropped(to: image.extent) ?? image
+    }
+
+    /// Applies the public monochromatic warm/cool and green/magenta controls
+    /// after the film base has produced its luminance. The matrix uses the
+    /// current output luminance as the tint carrier, so a neutral ACROS or
+    /// MONOCHROME base remains neutral while SEPIA keeps its base tone and
+    /// receives the same predictable axis behavior.
+    private static func applyMonochromaticColorAxes(
+        to image: CIImage,
+        recipe: FilmRecipe
+    ) -> CIImage {
+        guard isMonochromaticBase(recipe.filmBase),
+              let filter = CIFilter(name: "CIColorMatrix") else {
+            return image
+        }
+
+        let warmCool = CGFloat(clamp(
+            recipe.monochromaticColor.warmCool,
+            lower: -1,
+            upper: 1
+        ))
+        let greenMagenta = CGFloat(clamp(
+            recipe.monochromaticColor.greenMagenta,
+            lower: -1,
+            upper: 1
+        ))
+        guard abs(warmCool) > 0.0001 || abs(greenMagenta) > 0.0001 else {
+            return image
+        }
+
+        // These opponent directions are normalized against display-referred
+        // sRGB luminance. Positive values mean warm and magenta; negative
+        // values mean cool and green. The coefficients keep the weighted
+        // luma unchanged before the final safety clamp.
+        let lumaRed: CGFloat = 0.2126
+        let lumaGreen: CGFloat = 0.7152
+        let lumaBlue: CGFloat = 0.0722
+        let warmRedPerLuma: CGFloat = 0.06
+        let warmBluePerLuma = -warmRedPerLuma * lumaRed / lumaBlue
+        let magentaRedBluePerLuma: CGFloat = 0.12
+        let magentaGreenPerLuma = -magentaRedBluePerLuma * (lumaRed + lumaBlue) / lumaGreen
+
+        let redDeltaPerLuma = warmCool * warmRedPerLuma
+            + greenMagenta * magentaRedBluePerLuma
+        let greenDeltaPerLuma = greenMagenta * magentaGreenPerLuma
+        let blueDeltaPerLuma = warmCool * warmBluePerLuma
+            + greenMagenta * magentaRedBluePerLuma
+
+        let redVector = CIVector(
+            x: 1 + redDeltaPerLuma * lumaRed,
+            y: redDeltaPerLuma * lumaGreen,
+            z: redDeltaPerLuma * lumaBlue,
+            w: 0
+        )
+        let greenVector = CIVector(
+            x: greenDeltaPerLuma * lumaRed,
+            y: 1 + greenDeltaPerLuma * lumaGreen,
+            z: greenDeltaPerLuma * lumaBlue,
+            w: 0
+        )
+        let blueVector = CIVector(
+            x: blueDeltaPerLuma * lumaRed,
+            y: blueDeltaPerLuma * lumaGreen,
+            z: 1 + blueDeltaPerLuma * lumaBlue,
+            w: 0
+        )
+
+        filter.setValue(image, forKey: kCIInputImageKey)
+        filter.setValue(redVector, forKey: "inputRVector")
+        filter.setValue(greenVector, forKey: "inputGVector")
+        filter.setValue(blueVector, forKey: "inputBVector")
+        filter.setValue(immutableResources.alphaVector, forKey: "inputAVector")
+        return filter.outputImage?.cropped(to: image.extent) ?? image
+    }
+
+    private static func isMonochromaticBase(_ filmBase: FilmRecipe.FilmBase) -> Bool {
+        switch filmBase {
+        case .acros, .acrosYellow, .acrosRed, .acrosGreen, .monochrome, .sepia:
+            return true
+        default:
+            return false
+        }
     }
 
     private static func applyColorControls(
@@ -919,6 +1022,12 @@ public final class FilmRenderer {
             saturate(0.72)
             mappedRed += 0.006 * highlightWeight
             mappedBlue += 0.008 * shadowWeight
+        case .sepia:
+            // Original warm-monochrome approximation for the public Sepia
+            // vocabulary; this is not Fujifilm calibration data.
+            mappedRed = luma * 1.06
+            mappedGreen = luma * 0.91
+            mappedBlue = luma * 0.72
         case .acros, .acrosYellow, .acrosRed, .acrosGreen, .monochrome:
             mappedRed = luma
             mappedGreen = luma

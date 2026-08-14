@@ -35,7 +35,13 @@ final class PhotoOutputEncoderTests: XCTestCase {
                 kCGImagePropertyGPSLongitude as String: -87.63
             ],
             kCGImagePropertyTIFFDictionary as String: [
-                kCGImagePropertyTIFFArtist as String: "Filmy Camera test"
+                kCGImagePropertyTIFFArtist as String: "source-artist-should-not-leak"
+            ],
+            kCGImagePropertyExifDictionary as String: [
+                kCGImagePropertyExifLensModel as String: "source-lens-should-not-leak"
+            ],
+            kCGImagePropertyMakerAppleDictionary as String: [
+                "source-device-field": "source-maker-apple-should-not-leak"
             ]
         ]
         CGImageDestinationAddImage(sourceDestination, image, sourceProperties as CFDictionary)
@@ -70,6 +76,9 @@ final class PhotoOutputEncoderTests: XCTestCase {
         XCTAssertEqual(properties[kCGImagePropertyColorModel as String] as? String, kCGImagePropertyColorModelRGB as String)
         XCTAssertEqual(properties[kCGImagePropertyProfileName as String] as? String, PhotoOutputEncoder.outputProfileName)
         XCTAssertNil(properties[kCGImagePropertyGPSDictionary as String])
+        XCTAssertNil(tiff[kCGImagePropertyTIFFArtist as String])
+        XCTAssertNil(exif[kCGImagePropertyExifLensModel as String])
+        XCTAssertNil(properties[kCGImagePropertyMakerAppleDictionary as String])
         XCTAssertEqual(CGImageSourceGetType(outputSource) as String?, UTType.jpeg.identifier)
 
         let userComment = try XCTUnwrap(exif[kCGImagePropertyExifUserComment as String] as? String)

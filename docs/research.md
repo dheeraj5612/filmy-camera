@@ -34,10 +34,10 @@ The source snapshots were checked on 2026-08-13. Repository licenses and current
 
 ## Recipe model
 
-Fujifilm's public manuals and support material describe the controls as a combination of film simulation, highlight/shadow tone, grain, Color Chrome, Color Chrome FX Blue, white balance shift, and tone curve. Filmy Camera represents those controls as data in `FilmRecipe` and applies them as:
+Fujifilm's public manuals and support material describe the controls as a combination of film simulation, highlight/shadow tone, grain, Color Chrome, Color Chrome FX Blue, white balance, dynamic range, D Range Priority, monochromatic color, and tone curve. Filmy Camera represents those controls as data in `FilmRecipe` and applies them as:
 
 1. Exposure and tone controls.
-2. Temperature/tint white-balance shift.
+2. White-balance mode plus persisted Kelvin color temperature and temperature/tint fine-tuning.
 3. A generated 3D color cube for palette/cross-channel response.
 4. Grain and vignette finishing stages.
 
@@ -53,7 +53,7 @@ The live viewfinder and still export share `CameraFrameLayout.aspectFillCrop`. C
 
 The live camera output prefers bi-planar video-range YUV buffers when AVFoundation exposes them, with a BGRA fallback for older or simulator implementations. The camera session owns a random grain phase that is passed to both the preview and capture render, keeping grain placement aligned within a session while deterministic thumbnails and tests retain the canonical zero seed.
 
-The [X-T5 image-quality menu](https://fujifilm-dsc.com/en-int/manual/x-t5/introduction/menu_list/) and [image-quality reference](https://fujifilm-dsc.com/en/manual/x-t5/menu_shooting/image_quality_setting/) are the first-party vocabulary reference for the model. They document film simulation, grain effect roughness/size, Color Chrome, Color Chrome FX Blue, dynamic range, white balance, tone curve, color, sharpness, high-ISO noise reduction, and clarity. They do not provide a transferable iPhone LUT or sensor calibration. Therefore the renderer intentionally claims a transparent, original approximation of the public controls—not identical Fujifilm hardware output.
+The [X-T5 image-quality menu](https://fujifilm-dsc.com/en-int/manual/x-t5/introduction/menu_list/) and [image-quality reference](https://fujifilm-dsc.com/en/manual/x-t5/menu_shooting/image_quality_setting/) are the first-party vocabulary reference for the model. They document film simulation, grain effect roughness/size, Color Chrome, Color Chrome FX Blue, dynamic range, D Range Priority, white balance modes, monochromatic color axes, tone curve, color, sharpness, high-ISO noise reduction, and clarity. They do not provide a transferable iPhone LUT or sensor calibration. Therefore the renderer intentionally claims a transparent, original approximation of the public controls—not identical Fujifilm hardware output.
 
 ## Calibration and licensing boundary
 
@@ -70,11 +70,14 @@ The current renderer therefore remains an original, inspectable Core Image/Metal
 The recipe model now treats the public terminology boundary as an explicit
 product contract. The first-party X-T5 manual uses the following control
 groups: Film Simulation, Grain Effect (roughness and size), Color Chrome Effect,
-Color Chrome FX Blue, White Balance, Dynamic Range, Tone Curve, Color,
-Sharpness, High ISO NR, and Clarity. It also documents ACROS and monochrome
+Color Chrome FX Blue, White Balance, Dynamic Range, D Range Priority, Tone
+Curve, Color, Sharpness, High ISO NR, and Clarity. It also documents
+monochromatic warm/cool and green/magenta axes plus ACROS and monochrome
 yellow, red, and green filter options. Filmy Camera uses those names as
-interoperable vocabulary, while its numeric values remain app-defined
-normalized parameters.
+interoperable vocabulary, while its normalized fine-tuning values remain
+app-defined parameters. The explicit Color Temperature mode also persists
+the documented 2500–10000 K range; this records camera intent but does not add
+proprietary calibration.
 
 `FilmRecipe.Control` is the single semantic catalog for those numeric
 parameters. Each entry states its unit, meaning, and app editor range. The
@@ -82,7 +85,7 @@ range is not presented as a Fujifilm hardware scale, and validation reports
 out-of-range drafts without rewriting them. The renderer remains defensive and
 clamps at its own output boundary.
 
-`FilmRecipe` persistence is versioned. Current records use schema version 3
+`FilmRecipe` persistence is versioned. Current records use schema version 5
 and serialize `Provenance` with the two first-party references above. The
 record states `originalParametricApproximation` and
 `notCalibratedToFujifilmHardware`; there is intentionally no exact-match,
@@ -102,3 +105,38 @@ First-party references:
 
 - [FUJIFILM X-T5 Image Quality Setting](https://fujifilm-dsc.com/en/manual/x-t5/menu_shooting/image_quality_setting/)
 - [FUJIFILM Film Simulation overview](https://www.fujifilm-x.com/en-us/products/film-simulation/)
+
+## Live open-source review — 2026-08-14
+
+The implementation review was refreshed against current upstream repositories
+and Apple's filtered-camera sample. The result reinforces the existing choice
+to keep the app dependency-free:
+
+- [IFTTT/FastttCamera](https://github.com/IFTTT/FastttCamera) (MIT) remains a
+  useful reference for capture lifecycle, orientation, crop, focus/exposure,
+  and lookup-filter separation, but its Objective-C/CocoaPods foundation is
+  not a good new dependency.
+- [BradLarson/GPUImage3](https://github.com/BradLarson/GPUImage3) (BSD-3-Clause)
+  demonstrates a composable Swift/Metal source → operation → consumer graph;
+  its README still calls out incomplete still-photo processing, so it is a
+  reference rather than the still-export foundation.
+- [MetalPetal/MetalPetal](https://github.com/MetalPetal/MetalPetal) (MIT) is
+  the strongest reusable render-graph alternative: immutable image promises,
+  reusable context, custom kernels, color lookup, caching, and explicit color
+  boundaries. Its examples and documentation have separate licensing notes.
+- [NextLevel/NextLevel](https://github.com/NextLevel/NextLevel) (MIT) is a
+  useful capture-state reference for interruptions, depth, RAW, and output
+  callbacks, but its broad dependency surface is unnecessary for the current
+  app's AVFoundation service.
+- [yangKJ/Harbeth](https://github.com/yangKJ/Harbeth) (MIT) is a benchmark
+  candidate for Metal/CUBE/LUT plumbing, not an adopted dependency until API
+  stability, performance, and every transitive asset are reviewed.
+
+Apple's [AVCamFilter sample](https://developer.apple.com/documentation/avfoundation/avcamfilter-applying-filters-to-a-capture-stream)
+continues to support the chosen architecture: keep camera session work off the
+main thread, process pixel buffers through a reusable Core Image/Metal context,
+and use the same deterministic recipe graph for preview and still output.
+The public Fujifilm material still defines the user-facing recipe controls, not
+the sensor/ISP transfer functions or a general-purpose LUT. Model-specific
+downloadable LUTs and community profiles therefore remain excluded from the
+commercial bundle without explicit redistribution rights and calibration data.

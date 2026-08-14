@@ -2,24 +2,62 @@ import SwiftUI
 import UIKit
 
 enum FilmyTheme {
-    static let background = Color(red: 0.035, green: 0.039, blue: 0.044)
-    static let panel = Color(red: 0.075, green: 0.081, blue: 0.09)
-    static let panelRaised = Color(red: 0.12, green: 0.13, blue: 0.145)
+    static let background = Color(red: 0.027, green: 0.031, blue: 0.039)
+    static let backgroundRaised = Color(red: 0.055, green: 0.062, blue: 0.075)
+    static let panel = Color(red: 0.075, green: 0.083, blue: 0.098)
+    static let panelRaised = Color(red: 0.13, green: 0.143, blue: 0.165)
     static let line = Color.white.opacity(0.12)
     static let primary = Color.white.opacity(0.94)
     static let secondary = Color.white.opacity(0.62)
     // Keep small section labels above contrast-safe opacity on dark surfaces.
     static let tertiary = Color.white.opacity(0.56)
-    static let accent = Color(red: 0.97, green: 0.72, blue: 0.27)
+    static let accent = Color(red: 0.98, green: 0.73, blue: 0.28)
+    static let accentWarm = Color(red: 1.0, green: 0.55, blue: 0.32)
     static let mint = Color(red: 0.47, green: 0.83, blue: 0.73)
-    static let cornerRadius: CGFloat = 22
-    static let controlRadius: CGFloat = 12
-    static let actionPlateRadius: CGFloat = 24
+    static let cornerRadius: CGFloat = 24
+    static let controlRadius: CGFloat = 14
+    static let actionPlateRadius: CGFloat = 28
     static let minimumHitTarget: CGFloat = 44
 
     static let titleFont = Font.system(.title2, design: .rounded).weight(.bold)
     static let bodyFont = Font.system(.body, design: .rounded)
     static let metadataFont = Font.system(.caption, design: .monospaced).weight(.semibold)
+
+    static let pageGradient = LinearGradient(
+        colors: [backgroundRaised.opacity(0.84), background, background],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+
+    static let plateGradient = LinearGradient(
+        colors: [Color.white.opacity(0.13), Color.white.opacity(0.045)],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+}
+
+struct FilmyPageBackground: View {
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                FilmyTheme.pageGradient
+
+                Circle()
+                    .fill(FilmyTheme.accentWarm.opacity(0.075))
+                    .frame(width: min(proxy.size.width * 0.9, 380))
+                    .blur(radius: 70)
+                    .offset(x: proxy.size.width * 0.34, y: -proxy.size.height * 0.38)
+
+                Circle()
+                    .fill(FilmyTheme.accent.opacity(0.045))
+                    .frame(width: min(proxy.size.width * 0.76, 320))
+                    .blur(radius: 80)
+                    .offset(x: -proxy.size.width * 0.48, y: proxy.size.height * 0.35)
+            }
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+    }
 }
 
 struct SectionHeading: View {
@@ -67,11 +105,16 @@ struct GlassCard<Content: View>: View {
     var body: some View {
         content
             .padding(padding)
-            .background(FilmyTheme.panel.opacity(0.94), in: RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous))
+            .background(
+                FilmyTheme.plateGradient,
+                in: RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous)
+            )
+            .background(FilmyTheme.panel.opacity(0.92), in: RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous)
                     .stroke(FilmyTheme.line, lineWidth: 1)
             }
+            .shadow(color: .black.opacity(0.18), radius: 22, y: 10)
     }
 }
 
@@ -113,9 +156,9 @@ struct CameraActionButton: View {
                 Image(systemName: systemName)
                     .font(.system(size: 15, weight: .bold))
                 Text(title)
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .font(.system(.caption, design: .rounded).weight(.bold))
                     .lineLimit(2)
-                    .minimumScaleFactor(0.68)
+                    .minimumScaleFactor(0.78)
                     .allowsTightening(true)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
@@ -176,23 +219,35 @@ struct CameraStatusPill: View {
     let availability: CameraService.Availability
     let message: String
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var isLive: Bool {
+        // `isRunning` can briefly outlive a lifecycle transition. Availability
+        // is the source of truth so Simulator and offline states never look
+        // or sound like a live camera.
+        availability == .running && isRunning
+    }
+
     var body: some View {
         HStack(spacing: 7) {
             Circle()
-                .fill(isRunning ? FilmyTheme.mint : FilmyTheme.accent)
+                .fill(isLive ? FilmyTheme.mint : FilmyTheme.accent)
                 .frame(width: 7, height: 7)
 
             Text(condensedMessage)
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .lineLimit(1)
+                .font(.system(.caption2, design: .rounded).weight(.semibold))
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(FilmyTheme.primary)
         }
         .padding(.horizontal, 11)
         .padding(.vertical, 8)
+        .frame(minHeight: FilmyTheme.minimumHitTarget)
         .background(Color.black.opacity(0.42), in: Capsule())
         .overlay { Capsule().stroke(Color.white.opacity(0.14), lineWidth: 1) }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(isRunning ? "Camera status: live preview" : "Camera status: \(message)")
+        .accessibilityLabel("Camera status")
+        .accessibilityValue(accessibilityStatus)
     }
 
     private var condensedMessage: String {
@@ -210,30 +265,80 @@ struct CameraStatusPill: View {
         case .idle, .starting:
             return "Starting"
         case .running:
-            return isRunning ? "Live" : "Starting"
+            return isLive ? "Live" : "Starting"
         }
+    }
+
+    private var accessibilityStatus: String {
+        if isLive {
+            return "Live preview"
+        }
+
+        let detail = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !detail.isEmpty else { return condensedMessage }
+        return "\(condensedMessage). \(detail)"
     }
 }
 
 struct ZoomControl: View {
     let value: CGFloat
     let onAdjust: (AccessibilityAdjustmentDirection) -> Void
+    let onSelect: (CGFloat) -> Void
+
+    private let zoomPresets: [CGFloat] = [0.5, 1, 2, 3, 5]
 
     var body: some View {
-        Text("\(value, specifier: "%.1f")×")
-            .font(.system(size: 12, weight: .bold, design: .rounded))
+        Menu {
+            Section("Quick zoom") {
+                ForEach(zoomPresets, id: \.self) { preset in
+                    Button {
+                        onSelect(preset)
+                    } label: {
+                        if abs(value - preset) < 0.05 {
+                            Label(presetTitle(preset), systemImage: "checkmark")
+                        } else {
+                            Text(presetTitle(preset))
+                        }
+                    }
+                }
+            }
+
+            Divider()
+
+            Button("Zoom out", systemImage: "minus") {
+                onAdjust(.decrement)
+            }
+            Button("Zoom in", systemImage: "plus") {
+                onAdjust(.increment)
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "viewfinder")
+                    .font(.system(size: 10, weight: .black))
+                Text("\(value, specifier: "%.1f")×")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .black))
+                    .foregroundStyle(.white.opacity(0.66))
+            }
             .foregroundStyle(.white)
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
+            .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
             .background(Color.black.opacity(0.46), in: Capsule())
             .overlay { Capsule().stroke(Color.white.opacity(0.16), lineWidth: 1) }
-            .accessibilityElement()
-            .accessibilityLabel("Zoom")
-            .accessibilityValue("\(value, specifier: "%.1f") times")
-            .accessibilityHint("Swipe up or down to adjust zoom. Pinch the preview to zoom with touch.")
-            .accessibilityAdjustableAction { direction in
-                onAdjust(direction)
-            }
+        }
+        .accessibilityElement()
+        .accessibilityLabel("Zoom")
+        .accessibilityValue("\(value, specifier: "%.1f") times")
+        .accessibilityHint("Choose a quick zoom, swipe up or down to adjust, or pinch the preview.")
+        .accessibilityAdjustableAction { direction in
+            onAdjust(direction)
+        }
+    }
+
+    private func presetTitle(_ preset: CGFloat) -> String {
+        String(format: "%.1f×", preset)
     }
 }
 
@@ -326,6 +431,7 @@ struct RecipeSwatch: View {
     let recipe: FilmRecipe
     var isSelected = false
     var compact = false
+    var showsLabel = true
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var thumbnailData: Data?
@@ -353,29 +459,32 @@ struct RecipeSwatch: View {
             )
         }
         .overlay(alignment: .bottomLeading) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(recipe.name)
-                    .font(.system(size: compact ? 12 : 13, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .lineLimit(compact ? 1 : 2)
-                    .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 0.72 : 0.84)
-                    .allowsTightening(true)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                if !compact {
-                    Text(recipe.descriptor)
-                        .font(.system(size: 9, weight: .medium, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.82))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.72)
+            if showsLabel {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(recipe.name)
+                        .font((compact ? Font.caption : (dynamicTypeSize.isAccessibilitySize ? Font.body : Font.subheadline)).weight(.bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(compact ? 1 : (dynamicTypeSize.isAccessibilitySize ? 3 : 2))
+                        .minimumScaleFactor(compact ? 0.84 : 0.78)
                         .allowsTightening(true)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if !compact {
+                        Text(recipe.descriptor)
+                            .font((dynamicTypeSize.isAccessibilitySize ? Font.caption : Font.caption2).weight(.medium))
+                            .foregroundStyle(.white.opacity(0.9))
+                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                            .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 0.78 : 0.72)
+                            .allowsTightening(true)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
+                .padding(compact ? 10 : 12)
+                .background(
+                    Color.black.opacity(0.22),
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                )
             }
-            .padding(compact ? 10 : 12)
-            .background(
-                Color.black.opacity(0.22),
-                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-            )
         }
         .clipShape(RoundedRectangle(cornerRadius: compact ? 14 : 18, style: .continuous))
         .overlay {
@@ -414,11 +523,26 @@ struct RecipeEditorSectionLabel: View {
 
 struct CaptureButton: View {
     let isCapturing: Bool
+    let isEnabled: Bool
     let action: () -> Void
+
+    init(
+        isCapturing: Bool,
+        isEnabled: Bool = true,
+        action: @escaping () -> Void
+    ) {
+        self.isCapturing = isCapturing
+        self.isEnabled = isEnabled
+        self.action = action
+    }
 
     var body: some View {
         Button(action: action) {
             ZStack {
+                Circle()
+                    .stroke(FilmyTheme.accent.opacity(0.72), lineWidth: 1)
+                    .frame(width: 92, height: 92)
+
                 Circle()
                     .fill(.white)
                     .frame(width: 78, height: 78)
@@ -438,9 +562,18 @@ struct CaptureButton: View {
             }
         }
         .buttonStyle(.plain)
-        .disabled(isCapturing)
-        .accessibilityLabel(isCapturing ? "Saving photo" : "Capture photo")
-        .accessibilityHint("Captures the current frame using the selected recipe")
+        .opacity(isEnabled ? 1 : 0.52)
+        .disabled(isCapturing || !isEnabled)
+        .accessibilityLabel(
+            isCapturing
+                ? "Saving photo"
+                : (isEnabled ? "Capture photo" : "Capture unavailable in Preview mode")
+        )
+        .accessibilityHint(
+            isEnabled
+                ? "Captures the current frame using the selected recipe"
+                : "Capture is available on a physical iPhone"
+        )
     }
 }
 
@@ -626,6 +759,7 @@ struct PermissionBadge: View {
             .foregroundStyle(isEnabled ? FilmyTheme.mint : FilmyTheme.accent)
             .padding(.horizontal, 9)
             .padding(.vertical, 6)
+            .fixedSize(horizontal: true, vertical: false)
             .background((isEnabled ? FilmyTheme.mint : FilmyTheme.accent).opacity(0.12), in: Capsule())
     }
 }
@@ -638,47 +772,69 @@ struct PreviewPlaceholder: View {
     var action: (() -> Void)?
 
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: recipe.previewColors,
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .overlay(Color.black.opacity(0.3))
+        GeometryReader { proxy in
+            ZStack {
+                LinearGradient(
+                    colors: recipe.previewColors,
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
 
-            VStack(spacing: 14) {
-                Image(systemName: isSimulator ? "iphone.gen3" : "camera.fill")
-                    .font(.system(size: 25, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .frame(width: 58, height: 58)
-                    .background(.white.opacity(0.12), in: Circle())
-
-                VStack(spacing: 5) {
-                    Text(isSimulator ? "Preview mode" : "Camera unavailable")
-                        .font(.system(size: 19, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                    Text(message ?? (isSimulator ? "Shoot this look on an iPhone." : "Check camera access in Settings, then try again."))
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.72))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 28)
+                // Keep the simulator and unavailable-camera states visually useful
+                // without presenting a synthetic image as live camera output. This
+                // is the same renderer-backed scene used by the recipe rail, so a
+                // user can still see how the selected look is meant to feel before
+                // moving to a physical iPhone.
+                if isSimulator {
+                    RecipeSwatch(recipe: recipe, compact: false, showsLabel: false)
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                        .overlay(Color.black.opacity(0.18))
+                        .accessibilityHidden(true)
                 }
 
-                if let actionTitle, let action {
-                    Button(actionTitle, action: action)
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundStyle(FilmyTheme.background)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
-                        .background(FilmyTheme.accent, in: Capsule())
-                        .accessibilityIdentifier(actionTitle == "Open Settings" ? "camera-permission-action" : "camera-recovery-action")
-                        .accessibilityHint(actionTitle == "Open Settings" ? "Opens Filmy Camera permissions" : "Attempts to resume the camera")
+                Color.black.opacity(isSimulator ? 0.30 : 0.46)
+
+                VStack(spacing: 14) {
+                    Image(systemName: isSimulator ? "iphone.gen3" : "camera.fill")
+                        .font(.system(size: 25, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .frame(width: 58, height: 58)
+                        .background(.white.opacity(0.12), in: Circle())
+
+                    VStack(spacing: 5) {
+                        Text(isSimulator ? "Preview mode" : "Camera unavailable")
+                            .font(.system(size: 19, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                        Text(message ?? (isSimulator ? "Shoot this look on an iPhone." : "Check camera access in Settings, then try again."))
+                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 28)
+                    }
+
+                    if let actionTitle, let action {
+                        Button(actionTitle, action: action)
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundStyle(FilmyTheme.background)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
+                            .background(FilmyTheme.accent, in: Capsule())
+                            .accessibilityIdentifier(actionTitle == "Open Settings" ? "camera-permission-action" : "camera-recovery-action")
+                            .accessibilityHint(actionTitle == "Open Settings" ? "Opens Filmy Camera permissions" : "Attempts to resume the camera")
+                    }
                 }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 18)
+                .background(Color.black.opacity(0.28), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                }
+                // Keep the explanation above the camera action plate so the
+                // unavailable state remains readable on short iPhone displays.
+                .offset(y: -128)
             }
-            // Keep the explanation above the camera action plate so the
-            // unavailable state remains readable on short iPhone displays.
-            .offset(y: -128)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

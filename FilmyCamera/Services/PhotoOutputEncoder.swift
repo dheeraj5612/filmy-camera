@@ -33,7 +33,7 @@ enum PhotoOutputEncoder {
 
     static func jpegData(
         for image: CGImage,
-        sourceData: Data,
+        sourceData _: Data,
         capturedAt: Date,
         recipe: FilmRecipe
     ) -> Data? {
@@ -46,30 +46,22 @@ enum PhotoOutputEncoder {
             return nil
         }
 
-        var properties: [String: Any] = [:]
-        if let source = CGImageSourceCreateWithData(sourceData as CFData, nil),
-           let sourceProperties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any] {
-            // GPS is intentionally not copied. The app should not add a
-            // location trail to an edited frame without an explicit user
-            // choice.
-            for key in [
-                kCGImagePropertyTIFFDictionary as String,
-                kCGImagePropertyExifDictionary as String,
-                kCGImagePropertyMakerAppleDictionary as String
-            ] {
-                if let value = sourceProperties[key] {
-                    properties[key] = value
-                }
-            }
-        }
+        // Build export metadata from an explicit allowlist. Source TIFF, EXIF,
+        // MakerApple, GPS, and other camera/device metadata must never cross
+        // this boundary into an app-created JPEG.
+        var properties: [String: Any] = [
+            kCGImagePropertyColorModel as String: kCGImagePropertyColorModelRGB,
+            kCGImagePropertyProfileName as String: Self.outputProfileName,
+            kCGImagePropertyPixelWidth as String: outputImage.width,
+            kCGImagePropertyPixelHeight as String: outputImage.height,
+            kCGImagePropertyOrientation as String: 1
+        ]
 
-        var tiff = properties[kCGImagePropertyTIFFDictionary as String] as? [String: Any] ?? [:]
-        tiff[kCGImagePropertyTIFFSoftware as String] = "Filmy Camera"
-        tiff[kCGImagePropertyTIFFImageDescription as String] = "Filmy Camera • \(recipe.name)"
+        let tiff: [String: Any] = [
+            kCGImagePropertyTIFFSoftware as String: "Filmy Camera",
+            kCGImagePropertyTIFFImageDescription as String: "Filmy Camera • \(recipe.name)"
+        ]
         properties[kCGImagePropertyTIFFDictionary as String] = tiff
-
-        properties[kCGImagePropertyColorModel as String] = kCGImagePropertyColorModelRGB
-        properties[kCGImagePropertyProfileName as String] = Self.outputProfileName
 
         // The filtered frame may be aspect-fill cropped before encoding. Keep
         // the exported metadata truthful instead of carrying source-camera
@@ -78,20 +70,19 @@ enum PhotoOutputEncoder {
         dateFormatter.locale = Locale(identifier: "en_US_POSIX")
         dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
         dateFormatter.dateFormat = "yyyy:MM:dd HH:mm:ss"
-        var exif = properties[kCGImagePropertyExifDictionary as String] as? [String: Any] ?? [:]
-        exif[kCGImagePropertyExifDateTimeOriginal as String] = dateFormatter.string(from: capturedAt)
-        exif[kCGImagePropertyExifPixelXDimension as String] = outputImage.width
-        exif[kCGImagePropertyExifPixelYDimension as String] = outputImage.height
-        // EXIF 2.3: 1 means sRGB. This complements the embedded ICC profile
-        // for readers that inspect EXIF but do not parse ICC resources.
-        exif[kCGImagePropertyExifColorSpace as String] = 1
+        var exif: [String: Any] = [
+            kCGImagePropertyExifDateTimeOriginal as String: dateFormatter.string(from: capturedAt),
+            kCGImagePropertyExifPixelXDimension as String: outputImage.width,
+            kCGImagePropertyExifPixelYDimension as String: outputImage.height,
+            // EXIF 2.3: 1 means sRGB. This complements the embedded ICC
+            // profile for readers that inspect EXIF but do not parse ICC
+            // resources.
+            kCGImagePropertyExifColorSpace as String: 1
+        ]
         if let provenance = provenanceJSON(for: recipe) {
             exif[kCGImagePropertyExifUserComment as String] = provenance
         }
         properties[kCGImagePropertyExifDictionary as String] = exif
-        properties[kCGImagePropertyPixelWidth as String] = outputImage.width
-        properties[kCGImagePropertyPixelHeight as String] = outputImage.height
-        properties[kCGImagePropertyOrientation as String] = 1
 
         let outputData = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(
