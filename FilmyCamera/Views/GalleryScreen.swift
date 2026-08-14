@@ -428,6 +428,7 @@ private struct GalleryDetailView: View {
     @ObservedObject var photoLibrary: PhotoLibraryService
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var image: UIImage?
     @State private var shareURL: URL?
     @State private var isShowingShareSheet = false
@@ -659,11 +660,17 @@ private struct GalleryDetailView: View {
     }
 
     private func resetImageTransform() {
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+        let reset = {
             zoomScale = 1
             pinchBaseZoom = nil
             imageOffset = .zero
             dragBaseOffset = .zero
+        }
+
+        if reduceMotion {
+            reset()
+        } else {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.82), reset)
         }
     }
 }

@@ -234,21 +234,22 @@ struct CameraScreen: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 7) {
                         Text("FILMY CAMERA")
-                            .font(.system(size: 12, weight: .black, design: .rounded))
+                            .font(.system(.caption, design: .rounded).weight(.black))
                             .tracking(2.0)
 
-                        Text(camera.isRunning ? "LIVE" : "PAUSED")
-                            .font(.system(size: 8, weight: .black, design: .rounded))
+                        Text(sessionLabel)
+                            .font(.system(.caption2, design: .rounded).weight(.black))
                             .tracking(0.8)
                             .foregroundStyle(camera.isRunning ? FilmyTheme.mint : FilmyTheme.accent)
                     }
                         .foregroundStyle(.white)
 
                     Text(viewModel.selectedRecipe.name + "  ·  " + viewModel.selectedRecipe.descriptor)
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .font(.system(.caption2, design: .rounded).weight(.semibold))
                         .foregroundStyle(.white.opacity(0.6))
-                        .lineLimit(1)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
                         .minimumScaleFactor(0.7)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
@@ -338,6 +339,23 @@ struct CameraScreen: View {
 
     private var shouldShowCameraEmptyState: Bool {
         !camera.isRunning
+    }
+
+    private var sessionLabel: String {
+        switch camera.availability {
+        case .running:
+            return "LIVE"
+        case .simulator:
+            return "PREVIEW"
+        case .permissionDenied:
+            return "ACCESS OFF"
+        case .requestingPermission:
+            return "ACCESS NEEDED"
+        case .paused:
+            return "PAUSED"
+        case .interrupted, .needsRecovery, .unavailable, .idle, .starting:
+            return "STARTING"
+        }
     }
 
     private var isUITesting: Bool {
@@ -769,7 +787,7 @@ struct CameraScreen: View {
                 selectedRecipeID: $viewModel.selectedRecipeID,
                 onOpenDetail: { recipeForDetail = $0 }
             )
-            .frame(height: 80)
+            .frame(height: dynamicTypeSize.isAccessibilitySize ? 118 : 80)
 
             HStack(alignment: .center, spacing: 12) {
                 CameraActionButton(

@@ -219,6 +219,8 @@ struct CameraStatusPill: View {
     let availability: CameraService.Availability
     let message: String
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     var body: some View {
         HStack(spacing: 7) {
             Circle()
@@ -226,12 +228,14 @@ struct CameraStatusPill: View {
                 .frame(width: 7, height: 7)
 
             Text(condensedMessage)
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .lineLimit(1)
+                .font(.system(.caption2, design: .rounded).weight(.semibold))
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(FilmyTheme.primary)
         }
         .padding(.horizontal, 11)
         .padding(.vertical, 8)
+        .frame(minHeight: FilmyTheme.minimumHitTarget)
         .background(Color.black.opacity(0.42), in: Capsule())
         .overlay { Capsule().stroke(Color.white.opacity(0.14), lineWidth: 1) }
         .accessibilityElement(children: .combine)
