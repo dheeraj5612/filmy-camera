@@ -35,7 +35,7 @@ struct ContentView: View {
                 camera: camera,
                 viewModel: cameraViewModel,
                 photoLibrary: photoLibrary,
-                isCameraTabActive: true,
+                isCameraTabActive: selectedTab == .camera,
                 onOpenGallery: { selectedTab = .gallery }
             )
         case .gallery:

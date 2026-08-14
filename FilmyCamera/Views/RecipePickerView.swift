@@ -177,6 +177,7 @@ struct RecipeDetailView: View {
                     }
 
                     Button {
+                        commitDraft()
                         onSelect()
                     } label: {
                         HStack(spacing: 10) {
@@ -340,6 +341,21 @@ struct RecipeDetailView: View {
 
                 Spacer(minLength: 12)
 
+                if onUpdate != nil {
+                    Button("Apply") {
+                        commitDraft()
+                        dismiss()
+                    }
+                    .font(.system(.subheadline, design: .rounded).weight(.bold))
+                    .foregroundStyle(FilmyTheme.background)
+                    .padding(.horizontal, 12)
+                    .frame(minHeight: FilmyTheme.minimumHitTarget)
+                    .background(FilmyTheme.accent, in: Capsule())
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Apply recipe changes")
+                    .accessibilityHint("Saves the current recipe controls and closes the editor")
+                }
+
                 Button("Reset") {
                     draft = originalRecipe
                     onReset?()
@@ -460,9 +476,13 @@ struct RecipeDetailView: View {
             get: { draft[keyPath: keyPath] },
             set: { newValue in
                 draft[keyPath: keyPath] = newValue
-                onUpdate?(draft)
             }
         )
+    }
+
+    private func commitDraft() {
+        guard draft != recipe else { return }
+        onUpdate?(draft)
     }
 
     private var dynamicRangeBinding: Binding<FilmRecipe.DynamicRange> {
@@ -470,7 +490,6 @@ struct RecipeDetailView: View {
             get: { draft.dynamicRange },
             set: { newValue in
                 draft.dynamicRange = newValue
-                onUpdate?(draft)
             }
         )
     }
@@ -480,7 +499,6 @@ struct RecipeDetailView: View {
             get: { draft.fxBlueLevel },
             set: { newValue in
                 draft.fxBlueLevel = newValue
-                onUpdate?(draft)
             }
         )
     }
@@ -490,7 +508,6 @@ struct RecipeDetailView: View {
             get: { draft.colorChromeLevel },
             set: { newValue in
                 draft.colorChromeLevel = newValue
-                onUpdate?(draft)
             }
         )
     }
@@ -500,7 +517,6 @@ struct RecipeDetailView: View {
             get: { draft.grainEffectLevel },
             set: { newValue in
                 draft.grainEffectLevel = newValue
-                onUpdate?(draft)
             }
         )
     }
@@ -510,7 +526,6 @@ struct RecipeDetailView: View {
             get: { draft.grainSizeLevel },
             set: { newValue in
                 draft.grainSizeLevel = newValue
-                onUpdate?(draft)
             }
         )
     }

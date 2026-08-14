@@ -261,22 +261,62 @@ struct CameraStatusPill: View {
 struct ZoomControl: View {
     let value: CGFloat
     let onAdjust: (AccessibilityAdjustmentDirection) -> Void
+    let onSelect: (CGFloat) -> Void
+
+    private let zoomPresets: [CGFloat] = [0.5, 1, 2, 3, 5]
 
     var body: some View {
-        Text("\(value, specifier: "%.1f")×")
-            .font(.system(size: 12, weight: .bold, design: .rounded))
+        Menu {
+            Section("Quick zoom") {
+                ForEach(zoomPresets, id: \.self) { preset in
+                    Button {
+                        onSelect(preset)
+                    } label: {
+                        if abs(value - preset) < 0.05 {
+                            Label(presetTitle(preset), systemImage: "checkmark")
+                        } else {
+                            Text(presetTitle(preset))
+                        }
+                    }
+                }
+            }
+
+            Divider()
+
+            Button("Zoom out", systemImage: "minus") {
+                onAdjust(.decrement)
+            }
+            Button("Zoom in", systemImage: "plus") {
+                onAdjust(.increment)
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "viewfinder")
+                    .font(.system(size: 10, weight: .black))
+                Text("\(value, specifier: "%.1f")×")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .black))
+                    .foregroundStyle(.white.opacity(0.66))
+            }
             .foregroundStyle(.white)
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
+            .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
             .background(Color.black.opacity(0.46), in: Capsule())
             .overlay { Capsule().stroke(Color.white.opacity(0.16), lineWidth: 1) }
-            .accessibilityElement()
-            .accessibilityLabel("Zoom")
-            .accessibilityValue("\(value, specifier: "%.1f") times")
-            .accessibilityHint("Swipe up or down to adjust zoom. Pinch the preview to zoom with touch.")
-            .accessibilityAdjustableAction { direction in
-                onAdjust(direction)
-            }
+        }
+        .accessibilityElement()
+        .accessibilityLabel("Zoom")
+        .accessibilityValue("\(value, specifier: "%.1f") times")
+        .accessibilityHint("Choose a quick zoom, swipe up or down to adjust, or pinch the preview.")
+        .accessibilityAdjustableAction { direction in
+            onAdjust(direction)
+        }
+    }
+
+    private func presetTitle(_ preset: CGFloat) -> String {
+        String(format: "%.1f×", preset)
     }
 }
 

@@ -285,10 +285,14 @@ struct CameraScreen: View {
     private var cameraControlRail: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 7) {
-                ZoomControl(value: camera.zoomFactor) { direction in
-                    let delta: CGFloat = direction == .increment ? 0.5 : -0.5
-                    camera.setZoom(camera.zoomFactor + delta)
-                }
+                ZoomControl(
+                    value: camera.zoomFactor,
+                    onAdjust: { direction in
+                        let delta: CGFloat = direction == .increment ? 0.5 : -0.5
+                        camera.setZoom(camera.zoomFactor + delta)
+                    },
+                    onSelect: camera.setZoom
+                )
 
                 ExposureControl(value: camera.exposureBias) { direction in
                     let delta: Float = direction == .increment ? (1.0 / 3.0) : -(1.0 / 3.0)
