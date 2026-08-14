@@ -67,6 +67,34 @@ final class FilmyCameraUITests: XCTestCase {
             "The unavailable camera preview must not remain an actionable target"
         )
     }
+
+    func testAccessibilitySizeCameraShellKeepsRecipeControlsReachable() throws {
+        let accessibilityApp = MainActor.assumeIsolated {
+            let accessibilityApp = XCUIApplication()
+            accessibilityApp.launchArguments = [
+                "-ui-testing",
+                "-UIPreferredContentSizeCategoryName",
+                "UICTContentSizeCategoryAccessibilityXXXL"
+            ]
+            accessibilityApp.launch()
+            return accessibilityApp
+        }
+
+        XCTAssertTrue(accessibilityApp.staticTexts["FILM STOCK"].waitForExistence(timeout: 8))
+
+        let roll = accessibilityApp.buttons["Open roll"]
+        assertMinimumHitTarget(roll, named: "Accessibility-size Roll")
+
+        let tune = accessibilityApp.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH 'Tune '")
+        ).firstMatch
+        assertMinimumHitTarget(tune, named: "Accessibility-size Tune")
+
+        let captureNotice = accessibilityApp.staticTexts[
+            "Capture is available on a physical iPhone"
+        ]
+        XCTAssertTrue(captureNotice.waitForExistence(timeout: 5))
+    }
     #endif
 
     func testGalleryAndSettingsNavigation() throws {
@@ -100,6 +128,10 @@ final class FilmyCameraUITests: XCTestCase {
         let photosPermission = app.buttons["photos-permission-settings"]
         scrollBackToHittable(photosPermission, in: app)
         assertMinimumHitTarget(photosPermission, named: "Photos permission settings")
+
+        let photosSavePermission = app.buttons["photos-save-permission-settings"]
+        scrollBackToHittable(photosSavePermission, in: app)
+        assertMinimumHitTarget(photosSavePermission, named: "Photos save permission settings")
 
         let clearCache = app.buttons["clear-local-cache"]
         XCTAssertTrue(clearCache.waitForExistence(timeout: 5))

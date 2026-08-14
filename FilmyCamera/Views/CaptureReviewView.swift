@@ -11,6 +11,7 @@ struct CaptureReviewView: View {
     let onOpenSettings: () -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         ZStack {
@@ -21,12 +22,14 @@ struct CaptureReviewView: View {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("REVIEW FRAME")
-                                .font(.system(size: 10, weight: .black, design: .rounded))
+                                .font(.system(.caption2, design: .rounded).weight(.black))
                                 .tracking(1.5)
                                 .foregroundStyle(FilmyTheme.accent)
                             Text(recipe.name)
-                                .font(.system(size: 23, weight: .black, design: .rounded))
+                                .font(.system(.title3, design: .rounded).weight(.black))
                                 .foregroundStyle(FilmyTheme.primary)
+                                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 2)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
 
                         Spacer()
@@ -66,11 +69,13 @@ struct CaptureReviewView: View {
 
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(recipe.name)
-                                    .lineLimit(1)
+                                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                                    .fixedSize(horizontal: false, vertical: true)
                                 Text(recipe.descriptor)
-                                    .font(.caption2.weight(.medium))
+                                    .font((dynamicTypeSize.isAccessibilitySize ? Font.caption : Font.caption2).weight(.medium))
                                     .foregroundStyle(.white.opacity(0.74))
-                                    .lineLimit(1)
+                                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                         }
                         .font(.system(.caption, design: .rounded).weight(.bold))
@@ -150,48 +155,64 @@ struct CaptureReviewView: View {
     }
 
     private var actionBar: some View {
-        HStack(spacing: 10) {
-            Button {
-                onRetake()
-                dismiss()
-            } label: {
-                Label("Retake", systemImage: "arrow.counterclockwise")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
-                    .foregroundStyle(FilmyTheme.primary)
-                    .frame(maxWidth: .infinity, minHeight: 52)
-                    .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .disabled(isSaving)
-
-            Button {
-                onSave()
-            } label: {
-                Group {
-                    if isSaving {
-                        ProgressView()
-                            .tint(FilmyTheme.background)
-                    } else {
-                        Label("Keep Frame", systemImage: "checkmark")
-                    }
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(spacing: 10) {
+                    retakeButton
+                    keepFrameButton
                 }
-                .font(.system(.body, design: .rounded).weight(.bold))
-                .foregroundStyle(FilmyTheme.background)
-                .frame(maxWidth: .infinity, minHeight: 52)
-                .background(
-                    LinearGradient(
-                        colors: [FilmyTheme.accent, FilmyTheme.accentWarm],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-                )
-                .shadow(color: FilmyTheme.accent.opacity(0.24), radius: 14, y: 7)
+            } else {
+                HStack(spacing: 10) {
+                    retakeButton
+                    keepFrameButton
+                }
             }
-            .buttonStyle(.plain)
-            .disabled(isSaving)
-            .accessibilityLabel(isSaving ? "Saving frame" : "Keep frame")
-            .accessibilityHint("Saves the finished frame to your Photos library")
         }
+    }
+
+    private var retakeButton: some View {
+        Button {
+            onRetake()
+            dismiss()
+        } label: {
+            Label("Retake", systemImage: "arrow.counterclockwise")
+                .font(.system(.body, design: .rounded).weight(.bold))
+                .foregroundStyle(FilmyTheme.primary)
+                .frame(maxWidth: .infinity, minHeight: 52)
+                .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(isSaving)
+    }
+
+    private var keepFrameButton: some View {
+        Button {
+            onSave()
+        } label: {
+            Group {
+                if isSaving {
+                    ProgressView()
+                        .tint(FilmyTheme.background)
+                } else {
+                    Label("Keep Frame", systemImage: "checkmark")
+                }
+            }
+            .font(.system(.body, design: .rounded).weight(.bold))
+            .foregroundStyle(FilmyTheme.background)
+            .frame(maxWidth: .infinity, minHeight: 52)
+            .background(
+                LinearGradient(
+                    colors: [FilmyTheme.accent, FilmyTheme.accentWarm],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+            )
+            .shadow(color: FilmyTheme.accent.opacity(0.24), radius: 14, y: 7)
+        }
+        .buttonStyle(.plain)
+        .disabled(isSaving)
+        .accessibilityLabel(isSaving ? "Saving frame" : "Keep frame")
+        .accessibilityHint("Saves the finished frame to your Photos library")
     }
 }

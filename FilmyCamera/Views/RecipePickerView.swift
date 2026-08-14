@@ -9,7 +9,7 @@ struct RecipePickerView: View {
 
     private var recipeTileSize: CGSize {
         dynamicTypeSize.isAccessibilitySize
-            ? CGSize(width: 166, height: 104)
+            ? CGSize(width: 174, height: 138)
             : CGSize(width: 142, height: 86)
     }
 
@@ -30,7 +30,8 @@ struct RecipePickerView: View {
                         Text(selectedRecipe.name)
                             .font(.system(.caption, design: .rounded).weight(.semibold))
                             .foregroundStyle(FilmyTheme.primary)
-                            .lineLimit(1)
+                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
 
                     Spacer(minLength: 8)

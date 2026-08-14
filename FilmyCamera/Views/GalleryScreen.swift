@@ -261,24 +261,33 @@ struct GalleryScreen: View {
     }
 
     private var archiveAccessNotice: some View {
-        HStack(alignment: .top, spacing: 11) {
-            Image(systemName: "lock.open")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(FilmyTheme.accent)
-                .frame(width: 28, height: 28)
-                .background(FilmyTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(alignment: .top, spacing: 11) {
+                Image(systemName: "lock.open")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(FilmyTheme.accent)
+                    .frame(width: 28, height: 28)
+                    .background(FilmyTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Showing your saved frames")
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(FilmyTheme.primary)
-                Text("Enable Photos read access to refresh this archive from your library.")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(FilmyTheme.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Showing your saved frames")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(FilmyTheme.primary)
+                    Text("Enable Photos read access to refresh this archive from your library.")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(FilmyTheme.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
             }
 
-            Spacer(minLength: 0)
+            Button("Open Photos Settings", action: openSystemSettings)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(FilmyTheme.accent)
+                .frame(minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
+                .accessibilityIdentifier("gallery-photos-permission-settings")
+                .accessibilityHint("Opens Filmy Camera Photos permissions")
         }
         .padding(13)
         .background(FilmyTheme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))

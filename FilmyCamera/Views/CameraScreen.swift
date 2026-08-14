@@ -19,6 +19,7 @@ struct CameraScreen: View {
     @State private var focusPoint: CGPoint?
     @State private var focusNormalizedPoint: CGPoint?
     @State private var pinchStartZoom: CGFloat = 1
+    @State private var isPinching = false
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -62,12 +63,14 @@ struct CameraScreen: View {
                     .simultaneousGesture(
                         MagnificationGesture()
                             .onChanged { scale in
-                                if abs(scale - 1) < 0.001 {
+                                if !isPinching {
+                                    isPinching = true
                                     pinchStartZoom = camera.zoomFactor
                                 }
                                 camera.setZoom(pinchStartZoom * scale)
                             }
                             .onEnded { _ in
+                                isPinching = false
                                 pinchStartZoom = camera.zoomFactor
                             }
                     )
@@ -809,7 +812,7 @@ struct CameraScreen: View {
     }
 
     private var recipeHeader: some View {
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: dynamicTypeSize.isAccessibilitySize ? .top : .center, spacing: 12) {
             ZStack {
                 Circle()
                     .fill(FilmyTheme.accent.opacity(0.13))
@@ -822,18 +825,19 @@ struct CameraScreen: View {
             }
             .frame(width: 34, height: 34)
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: dynamicTypeSize.isAccessibilitySize ? 7 : 3) {
                 Text("FILM STOCK")
                     .font(.system(size: 10, weight: .black, design: .rounded))
                     .tracking(1.5)
                     .foregroundStyle(FilmyTheme.accent)
 
-                HStack(spacing: 7) {
+                HStack(alignment: .firstTextBaseline, spacing: 7) {
                     Text(viewModel.selectedRecipe.name)
                         .font(.system(.title3, design: .rounded).weight(.bold))
                         .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.72)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .layoutPriority(1)
 
                     if viewModel.isCustomized(viewModel.selectedRecipe) {
                         Text("CUSTOM")
@@ -842,26 +846,43 @@ struct CameraScreen: View {
                             .foregroundStyle(FilmyTheme.background)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 4)
-                            .background(FilmyTheme.accent, in: Capsule())
+                        .background(FilmyTheme.accent, in: Capsule())
                     }
                 }
+                if dynamicTypeSize.isAccessibilitySize {
+                    Text(viewModel.selectedRecipe.base.uppercased())
+                        .font(.system(.caption, design: .rounded).weight(.bold))
+                        .tracking(1)
+                        .foregroundStyle(.white.opacity(0.58))
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(viewModel.selectedRecipe.descriptor.uppercased())
+                        .font(.system(.caption2, design: .rounded).weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.46))
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
+            .layoutPriority(1)
 
-            Spacer(minLength: 8)
+            if !dynamicTypeSize.isAccessibilitySize {
+                Spacer(minLength: 8)
 
-            VStack(alignment: .trailing, spacing: 3) {
-                Text(viewModel.selectedRecipe.base.uppercased())
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .tracking(1)
-                    .foregroundStyle(.white.opacity(0.54))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text(viewModel.selectedRecipe.base.uppercased())
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .tracking(1)
+                        .foregroundStyle(.white.opacity(0.54))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
 
-                Text(viewModel.selectedRecipe.descriptor.uppercased())
-                    .font(.system(size: 9, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.42))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.68)
+                    Text(viewModel.selectedRecipe.descriptor.uppercased())
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.42))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.68)
+                }
             }
         }
     }
@@ -875,43 +896,72 @@ struct CameraScreen: View {
                 selectedRecipeID: $viewModel.selectedRecipeID,
                 onOpenDetail: { recipeForDetail = $0 }
             )
-            .frame(height: dynamicTypeSize.isAccessibilitySize ? 118 : 80)
 
-            HStack(alignment: .center, spacing: 12) {
-                CameraActionButton(
-                    systemName: "square.grid.2x2",
-                    title: "Roll",
-                    accessibilityLabel: "Open roll",
-                    action: onOpenGallery
-                )
-                .fixedSize(horizontal: true, vertical: false)
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(spacing: 10) {
+                    HStack(spacing: 10) {
+                        CameraActionButton(
+                            systemName: "square.grid.2x2",
+                            title: "Roll",
+                            accessibilityLabel: "Open roll",
+                            action: onOpenGallery
+                        )
+                        .frame(maxWidth: .infinity)
 
-                HStack(spacing: 8) {
-                    Image(systemName: "iphone")
-                        .font(.system(size: 15, weight: .semibold))
-                        .accessibilityHidden(true)
+                        CameraActionButton(
+                            systemName: "slider.horizontal.3",
+                            title: "Tune",
+                            accessibilityLabel: "Tune \(viewModel.selectedRecipe.name)",
+                            action: { recipeForDetail = viewModel.selectedRecipe }
+                        )
+                        .frame(maxWidth: .infinity)
+                    }
 
-                    Text(dynamicTypeSize.isAccessibilitySize ? "iPhone only" : "Capture on iPhone")
+                    Label("Capture is available on a physical iPhone", systemImage: "iphone")
                         .font(.system(.caption, design: .rounded).weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.58))
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.72)
-                        .allowsTightening(true)
+                        .foregroundStyle(.white.opacity(0.62))
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity)
+                        .accessibilityElement(children: .combine)
                 }
-                .frame(maxWidth: .infinity, minHeight: FilmyTheme.minimumHitTarget)
-                .layoutPriority(1)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Capture is available on a physical iPhone")
+            } else {
+                HStack(alignment: .center, spacing: 12) {
+                    CameraActionButton(
+                        systemName: "square.grid.2x2",
+                        title: "Roll",
+                        accessibilityLabel: "Open roll",
+                        action: onOpenGallery
+                    )
+                    .fixedSize(horizontal: true, vertical: false)
 
-                CameraActionButton(
-                    systemName: "slider.horizontal.3",
-                    title: "Tune",
-                    accessibilityLabel: "Tune \(viewModel.selectedRecipe.name)",
-                    action: { recipeForDetail = viewModel.selectedRecipe }
-                )
-                .fixedSize(horizontal: true, vertical: false)
+                    HStack(spacing: 8) {
+                        Image(systemName: "iphone")
+                            .font(.system(size: 15, weight: .semibold))
+                            .accessibilityHidden(true)
+
+                        Text("Capture on iPhone")
+                            .font(.system(.caption, design: .rounded).weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.58))
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.72)
+                            .allowsTightening(true)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: FilmyTheme.minimumHitTarget)
+                    .layoutPriority(1)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Capture is available on a physical iPhone")
+
+                    CameraActionButton(
+                        systemName: "slider.horizontal.3",
+                        title: "Tune",
+                        accessibilityLabel: "Tune \(viewModel.selectedRecipe.name)",
+                        action: { recipeForDetail = viewModel.selectedRecipe }
+                    )
+                    .fixedSize(horizontal: true, vertical: false)
+                }
             }
         }
         .padding(.horizontal, 14)
@@ -923,6 +973,10 @@ struct CameraScreen: View {
                 .stroke(Color.white.opacity(0.18), lineWidth: 1)
         }
         .shadow(color: .black.opacity(0.26), radius: 28, y: 12)
+        // The camera chrome is a constrained overlay rather than a scrolling
+        // document. Cap its visual scale one step below the largest Dynamic
+        // Type sizes so every capture, Roll, and Tune action remains reachable.
+        .dynamicTypeSize(.large ... .accessibility1)
     }
 }
 

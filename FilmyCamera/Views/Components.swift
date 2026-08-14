@@ -156,9 +156,9 @@ struct CameraActionButton: View {
                 Image(systemName: systemName)
                     .font(.system(size: 15, weight: .bold))
                 Text(title)
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .font(.system(.caption, design: .rounded).weight(.bold))
                     .lineLimit(2)
-                    .minimumScaleFactor(0.68)
+                    .minimumScaleFactor(0.78)
                     .allowsTightening(true)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
@@ -462,20 +462,21 @@ struct RecipeSwatch: View {
             if showsLabel {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(recipe.name)
-                        .font((compact ? Font.caption : Font.subheadline).weight(.bold))
+                        .font((compact ? Font.caption : (dynamicTypeSize.isAccessibilitySize ? Font.body : Font.subheadline)).weight(.bold))
                         .foregroundStyle(.white)
-                        .lineLimit(compact ? 1 : 2)
-                        .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 0.72 : 0.84)
+                        .lineLimit(compact ? 1 : (dynamicTypeSize.isAccessibilitySize ? 3 : 2))
+                        .minimumScaleFactor(compact ? 0.84 : 0.78)
                         .allowsTightening(true)
                         .fixedSize(horizontal: false, vertical: true)
 
                     if !compact {
                         Text(recipe.descriptor)
-                            .font(.caption2.weight(.medium))
+                            .font((dynamicTypeSize.isAccessibilitySize ? Font.caption : Font.caption2).weight(.medium))
                             .foregroundStyle(.white.opacity(0.9))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.72)
+                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                            .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 0.78 : 0.72)
                             .allowsTightening(true)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 .padding(compact ? 10 : 12)

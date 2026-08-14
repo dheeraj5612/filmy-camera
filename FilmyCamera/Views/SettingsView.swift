@@ -177,7 +177,8 @@ struct SettingsView: View {
             ) {
                 PermissionBadge(
                     title: photoStatusTitle,
-                    isEnabled: photoLibrary.authorizationStatus == .authorized || photoLibrary.authorizationStatus == .limited
+                    isEnabled: PhotoLibraryAuthorizationPolicy.canRead(photoLibrary.authorizationStatus)
+                        || photoLibrary.canSaveToPhotos
                 )
             }
 
@@ -198,6 +199,27 @@ struct SettingsView: View {
                     identifier: "photos-permission-action",
                     hint: "Requests Photos access for the Roll",
                     action: requestPhotoAccess
+                )
+            }
+
+            if photoLibrary.addOnlyAuthorizationStatus == .denied
+                || photoLibrary.addOnlyAuthorizationStatus == .restricted {
+                settingsDivider
+                settingsAction(
+                    title: "Allow saving frames",
+                    systemName: "arrow.up.right.square",
+                    identifier: "photos-save-permission-settings",
+                    hint: "Opens Filmy Camera Photos permissions for saving frames",
+                    action: openSystemSettings
+                )
+            } else if photoLibrary.addOnlyAuthorizationStatus == .notDetermined {
+                settingsDivider
+                settingsAction(
+                    title: "Allow saving frames",
+                    systemName: "photo.badge.plus",
+                    identifier: "photos-save-permission-request",
+                    hint: "Requests Photos access needed to save finished frames",
+                    action: requestSaveAccess
                 )
             }
         }
@@ -518,6 +540,10 @@ struct SettingsView: View {
 
     private func requestPhotoAccess() {
         Task { _ = await photoLibrary.requestAccessIfNeeded() }
+    }
+
+    private func requestSaveAccess() {
+        Task { _ = await photoLibrary.requestSaveAccessIfNeeded() }
     }
 
     private func requestCameraAccess() {

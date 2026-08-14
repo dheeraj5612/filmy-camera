@@ -322,10 +322,27 @@ final class PhotoLibraryService: ObservableObject {
 
     var galleryAssets: [PhotoLibraryGalleryAsset] {
         let photoIdentifiers = Set(assets.map(\.localIdentifier))
-        return assets.map(PhotoLibraryGalleryAsset.photos)
+        let combined = assets.map(PhotoLibraryGalleryAsset.photos)
             + localSavedFrames
                 .filter { !photoIdentifiers.contains($0.assetIdentifier) }
                 .map(PhotoLibraryGalleryAsset.cached)
+
+        return combined.sorted { lhs, rhs in
+            let lhsDate = galleryDate(for: lhs)
+            let rhsDate = galleryDate(for: rhs)
+            if lhsDate != rhsDate { return lhsDate > rhsDate }
+            return lhs.assetIdentifier > rhs.assetIdentifier
+        }
+    }
+
+    private func galleryDate(for asset: PhotoLibraryGalleryAsset) -> Date {
+        if let metadataDate = metadataByAssetIdentifier[asset.assetIdentifier]?.capturedAt {
+            return metadataDate
+        }
+        if case .photos(let photoAsset) = asset {
+            return photoAsset.creationDate ?? .distantPast
+        }
+        return .distantPast
     }
 
     func requestAccessIfNeeded() async -> Bool {
@@ -351,6 +368,20 @@ final class PhotoLibraryService: ObservableObject {
 
         refresh()
         return true
+    }
+
+    func requestSaveAccessIfNeeded() async -> Bool {
+        if isUITesting {
+            addOnlyAuthorizationStatus = .denied
+            return false
+        }
+
+        let currentStatus = PHPhotoLibrary.authorizationStatus(for: .addOnly)
+        if currentStatus == .notDetermined {
+            _ = await requestAuthorization(for: .addOnly)
+        }
+        refreshAuthorizationStatuses()
+        return canSaveToPhotos
     }
 
     func refresh() {
