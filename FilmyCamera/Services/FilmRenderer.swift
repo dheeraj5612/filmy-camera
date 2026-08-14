@@ -28,13 +28,15 @@ public final class FilmRenderer {
         }
     }
 
-    // This immutable device handle is shared by the renderer and preview.
-    public static let metalDevice: MTLDevice? = MTLCreateSystemDefaultDevice()
+    // Xcode 16.4's SDK annotations do not model these immutable handles as
+    // Sendable. They are initialized once and never mutated after creation.
+    // Keep the explicit opt-out until the minimum hosted toolchain catches up.
+    public nonisolated(unsafe) static let metalDevice: MTLDevice? = MTLCreateSystemDefaultDevice()
 
     /// A reusable GPU-backed context for callers that need to materialize the
     /// rendered CIImage. It falls back to Core Image's software renderer on a
     /// simulator or Mac without a Metal device.
-    public static let sharedContext: CIContext = {
+    public nonisolated(unsafe) static let sharedContext: CIContext = {
         if let metalDevice {
             return CIContext(
                 mtlDevice: metalDevice,
