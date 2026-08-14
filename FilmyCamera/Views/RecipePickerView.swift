@@ -412,7 +412,11 @@ struct RecipeDetailView: View {
             VStack(spacing: 14) {
                 RecipeSliderRow(title: "Color", value: binding(\.saturation), range: 0...2, format: "%.2f")
                 RecipeSliderRow(title: "Color Chrome", value: binding(\.colorChrome), range: 0...1, format: "%.2f")
-                RecipeSliderRow(title: "FX Blue", value: binding(\.fxBlue), range: -1...1, format: "%+.2f")
+                RecipeChoiceRow(title: "FX Blue", selection: fxBlueLevelBinding) {
+                    ForEach(FilmRecipe.FXBlueLevel.allCases, id: \.self) { level in
+                        Text(level.displayName).tag(level)
+                    }
+                }
                 RecipeSliderRow(title: "Warmth", value: binding(\.whiteBalance.temperature), range: -1...1, format: "%+.2f")
                 RecipeSliderRow(title: "Tint", value: binding(\.whiteBalance.tint), range: -1...1, format: "%+.2f")
             }
@@ -451,11 +455,21 @@ struct RecipeDetailView: View {
             }
         )
     }
+
+    private var fxBlueLevelBinding: Binding<FilmRecipe.FXBlueLevel> {
+        Binding(
+            get: { draft.fxBlueLevel },
+            set: { newValue in
+                draft.fxBlueLevel = newValue
+                onUpdate?(draft)
+            }
+        )
+    }
 }
 
-private struct RecipeChoiceRow<Content: View>: View {
+private struct RecipeChoiceRow<Selection: Hashable, Content: View>: View {
     let title: String
-    @Binding var selection: FilmRecipe.DynamicRange
+    @Binding var selection: Selection
     @ViewBuilder let content: () -> Content
 
     var body: some View {
@@ -471,7 +485,9 @@ private struct RecipeChoiceRow<Content: View>: View {
                 .pickerStyle(.menu)
                 .tint(FilmyTheme.accent)
                 .font(.system(.subheadline, design: .rounded).weight(.bold))
+                .padding(.vertical, 5)
                 .frame(minHeight: FilmyTheme.minimumHitTarget)
+                .accessibilityIdentifier(title == "FX Blue" ? "fx-blue-control" : "recipe-choice-\(title)")
         }
         .frame(minHeight: 52)
     }

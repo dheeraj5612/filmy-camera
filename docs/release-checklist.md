@@ -24,7 +24,7 @@
 
 - [x] Run `xcodegen generate` and verify generated-project reproducibility after reconciling the signing-team update.
 - [x] Run the credential-free release project preflight (`scripts/release/validate-project.sh`) against team `6ALSCF5GBV`.
-- [x] Run the iPhone Simulator build and XCTest workflow locally; 85 tests passed on iPhone 17 Pro Simulator running iOS 26.5.
+- [x] Run the iPhone Simulator build and XCTest workflow locally; 87 tests passed on iPhone 17 Pro Simulator running iOS 26.5.
 - [x] Record the current hosted hardening evidence: [PR #55](https://github.com/dheeraj5612/filmy-camera/pull/55) and [run 31755196952](https://github.com/dheeraj5612/filmy-camera/actions/runs/31755196952) for branch `codex/security-hardening-20260813` at HEAD `357737f1114551520025b4b01bbf087e1167359e`; `change-scope`, `release-scripts`, and `build-and-test` all passed.
 - [x] Keep release-script syntax, ShellCheck, and fail-closed upload-preparation checks in CI.
 - [ ] Run a signed Release archive for a generic iOS device destination and verify the app on a physical iPhone; the current unsigned archive fails validation because it has no embedded provisioning profile.
@@ -71,7 +71,7 @@ scripts/release/prepare-upload.sh --export
 scripts/release/prepare-upload.sh --upload
 ```
 
-The archive wrapper generates the project and creates a Release archive for a generic iOS device. The upload-preparation wrapper is read-only by default, validates the archive and local signing material before export, requires explicit `--export` or `--upload` modes, and keeps App Store Connect keys outside the repository. It fails closed unless the archive and exported IPA have the expected bundle/version, distribution signature, provisioning profile, dSYM, and privacy manifest. It never stores credentials in the repository or CI logs.
+The archive wrapper requires a clean checkout, generates the project, refuses a pre-existing destination, and creates a Release archive for a generic iOS device stamped with the exact source SHA. The upload-preparation wrapper is read-only by default, validates the archive provenance and local signing material before export, requires explicit `--export` or `--upload` modes, and keeps App Store Connect keys outside the repository. It fails closed unless the archive and exported IPA have the expected bundle/version, distribution signature, provisioning profile, dSYM, privacy manifest, and current source revision. It never stores credentials in the repository or CI logs.
 
 For headless provisioning, `archive-device.sh --allow-provisioning-updates` accepts the same `FILMY_ASC_KEY_ID`, `FILMY_ASC_ISSUER_ID`, and `FILMY_ASC_KEY_PATH` environment variables as the upload wrapper. Partial credentials and repository-local key paths are rejected before Xcode runs.
 
@@ -79,9 +79,9 @@ The hosted workflow keeps the release-script gate on metadata and checklist chan
 
 ## Verified evidence
 
-- Current repository evidence: branch `codex/security-hardening-20260813` at committed HEAD `357737f1114551520025b4b01bbf087e1167359e`, with the camera-shell UI revamp, capture identity hardening, accessibility coverage, and team-aligned release configuration.
+- Current repository evidence: branch `codex/security-hardening-20260813` at committed HEAD `357737f1114551520025b4b01bbf087e1167359e`, with the camera-shell UI revamp, typed FX Blue control, capture identity hardening, accessibility coverage, and team-aligned release configuration.
 - Current hosted evidence: [PR #55](https://github.com/dheeraj5612/filmy-camera/pull/55) and [run 31755196952](https://github.com/dheeraj5612/filmy-camera/actions/runs/31755196952), both tied to committed HEAD `357737f1114551520025b4b01bbf087e1167359e`; `change-scope`, `release-scripts`, and the simulator build/test lane passed, and the PR remains open and draft.
-- Current local simulator evidence: 85 tests passed on iPhone 17 Pro Simulator running iOS 26.5 (81 unit tests and 4 UI tests); camera shell, recipe details, Gallery, Settings navigation, simulator fallback, and renderer parity are covered.
+- Current local simulator evidence: 87 tests passed on iPhone 17 Pro Simulator running iOS 26.5 (83 unit tests and 4 UI tests); camera shell, recipe details, Gallery, Settings navigation, simulator fallback, typed FX Blue editing, and renderer parity are covered.
 - Current credential-free device archive evidence: the Release archive reached a successful arm64 device build and contains the app, dSYM, privacy manifest, version `1.0.0`, and build `1`; archive validation correctly stopped because no embedded App Store provisioning profile is installed.
 - Current UI hardening: the recipe-detail hero no longer duplicates the swatch label; recipe-editor section icons participate in layout; simulator fallback hides the unavailable live-preview accessibility target; Photos permission badges remain readable at narrow widths; and the 2026-08-13 revamp adds floating navigation, ambient page surfaces, a film-stock header, pinned quick controls, and bounded Dynamic Type chrome. The modern darkroom/amber camera shell, recipe rail, accessibility labels, and touch-target work remain covered by the simulator gate.
 - Current security/release hardening: CI checkout credentials are not persisted; ShellCheck and XcodeGen are pinned and verified; the credential scan covers tracked files; local photo-cache orphan cleanup is reconciled; exported JPEG metadata uses an explicit privacy-safe allowlist; archive project generation is reproducibility-checked; App Store profiles are team-validated and reject development-device entitlements; and late photo callbacks cannot consume newer capture state.

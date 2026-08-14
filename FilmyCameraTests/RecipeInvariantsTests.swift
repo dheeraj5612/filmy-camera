@@ -187,6 +187,25 @@ final class RecipeInvariantsTests: XCTestCase {
         XCTAssertEqual(FilmRecipe.Control.grainSize.editorRange, 0.35...2.5)
     }
 
+    func testFXBlueUsesPublicThreeStateControlAndLegacyScalarBridge() throws {
+        XCTAssertEqual(FilmRecipe.FXBlueLevel.allCases.map(\.displayName), ["Off", "Weak", "Strong"])
+        XCTAssertEqual(FilmRecipe.FXBlueLevel.off.scalarValue, 0)
+        XCTAssertEqual(FilmRecipe.FXBlueLevel.weak.scalarValue, 0.5)
+        XCTAssertEqual(FilmRecipe.FXBlueLevel.strong.scalarValue, 1)
+        XCTAssertEqual(FilmRecipe.FXBlueLevel(scalarValue: -0.5), .off)
+        XCTAssertEqual(FilmRecipe.FXBlueLevel(scalarValue: 0.5), .weak)
+        XCTAssertEqual(FilmRecipe.FXBlueLevel(scalarValue: 0.9), .strong)
+
+        var recipe = FilmRecipe.builtIns[0]
+        recipe.fxBlueLevel = .weak
+        XCTAssertEqual(recipe.fxBlue, 0.5)
+        XCTAssertEqual(recipe.fxBlueLevel, .weak)
+
+        let decoded = try JSONDecoder().decode(FilmRecipe.self, from: JSONEncoder().encode(recipe))
+        XCTAssertEqual(decoded.fxBlue, 0.5)
+        XCTAssertEqual(decoded.fxBlueLevel, .weak)
+    }
+
     func testLegacyRecipeWithoutProvenanceRemainsReadableButFailsAudit() throws {
         let original = FilmRecipe.builtIns[0]
         let encoded = try JSONEncoder().encode(original)

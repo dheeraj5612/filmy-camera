@@ -8,6 +8,7 @@ derived_data_path="${FILMY_DERIVED_DATA_PATH:-${root_dir}/build/DerivedData}"
 xcodegen_version='2.45.4'
 xcodegen_sha256='6aa2b4da95304b343bea12890c59f9655aa428c08b351d57d592cfab4e88a9f1'
 xcodegen_path="${FILMY_XCODEGEN_PATH:-${root_dir}/.ci/xcodegen/bin/xcodegen}"
+source_revision=""
 allow_provisioning_updates=false
 asc_key_id="${FILMY_ASC_KEY_ID:-}"
 asc_issuer_id="${FILMY_ASC_ISSUER_ID:-}"
@@ -79,6 +80,21 @@ xcodegen_version_output="$("${xcodegen_path}" --version 2>&1)" || {
 grep -Fxq "Version: ${xcodegen_version}" <<<"${xcodegen_version_output}" || {
   echo "XcodeGen ${xcodegen_version} is required; found: ${xcodegen_version_output}" >&2
   exit 127
+}
+
+source_revision="$(git -C "${root_dir}" rev-parse --verify HEAD 2>/dev/null)" || {
+  echo "Unable to determine the source revision for the release archive" >&2
+  exit 1
+}
+
+[[ -z "$(git -C "${root_dir}" status --porcelain --untracked-files=all)" ]] || {
+  echo "Release archiving requires a clean source checkout" >&2
+  exit 1
+}
+
+[[ ! -e "${archive_path}" && ! -L "${archive_path}" ]] || {
+  echo "Archive destination already exists; choose a fresh FILMY_ARCHIVE_PATH" >&2
+  exit 1
 }
 
 validate_asc_credentials() {
@@ -170,5 +186,7 @@ fi
 
 archive_args+=( archive )
 xcodebuild "${archive_args[@]}"
+
+printf '%s\n' "${source_revision}" > "${archive_path}/FilmyCamera.source-sha"
 
 "${script_dir}/validate-archive.sh" "${archive_path}"

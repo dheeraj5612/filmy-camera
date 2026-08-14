@@ -128,6 +128,43 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         }
     }
 
+    /// The public FX Blue control has the three states exposed by Fujifilm's
+    /// camera UI. The scalar bridge keeps older persisted recipes readable.
+    public enum FXBlueLevel: Int, CaseIterable, Codable, Hashable, Sendable {
+        case off
+        case weak
+        case strong
+
+        public var displayName: String {
+            switch self {
+            case .off: return "Off"
+            case .weak: return "Weak"
+            case .strong: return "Strong"
+            }
+        }
+
+        /// Renderer scalar used by the original parametric approximation.
+        public var scalarValue: Double {
+            switch self {
+            case .off: return 0
+            case .weak: return 0.5
+            case .strong: return 1
+            }
+        }
+
+        /// Maps the old signed scalar representation to the public control.
+        /// Negative legacy values are intentionally treated as Off.
+        public init(scalarValue: Double) {
+            if scalarValue >= 0.75 {
+                self = .strong
+            } else if scalarValue > 0 {
+                self = .weak
+            } else {
+                self = .off
+            }
+        }
+    }
+
     /// First-party public references used for terminology and control scope.
     /// These references document vocabulary and behavior, not transferable
     /// LUT values, sensor calibration, or proprietary implementation data.
@@ -390,7 +427,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             case .blueResponse:
                 return "Signed normalized blue-channel response used by the original approximation."
             case .fxBlue:
-                return "Signed normalized strength of the original blue-response approximation."
+                return "Three-state FX Blue control: Off, Weak, or Strong; negative legacy values render as Off."
             case .temperature:
                 return "Normalized white-balance temperature shift; positive values warm the image."
             case .tint:
@@ -562,6 +599,10 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     public var colorChrome: Double
     public var blueResponse: Double
     public var fxBlue: Double
+    public var fxBlueLevel: FXBlueLevel {
+        get { FXBlueLevel(scalarValue: fxBlue) }
+        set { fxBlue = newValue.scalarValue }
+    }
     public var sharpness: Double
     public var noiseReduction: Double
     public var clarity: Double

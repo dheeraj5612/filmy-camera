@@ -11,11 +11,35 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root_dir="$(cd "${script_dir}/../.." && pwd)"
 project_spec="${root_dir}/project.yml"
 expected_team="$(sed -n 's/^[[:space:]]*DEVELOPMENT_TEAM:[[:space:]]*\([^[:space:]]*\)[[:space:]]*$/\1/p' "${project_spec}" | head -n 1)"
+source_sha_path=""
+source_revision=""
 
 if [[ ! -d "${archive_path}" ]]; then
   echo "Archive not found: ${archive_path}" >&2
   exit 1
 fi
+
+source_revision="$(git -C "${root_dir}" rev-parse --verify HEAD 2>/dev/null)" || {
+  echo "Unable to determine the current source revision" >&2
+  exit 1
+}
+
+[[ -z "$(git -C "${root_dir}" status --porcelain --untracked-files=all)" ]] || {
+  echo "Archive validation requires a clean source checkout" >&2
+  exit 1
+}
+
+source_sha_path="${archive_path}/FilmyCamera.source-sha"
+[[ -f "${source_sha_path}" ]] || {
+  echo "Archive has no source revision provenance" >&2
+  exit 1
+}
+
+archive_source_revision="$(<"${source_sha_path}")"
+[[ "${archive_source_revision}" == "${source_revision}" ]] || {
+  echo "Archive source revision does not match the current checkout" >&2
+  exit 1
+}
 
 app_path="${archive_path}/Products/Applications/FilmyCamera.app"
 info_plist="${app_path}/Info.plist"

@@ -477,6 +477,32 @@ final class RendererOutputBoundsTests: XCTestCase {
         XCTAssertGreaterThan(blueDistance, warmDistance + 0.001)
     }
 
+    func testLegacyNegativeFXBlueRendersAsOff() {
+        let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
+        let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+        let input = CIImage(color: CIColor(red: 0.08, green: 0.18, blue: 0.90, alpha: 1)).cropped(to: extent)
+        var off = FilmRecipe.builtIns[0]
+        off.fxBlue = 0
+        var legacy = off
+        legacy.fxBlue = -1
+
+        let offPixels = renderFloatPixels(
+            FilmRenderer.render(input, recipe: off, quality: .photo),
+            extent: extent,
+            context: context
+        )
+        let legacyPixels = renderFloatPixels(
+            FilmRenderer.render(input, recipe: legacy, quality: .photo),
+            extent: extent,
+            context: context
+        )
+
+        let difference = zip(offPixels, legacyPixels)
+            .map { abs(Double($0.0) - Double($0.1)) }
+            .reduce(0, +)
+        XCTAssertLessThan(difference, 0.0001)
+    }
+
     func testPositiveToneValuesHardenTheCorrespondingCurveRegions() {
         let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
         let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])

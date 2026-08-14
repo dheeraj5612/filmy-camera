@@ -302,7 +302,10 @@ public final class FilmRenderer {
         )
         safe.colorChrome = value(recipe.colorChrome, .colorChrome, neutral: 0)
         safe.blueResponse = value(recipe.blueResponse, .blueResponse, neutral: 0)
-        safe.fxBlue = value(recipe.fxBlue, .fxBlue, neutral: 0)
+        // FX Blue is a public Off/Weak/Strong control. Older saved recipes
+        // could contain a signed negative scalar; preserve their readability
+        // but normalize those legacy values to the current Off state.
+        safe.fxBlue = max(value(recipe.fxBlue, .fxBlue, neutral: 0), 0)
         safe.sharpness = value(recipe.sharpness, .sharpness, neutral: 0)
         safe.noiseReduction = value(recipe.noiseReduction, .noiseReduction, neutral: 0)
         safe.clarity = value(recipe.clarity, .clarity, neutral: 0)
