@@ -640,7 +640,7 @@ struct RecipeDetailView: View {
                 RecipeSliderRow(title: "Warmth", value: binding(\.whiteBalance.temperature), range: -1...1, format: "%+.2f")
                 RecipeSliderRow(title: "Tint", value: binding(\.whiteBalance.tint), range: -1...1, format: "%+.2f")
 
-                if draft.filmBase.monochromeFilter != nil {
+                if draft.filmBase.supportsMonochromaticColorAxes {
                     RecipeSliderRow(
                         title: "Monochromatic warm-cool",
                         value: binding(\.monochromaticColor.warmCool),

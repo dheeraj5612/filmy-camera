@@ -218,6 +218,7 @@ struct SettingsView: View {
                     systemName: "arrow.up.right.square",
                     identifier: "camera-permission-settings",
                     hint: "Opens Filmy Camera camera permissions",
+                    subtitle: "Continue in iOS Settings",
                     action: openSystemSettings
                 )
             }
@@ -254,6 +255,7 @@ struct SettingsView: View {
                     systemName: "arrow.up.right.square",
                     identifier: "photos-permission-settings",
                     hint: "Opens Filmy Camera permissions",
+                    subtitle: "Continue in iOS Settings",
                     action: openSystemSettings
                 )
             } else if photoLibrary.authorizationStatus == .notDetermined {
@@ -275,6 +277,7 @@ struct SettingsView: View {
                     systemName: "arrow.up.right.square",
                     identifier: "photos-save-permission-settings",
                     hint: "Opens Filmy Camera Photos permissions for saving frames",
+                    subtitle: "Continue in iOS Settings",
                     action: openSystemSettings
                 )
             } else if photoLibrary.addOnlyAuthorizationStatus == .notDetermined {
@@ -480,6 +483,7 @@ struct SettingsView: View {
         systemName: String,
         identifier: String,
         hint: String,
+        subtitle: String? = nil,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -494,7 +498,7 @@ struct SettingsView: View {
                     Text(title)
                         .font(.subheadline.weight(.bold))
                         .multilineTextAlignment(.leading)
-                    Text(title == "Open System Settings" ? "Continue in iOS Settings" : "Show the system permission prompt")
+                    Text(subtitle ?? "Show the system permission prompt")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(FilmyTheme.secondary)
                 }
