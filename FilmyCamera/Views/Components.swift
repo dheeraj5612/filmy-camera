@@ -7,6 +7,7 @@ enum FilmyTheme {
     static let panel = Color(red: 0.075, green: 0.083, blue: 0.098)
     static let panelRaised = Color(red: 0.13, green: 0.143, blue: 0.165)
     static let line = Color.white.opacity(0.12)
+    static let lineStrong = Color.white.opacity(0.18)
     static let primary = Color.white.opacity(0.94)
     static let secondary = Color.white.opacity(0.62)
     // Keep small section labels above contrast-safe opacity on dark surfaces.
@@ -14,6 +15,7 @@ enum FilmyTheme {
     static let accent = Color(red: 0.98, green: 0.73, blue: 0.28)
     static let accentWarm = Color(red: 1.0, green: 0.55, blue: 0.32)
     static let mint = Color(red: 0.47, green: 0.83, blue: 0.73)
+    static let chromeFill = Color.black.opacity(0.48)
     static let cornerRadius: CGFloat = 24
     static let controlRadius: CGFloat = 14
     static let actionPlateRadius: CGFloat = 28
@@ -31,6 +33,18 @@ enum FilmyTheme {
 
     static let plateGradient = LinearGradient(
         colors: [Color.white.opacity(0.13), Color.white.opacity(0.045)],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+
+    static let chromeGradient = LinearGradient(
+        colors: [Color.white.opacity(0.14), Color.white.opacity(0.055)],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+
+    static let navBarGradient = LinearGradient(
+        colors: [Color.white.opacity(0.14), Color.white.opacity(0.065)],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
     )
@@ -53,6 +67,15 @@ struct FilmyPageBackground: View {
                     .frame(width: min(proxy.size.width * 0.76, 320))
                     .blur(radius: 80)
                     .offset(x: -proxy.size.width * 0.48, y: proxy.size.height * 0.35)
+
+                Rectangle()
+                    .fill(
+                        LinearGradient(
+                            colors: [.clear, Color.black.opacity(0.18)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
             }
         }
         .ignoresSafeArea()
@@ -106,15 +129,15 @@ struct GlassCard<Content: View>: View {
         content
             .padding(padding)
             .background(
-                FilmyTheme.plateGradient,
+                FilmyTheme.chromeGradient,
                 in: RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous)
             )
             .background(FilmyTheme.panel.opacity(0.92), in: RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous)
-                    .stroke(FilmyTheme.line, lineWidth: 1)
+                    .stroke(FilmyTheme.lineStrong, lineWidth: 1)
             }
-            .shadow(color: .black.opacity(0.18), radius: 22, y: 10)
+            .shadow(color: .black.opacity(0.22), radius: 24, y: 12)
     }
 }
 
@@ -167,7 +190,7 @@ struct CameraActionButton: View {
             .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
             .padding(.horizontal, 6)
             .background(
-                isProminent ? FilmyTheme.accent : Color.black.opacity(0.32),
+                isProminent ? FilmyTheme.accent : FilmyTheme.chromeFill,
                 in: RoundedRectangle(cornerRadius: FilmyTheme.controlRadius, style: .continuous)
             )
             .overlay {
@@ -540,16 +563,20 @@ struct CaptureButton: View {
         Button(action: action) {
             ZStack {
                 Circle()
-                    .stroke(FilmyTheme.accent.opacity(0.72), lineWidth: 1)
-                    .frame(width: 92, height: 92)
+                    .fill(Color.black.opacity(0.42))
+                    .frame(width: 102, height: 102)
 
                 Circle()
-                    .fill(.white)
-                    .frame(width: 78, height: 78)
+                    .stroke(FilmyTheme.accent.opacity(0.82), lineWidth: 1.5)
+                    .frame(width: 98, height: 98)
 
                 Circle()
-                    .stroke(Color.black.opacity(0.35), lineWidth: 2)
-                    .frame(width: 66, height: 66)
+                    .fill(Color.white.opacity(0.96))
+                    .frame(width: 80, height: 80)
+
+                Circle()
+                    .stroke(FilmyTheme.accent.opacity(0.3), lineWidth: 2)
+                    .frame(width: 68, height: 68)
 
                 if isCapturing {
                     ProgressView()
@@ -557,12 +584,13 @@ struct CaptureButton: View {
                 } else {
                     Circle()
                         .fill(FilmyTheme.background)
-                        .frame(width: 12, height: 12)
+                        .frame(width: 13, height: 13)
                 }
             }
         }
         .buttonStyle(.plain)
         .opacity(isEnabled ? 1 : 0.52)
+        .shadow(color: FilmyTheme.accent.opacity(isEnabled ? 0.22 : 0), radius: 16, y: 6)
         .disabled(isCapturing || !isEnabled)
         .accessibilityLabel(
             isCapturing

@@ -10,8 +10,8 @@ struct GalleryScreen: View {
     @State private var selectedAsset: PhotoLibraryGalleryAsset?
 
     private let columns = [
-        GridItem(.flexible(), spacing: 8),
-        GridItem(.flexible(), spacing: 8)
+        GridItem(.flexible(), spacing: 10),
+        GridItem(.flexible(), spacing: 10)
     ]
 
     var body: some View {
@@ -21,14 +21,35 @@ struct GalleryScreen: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 18) {
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(FilmyTheme.mint)
+                                .frame(width: 6, height: 6)
+
+                            Text("FILMY CAMERA / ROLL")
+                                .font(FilmyTheme.metadataFont)
+                                .tracking(1.2)
+                                .foregroundStyle(FilmyTheme.tertiary)
+
+                            Spacer(minLength: 8)
+
+                            Text("ARCHIVE")
+                                .font(.system(size: 10, weight: .bold, design: .rounded))
+                                .tracking(1)
+                                .foregroundStyle(FilmyTheme.accent)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(FilmyTheme.accent.opacity(0.12), in: Capsule())
+                        }
+
                         SectionHeading(
                             eyebrow: "The archive",
                             title: "Roll",
                             trailing: photoLibrary.galleryAssets.isEmpty ? nil : "\(photoLibrary.galleryAssets.count) frames"
                         )
 
-                        Text("A contact sheet for the frames worth keeping.")
-                            .font(.subheadline.weight(.medium))
+                        Text("A considered contact sheet for the frames worth keeping.")
+                            .font(.system(.subheadline, design: .rounded).weight(.medium))
                             .foregroundStyle(FilmyTheme.secondary)
                             .fixedSize(horizontal: false, vertical: true)
 
@@ -71,53 +92,92 @@ struct GalleryScreen: View {
             if let selectedAsset {
                 GalleryDetailView(asset: selectedAsset, photoLibrary: photoLibrary)
                     .presentationDetents([.large])
+                    .presentationBackground(FilmyTheme.background)
+                    .presentationCornerRadius(28)
                     .presentationDragIndicator(.visible)
             }
         }
     }
 
     private var archiveSummary: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(FilmyTheme.accent.opacity(0.14))
-                Image(systemName: "rectangle.on.rectangle.angled")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(FilmyTheme.accent)
+        VStack(alignment: .leading, spacing: 15) {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(FilmyTheme.accent.opacity(0.14))
+                    Image(systemName: "rectangle.on.rectangle.angled")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(FilmyTheme.accent)
+                }
+                .frame(width: 46, height: 46)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("CONTACT SHEET")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .tracking(1.2)
+                        .foregroundStyle(FilmyTheme.accent)
+                    Text("Recent frames, recipe by recipe")
+                        .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                        .foregroundStyle(FilmyTheme.primary)
+                }
+
+                Spacer(minLength: 8)
+
+                VStack(alignment: .trailing, spacing: 0) {
+                    Text("\(photoLibrary.galleryAssets.count)")
+                        .font(.system(size: 27, weight: .bold, design: .rounded))
+                        .foregroundStyle(FilmyTheme.primary)
+                    Text("FRAMES")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .tracking(1)
+                        .foregroundStyle(FilmyTheme.tertiary)
+                }
             }
-            .frame(width: 42, height: 42)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text("CONTACT SHEET")
-                    .font(.caption2.weight(.bold))
-                    .tracking(1.1)
-                    .foregroundStyle(FilmyTheme.accent)
-                Text("Recent frames, recipe by recipe")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(FilmyTheme.primary)
-            }
+            Rectangle()
+                .fill(FilmyTheme.line)
+                .frame(height: 1)
 
-            Spacer(minLength: 10)
-
-            VStack(alignment: .trailing, spacing: 2) {
-                Text("\(photoLibrary.galleryAssets.count)")
-                    .font(.title3.weight(.bold))
-                    .foregroundStyle(FilmyTheme.primary)
-                Text("FRAMES")
-                    .font(.caption2.weight(.bold))
-                    .tracking(0.9)
-                    .foregroundStyle(FilmyTheme.tertiary)
+            HStack(spacing: 0) {
+                archiveMetric(title: "ORDER", value: "NEWEST FIRST")
+                Spacer(minLength: 12)
+                archiveMetric(
+                    title: "SOURCE",
+                    value: photoLibrary.authorizationStatus == .limited ? "LIMITED PHOTOS" : "PHOTOS"
+                )
             }
         }
-        .padding(14)
-        .background(FilmyTheme.panel.opacity(0.76), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(16)
+        .background(
+            LinearGradient(
+                colors: [FilmyTheme.panelRaised.opacity(0.68), FilmyTheme.panel.opacity(0.78)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+        )
         .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(FilmyTheme.line, lineWidth: 1)
         }
+        .shadow(color: FilmyTheme.accentWarm.opacity(0.08), radius: 24, y: 12)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Contact sheet")
         .accessibilityValue("\(photoLibrary.galleryAssets.count) frames")
+    }
+
+    private func archiveMetric(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .tracking(1)
+                .foregroundStyle(FilmyTheme.tertiary)
+            Text(value)
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .foregroundStyle(FilmyTheme.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        }
     }
 
     private func clearSelectionIfUnavailable() {
@@ -194,52 +254,66 @@ struct GalleryScreen: View {
             photoLibrary.presentLimitedLibraryPicker()
         } label: {
             HStack(spacing: 12) {
-                Image(systemName: "checkmark.circle")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(FilmyTheme.mint)
-                    .frame(width: 24)
+                ZStack {
+                    Circle()
+                        .fill(FilmyTheme.mint.opacity(0.14))
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(FilmyTheme.mint)
+                }
+                .frame(width: 30, height: 30)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Manage access to saved frames")
-                        .font(.subheadline.weight(.bold))
+                        .font(.system(.subheadline, design: .rounded).weight(.bold))
                         .foregroundStyle(FilmyTheme.primary)
                     Text("Choose which frames the Roll can see")
-                        .font(.caption.weight(.medium))
+                        .font(.system(.caption, design: .rounded).weight(.medium))
                         .foregroundStyle(FilmyTheme.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right")
-                    .font(.caption.weight(.bold))
+                    .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(FilmyTheme.accent)
             }
             .padding(.horizontal, 14)
-            .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
         }
         .buttonStyle(.plain)
-        .background(FilmyTheme.panel.opacity(0.76), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(FilmyTheme.panel.opacity(0.76), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(FilmyTheme.line, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(FilmyTheme.mint.opacity(0.24), lineWidth: 1)
         }
         .accessibilityHint("Choose which saved Filmy Camera frames can be viewed in the Roll")
     }
 
     private var galleryGrid: some View {
         VStack(alignment: .leading, spacing: 11) {
-            HStack(alignment: .lastTextBaseline) {
+            HStack(alignment: .center, spacing: 8) {
                 Text("RECENT FRAMES")
-                    .font(.caption2.weight(.bold))
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
                     .tracking(1.2)
                     .foregroundStyle(FilmyTheme.tertiary)
+
+                Capsule()
+                    .fill(FilmyTheme.line)
+                    .frame(width: 4, height: 4)
+
+                Text("CONTACT SHEET")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .tracking(1.2)
+                    .foregroundStyle(FilmyTheme.accent)
+
                 Spacer(minLength: 8)
-                Text("Newest first")
-                    .font(.caption.weight(.medium))
+                Text("NEWEST")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
                     .foregroundStyle(FilmyTheme.secondary)
             }
 
-            GlassCard(padding: 10) {
+            GlassCard(padding: 11) {
                 LazyVGrid(columns: columns, spacing: 10) {
                     ForEach(photoLibrary.galleryAssets) { asset in
                         Button {
@@ -249,11 +323,13 @@ struct GalleryScreen: View {
                             GalleryThumbnail(asset: asset, photoLibrary: photoLibrary)
                         }
                         .buttonStyle(.plain)
+                        .contentShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
                         .accessibilityLabel(
                             photoLibrary.metadata(for: asset).map {
                                 "Photo in your gallery, \($0.recipe.name)"
                             } ?? "Photo in your gallery"
                         )
+                        .accessibilityHint("Opens frame details")
                     }
                 }
             }
@@ -263,18 +339,21 @@ struct GalleryScreen: View {
     private var archiveAccessNotice: some View {
         VStack(alignment: .leading, spacing: 11) {
             HStack(alignment: .top, spacing: 11) {
-                Image(systemName: "lock.open")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(FilmyTheme.accent)
-                    .frame(width: 28, height: 28)
-                    .background(FilmyTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                ZStack {
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .fill(FilmyTheme.accent.opacity(0.13))
+                    Image(systemName: "lock.open")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(FilmyTheme.accent)
+                }
+                .frame(width: 34, height: 34)
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Showing your saved frames")
-                        .font(.subheadline.weight(.bold))
+                        .font(.system(.subheadline, design: .rounded).weight(.bold))
                         .foregroundStyle(FilmyTheme.primary)
                     Text("Enable Photos read access to refresh this archive from your library.")
-                        .font(.caption.weight(.medium))
+                        .font(.system(.caption, design: .rounded).weight(.medium))
                         .foregroundStyle(FilmyTheme.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -283,16 +362,16 @@ struct GalleryScreen: View {
             }
 
             Button("Open Photos Settings", action: openSystemSettings)
-                .font(.caption.weight(.bold))
+                .font(.system(.caption, design: .rounded).weight(.bold))
                 .foregroundStyle(FilmyTheme.accent)
                 .frame(minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
                 .accessibilityIdentifier("gallery-photos-permission-settings")
                 .accessibilityHint("Opens Filmy Camera Photos permissions")
         }
-        .padding(13)
-        .background(FilmyTheme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(14)
+        .background(FilmyTheme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 19, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 19, style: .continuous)
                 .stroke(FilmyTheme.accent.opacity(0.28), lineWidth: 1)
         }
         .accessibilityElement(children: .combine)
@@ -323,36 +402,50 @@ private struct GalleryThumbnail: View {
                     .resizable()
                     .scaledToFill()
             } else {
-                Rectangle()
-                    .fill(FilmyTheme.panel)
+                FilmyTheme.panel
                     .overlay {
-                        ProgressView().tint(FilmyTheme.accent)
+                        VStack(spacing: 9) {
+                            Image(systemName: "photo")
+                                .font(.system(size: 18, weight: .medium))
+                                .foregroundStyle(FilmyTheme.secondary)
+                            ProgressView()
+                                .tint(FilmyTheme.accent)
+                                .scaleEffect(0.8)
+                        }
                     }
             }
         }
         .aspectRatio(
-            0.78,
+            0.76,
             contentMode: .fit
         )
-        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 15, style: .continuous)
-                .stroke(Color.white.opacity(0.13), lineWidth: 1)
+            LinearGradient(
+                colors: [.clear, Color.black.opacity(0.2)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .allowsHitTesting(false)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 17, style: .continuous)
+                .stroke(Color.white.opacity(0.16), lineWidth: 1)
         }
         .overlay(alignment: .bottomLeading) {
             if let metadata = photoLibrary.metadata(for: asset) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(metadata.recipe.name)
-                        .font(.caption.weight(.bold))
+                        .font(.system(.caption, design: .rounded).weight(.bold))
                         .lineLimit(1)
                         .minimumScaleFactor(0.72)
                     Text(metadata.capturedAt, format: .dateTime.month(.abbreviated).day().hour().minute())
-                        .font(.caption2.weight(.medium))
+                        .font(.system(.caption2, design: .monospaced).weight(.medium))
                         .foregroundStyle(.white.opacity(0.72))
                 }
                 .foregroundStyle(.white)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 10)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 11)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background {
                     LinearGradient(
@@ -363,6 +456,7 @@ private struct GalleryThumbnail: View {
                 }
             }
         }
+        .shadow(color: .black.opacity(0.24), radius: 10, y: 6)
         .task(id: asset.id) {
             image = await photoLibrary.image(for: asset, targetSize: CGSize(width: 360, height: 440))
         }
@@ -385,48 +479,93 @@ private struct RollEmptyState: View {
     var action: (() -> Void)?
 
     var body: some View {
-        GlassCard(padding: 18) {
-            VStack(alignment: .leading, spacing: 18) {
-                HStack(alignment: .top, spacing: 14) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 15, style: .continuous)
-                            .fill(FilmyTheme.accent.opacity(0.14))
-                        Image(systemName: systemName)
-                            .font(.system(size: 22, weight: .semibold))
-                            .foregroundStyle(FilmyTheme.accent)
-                    }
-                    .frame(width: 52, height: 52)
+        GlassCard(padding: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                ZStack {
+                    LinearGradient(
+                        colors: [FilmyTheme.panelRaised, FilmyTheme.panel],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
 
-                    VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 7) {
+                        ForEach(0..<5, id: \.self) { _ in
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(Color.white.opacity(0.055))
+                                .frame(width: 22, height: 70)
+                        }
+                    }
+                    .rotationEffect(.degrees(-10))
+                    .offset(x: 112, y: -8)
+                    .accessibilityHidden(true)
+
+                    VStack(spacing: 10) {
+                        ZStack {
+                            Circle()
+                                .fill(FilmyTheme.accent.opacity(0.14))
+                            Image(systemName: systemName)
+                                .font(.system(size: 24, weight: .semibold))
+                                .foregroundStyle(FilmyTheme.accent)
+                        }
+                        .frame(width: 58, height: 58)
+
+                        Text("NO FRAMES YET")
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .tracking(1.3)
+                            .foregroundStyle(FilmyTheme.tertiary)
+                    }
+                }
+                .frame(height: 154)
+                .clipShape(
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: FilmyTheme.cornerRadius,
+                        bottomLeadingRadius: 0,
+                        bottomTrailingRadius: 0,
+                        topTrailingRadius: FilmyTheme.cornerRadius,
+                        style: .continuous
+                    )
+                )
+                .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
                         Text(title)
-                            .font(.title3.weight(.bold))
+                            .font(.system(.title3, design: .rounded).weight(.bold))
                             .foregroundStyle(FilmyTheme.primary)
                             .fixedSize(horizontal: false, vertical: true)
                         Text(message)
-                            .font(.subheadline.weight(.medium))
+                            .font(.system(.subheadline, design: .rounded).weight(.medium))
                             .foregroundStyle(FilmyTheme.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                }
 
-                HStack(alignment: .top, spacing: 9) {
-                    Image(systemName: "film.stack")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(FilmyTheme.mint)
-                    Text("Finished frames stay here with their recipe and capture time.")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(FilmyTheme.mint)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                    HStack(alignment: .top, spacing: 9) {
+                        Image(systemName: "film.stack")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(FilmyTheme.mint)
+                        Text("Finished frames stay here with their recipe and capture time.")
+                            .font(.system(.caption, design: .rounded).weight(.semibold))
+                            .foregroundStyle(FilmyTheme.mint)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
-                if let actionTitle, let action {
-                    Button(actionTitle, action: action)
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(FilmyTheme.background)
-                        .frame(maxWidth: .infinity, minHeight: 48)
-                        .background(FilmyTheme.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .accessibilityHint("Opens the relevant permission settings")
+                    if let actionTitle, let action {
+                        Button(actionTitle, action: action)
+                            .font(.system(.subheadline, design: .rounded).weight(.bold))
+                            .foregroundStyle(FilmyTheme.background)
+                            .frame(maxWidth: .infinity, minHeight: 50)
+                            .background(
+                                LinearGradient(
+                                    colors: [FilmyTheme.accent, FilmyTheme.accentWarm],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                ),
+                                in: RoundedRectangle(cornerRadius: 15, style: .continuous)
+                            )
+                            .accessibilityHint("Opens the relevant permission settings")
+                    }
                 }
+                .padding(18)
             }
         }
     }
@@ -458,7 +597,8 @@ private struct GalleryDetailView: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()
-                    .padding(16)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 26)
                     .scaleEffect(zoomScale)
                     .offset(imageOffset)
                     .contentShape(Rectangle())
@@ -513,7 +653,14 @@ private struct GalleryDetailView: View {
                     )
                     .onTapGesture(count: 2, perform: resetImageTransform)
             } else {
-                ProgressView().tint(FilmyTheme.accent)
+                VStack(spacing: 12) {
+                    ProgressView()
+                        .tint(FilmyTheme.accent)
+                    Text("DEVELOPING FRAME")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .tracking(1.2)
+                        .foregroundStyle(FilmyTheme.tertiary)
+                }
             }
         }
         .task {
@@ -531,25 +678,47 @@ private struct GalleryDetailView: View {
         .overlay(alignment: .bottom) {
             if let metadata = photoLibrary.metadata(for: asset) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(metadata.recipe.name)
-                        .font(.system(.headline, design: .rounded).weight(.bold))
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("RECIPE")
+                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                .tracking(1.1)
+                                .foregroundStyle(FilmyTheme.accent)
+                            Text(metadata.recipe.name)
+                                .font(.system(.headline, design: .rounded).weight(.bold))
+                                .lineLimit(1)
+                        }
+
+                        Spacer(minLength: 8)
+
+                        Text(zoomScale > 1 ? "ZOOM \(Int(zoomScale * 100))%" : "FIT TO SCREEN")
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .tracking(0.7)
+                            .foregroundStyle(FilmyTheme.tertiary)
+                    }
+
                     Text(metadata.recipe.subtitle)
                         .font(.system(.subheadline, design: .rounded).weight(.medium))
                         .foregroundStyle(.white.opacity(0.72))
-                    Text(metadata.capturedAt, format: .dateTime.weekday(.wide).month(.abbreviated).day().hour().minute())
-                        .font(.system(.caption, design: .rounded).weight(.medium))
-                        .foregroundStyle(.white.opacity(0.58))
+
+                    HStack(spacing: 7) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text(metadata.capturedAt, format: .dateTime.weekday(.wide).month(.abbreviated).day().hour().minute())
+                            .font(.system(.caption, design: .monospaced).weight(.medium))
+                    }
+                    .foregroundStyle(.white.opacity(0.58))
                 }
                 .foregroundStyle(.white)
+                .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(18)
-                .background {
-                    LinearGradient(
-                        colors: [.clear, FilmyTheme.background.opacity(0.96)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .stroke(Color.white.opacity(0.14), lineWidth: 1)
                 }
+                .padding(.horizontal, 14)
+                .padding(.bottom, 14)
             }
         }
         .accessibilityElement(children: .contain)
@@ -591,53 +760,71 @@ private struct GalleryDetailView: View {
     }
 
     private var detailToolbar: some View {
-        HStack(spacing: 10) {
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 13, weight: .bold))
-                    .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
-                    .background(FilmyTheme.panel, in: Circle())
-            }
-            .accessibilityLabel("Close frame")
-
-            Spacer()
-
-            Button {
-                shareFrame()
-            } label: {
-                Group {
-                    if isPreparingShare {
-                        ProgressView().tint(.white)
-                    } else {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.system(size: 14, weight: .bold))
-                    }
-                }
-                    .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
-                    .background(FilmyTheme.panel, in: Circle())
-            }
-            .accessibilityLabel("Share frame")
-            .disabled(image == nil || isDeleting || isPreparingShare)
-
-            if photoLibrary.canDelete(asset: asset) {
+        ZStack {
+            HStack(spacing: 10) {
                 Button {
-                    isShowingDeleteConfirmation = true
+                    dismiss()
                 } label: {
-                    Image(systemName: "trash")
-                        .font(.system(size: 14, weight: .bold))
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .bold))
                         .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
                         .background(FilmyTheme.panel, in: Circle())
                 }
-                .accessibilityLabel("Delete frame")
-                .disabled(isDeleting)
+                .accessibilityLabel("Close frame")
+
+                Spacer()
+
+                Button {
+                    shareFrame()
+                } label: {
+                    Group {
+                        if isPreparingShare {
+                            ProgressView().tint(.white)
+                        } else {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 14, weight: .bold))
+                        }
+                    }
+                        .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+                        .background(FilmyTheme.panel, in: Circle())
+                }
+                .accessibilityLabel("Share frame")
+                .disabled(image == nil || isDeleting || isPreparingShare)
+
+                if photoLibrary.canDelete(asset: asset) {
+                    Button {
+                        isShowingDeleteConfirmation = true
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 14, weight: .bold))
+                            .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+                            .background(FilmyTheme.panel, in: Circle())
+                    }
+                    .accessibilityLabel("Delete frame")
+                    .disabled(isDeleting)
+                }
             }
+
+            VStack(spacing: 2) {
+                Text("ROLL")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .tracking(1.2)
+                    .foregroundStyle(FilmyTheme.accent)
+                Text("FRAME DETAIL")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(FilmyTheme.primary)
+            }
+            .allowsHitTesting(false)
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 18)
         .padding(.vertical, 6)
         .background(.ultraThinMaterial)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.white.opacity(0.1))
+                .frame(height: 1)
+        }
     }
 
     private func deleteFrame() {

@@ -53,9 +53,9 @@ struct ContentView: View {
         }
         .padding(6)
         .background(.ultraThinMaterial, in: Capsule())
-        .background(Color.black.opacity(0.38), in: Capsule())
-        .overlay { Capsule().stroke(Color.white.opacity(0.15), lineWidth: 1) }
-        .shadow(color: .black.opacity(0.32), radius: 22, y: 10)
+        .background(FilmyTheme.navBarGradient, in: Capsule())
+        .overlay { Capsule().stroke(FilmyTheme.lineStrong, lineWidth: 1) }
+        .shadow(color: .black.opacity(0.38), radius: 25, y: 12)
     }
 
     private func tabButton(_ tab: Tab, title: String, systemImage: String) -> some View {
@@ -68,19 +68,22 @@ struct ContentView: View {
                 Image(systemName: systemImage)
                     .font(.system(size: 15, weight: .bold))
 
-                if selectedTab == tab {
-                    Text(title)
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
-                        .lineLimit(1)
-                        .transition(.opacity.combined(with: .scale(scale: 0.9)))
-                }
+                Text(title)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             .foregroundStyle(selectedTab == tab ? FilmyTheme.background : FilmyTheme.primary)
             .frame(maxWidth: .infinity, minHeight: 48)
             .background(
-                selectedTab == tab ? FilmyTheme.accent : Color.clear,
+                selectedTab == tab ? FilmyTheme.accent : Color.white.opacity(0.02),
                 in: Capsule()
             )
+            .overlay {
+                if selectedTab != tab {
+                    Capsule().stroke(Color.white.opacity(0.06), lineWidth: 1)
+                }
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
