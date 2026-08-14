@@ -163,7 +163,9 @@ struct GalleryScreen: View {
         .shadow(color: FilmyTheme.accentWarm.opacity(0.08), radius: 24, y: 12)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Contact sheet")
-        .accessibilityValue("\(photoLibrary.galleryAssets.count) frames")
+        .accessibilityValue(
+            "\(photoLibrary.galleryAssets.count) frames. Source: \(archiveSourceLabel). Order: newest first."
+        )
     }
 
     private var archiveSourceLabel: String {
@@ -248,6 +250,7 @@ struct GalleryScreen: View {
                     systemName: "lock.slash",
                     title: "Photo access is off",
                     message: "Enable Photos access in Settings to see your saved frames.",
+                    heroLabel: nil,
                     actionTitle: "Open Settings",
                     action: openSystemSettings
                 )
@@ -492,6 +495,7 @@ private struct RollEmptyState: View {
     let systemName: String
     let title: String
     let message: String
+    var heroLabel: String? = "NO FRAMES YET"
     var actionTitle: String?
     var action: (() -> Void)?
 
@@ -526,10 +530,12 @@ private struct RollEmptyState: View {
                         }
                         .frame(width: 58, height: 58)
 
-                        Text("NO FRAMES YET")
-                            .font(.system(size: 10, weight: .bold, design: .monospaced))
-                            .tracking(1.3)
-                            .foregroundStyle(FilmyTheme.tertiary)
+                        if let heroLabel {
+                            Text(heroLabel)
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .tracking(1.3)
+                                .foregroundStyle(FilmyTheme.tertiary)
+                        }
                     }
                 }
                 .frame(height: 154)
