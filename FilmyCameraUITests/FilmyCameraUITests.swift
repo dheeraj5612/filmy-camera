@@ -79,6 +79,7 @@ final class FilmyCameraUITests: XCTestCase {
             accessibilityApp.launch()
             return accessibilityApp
         }
+        defer { accessibilityApp.terminate() }
 
         XCTAssertTrue(accessibilityApp.staticTexts["FILM STOCK"].waitForExistence(timeout: 8))
 

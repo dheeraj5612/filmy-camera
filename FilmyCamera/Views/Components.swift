@@ -752,67 +752,69 @@ struct PreviewPlaceholder: View {
     var action: (() -> Void)?
 
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: recipe.previewColors,
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+        GeometryReader { proxy in
+            ZStack {
+                LinearGradient(
+                    colors: recipe.previewColors,
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
 
-            // Keep the simulator and unavailable-camera states visually useful
-            // without presenting a synthetic image as live camera output. This
-            // is the same renderer-backed scene used by the recipe rail, so a
-            // user can still see how the selected look is meant to feel before
-            // moving to a physical iPhone.
-            if isSimulator {
-                RecipeSwatch(recipe: recipe, compact: false, showsLabel: false)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .overlay(Color.black.opacity(0.18))
-                    .accessibilityHidden(true)
-            }
-
-            Color.black.opacity(isSimulator ? 0.30 : 0.46)
-
-            VStack(spacing: 14) {
-                Image(systemName: isSimulator ? "iphone.gen3" : "camera.fill")
-                    .font(.system(size: 25, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .frame(width: 58, height: 58)
-                    .background(.white.opacity(0.12), in: Circle())
-
-                VStack(spacing: 5) {
-                    Text(isSimulator ? "Preview mode" : "Camera unavailable")
-                        .font(.system(size: 19, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                    Text(message ?? (isSimulator ? "Shoot this look on an iPhone." : "Check camera access in Settings, then try again."))
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.72))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 28)
+                // Keep the simulator and unavailable-camera states visually useful
+                // without presenting a synthetic image as live camera output. This
+                // is the same renderer-backed scene used by the recipe rail, so a
+                // user can still see how the selected look is meant to feel before
+                // moving to a physical iPhone.
+                if isSimulator {
+                    RecipeSwatch(recipe: recipe, compact: false, showsLabel: false)
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                        .overlay(Color.black.opacity(0.18))
+                        .accessibilityHidden(true)
                 }
 
-                if let actionTitle, let action {
-                    Button(actionTitle, action: action)
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundStyle(FilmyTheme.background)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
-                        .background(FilmyTheme.accent, in: Capsule())
-                        .accessibilityIdentifier(actionTitle == "Open Settings" ? "camera-permission-action" : "camera-recovery-action")
-                        .accessibilityHint(actionTitle == "Open Settings" ? "Opens Filmy Camera permissions" : "Attempts to resume the camera")
+                Color.black.opacity(isSimulator ? 0.30 : 0.46)
+
+                VStack(spacing: 14) {
+                    Image(systemName: isSimulator ? "iphone.gen3" : "camera.fill")
+                        .font(.system(size: 25, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .frame(width: 58, height: 58)
+                        .background(.white.opacity(0.12), in: Circle())
+
+                    VStack(spacing: 5) {
+                        Text(isSimulator ? "Preview mode" : "Camera unavailable")
+                            .font(.system(size: 19, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                        Text(message ?? (isSimulator ? "Shoot this look on an iPhone." : "Check camera access in Settings, then try again."))
+                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 28)
+                    }
+
+                    if let actionTitle, let action {
+                        Button(actionTitle, action: action)
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundStyle(FilmyTheme.background)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
+                            .background(FilmyTheme.accent, in: Capsule())
+                            .accessibilityIdentifier(actionTitle == "Open Settings" ? "camera-permission-action" : "camera-recovery-action")
+                            .accessibilityHint(actionTitle == "Open Settings" ? "Opens Filmy Camera permissions" : "Attempts to resume the camera")
+                    }
                 }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 18)
+                .background(Color.black.opacity(0.28), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                }
+                // Keep the explanation above the camera action plate so the
+                // unavailable state remains readable on short iPhone displays.
+                .offset(y: -128)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 18)
-            .background(Color.black.opacity(0.28), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(Color.white.opacity(0.18), lineWidth: 1)
-            }
-            // Keep the explanation above the camera action plate so the
-            // unavailable state remains readable on short iPhone displays.
-            .offset(y: -128)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

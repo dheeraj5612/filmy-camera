@@ -177,6 +177,10 @@ struct CameraScreen: View {
                 updateCameraActivity()
             }
         }
+        // The simulator placeholder contains a renderer-backed swatch with a
+        // non-zero ideal size. Keep that child from expanding the camera shell
+        // beyond the window proposal and shifting the chrome offscreen.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     @ViewBuilder
@@ -461,6 +465,7 @@ struct CameraScreen: View {
             .padding(.horizontal, 7)
             .padding(.vertical, 5)
         }
+        .frame(maxWidth: .infinity)
         .scrollIndicators(.hidden)
         .background(Color.black.opacity(0.24), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay {
