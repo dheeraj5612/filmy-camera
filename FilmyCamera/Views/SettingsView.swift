@@ -7,6 +7,8 @@ struct SettingsView: View {
     @ObservedObject var camera: CameraService
     @ObservedObject var photoLibrary: PhotoLibraryService
 
+    @Environment(\.scenePhase) private var scenePhase
+
     private let privacyPolicyURL = URL(string: "https://dheeraj5612.github.io/filmycam-legal/privacy-policy.html")!
     private let supportURL = URL(string: "https://dheeraj5612.github.io/filmycam-legal/support.html")!
 
@@ -34,6 +36,11 @@ struct SettingsView: View {
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
+        }
+        .onAppear { refreshPermissionState() }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            refreshPermissionState()
         }
     }
 
@@ -273,7 +280,7 @@ struct SettingsView: View {
                         .font(.title3.weight(.bold))
                         .foregroundStyle(FilmyTheme.primary)
                     Spacer(minLength: 8)
-                    Text("VERSION 1.0")
+                    Text("VERSION \(appVersion)")
                         .font(.caption2.weight(.bold))
                         .tracking(0.9)
                         .foregroundStyle(FilmyTheme.accent)
@@ -420,17 +427,21 @@ struct SettingsView: View {
     }
 
     private var photoStatusTitle: String {
-        switch photoLibrary.authorizationStatus {
-        case .authorized: return "ALLOWED"
-        case .limited: return "LIMITED"
-        case .denied, .restricted: return "OFF"
-        case .notDetermined: return "ASK"
-        @unknown default: return "CHECK"
+        let canRead = PhotoLibraryAuthorizationPolicy.canRead(photoLibrary.authorizationStatus)
+        let canAdd = photoLibrary.canSaveToPhotos
+        switch (canRead, canAdd, photoLibrary.authorizationStatus, photoLibrary.addOnlyAuthorizationStatus) {
+        case (true, true, .authorized, _): return "ALLOWED"
+        case (true, true, .limited, _): return "LIMITED"
+        case (false, true, _, _): return "SAVE ONLY"
+        case (_, false, .notDetermined, _), (_, false, _, .notDetermined): return "ASK"
+        case (false, false, .denied, _), (false, false, .restricted, _): return "OFF"
+        default: return "CHECK"
         }
     }
 
     private var cameraPermissionNeedsSettings: Bool {
-        camera.availability == .permissionDenied
+        let status = AVCaptureDevice.authorizationStatus(for: .video)
+        return status == .denied || status == .restricted
     }
 
     private var cameraPermissionNeedsRequest: Bool {
@@ -440,14 +451,16 @@ struct SettingsView: View {
     }
 
     private var cameraStatusTitle: String {
-        switch camera.availability {
-        case .running: return "LIVE"
-        case .simulator: return "SIMULATOR"
-        case .permissionDenied: return "OFF"
-        case .requestingPermission: return "ASKING"
-        case .starting, .idle: return "ASK"
-        case .paused: return "ALLOWED"
-        case .interrupted, .needsRecovery, .unavailable: return "CHECK"
+        if camera.availability == .simulator { return "SIMULATOR" }
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            return camera.availability == .running ? "LIVE" : "ALLOWED"
+        case .notDetermined:
+            return camera.availability == .requestingPermission ? "ASKING" : "ASK"
+        case .denied, .restricted:
+            return "OFF"
+        @unknown default:
+            return "CHECK"
         }
     }
 
@@ -456,25 +469,51 @@ struct SettingsView: View {
     }
 
     private var cameraStatusDetail: String {
-        switch camera.availability {
-        case .running: return "Live preview is ready to capture."
-        case .simulator: return "Simulator-safe preview mode"
-        case .permissionDenied: return "Enable camera access in Settings to preview and capture."
-        case .requestingPermission: return "Waiting for camera permission."
-        case .starting, .idle: return "Ask when you are ready to capture."
-        case .paused: return "Camera access is enabled; preview is paused."
-        case .interrupted, .needsRecovery, .unavailable: return camera.statusMessage
+        if camera.availability == .simulator { return "Simulator-safe preview mode" }
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            switch camera.availability {
+            case .running: return "Live preview is ready to capture."
+            case .paused: return "Camera access is enabled; preview is paused."
+            case .interrupted, .needsRecovery, .unavailable: return camera.statusMessage
+            default: return "Camera access is enabled. Open Camera to begin preview."
+            }
+        case .notDetermined:
+            return camera.availability == .requestingPermission
+                ? "Waiting for camera permission."
+                : "Ask when you are ready to capture."
+        case .denied, .restricted:
+            return "Enable camera access in Settings to preview and capture."
+        @unknown default:
+            return "Camera permission status is unavailable."
         }
     }
 
     private var photoStatusDetail: String {
-        switch photoLibrary.authorizationStatus {
-        case .authorized: return "Read and save access is enabled."
-        case .limited: return "Limited access is enabled for selected photos."
-        case .denied, .restricted: return "Enable Photos access to save and view your roll."
-        case .notDetermined: return "Ask when you are ready to build your roll."
-        @unknown default: return "Photo access status is unavailable."
+        let canRead = PhotoLibraryAuthorizationPolicy.canRead(photoLibrary.authorizationStatus)
+        let canAdd = photoLibrary.canSaveToPhotos
+        switch (canRead, canAdd) {
+        case (true, true):
+            return photoLibrary.authorizationStatus == .limited
+                ? "Limited access is enabled for selected photos; new frames can still be saved."
+                : "Read and save access is enabled."
+        case (false, true):
+            return "Save access is enabled; allow Photos access to view the Roll."
+        case (true, false):
+            return "The Roll is available; allow add access to save new frames."
+        default:
+            return "Ask when you are ready to build your roll."
         }
+    }
+
+    private var appVersion: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
+        return "\(version) (\(build))"
+    }
+
+    private func refreshPermissionState() {
+        photoLibrary.refresh()
     }
 
     private func requestPhotoAccess() {

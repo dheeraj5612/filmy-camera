@@ -52,9 +52,7 @@ public struct FilteredCameraPreview: UIViewRepresentable {
             quality: quality,
             grainSeed: cameraService.previewGrainSeed
         )
-        coordinator.frameHandlerID = cameraService.installFrameHandler { [weak coordinator] image in
-            coordinator?.receive(image)
-        }
+        coordinator.installFrameHandlerIfNeeded()
         view.accessibilityLabel = "Live camera preview"
         return view
     }
@@ -73,12 +71,10 @@ public struct FilteredCameraPreview: UIViewRepresentable {
             grainSeed: cameraService.previewGrainSeed
         )
 
-        // SwiftUI can recreate the callback after another view has used the
-        // service. Reinstalling this tiny forwarding closure keeps the preview
-        // attached to the current representable instance.
-        coordinator.frameHandlerID = cameraService.installFrameHandler { [weak coordinator] image in
-            coordinator?.receive(image)
-        }
+        // The coordinator owns one callback for the lifetime of the UIKit
+        // view. Reinstalling it on every SwiftUI update can multiply frame
+        // delivery while a slider or recipe selection is changing.
+        coordinator.installFrameHandlerIfNeeded()
     }
 
     public static func dismantleUIView(
@@ -107,6 +103,13 @@ public struct FilteredCameraPreview: UIViewRepresentable {
             self.service = service
             self.recipe = recipe
             self.quality = quality
+        }
+
+        fileprivate func installFrameHandlerIfNeeded() {
+            guard frameHandlerID == nil, let service else { return }
+            frameHandlerID = service.installFrameHandler { [weak self] image in
+                self?.receive(image)
+            }
         }
 
         fileprivate func receive(_ image: CIImage) {
