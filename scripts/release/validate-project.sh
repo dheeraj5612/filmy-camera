@@ -50,7 +50,6 @@ if ! plutil -lint "${privacy_manifest}" >/dev/null; then
 fi
 
 require_spec_value 'PRODUCT_BUNDLE_IDENTIFIER: com.dheeraj.filmycamera' "production bundle identifier"
-require_spec_value 'CURRENT_PROJECT_VERSION: "1"' "initial build number"
 require_spec_value 'MARKETING_VERSION: "1.0.0"' "marketing version"
 require_spec_value 'DEVELOPMENT_TEAM: 6ALSCF5GBV' "development team"
 require_spec_value 'CFBundleDisplayName: Filmy Camera' "display name"
@@ -59,6 +58,14 @@ require_spec_value 'NSCameraUsageDescription:' "camera permission copy"
 require_spec_value 'NSPhotoLibraryAddUsageDescription:' "photo-add permission copy"
 require_spec_value 'NSPhotoLibraryUsageDescription:' "photo-read permission copy"
 require_spec_value 'ITSAppUsesNonExemptEncryption: false' "export-compliance declaration"
+
+build_number="$(sed -n 's/^[[:space:]]*CURRENT_PROJECT_VERSION:[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' "${project_spec}" | head -n 1)"
+if [[ -z "${build_number}" ]] || [[ ! "${build_number}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "CURRENT_PROJECT_VERSION must be a positive integer in project.yml" >&2
+  failures=$((failures + 1))
+fi
+
+marketing_version="$(sed -n 's/^[[:space:]]*MARKETING_VERSION:[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' "${project_spec}" | head -n 1)"
 
 if ! grep -Fq 'NSPrivacyTracking' "${privacy_manifest}" \
   || ! grep -Fq 'NSPrivacyCollectedDataTypes' "${privacy_manifest}" \
@@ -109,7 +116,7 @@ fi
 
 echo "Release project preflight passed"
 echo "  bundle: com.dheeraj.filmycamera"
-echo "  version: 1.0.0 (1)"
+echo "  version: ${marketing_version} (${build_number})"
 echo "  privacy manifest: present"
 echo "  app icon: 1024x1024"
 echo "  scheme/tests: present"
