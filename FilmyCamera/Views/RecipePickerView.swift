@@ -5,6 +5,13 @@ struct RecipePickerView: View {
     @Binding var selectedRecipeID: String
     let onOpenDetail: (FilmRecipe) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var recipeTileSize: CGSize {
+        dynamicTypeSize.isAccessibilitySize
+            ? CGSize(width: 166, height: 104)
+            : CGSize(width: 142, height: 86)
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -63,7 +70,7 @@ struct RecipePickerView: View {
 
         ZStack(alignment: .topTrailing) {
             RecipeSwatch(recipe: recipe, isSelected: isSelected)
-                .frame(width: 142, height: 86)
+                .frame(width: recipeTileSize.width, height: recipeTileSize.height)
 
             if isSelected {
                 HStack(spacing: 4) {

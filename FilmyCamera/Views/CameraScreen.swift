@@ -28,7 +28,7 @@ struct CameraScreen: View {
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel("Live camera preview")
                     .accessibilityValue(camera.isRunning ? "Showing the \(viewModel.selectedRecipe.name) look" : camera.statusMessage)
-                    .accessibilityHint("Tap the preview to focus and expose the frame")
+                    .accessibilityHint("Tap the preview to focus at that point. VoiceOver users can use the Focus and expose at center action.")
                     .accessibilityAction(named: "Focus and expose at center") {
                         let normalizedPoint = CGPoint(x: 0.5, y: 0.5)
                         camera.focus(at: normalizedPoint)

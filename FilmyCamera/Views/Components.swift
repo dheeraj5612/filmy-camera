@@ -440,7 +440,7 @@ struct RecipeSwatch: View {
             if showsLabel {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(recipe.name)
-                        .font(.system(size: compact ? 12 : 13, weight: .bold, design: .rounded))
+                        .font((compact ? Font.caption : Font.subheadline).weight(.bold))
                         .foregroundStyle(.white)
                         .lineLimit(compact ? 1 : 2)
                         .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 0.72 : 0.84)
@@ -449,8 +449,8 @@ struct RecipeSwatch: View {
 
                     if !compact {
                         Text(recipe.descriptor)
-                            .font(.system(size: 9, weight: .medium, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.82))
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.9))
                             .lineLimit(1)
                             .minimumScaleFactor(0.72)
                             .allowsTightening(true)
@@ -731,7 +731,7 @@ struct PreviewPlaceholder: View {
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
-            .overlay(Color.black.opacity(0.3))
+            .overlay(Color.black.opacity(0.46))
 
             VStack(spacing: 14) {
                 Image(systemName: isSimulator ? "iphone.gen3" : "camera.fill")
@@ -762,6 +762,13 @@ struct PreviewPlaceholder: View {
                         .accessibilityIdentifier(actionTitle == "Open Settings" ? "camera-permission-action" : "camera-recovery-action")
                         .accessibilityHint(actionTitle == "Open Settings" ? "Opens Filmy Camera permissions" : "Attempts to resume the camera")
                 }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 18)
+            .background(Color.black.opacity(0.28), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(Color.white.opacity(0.18), lineWidth: 1)
             }
             // Keep the explanation above the camera action plate so the
             // unavailable state remains readable on short iPhone displays.
