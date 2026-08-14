@@ -13,6 +13,9 @@ allow_provisioning_updates=false
 asc_key_id="${FILMY_ASC_KEY_ID:-}"
 asc_issuer_id="${FILMY_ASC_ISSUER_ID:-}"
 asc_key_path="${FILMY_ASC_KEY_PATH:-}"
+code_sign_style="${FILMY_CODE_SIGN_STYLE:-}"
+code_sign_identity="${FILMY_CODE_SIGN_IDENTITY:-}"
+provisioning_profile_specifier="${FILMY_PROVISIONING_PROFILE_SPECIFIER:-}"
 
 usage() {
   cat <<'EOF'
@@ -29,6 +32,10 @@ the repository; its contents are never printed.
 
 FILMY_XCODEGEN_PATH may point to a trusted absolute XcodeGen executable. When
 it is unset, the repository-local CI XcodeGen executable is required.
+
+For a locally installed distribution profile, FILMY_CODE_SIGN_STYLE,
+FILMY_CODE_SIGN_IDENTITY, and FILMY_PROVISIONING_PROFILE_SPECIFIER may be set
+together to force an explicit signing selection without contacting Apple.
 EOF
 }
 
@@ -169,6 +176,21 @@ archive_args=(
   -derivedDataPath "${derived_data_path}"
   -archivePath "${archive_path}"
 )
+
+signing_args=()
+if [[ -n "${code_sign_style}${code_sign_identity}${provisioning_profile_specifier}" ]]; then
+  [[ -n "${code_sign_style}" && -n "${code_sign_identity}" && -n "${provisioning_profile_specifier}" ]] || {
+    echo "FILMY_CODE_SIGN_STYLE, FILMY_CODE_SIGN_IDENTITY, and FILMY_PROVISIONING_PROFILE_SPECIFIER must be provided together" >&2
+    exit 64
+  }
+  signing_args+=(
+    "CODE_SIGN_STYLE=${code_sign_style}"
+    "CODE_SIGN_IDENTITY=${code_sign_identity}"
+    "PROVISIONING_PROFILE_SPECIFIER=${provisioning_profile_specifier}"
+    "CODE_SIGNING_REQUIRED=YES"
+    "CODE_SIGNING_ALLOWED=YES"
+  )
+fi
 if [[ "${allow_provisioning_updates}" == true ]]; then
   archive_args+=( -allowProvisioningUpdates )
   if [[ -n "${asc_key_id}${asc_issuer_id}${asc_key_path}" ]]; then
@@ -185,7 +207,7 @@ if [[ "${allow_provisioning_updates}" == true ]]; then
   fi
 fi
 
-archive_args+=( archive )
+archive_args+=( "${signing_args[@]}" archive )
 xcodebuild "${archive_args[@]}"
 
 printf '%s\n' "${source_revision}" > "${archive_path}/FilmyCamera.source-sha"

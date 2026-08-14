@@ -112,6 +112,7 @@ profile_expiration="$(/usr/libexec/PlistBuddy -c 'Print :ExpirationDate' "${prof
 profile_expiration_epoch="$(
   date -j -f '%Y-%m-%d %H:%M:%S %z' "${profile_expiration}" '+%s' 2>/dev/null \
     || date -j -f '%Y-%m-%dT%H:%M:%SZ' "${profile_expiration}" '+%s' 2>/dev/null \
+    || date -j -f '%a %b %d %H:%M:%S %Z %Y' "${profile_expiration}" '+%s' 2>/dev/null \
     || true
 )"
 
