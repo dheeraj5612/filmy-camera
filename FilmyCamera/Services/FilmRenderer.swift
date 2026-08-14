@@ -256,6 +256,7 @@ public final class FilmRenderer {
         output = applyMonochromeFilter(to: output, recipe: safeRecipe)
         output = applyColorControls(to: output, recipe: safeRecipe)
         output = applyColorCube(to: output, recipe: safeRecipe, quality: quality)
+        output = applyMonochromaticColorAxes(to: output, recipe: safeRecipe)
         output = applyDetailControls(to: output, recipe: safeRecipe)
         output = applyClarity(to: output, recipe: safeRecipe)
         output = applyGrain(
@@ -489,18 +490,10 @@ public final class FilmRenderer {
         }
 
         let weights = monochromeFilter.channelWeights
-        let warmCool = clamp(recipe.monochromaticColor.warmCool, lower: -1, upper: 1)
-        let greenMagenta = clamp(recipe.monochromaticColor.greenMagenta, lower: -1, upper: 1)
-        let adjustedWeights = (
-            red: weights.red + warmCool * 0.10 + greenMagenta * 0.05,
-            green: weights.green - greenMagenta * 0.04,
-            blue: weights.blue - warmCool * 0.10 - greenMagenta * 0.01
-        )
-        let total = max(adjustedWeights.red + adjustedWeights.green + adjustedWeights.blue, 0.001)
         let vector = CIVector(
-            x: adjustedWeights.red / total,
-            y: adjustedWeights.green / total,
-            z: adjustedWeights.blue / total,
+            x: weights.red,
+            y: weights.green,
+            z: weights.blue,
             w: 0
         )
         filter.setValue(image, forKey: kCIInputImageKey)
@@ -509,6 +502,88 @@ public final class FilmRenderer {
         filter.setValue(vector, forKey: "inputBVector")
         filter.setValue(immutableResources.alphaVector, forKey: "inputAVector")
         return filter.outputImage?.cropped(to: image.extent) ?? image
+    }
+
+    /// Applies the public monochromatic warm/cool and green/magenta controls
+    /// after the film base has produced its luminance. The matrix uses the
+    /// current output luminance as the tint carrier, so a neutral ACROS or
+    /// MONOCHROME base remains neutral while SEPIA keeps its base tone and
+    /// receives the same predictable axis behavior.
+    private static func applyMonochromaticColorAxes(
+        to image: CIImage,
+        recipe: FilmRecipe
+    ) -> CIImage {
+        guard isMonochromaticBase(recipe.filmBase),
+              let filter = CIFilter(name: "CIColorMatrix") else {
+            return image
+        }
+
+        let warmCool = CGFloat(clamp(
+            recipe.monochromaticColor.warmCool,
+            lower: -1,
+            upper: 1
+        ))
+        let greenMagenta = CGFloat(clamp(
+            recipe.monochromaticColor.greenMagenta,
+            lower: -1,
+            upper: 1
+        ))
+        guard abs(warmCool) > 0.0001 || abs(greenMagenta) > 0.0001 else {
+            return image
+        }
+
+        // These opponent directions are normalized against display-referred
+        // sRGB luminance. Positive values mean warm and magenta; negative
+        // values mean cool and green. The coefficients keep the weighted
+        // luma unchanged before the final safety clamp.
+        let lumaRed: CGFloat = 0.2126
+        let lumaGreen: CGFloat = 0.7152
+        let lumaBlue: CGFloat = 0.0722
+        let warmRedPerLuma: CGFloat = 0.06
+        let warmBluePerLuma = -warmRedPerLuma * lumaRed / lumaBlue
+        let magentaRedBluePerLuma: CGFloat = 0.12
+        let magentaGreenPerLuma = -magentaRedBluePerLuma * (lumaRed + lumaBlue) / lumaGreen
+
+        let redDeltaPerLuma = warmCool * warmRedPerLuma
+            + greenMagenta * magentaRedBluePerLuma
+        let greenDeltaPerLuma = greenMagenta * magentaGreenPerLuma
+        let blueDeltaPerLuma = warmCool * warmBluePerLuma
+            + greenMagenta * magentaRedBluePerLuma
+
+        let redVector = CIVector(
+            x: 1 + redDeltaPerLuma * lumaRed,
+            y: redDeltaPerLuma * lumaGreen,
+            z: redDeltaPerLuma * lumaBlue,
+            w: 0
+        )
+        let greenVector = CIVector(
+            x: greenDeltaPerLuma * lumaRed,
+            y: 1 + greenDeltaPerLuma * lumaGreen,
+            z: greenDeltaPerLuma * lumaBlue,
+            w: 0
+        )
+        let blueVector = CIVector(
+            x: blueDeltaPerLuma * lumaRed,
+            y: blueDeltaPerLuma * lumaGreen,
+            z: 1 + blueDeltaPerLuma * lumaBlue,
+            w: 0
+        )
+
+        filter.setValue(image, forKey: kCIInputImageKey)
+        filter.setValue(redVector, forKey: "inputRVector")
+        filter.setValue(greenVector, forKey: "inputGVector")
+        filter.setValue(blueVector, forKey: "inputBVector")
+        filter.setValue(immutableResources.alphaVector, forKey: "inputAVector")
+        return filter.outputImage?.cropped(to: image.extent) ?? image
+    }
+
+    private static func isMonochromaticBase(_ filmBase: FilmRecipe.FilmBase) -> Bool {
+        switch filmBase {
+        case .acros, .acrosYellow, .acrosRed, .acrosGreen, .monochrome, .sepia:
+            return true
+        default:
+            return false
+        }
     }
 
     private static func applyColorControls(

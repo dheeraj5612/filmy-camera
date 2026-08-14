@@ -221,10 +221,17 @@ struct CameraStatusPill: View {
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
+    private var isLive: Bool {
+        // `isRunning` can briefly outlive a lifecycle transition. Availability
+        // is the source of truth so Simulator and offline states never look
+        // or sound like a live camera.
+        availability == .running && isRunning
+    }
+
     var body: some View {
         HStack(spacing: 7) {
             Circle()
-                .fill(isRunning ? FilmyTheme.mint : FilmyTheme.accent)
+                .fill(isLive ? FilmyTheme.mint : FilmyTheme.accent)
                 .frame(width: 7, height: 7)
 
             Text(condensedMessage)
@@ -239,7 +246,8 @@ struct CameraStatusPill: View {
         .background(Color.black.opacity(0.42), in: Capsule())
         .overlay { Capsule().stroke(Color.white.opacity(0.14), lineWidth: 1) }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(isRunning ? "Camera status: live preview" : "Camera status: \(message)")
+        .accessibilityLabel("Camera status")
+        .accessibilityValue(accessibilityStatus)
     }
 
     private var condensedMessage: String {
@@ -257,8 +265,18 @@ struct CameraStatusPill: View {
         case .idle, .starting:
             return "Starting"
         case .running:
-            return isRunning ? "Live" : "Starting"
+            return isLive ? "Live" : "Starting"
         }
+    }
+
+    private var accessibilityStatus: String {
+        if isLive {
+            return "Live preview"
+        }
+
+        let detail = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !detail.isEmpty else { return condensedMessage }
+        return "\(condensedMessage). \(detail)"
     }
 }
 

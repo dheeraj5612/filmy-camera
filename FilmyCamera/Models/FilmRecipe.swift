@@ -666,9 +666,9 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             case .colorTemperature:
                 return "Color temperature in Kelvin; the public camera range is 2500 K through 10000 K."
             case .monochromaticWarmCool:
-                return "Normalized ACROS or MONOCHROME warm-to-cool color axis."
+                return "Normalized ACROS, MONOCHROME, or SEPIA warm-to-cool color axis."
             case .monochromaticGreenMagenta:
-                return "Normalized ACROS or MONOCHROME green-to-magenta color axis."
+                return "Normalized ACROS, MONOCHROME, or SEPIA green-to-magenta color axis."
             case .sharpness:
                 return "Signed normalized edge-definition adjustment."
             case .noiseReduction:
@@ -813,9 +813,9 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     }
 
     /// Fujifilm's monochromatic color axes are represented as normalized
-    /// warm/cool and green/magenta shifts. They only affect monochrome bases;
-    /// keeping them in the recipe makes the control contract explicit rather
-    /// than silently dropping the setting from an edited look.
+    /// warm/cool and green/magenta shifts. They affect ACROS, MONOCHROME, and
+    /// SEPIA-style bases; keeping them in the recipe makes the control contract
+    /// explicit rather than silently dropping the setting from an edited look.
     public struct MonochromaticColor: Codable, Hashable, Sendable {
         public var warmCool: Double
         public var greenMagenta: Double

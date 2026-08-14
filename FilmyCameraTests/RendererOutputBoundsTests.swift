@@ -413,39 +413,102 @@ final class RendererOutputBoundsTests: XCTestCase {
         XCTAssertTrue(distances.allSatisfy { $0 > 0.005 })
     }
 
-    func testMonochromaticColorAxesChangeMonochromeOutput() {
+    func testMonochromaticWarmCoolAxisMovesTintInDeclaredDirectionAcrossBases() {
         let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
         let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
         let source = CIImage(color: CIColor(red: 0.76, green: 0.25, blue: 0.12, alpha: 1))
             .cropped(to: extent)
-        var warm = FilmRecipe(
-            id: "mono-axes",
-            name: "Monochrome axes",
-            subtitle: "Test",
-            filmBase: .acros,
-            saturation: 0,
-            grain: 0,
-            vignette: 0,
-            halation: 0
-        )
-        warm.monochromaticColor.warmCool = 1
-        var cool = warm
-        cool.monochromaticColor.warmCool = -1
+        let bases: [FilmRecipe.FilmBase] = [.acros, .monochrome, .sepia]
 
-        let warmPixels = renderFloatPixels(
-            FilmRenderer.render(source, recipe: warm, quality: .photo),
-            extent: extent,
-            context: context
-        )
-        let coolPixels = renderFloatPixels(
-            FilmRenderer.render(source, recipe: cool, quality: .photo),
-            extent: extent,
-            context: context
-        )
+        for filmBase in bases {
+            let base = FilmRecipe(
+                id: "mono-warm-cool-\(filmBase.rawValue)",
+                name: filmBase.displayName,
+                subtitle: "Test",
+                filmBase: filmBase,
+                saturation: 0,
+                grain: 0,
+                vignette: 0,
+                halation: 0,
+                palette: FilmRecipe.Palette(saturation: 0)
+            )
+            var neutral = base
+            neutral.monochromaticColor = .init()
+            var warm = base
+            warm.monochromaticColor.warmCool = 1
+            var cool = base
+            cool.monochromaticColor.warmCool = -1
 
-        XCTAssertGreaterThan(abs(Double(warmPixels[0]) - Double(coolPixels[0])), 0.001)
-        XCTAssertEqual(warmPixels[0], warmPixels[1], accuracy: 0.001)
-        XCTAssertEqual(coolPixels[1], coolPixels[2], accuracy: 0.001)
+            func redBlueBias(_ recipe: FilmRecipe) -> Double {
+                let pixel = renderFloatPixels(
+                    FilmRenderer.render(source, recipe: recipe, quality: .photo),
+                    extent: extent,
+                    context: context
+                )
+                return Double(pixel[0]) - Double(pixel[2])
+            }
+
+            let neutralBias = redBlueBias(neutral)
+            XCTAssertGreaterThan(
+                redBlueBias(warm),
+                neutralBias + 0.01,
+                "Positive warm-cool axis was not warmer for \(filmBase.rawValue)"
+            )
+            XCTAssertLessThan(
+                redBlueBias(cool),
+                neutralBias - 0.01,
+                "Negative warm-cool axis was not cooler for \(filmBase.rawValue)"
+            )
+        }
+    }
+
+    func testMonochromaticGreenMagentaAxisMovesTintInDeclaredDirectionAcrossBases() {
+        let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
+        let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+        let source = CIImage(color: CIColor(red: 0.76, green: 0.25, blue: 0.12, alpha: 1))
+            .cropped(to: extent)
+        let bases: [FilmRecipe.FilmBase] = [.acros, .monochrome, .sepia]
+
+        for filmBase in bases {
+            let base = FilmRecipe(
+                id: "mono-green-magenta-\(filmBase.rawValue)",
+                name: filmBase.displayName,
+                subtitle: "Test",
+                filmBase: filmBase,
+                saturation: 0,
+                grain: 0,
+                vignette: 0,
+                halation: 0,
+                palette: FilmRecipe.Palette(saturation: 0)
+            )
+            var neutral = base
+            neutral.monochromaticColor = .init()
+            var magenta = base
+            magenta.monochromaticColor.greenMagenta = 1
+            var green = base
+            green.monochromaticColor.greenMagenta = -1
+
+            func magentaBias(_ recipe: FilmRecipe) -> Double {
+                let pixel = renderFloatPixels(
+                    FilmRenderer.render(source, recipe: recipe, quality: .photo),
+                    extent: extent,
+                    context: context
+                )
+                return (Double(pixel[0]) + Double(pixel[2])) * 0.5 - Double(pixel[1])
+            }
+
+            let neutralBias = magentaBias(neutral)
+            XCTAssertGreaterThan(
+                magentaBias(magenta),
+                neutralBias + 0.01,
+                "Positive green-magenta axis was not more magenta for \(filmBase.rawValue)"
+            )
+            XCTAssertLessThan(
+                magentaBias(green),
+                neutralBias - 0.01,
+                "Negative green-magenta axis was not greener for \(filmBase.rawValue)"
+            )
+        }
     }
 
     func testGrainIsStableAcrossRepeatedRenders() {

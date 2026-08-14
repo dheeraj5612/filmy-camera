@@ -660,17 +660,20 @@ private struct GalleryDetailView: View {
     }
 
     private func resetImageTransform() {
-        let reset = {
+        var transaction = Transaction()
+        transaction.animation = reduceMotion
+            ? nil
+            : .spring(response: 0.28, dampingFraction: 0.82)
+        // A nil animation does not override every animation inherited from a
+        // parent transaction. Disable animations explicitly for Reduce Motion
+        // so double-tap, VoiceOver, and pinch resets all behave consistently.
+        transaction.disablesAnimations = reduceMotion
+
+        withTransaction(transaction) {
             zoomScale = 1
             pinchBaseZoom = nil
             imageOffset = .zero
             dragBaseOffset = .zero
-        }
-
-        if reduceMotion {
-            reset()
-        } else {
-            withAnimation(.spring(response: 0.28, dampingFraction: 0.82), reset)
         }
     }
 }
