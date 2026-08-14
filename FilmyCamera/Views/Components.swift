@@ -523,7 +523,18 @@ struct RecipeEditorSectionLabel: View {
 
 struct CaptureButton: View {
     let isCapturing: Bool
+    let isEnabled: Bool
     let action: () -> Void
+
+    init(
+        isCapturing: Bool,
+        isEnabled: Bool = true,
+        action: @escaping () -> Void
+    ) {
+        self.isCapturing = isCapturing
+        self.isEnabled = isEnabled
+        self.action = action
+    }
 
     var body: some View {
         Button(action: action) {
@@ -551,9 +562,18 @@ struct CaptureButton: View {
             }
         }
         .buttonStyle(.plain)
-        .disabled(isCapturing)
-        .accessibilityLabel(isCapturing ? "Saving photo" : "Capture photo")
-        .accessibilityHint("Captures the current frame using the selected recipe")
+        .opacity(isEnabled ? 1 : 0.52)
+        .disabled(isCapturing || !isEnabled)
+        .accessibilityLabel(
+            isCapturing
+                ? "Saving photo"
+                : (isEnabled ? "Capture photo" : "Capture unavailable in Preview mode")
+        )
+        .accessibilityHint(
+            isEnabled
+                ? "Captures the current frame using the selected recipe"
+                : "Capture is available on a physical iPhone"
+        )
     }
 }
 

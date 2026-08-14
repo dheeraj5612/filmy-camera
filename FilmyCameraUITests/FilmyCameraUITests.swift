@@ -105,6 +105,38 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertTrue(captureNotice.waitForExistence(timeout: 5))
         attachScreenshot(named: "accessibility-camera-shell")
     }
+
+    func testViewfinderFirstChromePreviewKeepsCameraQuiet() throws {
+        let previewApp = MainActor.assumeIsolated {
+            let previewApp = XCUIApplication()
+            previewApp.launchArguments = [
+                "-ui-testing",
+                "-ui-testing-viewfinder-chrome"
+            ]
+            previewApp.launch()
+            return previewApp
+        }
+        defer { previewApp.terminate() }
+
+        XCTAssertTrue(previewApp.staticTexts["CURRENT LOOK"].waitForExistence(timeout: 8))
+
+        let roll = previewApp.buttons["Open roll"]
+        assertMinimumHitTarget(roll, named: "Viewfinder preview Roll")
+
+        let controlsToggle = previewApp.buttons["Show camera controls"]
+        assertMinimumHitTarget(controlsToggle, named: "Viewfinder preview controls toggle")
+
+        let capture = previewApp.buttons["Capture unavailable in Preview mode"]
+        XCTAssertTrue(capture.waitForExistence(timeout: 5))
+        XCTAssertFalse(capture.isEnabled, "Simulator preview must not expose a fake capture action")
+        XCTAssertGreaterThanOrEqual(capture.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(capture.frame.height, 44)
+
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "viewfinder-first-chrome-preview"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
     #endif
 
     func testGalleryAndSettingsNavigation() throws {

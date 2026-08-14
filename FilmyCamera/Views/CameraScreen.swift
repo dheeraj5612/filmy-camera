@@ -342,7 +342,7 @@ struct CameraScreen: View {
             Spacer(minLength: 8)
 
             HStack(spacing: 7) {
-                if camera.isRunning {
+                if camera.isRunning || isViewfinderChromePreview {
                     chromeVisibilityButton
                 }
 
@@ -403,7 +403,7 @@ struct CameraScreen: View {
 
             Spacer(minLength: 4)
             HStack(spacing: 5) {
-                if camera.isRunning {
+                if camera.isRunning || isViewfinderChromePreview {
                     chromeVisibilityButton
                 }
 
@@ -526,8 +526,7 @@ struct CameraScreen: View {
     }
 
     private var shouldUseViewfinderFirstChrome: Bool {
-        camera.isRunning
-            && !isUITesting
+        (camera.isRunning || isViewfinderChromePreview)
             && !dynamicTypeSize.isAccessibilitySize
             && !isShowingFullCameraChrome
     }
@@ -576,6 +575,10 @@ struct CameraScreen: View {
 
     private var isUITesting: Bool {
         ProcessInfo.processInfo.arguments.contains("-ui-testing")
+    }
+
+    private var isViewfinderChromePreview: Bool {
+        ProcessInfo.processInfo.arguments.contains("-ui-testing-viewfinder-chrome")
     }
 
     private var hasHardwareSelection: Bool {
@@ -1273,7 +1276,10 @@ struct CameraScreen: View {
             minimalRecipeMenu
                 .frame(maxWidth: .infinity)
 
-            CaptureButton(isCapturing: viewModel.isCapturing) {
+            CaptureButton(
+                isCapturing: viewModel.isCapturing,
+                isEnabled: !isViewfinderChromePreview
+            ) {
                 if hapticsEnabled {
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 }
