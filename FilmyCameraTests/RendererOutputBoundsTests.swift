@@ -737,6 +737,34 @@ final class RendererOutputBoundsTests: XCTestCase {
         XCTAssertGreaterThan(distance, 0.001)
     }
 
+    func testNonColorTemperatureWhiteBalanceIgnoresPersistedKelvin() {
+        let extent = CGRect(x: 0, y: 0, width: 2, height: 2)
+        let input = CIImage(color: CIColor(red: 0.56, green: 0.42, blue: 0.30, alpha: 1))
+            .cropped(to: extent)
+        let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+        var daylightKelvin = FilmRecipe.builtIns[0]
+        daylightKelvin.whiteBalance.mode = .daylight
+        daylightKelvin.whiteBalance.kelvin = 2500
+        var daylightOtherKelvin = daylightKelvin
+        daylightOtherKelvin.whiteBalance.kelvin = 10000
+
+        let first = renderFloatPixels(
+            FilmRenderer.render(input, recipe: daylightKelvin, quality: .photo),
+            extent: extent,
+            context: context
+        )
+        let second = renderFloatPixels(
+            FilmRenderer.render(input, recipe: daylightOtherKelvin, quality: .photo),
+            extent: extent,
+            context: context
+        )
+
+        let distance = zip(first, second)
+            .map { abs(Double($0.0) - Double($0.1)) }
+            .reduce(0, +)
+        XCTAssertLessThan(distance, 0.0001)
+    }
+
     func testNegativeClarityUsesBlurBlendAndPositiveClarityRemainsActiveAtMultipleSizes() {
         let context = CIContext(options: [
             .useSoftwareRenderer: true,

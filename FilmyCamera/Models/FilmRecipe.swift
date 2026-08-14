@@ -109,6 +109,19 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
                 return nil
             }
         }
+
+        /// Whether this base exposes Fujifilm-style monochromatic color axes.
+        /// Sepia intentionally has no channel-mix filter because its warm
+        /// tone is produced by the base transform, but it still supports the
+        /// same warm/cool and green/magenta controls.
+        public var supportsMonochromaticColorAxes: Bool {
+            switch self {
+            case .acros, .acrosYellow, .acrosRed, .acrosGreen, .monochrome, .sepia:
+                return true
+            default:
+                return false
+            }
+        }
     }
 
     public enum MonochromeFilter: String, CaseIterable, Codable, Hashable, Sendable {

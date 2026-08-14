@@ -454,7 +454,9 @@ public final class FilmRenderer {
     ) -> CIImage {
         let temperatureShift = recipe.temperatureShift + recipe.whiteBalance.mode.temperatureBias
         let tintShift = recipe.tintShift + recipe.whiteBalance.mode.tintBias
-        let baseKelvin = clamp(recipe.whiteBalance.kelvin, lower: 2500, upper: 10000)
+        let baseKelvin = recipe.whiteBalance.mode == .colorTemperature
+            ? clamp(recipe.whiteBalance.kelvin, lower: 2500, upper: 10000)
+            : 6500
         let targetKelvin = clamp(
             baseKelvin - clamp(temperatureShift, lower: -1, upper: 1) * 1800,
             lower: 2500,
@@ -578,12 +580,7 @@ public final class FilmRenderer {
     }
 
     private static func isMonochromaticBase(_ filmBase: FilmRecipe.FilmBase) -> Bool {
-        switch filmBase {
-        case .acros, .acrosYellow, .acrosRed, .acrosGreen, .monochrome, .sepia:
-            return true
-        default:
-            return false
-        }
+        filmBase.supportsMonochromaticColorAxes
     }
 
     private static func applyColorControls(

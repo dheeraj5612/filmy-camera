@@ -22,7 +22,7 @@ struct SettingsView: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 25) {
-                        SectionHeading(eyebrow: "Control room", title: "Settings")
+                        settingsHeader
 
                         introCard
                         captureSettings
@@ -30,9 +30,9 @@ struct SettingsView: View {
                         localCache
                         about
                     }
-                    .padding(.horizontal, 18)
-                    .padding(.top, 20)
-                    .padding(.bottom, 32)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 18)
+                    .padding(.bottom, 40)
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
@@ -44,38 +44,99 @@ struct SettingsView: View {
         }
     }
 
+    private var settingsHeader: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            SectionHeading(eyebrow: "Control room", title: "Settings")
+
+            HStack(spacing: 8) {
+                Image(systemName: "dial.medium")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(FilmyTheme.accent)
+                    .accessibilityHidden(true)
+
+                Text("FILMY CAMERA / SYSTEM")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .tracking(1.0)
+                    .foregroundStyle(FilmyTheme.tertiary)
+
+                Spacer(minLength: 8)
+
+                Text(appVersion)
+                    .font(FilmyTheme.metadataFont)
+                    .foregroundStyle(FilmyTheme.secondary)
+            }
+            .padding(.horizontal, 12)
+            .frame(minHeight: 34)
+            .background(Color.black.opacity(0.2), in: Capsule())
+            .overlay {
+                Capsule()
+                    .stroke(FilmyTheme.line.opacity(0.8), lineWidth: 1)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Filmy Camera version \(appVersion)")
+        }
+    }
+
     private var introCard: some View {
-        GlassCard(padding: 18) {
-            VStack(alignment: .leading, spacing: 17) {
-                HStack(alignment: .top, spacing: 13) {
+        GlassCard(padding: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top, spacing: 14) {
                     ZStack {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .fill(FilmyTheme.accent.opacity(0.16))
+                        RoundedRectangle(cornerRadius: 17, style: .continuous)
+                            .fill(FilmyTheme.accent.opacity(0.15))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 17, style: .continuous)
+                                    .stroke(FilmyTheme.accent.opacity(0.25), lineWidth: 1)
+                            }
+
                         Image(systemName: "camera.aperture")
-                            .font(.system(size: 24, weight: .semibold))
+                            .font(.system(size: 25, weight: .semibold))
                             .foregroundStyle(FilmyTheme.accent)
                             .accessibilityHidden(true)
                     }
-                    .frame(width: 54, height: 54)
+                    .frame(width: 58, height: 58)
 
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("A slower way to see")
-                            .font(.title3.weight(.bold))
-                            .foregroundStyle(FilmyTheme.primary)
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text("A slower way to see")
+                                .font(.title3.weight(.bold))
+                                .foregroundStyle(FilmyTheme.primary)
+
+                            Spacer(minLength: 4)
+
+                            Circle()
+                                .fill(FilmyTheme.mint)
+                                .frame(width: 7, height: 7)
+                                .shadow(color: FilmyTheme.mint.opacity(0.6), radius: 5)
+                                .accessibilityHidden(true)
+                        }
+
                         Text("Tune the camera, keep the mood, and let every frame land exactly where you left it.")
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(FilmyTheme.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
+                .padding(18)
+                .overlay(alignment: .leading) {
+                    Capsule()
+                        .fill(FilmyTheme.accent)
+                        .frame(width: 3, height: 34)
+                        .padding(.leading, 1)
+                }
 
-                Divider().overlay(FilmyTheme.line)
+                Divider()
+                    .overlay(FilmyTheme.line)
 
                 HStack(spacing: 8) {
                     settingsBadge(systemName: "slider.horizontal.3", title: "CAPTURE")
                     settingsBadge(systemName: "lock.fill", title: "PRIVATE")
                     settingsBadge(systemName: "sparkles", title: "FILMY")
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 14)
+                .background(Color.black.opacity(0.14))
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("Capture, private, and film-inspired controls")
             }
@@ -94,7 +155,11 @@ struct SettingsView: View {
         .foregroundStyle(FilmyTheme.tertiary)
         .padding(.horizontal, 9)
         .padding(.vertical, 7)
-        .background(Color.white.opacity(0.05), in: Capsule())
+        .background(Color.white.opacity(0.055), in: Capsule())
+        .overlay {
+            Capsule()
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        }
     }
 
     private var captureSettings: some View {
@@ -153,6 +218,7 @@ struct SettingsView: View {
                     systemName: "arrow.up.right.square",
                     identifier: "camera-permission-settings",
                     hint: "Opens Filmy Camera camera permissions",
+                    subtitle: "Continue in iOS Settings",
                     action: openSystemSettings
                 )
             }
@@ -189,6 +255,7 @@ struct SettingsView: View {
                     systemName: "arrow.up.right.square",
                     identifier: "photos-permission-settings",
                     hint: "Opens Filmy Camera permissions",
+                    subtitle: "Continue in iOS Settings",
                     action: openSystemSettings
                 )
             } else if photoLibrary.authorizationStatus == .notDetermined {
@@ -210,6 +277,7 @@ struct SettingsView: View {
                     systemName: "arrow.up.right.square",
                     identifier: "photos-save-permission-settings",
                     hint: "Opens Filmy Camera Photos permissions for saving frames",
+                    subtitle: "Continue in iOS Settings",
                     action: openSystemSettings
                 )
             } else if photoLibrary.addOnlyAuthorizationStatus == .notDetermined {
@@ -265,19 +333,32 @@ struct SettingsView: View {
                     guard photoLibrary.hasLocalCache else { return }
                     photoLibrary.clearLocalRollCache()
                 } label: {
-                    HStack(spacing: 10) {
+                    HStack(spacing: 12) {
                         Image(systemName: "trash")
                             .font(.subheadline.weight(.bold))
-                        Text("Clear local cache")
-                            .font(.subheadline.weight(.bold))
+                            .frame(width: 34, height: 34)
+                            .background(FilmyTheme.accent.opacity(0.11), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Clear local cache")
+                                .font(.subheadline.weight(.bold))
+                            Text(photoLibrary.hasLocalCache ? "Remove temporary frames" : "Nothing to remove")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(FilmyTheme.secondary)
+                        }
+
                         Spacer(minLength: 8)
+
                         Text(photoLibrary.hasLocalCache ? "Available" : "Empty")
-                            .font(.caption.weight(.semibold))
+                            .font(.caption.weight(.bold))
                             .foregroundStyle(FilmyTheme.secondary)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 6)
+                            .background(Color.white.opacity(0.055), in: Capsule())
                     }
-                    .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                    .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
                 .foregroundStyle(photoLibrary.hasLocalCache ? FilmyTheme.accent : FilmyTheme.tertiary)
                 .buttonStyle(.plain)
                 .disabled(!photoLibrary.hasLocalCache)
@@ -354,14 +435,7 @@ struct SettingsView: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: 11) {
-            HStack(alignment: .top, spacing: 11) {
-                Image(systemName: systemName)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(FilmyTheme.accent)
-                    .frame(width: 30, height: 30)
-                    .background(FilmyTheme.accent.opacity(0.11), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .accessibilityHidden(true)
-
+            HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(eyebrow.uppercased())
                         .font(.caption2.weight(.bold))
@@ -376,9 +450,23 @@ struct SettingsView: View {
                         .foregroundStyle(FilmyTheme.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-            }
 
-            GlassCard(padding: 15) {
+                Spacer(minLength: 8)
+
+                Image(systemName: systemName)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(FilmyTheme.accent)
+                    .frame(width: 34, height: 34)
+                    .background(FilmyTheme.accent.opacity(0.11), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 11, style: .continuous)
+                            .stroke(FilmyTheme.accent.opacity(0.17), lineWidth: 1)
+                    }
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 3)
+
+            GlassCard(padding: 16) {
                 VStack(spacing: 0, content: content)
             }
         }
@@ -387,7 +475,7 @@ struct SettingsView: View {
     private var settingsDivider: some View {
         Divider()
             .overlay(FilmyTheme.line)
-            .padding(.vertical, 12)
+            .padding(.vertical, 10)
     }
 
     private func settingsAction(
@@ -395,23 +483,39 @@ struct SettingsView: View {
         systemName: String,
         identifier: String,
         hint: String,
+        subtitle: String? = nil,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            HStack(spacing: 10) {
+            HStack(spacing: 12) {
                 Image(systemName: systemName)
                     .font(.subheadline.weight(.semibold))
-                    .frame(width: 24)
+                    .frame(width: 34, height: 34)
+                    .background(FilmyTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     .accessibilityHidden(true)
-                Text(title)
-                    .font(.subheadline.weight(.bold))
-                    .multilineTextAlignment(.leading)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.subheadline.weight(.bold))
+                        .multilineTextAlignment(.leading)
+                    Text(subtitle ?? "Show the system permission prompt")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(FilmyTheme.secondary)
+                }
+
                 Spacer(minLength: 8)
+
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.bold))
                     .accessibilityHidden(true)
             }
-            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+            .padding(.horizontal, 12)
+            .background(FilmyTheme.accent.opacity(0.055), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(FilmyTheme.accent.opacity(0.14), lineWidth: 1)
+            }
         }
         .foregroundStyle(FilmyTheme.accent)
         .buttonStyle(.plain)
@@ -427,20 +531,30 @@ struct SettingsView: View {
         identifier: String
     ) -> some View {
         Link(destination: destination) {
-            HStack(spacing: 10) {
+            HStack(spacing: 12) {
                 Image(systemName: systemName)
                     .font(.subheadline.weight(.semibold))
-                    .frame(width: 24)
+                    .frame(width: 34, height: 34)
+                    .background(FilmyTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     .accessibilityHidden(true)
+
                 Text(title)
                     .font(.subheadline.weight(.bold))
                     .multilineTextAlignment(.leading)
+
                 Spacer(minLength: 8)
+
                 Image(systemName: "arrow.up.right")
                     .font(.caption.weight(.bold))
                     .accessibilityHidden(true)
             }
-            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+            .padding(.horizontal, 12)
+            .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(FilmyTheme.line.opacity(0.8), lineWidth: 1)
+            }
         }
         .foregroundStyle(FilmyTheme.accent)
         .accessibilityIdentifier(identifier)
@@ -595,6 +709,10 @@ private struct ControlRoomRow<Accessory: View>: View {
                 .foregroundStyle(FilmyTheme.accent)
                 .frame(width: 34, height: 34)
                 .background(FilmyTheme.accent.opacity(0.11), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(FilmyTheme.accent.opacity(0.16), lineWidth: 1)
+                }
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 4) {
@@ -613,6 +731,7 @@ private struct ControlRoomRow<Accessory: View>: View {
             accessory
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 3)
         .accessibilityElement(children: .contain)
     }
 }
