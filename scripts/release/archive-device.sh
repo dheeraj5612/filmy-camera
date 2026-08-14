@@ -207,7 +207,10 @@ if [[ "${allow_provisioning_updates}" == true ]]; then
   fi
 fi
 
-archive_args+=( "${signing_args[@]}" archive )
+if ((${#signing_args[@]} > 0)); then
+  archive_args+=( "${signing_args[@]}" )
+fi
+archive_args+=( archive )
 xcodebuild "${archive_args[@]}"
 
 printf '%s\n' "${source_revision}" > "${archive_path}/FilmyCamera.source-sha"
