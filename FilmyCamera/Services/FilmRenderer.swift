@@ -28,16 +28,13 @@ public final class FilmRenderer {
         }
     }
 
-    // Xcode 16.4's SDK does not mark MTLDevice as Sendable. This singleton is
-    // intentionally shared by the renderer and preview as an immutable handle.
-    public nonisolated(unsafe) static let metalDevice: MTLDevice? = MTLCreateSystemDefaultDevice()
+    // This immutable device handle is shared by the renderer and preview.
+    public static let metalDevice: MTLDevice? = MTLCreateSystemDefaultDevice()
 
     /// A reusable GPU-backed context for callers that need to materialize the
     /// rendered CIImage. It falls back to Core Image's software renderer on a
     /// simulator or Mac without a Metal device.
-    // CIContext is likewise a shared Core Image resource whose SDK type is not
-    // Sendable on the release toolchain; callers keep image work off the UI.
-    public nonisolated(unsafe) static let sharedContext: CIContext = {
+    public static let sharedContext: CIContext = {
         if let metalDevice {
             return CIContext(
                 mtlDevice: metalDevice,
