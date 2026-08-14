@@ -16,6 +16,7 @@ struct CameraScreen: View {
     @AppStorage("hapticsEnabled") private var hapticsEnabled = true
     @State private var recipeForDetail: FilmRecipe?
     @State private var isShowingCameraControls = false
+    @State private var isShowingFullCameraChrome = false
     @State private var focusPoint: CGPoint?
     @State private var focusNormalizedPoint: CGPoint?
     @State private var pinchStartZoom: CGFloat = 1
@@ -185,7 +186,9 @@ struct CameraScreen: View {
 
     @ViewBuilder
     private func cameraChrome(for size: CGSize) -> some View {
-        if size.width > size.height {
+        if shouldUseViewfinderFirstChrome {
+            viewfinderFirstCameraChrome(for: size)
+        } else if size.width > size.height {
             if dynamicTypeSize.isAccessibilitySize {
                 compactLandscapeCameraChrome
             } else {
@@ -195,6 +198,34 @@ struct CameraScreen: View {
             compactPortraitCameraChrome
         } else {
             portraitCameraChrome
+        }
+    }
+
+    @ViewBuilder
+    private func viewfinderFirstCameraChrome(for size: CGSize) -> some View {
+        if size.width > size.height {
+            HStack(alignment: .bottom, spacing: 12) {
+                compactHeader
+                    .frame(maxWidth: 300)
+
+                Spacer(minLength: 0)
+
+                viewfinderFirstActionPlate
+                    .frame(maxWidth: 430)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+        } else {
+            VStack(spacing: 0) {
+                compactHeader
+
+                Spacer(minLength: 0)
+
+                viewfinderFirstActionPlate
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+            .padding(.bottom, 10)
         }
     }
 
@@ -310,11 +341,17 @@ struct CameraScreen: View {
 
             Spacer(minLength: 8)
 
-            CameraStatusPill(
-                isRunning: camera.isRunning,
-                availability: camera.availability,
-                message: camera.statusMessage
-            )
+            HStack(spacing: 7) {
+                if camera.isRunning {
+                    chromeVisibilityButton
+                }
+
+                CameraStatusPill(
+                    isRunning: camera.isRunning,
+                    availability: camera.availability,
+                    message: camera.statusMessage
+                )
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
@@ -365,7 +402,13 @@ struct CameraScreen: View {
             .layoutPriority(1)
 
             Spacer(minLength: 4)
-            compactStatusPill
+            HStack(spacing: 5) {
+                if camera.isRunning {
+                    chromeVisibilityButton
+                }
+
+                compactStatusPill
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -445,6 +488,7 @@ struct CameraScreen: View {
 
                 if camera.flashAvailability != .unsupported || hasHardwareSelection {
                     Button {
+                        isShowingFullCameraChrome = true
                         isShowingCameraControls = true
                     } label: {
                         Label("More", systemImage: "ellipsis")
@@ -479,6 +523,38 @@ struct CameraScreen: View {
 
     private var shouldShowCameraEmptyState: Bool {
         !camera.isRunning
+    }
+
+    private var shouldUseViewfinderFirstChrome: Bool {
+        camera.isRunning
+            && !isUITesting
+            && !dynamicTypeSize.isAccessibilitySize
+            && !isShowingFullCameraChrome
+    }
+
+    private var chromeVisibilityButton: some View {
+        Button {
+            withAnimation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.82)) {
+                isShowingFullCameraChrome.toggle()
+            }
+        } label: {
+            Image(systemName: isShowingFullCameraChrome ? "viewfinder" : "slider.horizontal.3")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+                .background(Color.black.opacity(0.42), in: Circle())
+                .overlay { Circle().stroke(Color.white.opacity(0.14), lineWidth: 1) }
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("camera-chrome-toggle")
+        .accessibilityLabel(
+            isShowingFullCameraChrome ? "Hide camera controls" : "Show camera controls"
+        )
+        .accessibilityHint(
+            isShowingFullCameraChrome
+                ? "Return to the viewfinder-first camera layout"
+                : "Reveal recipe, exposure, zoom, and camera controls"
+        )
     }
 
     private var sessionLabel: String {
@@ -1183,6 +1259,97 @@ struct CameraScreen: View {
                 .stroke(Color.white.opacity(0.17), lineWidth: 1)
         }
         .shadow(color: .black.opacity(0.3), radius: 24, y: 10)
+    }
+
+    private var viewfinderFirstActionPlate: some View {
+        HStack(spacing: 12) {
+            CameraActionButton(
+                systemName: "square.grid.2x2",
+                title: "Roll",
+                accessibilityLabel: "Open roll",
+                action: onOpenGallery
+            )
+
+            minimalRecipeMenu
+                .frame(maxWidth: .infinity)
+
+            CaptureButton(isCapturing: viewModel.isCapturing) {
+                if hapticsEnabled {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                }
+                viewModel.capture(camera: camera)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 10)
+        .padding(.bottom, 9)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(FilmyTheme.plateGradient, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.white.opacity(0.17), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.3), radius: 24, y: 10)
+    }
+
+    private var minimalRecipeMenu: some View {
+        Menu {
+            Section("Film stock") {
+                ForEach(FilmRecipe.builtIns) { recipe in
+                    Button {
+                        viewModel.select(recipe: recipe)
+                    } label: {
+                        if recipe.id == viewModel.selectedRecipeID {
+                            Label(recipe.name, systemImage: "checkmark")
+                        } else {
+                            Text(recipe.name)
+                        }
+                    }
+                }
+            }
+
+            Divider()
+
+            Button("Tune \\(viewModel.selectedRecipe.name)") {
+                recipeForDetail = viewModel.selectedRecipe
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "film.stack")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(FilmyTheme.accent)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("CURRENT LOOK")
+                        .font(.system(size: 9, weight: .black, design: .rounded))
+                        .tracking(1.2)
+                        .foregroundStyle(FilmyTheme.accent)
+
+                    Text(viewModel.selectedRecipe.name)
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                }
+
+                Spacer(minLength: 3)
+
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 10, weight: .black))
+                    .foregroundStyle(.white.opacity(0.68))
+            }
+            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+            .padding(.horizontal, 11)
+            .background(Color.black.opacity(0.34), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 15, style: .continuous)
+                    .stroke(Color.white.opacity(0.14), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("minimal-recipe-picker")
+        .accessibilityLabel("Choose film recipe")
+        .accessibilityValue(viewModel.selectedRecipe.name)
     }
 
     private var compactCaptureNotice: some View {
