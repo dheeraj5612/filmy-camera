@@ -15,6 +15,7 @@ struct CameraScreen: View {
     @AppStorage("showGrid") private var showGrid = true
     @AppStorage("hapticsEnabled") private var hapticsEnabled = true
     @State private var recipeForDetail: FilmRecipe?
+    @State private var isShowingCameraControls = false
     @State private var focusPoint: CGPoint?
     @State private var focusNormalizedPoint: CGPoint?
     @State private var pinchStartZoom: CGFloat = 1
@@ -156,6 +157,11 @@ struct CameraScreen: View {
                 .presentationDragIndicator(.hidden)
                 .interactiveDismissDisabled(viewModel.reviewImage != nil || viewModel.isSaving)
             }
+        }
+        .sheet(isPresented: $isShowingCameraControls) {
+            cameraControlsSheet
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
         }
         .onAppear { updateCameraActivity() }
         .onDisappear { camera.stop() }
@@ -313,15 +319,24 @@ struct CameraScreen: View {
                         .accessibilityHidden(true)
                 }
 
-                if camera.flashAvailability != .unsupported {
-                    FlashControl(
-                        mode: camera.flashMode,
-                        availability: camera.flashAvailability,
-                        action: camera.cycleFlashMode
-                    )
+                if camera.flashAvailability != .unsupported || hasHardwareSelection {
+                    Button {
+                        isShowingCameraControls = true
+                    } label: {
+                        Label("More", systemImage: "ellipsis")
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
+                            .background(Color.black.opacity(0.46), in: Capsule())
+                            .overlay { Capsule().stroke(Color.white.opacity(0.16), lineWidth: 1) }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("more-camera-controls")
+                    .accessibilityLabel("More camera controls")
+                    .accessibilityHint("Opens flash, camera, and lens controls")
                 }
-
-                CameraHardwareControls(camera: camera)
             }
             .padding(.horizontal, 7)
             .padding(.vertical, 5)
@@ -459,6 +474,79 @@ struct CameraScreen: View {
                 }
             }
         )
+    }
+
+    private var cameraControlsSheet: some View {
+        NavigationStack {
+            ZStack {
+                FilmyTheme.background.ignoresSafeArea()
+
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 18) {
+                        SectionHeading(
+                            eyebrow: "Camera controls",
+                            title: "More ways to frame",
+                            trailing: camera.cameraPosition.title
+                        )
+
+                        Text("Keep the viewfinder quiet. The controls you reach for less often live here.")
+                            .font(FilmyTheme.bodyFont)
+                            .foregroundStyle(FilmyTheme.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        GlassCard(padding: 15) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("LIGHT")
+                                    .font(.system(.caption2, design: .rounded).weight(.black))
+                                    .tracking(1.2)
+                                    .foregroundStyle(FilmyTheme.tertiary)
+
+                                if camera.flashAvailability != .unsupported {
+                                    FlashControl(
+                                        mode: camera.flashMode,
+                                        availability: camera.flashAvailability,
+                                        action: camera.cycleFlashMode
+                                    )
+                                } else {
+                                    Text("Flash is not available on this camera")
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(FilmyTheme.secondary)
+                                        .frame(minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
+                                }
+                            }
+                        }
+
+                        if hasHardwareSelection {
+                            GlassCard(padding: 15) {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text("HARDWARE")
+                                        .font(.system(.caption2, design: .rounded).weight(.black))
+                                        .tracking(1.2)
+                                        .foregroundStyle(FilmyTheme.tertiary)
+
+                                    hardwareSelectionControls
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 18)
+                    .padding(.bottom, 26)
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        isShowingCameraControls = false
+                    }
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(FilmyTheme.accent)
+                }
+            }
+            .toolbarBackground(FilmyTheme.background, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+        }
+        .preferredColorScheme(.dark)
     }
 
     @ViewBuilder

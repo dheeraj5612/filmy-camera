@@ -13,52 +13,97 @@ struct RecipePickerView: View {
             : CGSize(width: 142, height: 86)
     }
 
+    private var selectedRecipe: FilmRecipe? {
+        recipes.first { $0.id == selectedRecipeID }
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 12) {
-                    ForEach(recipes) { recipe in
-                        Button {
-                            withAnimation(reduceMotion ? nil : .snappy(duration: 0.22)) {
-                                selectedRecipeID = recipe.id
-                            }
-                        } label: {
-                            recipeTile(recipe)
-                        }
-                        .id(recipe.id)
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("\(recipe.name), \(recipe.descriptor)")
-                        .accessibilityValue(selectedRecipeID == recipe.id ? "Selected" : "Not selected")
-                        .accessibilityHint("Double tap to select this look. Use the View recipe details action for more information.")
-                        .accessibilityAction(named: "View recipe details") {
-                            onOpenDetail(recipe)
-                        }
-                        .accessibilityAddTraits(selectedRecipeID == recipe.id ? .isSelected : [])
-                        .contextMenu {
-                            Button {
-                                onOpenDetail(recipe)
-                            } label: {
-                                Label("View recipe details", systemImage: "info.circle")
-                            }
-                        }
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text("CURRENT LOOK")
+                        .font(.system(.caption2, design: .monospaced).weight(.bold))
+                        .tracking(1.2)
+                        .foregroundStyle(FilmyTheme.tertiary)
+
+                    if let selectedRecipe {
+                        Text(selectedRecipe.name)
+                            .font(.system(.caption, design: .rounded).weight(.semibold))
+                            .foregroundStyle(FilmyTheme.primary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    if recipes.count > 1 {
+                        Label("Swipe to browse", systemImage: "arrow.left.and.right")
+                            .font(.system(.caption2, design: .rounded).weight(.semibold))
+                            .foregroundStyle(FilmyTheme.tertiary)
+                            .accessibilityHidden(true)
                     }
                 }
-                .scrollTargetLayout()
                 .padding(.horizontal, 3)
-                .padding(.vertical, 5)
-            }
-            .scrollClipDisabled()
-            .scrollTargetBehavior(.viewAligned)
-            .contentMargins(.horizontal, 3, for: .scrollContent)
-            .onAppear {
-                proxy.scrollTo(selectedRecipeID, anchor: .center)
-            }
-            .onChange(of: selectedRecipeID) { _, newValue in
-                guard !reduceMotion else { return }
-                withAnimation(.snappy(duration: 0.24)) {
-                    proxy.scrollTo(newValue, anchor: .center)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Current look")
+                .accessibilityValue(selectedRecipe?.name ?? "None selected")
+
+                ZStack {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(spacing: 12) {
+                            ForEach(recipes) { recipe in
+                                Button {
+                                    withAnimation(reduceMotion ? nil : .snappy(duration: 0.22)) {
+                                        selectedRecipeID = recipe.id
+                                    }
+                                } label: {
+                                    recipeTile(recipe)
+                                }
+                                .id(recipe.id)
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("\(recipe.name), \(recipe.descriptor)")
+                                .accessibilityValue(selectedRecipeID == recipe.id ? "Selected" : "Not selected")
+                                .accessibilityHint("Double tap to select this look. Use the View recipe details action for more information.")
+                                .accessibilityAction(named: "View recipe details") {
+                                    onOpenDetail(recipe)
+                                }
+                                .accessibilityAddTraits(selectedRecipeID == recipe.id ? .isSelected : [])
+                                .contextMenu {
+                                    Button {
+                                        onOpenDetail(recipe)
+                                    } label: {
+                                        Label("View recipe details", systemImage: "info.circle")
+                                    }
+                                }
+                            }
+                        .scrollTargetLayout()
+                        .padding(.horizontal, 3)
+                        .padding(.vertical, 5)
+                    }
+                    .scrollClipDisabled()
+                    .scrollTargetBehavior(.viewAligned)
+                    .contentMargins(.horizontal, 3, for: .scrollContent)
+                    .onAppear {
+                        proxy.scrollTo(selectedRecipeID, anchor: .center)
+                    }
+                    .onChange(of: selectedRecipeID) { _, newValue in
+                        guard !reduceMotion else { return }
+                        withAnimation(.snappy(duration: 0.24)) {
+                            proxy.scrollTo(newValue, anchor: .center)
+                        }
+                    }
+
+                    HStack {
+                        LinearGradient(colors: [FilmyTheme.background, .clear], startPoint: .leading, endPoint: .trailing)
+                            .frame(width: 14)
+                        Spacer()
+                        LinearGradient(colors: [.clear, FilmyTheme.background], startPoint: .leading, endPoint: .trailing)
+                            .frame(width: 28)
+                    }
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
                 }
             }
+        }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Film recipe picker. Swipe left or right to browse looks.")

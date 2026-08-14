@@ -20,6 +20,7 @@ final class FilmyCameraUITests: XCTestCase {
         assertMinimumHitTarget(cameraTab, named: "Camera tab")
         XCTAssertTrue(app.staticTexts["FILMY CAMERA"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["Natural Standard"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["CURRENT LOOK"].waitForExistence(timeout: 5))
 
         let classicChrome = app.buttons.matching(
             NSPredicate(format: "label BEGINSWITH 'Muted Color'")

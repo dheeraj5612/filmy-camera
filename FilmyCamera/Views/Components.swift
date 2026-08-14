@@ -528,6 +528,10 @@ struct CaptureButton: View {
         Button(action: action) {
             ZStack {
                 Circle()
+                    .stroke(FilmyTheme.accent.opacity(0.72), lineWidth: 1)
+                    .frame(width: 92, height: 92)
+
+                Circle()
                     .fill(.white)
                     .frame(width: 78, height: 78)
 
