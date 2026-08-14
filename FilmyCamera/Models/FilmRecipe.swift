@@ -10,8 +10,9 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     /// Version of the persisted recipe envelope. Version 1 was the implicit
     /// pre-provenance format; version 2 records provenance explicitly; version
     /// 3 records user edits and renderer compatibility metadata; version 4
-    /// adds the canonical camera mode controls introduced by the fidelity pass.
-    public static let currentSchemaVersion = 4
+    /// adds the canonical camera mode controls introduced by the fidelity pass;
+    /// version 5 adds persisted Kelvin white-balance control.
+    public static let currentSchemaVersion = 5
     public static let rendererVersion = "core-image-parametric-v1"
 
     /// The product-level disclosure that accompanies every current recipe.
@@ -189,9 +190,8 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     }
 
     /// White-balance choices exposed by current Fujifilm image-quality menus.
-    /// The app keeps a normalized manual shift alongside the mode so recipes
-    /// remain editable without pretending to own a camera's custom-metered
-    /// Kelvin value.
+    /// The app keeps a normalized fine-tune shift alongside the mode and a
+    /// persisted Kelvin value for the explicit Color Temperature mode.
     public enum WhiteBalanceMode: String, CaseIterable, Codable, Hashable, Sendable {
         case auto
         case whitePriority
@@ -201,6 +201,8 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         case fluorescent1
         case fluorescent2
         case fluorescent3
+        case incandescent
+        case underwater
         case custom1
         case custom2
         case custom3
@@ -216,6 +218,8 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             case .fluorescent1: return "Fluorescent 1"
             case .fluorescent2: return "Fluorescent 2"
             case .fluorescent3: return "Fluorescent 3"
+            case .incandescent: return "Incandescent"
+            case .underwater: return "Underwater"
             case .custom1: return "Custom 1"
             case .custom2: return "Custom 2"
             case .custom3: return "Custom 3"
@@ -232,6 +236,8 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             case .fluorescent1: return -0.03
             case .fluorescent2: return -0.08
             case .fluorescent3: return -0.12
+            case .incandescent: return 0.18
+            case .underwater: return -0.08
             default: return 0
             }
         }
@@ -520,6 +526,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         case normalizedStrength
         case normalizedOffset
         case normalizedSize
+        case kelvin
     }
 
     /// Public semantics for every numeric field that participates in a
@@ -537,6 +544,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         case fxBlue
         case temperature
         case tint
+        case colorTemperature
         case monochromaticWarmCool
         case monochromaticGreenMagenta
         case sharpness
@@ -566,6 +574,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             case .fxBlue: return "Color Chrome FX Blue"
             case .temperature: return "White balance temperature shift"
             case .tint: return "White balance tint shift"
+            case .colorTemperature: return "White balance color temperature"
             case .monochromaticWarmCool: return "Monochromatic warm-cool"
             case .monochromaticGreenMagenta: return "Monochromatic green-magenta"
             case .sharpness: return "Sharpness"
@@ -599,6 +608,8 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
                  .paletteBlueBias, .paletteRedGreenMix, .paletteGreenBlueMix, .paletteBlueRedMix,
                  .monochromaticWarmCool, .monochromaticGreenMagenta:
                 return .normalizedOffset
+            case .colorTemperature:
+                return .kelvin
             case .grainSize:
                 return .normalizedSize
             }
@@ -615,6 +626,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             case .colorChrome: return 0.0...1.0
             case .blueResponse, .fxBlue: return -1.0...1.0
             case .temperature, .tint: return -1.0...1.0
+            case .colorTemperature: return 2500.0...10000.0
             case .monochromaticWarmCool, .monochromaticGreenMagenta: return -1.0...1.0
             case .sharpness, .clarity: return -1.0...1.0
             case .noiseReduction: return 0.0...1.0
@@ -648,6 +660,8 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
                 return "Normalized white-balance temperature shift; positive values warm the image."
             case .tint:
                 return "Normalized white-balance tint shift; positive values move toward magenta."
+            case .colorTemperature:
+                return "Color temperature in Kelvin; the public camera range is 2500 K through 10000 K."
             case .monochromaticWarmCool:
                 return "Normalized ACROS or MONOCHROME warm-to-cool color axis."
             case .monochromaticGreenMagenta:
@@ -687,6 +701,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             case .fxBlue: return recipe.fxBlue
             case .temperature: return recipe.whiteBalance.temperature
             case .tint: return recipe.whiteBalance.tint
+            case .colorTemperature: return recipe.whiteBalance.kelvin
             case .monochromaticWarmCool: return recipe.monochromaticColor.warmCool
             case .monochromaticGreenMagenta: return recipe.monochromaticColor.greenMagenta
             case .sharpness: return recipe.sharpness
@@ -810,6 +825,9 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
 
     public struct WhiteBalanceShift: Codable, Hashable, Sendable {
         public var mode: WhiteBalanceMode
+        /// Color temperature in Kelvin. The renderer clamps this to the public
+        /// camera range of 2500...10000 at its boundary.
+        public var kelvin: Double
         /// A normalized temperature shift. Positive values warm the image.
         public var temperature: Double
         /// A normalized tint shift. Positive values move toward magenta.
@@ -818,15 +836,18 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         public init(
             temperature: Double = 0,
             tint: Double = 0,
-            mode: WhiteBalanceMode = .auto
+            mode: WhiteBalanceMode = .auto,
+            kelvin: Double = 6500
         ) {
             self.mode = mode
+            self.kelvin = kelvin
             self.temperature = temperature
             self.tint = tint
         }
 
         private enum CodingKeys: String, CodingKey {
             case mode
+            case kelvin
             case temperature
             case tint
         }
@@ -834,6 +855,9 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             mode = try container.decodeIfPresent(WhiteBalanceMode.self, forKey: .mode) ?? .auto
+            // Pre-v5 records did not persist a Kelvin value. 6500 K is the
+            // neutral bridge used by the previous normalized-only model.
+            kelvin = try container.decodeIfPresent(Double.self, forKey: .kelvin) ?? 6500
             temperature = try container.decodeIfPresent(Double.self, forKey: .temperature) ?? 0
             tint = try container.decodeIfPresent(Double.self, forKey: .tint) ?? 0
         }

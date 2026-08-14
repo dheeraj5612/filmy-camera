@@ -298,7 +298,8 @@ public final class FilmRenderer {
         safe.whiteBalance = FilmRecipe.WhiteBalanceShift(
             temperature: value(recipe.whiteBalance.temperature, .temperature, neutral: 0),
             tint: value(recipe.whiteBalance.tint, .tint, neutral: 0),
-            mode: recipe.whiteBalance.mode
+            mode: recipe.whiteBalance.mode,
+            kelvin: value(recipe.whiteBalance.kelvin, .colorTemperature, neutral: 6500)
         )
         safe.monochromaticColor = FilmRecipe.MonochromaticColor(
             warmCool: value(recipe.monochromaticColor.warmCool, .monochromaticWarmCool, neutral: 0),
@@ -452,17 +453,24 @@ public final class FilmRenderer {
     ) -> CIImage {
         let temperatureShift = recipe.temperatureShift + recipe.whiteBalance.mode.temperatureBias
         let tintShift = recipe.tintShift + recipe.whiteBalance.mode.tintBias
-        guard abs(temperatureShift) > 0.0001 || abs(tintShift) > 0.0001,
+        let baseKelvin = clamp(recipe.whiteBalance.kelvin, lower: 2500, upper: 10000)
+        let targetKelvin = clamp(
+            baseKelvin - clamp(temperatureShift, lower: -1, upper: 1) * 1800,
+            lower: 2500,
+            upper: 10000
+        )
+        guard abs(targetKelvin - 6500) > 0.0001 || abs(tintShift) > 0.0001,
               let filter = CIFilter(name: "CITemperatureAndTint") else {
             return image
         }
 
         // CITemperatureAndTint works in Kelvin/tint units. The model keeps
-        // recipe controls normalized so they are easy to expose as sliders.
+        // fine-tuning controls normalized so they are easy to expose as
+        // sliders, while the explicit Color Temperature mode stores Kelvin.
         // Core Image's tint axis is positive toward green; the recipe model
         // follows camera terminology where positive tint means magenta.
         let target = CIVector(
-            x: 6500 - clamp(temperatureShift, lower: -1, upper: 1) * 1800,
+            x: targetKelvin,
             y: -clamp(tintShift, lower: -1, upper: 1) * 120
         )
         filter.setValue(image, forKey: kCIInputImageKey)

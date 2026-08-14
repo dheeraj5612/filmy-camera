@@ -37,7 +37,7 @@ The source snapshots were checked on 2026-08-13. Repository licenses and current
 Fujifilm's public manuals and support material describe the controls as a combination of film simulation, highlight/shadow tone, grain, Color Chrome, Color Chrome FX Blue, white balance, dynamic range, D Range Priority, monochromatic color, and tone curve. Filmy Camera represents those controls as data in `FilmRecipe` and applies them as:
 
 1. Exposure and tone controls.
-2. White-balance mode plus temperature/tint shift.
+2. White-balance mode plus persisted Kelvin color temperature and temperature/tint fine-tuning.
 3. A generated 3D color cube for palette/cross-channel response.
 4. Grain and vignette finishing stages.
 
@@ -74,8 +74,10 @@ Color Chrome FX Blue, White Balance, Dynamic Range, D Range Priority, Tone
 Curve, Color, Sharpness, High ISO NR, and Clarity. It also documents
 monochromatic warm/cool and green/magenta axes plus ACROS and monochrome
 yellow, red, and green filter options. Filmy Camera uses those names as
-interoperable vocabulary, while its numeric values remain app-defined
-normalized parameters.
+interoperable vocabulary, while its normalized fine-tuning values remain
+app-defined parameters. The explicit Color Temperature mode also persists
+the documented 2500–10000 K range; this records camera intent but does not add
+proprietary calibration.
 
 `FilmRecipe.Control` is the single semantic catalog for those numeric
 parameters. Each entry states its unit, meaning, and app editor range. The
@@ -83,7 +85,7 @@ range is not presented as a Fujifilm hardware scale, and validation reports
 out-of-range drafts without rewriting them. The renderer remains defensive and
 clamps at its own output boundary.
 
-`FilmRecipe` persistence is versioned. Current records use schema version 4
+`FilmRecipe` persistence is versioned. Current records use schema version 5
 and serialize `Provenance` with the two first-party references above. The
 record states `originalParametricApproximation` and
 `notCalibratedToFujifilmHardware`; there is intentionally no exact-match,

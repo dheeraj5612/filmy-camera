@@ -461,6 +461,15 @@ struct RecipeDetailView: View {
                         Text(mode.displayName).tag(mode)
                     }
                 }
+                if draft.whiteBalance.mode == .colorTemperature {
+                    RecipeSliderRow(
+                        title: "Color temperature",
+                        value: binding(\.whiteBalance.kelvin),
+                        range: 2500...10000,
+                        format: "%.0f K",
+                        step: 10
+                    )
+                }
                 RecipeSliderRow(title: "Warmth", value: binding(\.whiteBalance.temperature), range: -1...1, format: "%+.2f")
                 RecipeSliderRow(title: "Tint", value: binding(\.whiteBalance.tint), range: -1...1, format: "%+.2f")
 
@@ -612,6 +621,21 @@ private struct RecipeSliderRow: View {
     @Binding var value: Double
     let range: ClosedRange<Double>
     let format: String
+    let step: Double?
+
+    init(
+        title: String,
+        value: Binding<Double>,
+        range: ClosedRange<Double>,
+        format: String,
+        step: Double? = nil
+    ) {
+        self.title = title
+        _value = value
+        self.range = range
+        self.format = format
+        self.step = step
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -630,10 +654,17 @@ private struct RecipeSliderRow: View {
                     .lineLimit(1)
             }
 
-            Slider(value: $value, in: range)
-                .tint(FilmyTheme.accent)
-                .accessibilityLabel(title)
-                .accessibilityValue(String(format: format, value))
+            if let step {
+                Slider(value: $value, in: range, step: step)
+                    .tint(FilmyTheme.accent)
+                    .accessibilityLabel(title)
+                    .accessibilityValue(String(format: format, value))
+            } else {
+                Slider(value: $value, in: range)
+                    .tint(FilmyTheme.accent)
+                    .accessibilityLabel(title)
+                    .accessibilityValue(String(format: format, value))
+            }
         }
         .frame(minHeight: 52, alignment: .center)
     }

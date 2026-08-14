@@ -96,6 +96,7 @@ final class RecipeInvariantsTests: XCTestCase {
                 recipe.saturation,
                 recipe.contrast,
                 Double(recipe.dynamicRange.rawValue),
+                recipe.whiteBalance.kelvin,
                 recipe.whiteBalance.temperature,
                 recipe.whiteBalance.tint,
                 recipe.monochromaticColor.warmCool,
@@ -227,11 +228,14 @@ final class RecipeInvariantsTests: XCTestCase {
         )
         XCTAssertTrue(FilmRecipe.WhiteBalanceMode.allCases.contains(.ambiencePriority))
         XCTAssertTrue(FilmRecipe.WhiteBalanceMode.allCases.contains(.colorTemperature))
+        XCTAssertTrue(FilmRecipe.WhiteBalanceMode.allCases.contains(.incandescent))
+        XCTAssertTrue(FilmRecipe.WhiteBalanceMode.allCases.contains(.underwater))
 
         var recipe = FilmRecipe.builtIns.first(where: { $0.filmBase == .acros })!
         recipe.dynamicRange = .auto
         recipe.dRangePriority = .strong
-        recipe.whiteBalance.mode = .shade
+        recipe.whiteBalance.mode = .colorTemperature
+        recipe.whiteBalance.kelvin = 3200
         recipe.monochromaticColor = FilmRecipe.MonochromaticColor(
             warmCool: 0.4,
             greenMagenta: -0.3
@@ -243,7 +247,8 @@ final class RecipeInvariantsTests: XCTestCase {
         )
         XCTAssertEqual(decoded.dynamicRange, .auto)
         XCTAssertEqual(decoded.dRangePriority, .strong)
-        XCTAssertEqual(decoded.whiteBalance.mode, .shade)
+        XCTAssertEqual(decoded.whiteBalance.mode, .colorTemperature)
+        XCTAssertEqual(decoded.whiteBalance.kelvin, 3200)
         XCTAssertEqual(decoded.monochromaticColor, recipe.monochromaticColor)
     }
 
@@ -266,6 +271,7 @@ final class RecipeInvariantsTests: XCTestCase {
         )
         XCTAssertEqual(decoded.dRangePriority, .off)
         XCTAssertEqual(decoded.whiteBalance.mode, .auto)
+        XCTAssertEqual(decoded.whiteBalance.kelvin, 6500)
         XCTAssertEqual(decoded.monochromaticColor, .init())
     }
 

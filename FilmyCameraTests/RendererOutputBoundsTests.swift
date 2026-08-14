@@ -646,6 +646,34 @@ final class RendererOutputBoundsTests: XCTestCase {
         )
     }
 
+    func testPersistedKelvinWhiteBalanceChangesRenderedOutput() {
+        let extent = CGRect(x: 0, y: 0, width: 2, height: 2)
+        let input = CIImage(color: CIColor(red: 0.56, green: 0.42, blue: 0.30, alpha: 1))
+            .cropped(to: extent)
+        let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+        var warm = FilmRecipe.builtIns[0]
+        warm.whiteBalance.mode = .colorTemperature
+        warm.whiteBalance.kelvin = 2500
+        var cool = warm
+        cool.whiteBalance.kelvin = 10000
+
+        let warmPixels = renderFloatPixels(
+            FilmRenderer.render(input, recipe: warm, quality: .photo),
+            extent: extent,
+            context: context
+        )
+        let coolPixels = renderFloatPixels(
+            FilmRenderer.render(input, recipe: cool, quality: .photo),
+            extent: extent,
+            context: context
+        )
+
+        let distance = zip(warmPixels, coolPixels)
+            .map { abs(Double($0.0) - Double($0.1)) }
+            .reduce(0, +)
+        XCTAssertGreaterThan(distance, 0.001)
+    }
+
     func testNegativeClarityUsesBlurBlendAndPositiveClarityRemainsActiveAtMultipleSizes() {
         let context = CIContext(options: [
             .useSoftwareRenderer: true,
