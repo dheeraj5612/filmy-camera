@@ -32,8 +32,9 @@
 - [x] Validate `Info.plist`, launch behavior, app icon, version `1.0.0`, and build number `3`.
 - [x] Run App Store Connect upload validation and retain the archive plus dSYM/symbol artifacts; Xcode Organizer accepted build `1.0.0 (3)` and showed `Uploaded`.
 - [x] Final App Store metadata prepared for a free worldwide launch; pricing and availability are explicitly resolved in `docs/app-store/metadata-en-US.md`.
-- [ ] Enter and verify the final metadata in App Store Connect, upload real-device screenshots, and confirm the support contact.
-- [x] App Privacy answer matrix reviewed against the source tree in `docs/app-store/app-privacy.md`; entering the answers in App Store Connect remains an account-owner step.
+- [x] Enter and verify the version metadata in App Store Connect, select and save Build `3`, and confirm the app icon plus five 6.5-inch screenshots are present.
+- [ ] Replace the simulator-generated screenshots with real-device captures and confirm the App Review support contact.
+- [x] App Privacy answer matrix reviewed against the source tree in `docs/app-store/app-privacy.md`; App Store Connect shows the privacy details as published.
 - [ ] Produce required device screenshots and an optional preview video.
 - [x] Confirm the privacy policy, public support URL, and marketing URL are live.
 
@@ -44,7 +45,8 @@
 - [x] Register/verify the bundle identifier in the Apple Developer portal.
 - [x] Configure the local Apple Distribution certificate and App Store provisioning profile for device archives; CI remains simulator-only and does not receive signing material.
 - [x] Use an authenticated Xcode account for the App Store Connect upload; API-key automation remains optional.
-- [ ] Complete App Privacy publication, pricing, availability, and tax/banking setup; age rating and export-compliance answers are saved.
+- [x] Complete App Privacy publication, pricing, and availability; App Store Connect shows the published privacy details, a United States base country, and 175 available regions.
+- [ ] Complete or verify tax/banking agreements and account-owner release requirements; age rating and export-compliance answers are saved.
 - [ ] Supply/verify the final support contact; privacy, support, and marketing URLs are saved in the App Store record.
 - [ ] Submit TestFlight build for review, test with external testers, and resolve review feedback.
 - [ ] Submit the production version and confirm release timing.
@@ -83,12 +85,13 @@ The hosted workflow keeps the release-script gate on metadata and checklist chan
 
 ## Verified evidence
 
-Current audit (2026-08-16) supersedes any older item below that uses the word "current":
+Current audit (2026-08-17) supersedes any older item below that uses the word "current":
 
 - Build `3` contains the final compact-recipe accessibility fix; the exact-source archive, IPA, upload, and hosted-CI gates are complete for release candidate SHA `5ce57c55f7a50fd425b01bee40aa0c8a8a617c28`.
 - Hosted run [31992160265](https://github.com/dheeraj5612/filmy-camera/actions/runs/31992160265) passed all required jobs. The signed archive is `build/FilmyCamera-5ce57c5-manual-signed.xcarchive`; the independently validated IPA is `build/export-5ce57c5-direct/FilmyCamera.ipa` with SHA-256 `b55e656d5a8fc4679fa1e331dc46e18367294faee14e278ac2d56ebec16324df`.
 - Xcode uploaded build `1.0.0 (3)` to App Store Connect. Apple now reports Build 3 as `Complete` and `Ready to Submit`; the production version still requires final account-owner metadata and review steps.
-- Repository metadata is final for a free worldwide launch. App Store Connect screenshots and the app icon are present; physical-device camera/Photos/accessibility QA, privacy publication, pricing/availability confirmation, review contact, and final submission remain open. A signed binary is not submission proof.
+- App Store Connect now shows Build `3` selected and saved, five 6.5-inch screenshots plus the app icon, published App Privacy details, Content Rights set to no third-party content, a United States base country, and 175 available regions.
+- Repository metadata is final for a free worldwide launch. Physical-device camera/Photos/accessibility QA, real-device screenshots, review contact, tax/banking agreement verification, and final submission remain open. A signed binary is not submission proof.
 - The shipped product is intentionally local-only. There is no account, web client, backend, API, CloudKit, or cross-device sync implementation; adding synchronization requires a separate architecture/security/privacy review and revised App Store privacy answers.
 
 ### Historical evidence
