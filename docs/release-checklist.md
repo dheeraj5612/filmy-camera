@@ -2,7 +2,7 @@
 
 ## Current workspace gate
 
-- [x] Audited mainline baseline is `3fdd16f3402ffaf84c00668033cec86b37450425`; every release artifact records `FilmyCamera.source-sha`, which must equal the reviewed source commit.
+- [x] Audited release candidate is `5ce57c55f7a50fd425b01bee40aa0c8a8a617c28`; every release artifact records `FilmyCamera.source-sha`, which equals the reviewed source commit.
 - [x] Reconcile the App Store signing configuration across `project.yml`, `FilmyCamera.xcodeproj/project.pbxproj`, `scripts/release/prepare-upload.sh`, `scripts/release/validate-archive.sh`, and `scripts/release/validate-project.sh` for Developer team `6ALSCF5GBV`.
 - [x] Verify the production Swift app target is present under `FilmyCamera/`.
 - [x] Exercise the production `FilmRecipe.builtIns` and `FilmRenderer.render` APIs from XCTest.
@@ -25,12 +25,12 @@
 - [x] Run `xcodegen generate` and verify generated-project reproducibility after reconciling the signing-team update.
 - [x] Run the credential-free release project preflight (`scripts/release/validate-project.sh`) against team `6ALSCF5GBV`.
 - [x] Compile and run the simulator unit and UI gates locally; retain the `.xcresult` bundle when a local Xcode/runtime defect causes a runner restart.
-- [x] Hosted run [31803175804](https://github.com/dheeraj5612/filmy-camera/actions/runs/31803175804) passed `change-scope`, `release-scripts`, and `build-and-test` on exact mainline SHA `3fdd16f3402ffaf84c00668033cec86b37450425` with Xcode 16.4.
+- [x] Hosted run [31992160265](https://github.com/dheeraj5612/filmy-camera/actions/runs/31992160265) passed `change-scope`, `release-scripts`, and `build-and-test` on exact release-candidate SHA `5ce57c55f7a50fd425b01bee40aa0c8a8a617c28` with Xcode 16.4.
 - [x] Keep release-script syntax, ShellCheck, and fail-closed upload-preparation checks in CI.
 - [x] Run a signed Release archive for a generic iOS device destination and validate the app bundle with the Apple Distribution certificate and App Store profile `Filmy Camera App Store 1.0.0`; generated archives use `build/FilmyCamera-<source-sha>-signed.xcarchive` and are restamped after every checkout change.
 - [x] Export and independently validate a distribution IPA from the latest exact-head archive; generated exports use `build/export-<source-sha>/FilmyCamera.ipa` and their SHA-256 is recorded at export time.
 - [x] Validate `Info.plist`, launch behavior, app icon, version `1.0.0`, and build number `3`.
-- [ ] Run App Store Connect upload validation and retain the archive plus dSYM/ symbol artifacts.
+- [x] Run App Store Connect upload validation and retain the archive plus dSYM/symbol artifacts; Xcode Organizer accepted build `1.0.0 (3)` and showed `Uploaded`.
 - [x] Final App Store metadata prepared for a free worldwide launch; pricing and availability are explicitly resolved in `docs/app-store/metadata-en-US.md`.
 - [ ] Enter and verify the final metadata in App Store Connect, upload real-device screenshots, and confirm the support contact.
 - [x] App Privacy answer matrix reviewed against the source tree in `docs/app-store/app-privacy.md`; entering the answers in App Store Connect remains an account-owner step.
@@ -43,7 +43,7 @@
 - [x] Create the App Store Connect app record with bundle ID `com.dheeraj.filmycamera` (Apple ID `6801404866`).
 - [x] Register/verify the bundle identifier in the Apple Developer portal.
 - [x] Configure the local Apple Distribution certificate and App Store provisioning profile for device archives; CI remains simulator-only and does not receive signing material.
-- [ ] Create an App Store Connect API key or use an authenticated Xcode/Transporter account for upload.
+- [x] Use an authenticated Xcode account for the App Store Connect upload; API-key automation remains optional.
 - [ ] Complete App Privacy publication, pricing, availability, and tax/banking setup; age rating and export-compliance answers are saved.
 - [ ] Supply/verify the final support contact; privacy, support, and marketing URLs are saved in the App Store record.
 - [ ] Submit TestFlight build for review, test with external testers, and resolve review feedback.
@@ -85,9 +85,10 @@ The hosted workflow keeps the release-script gate on metadata and checklist chan
 
 Current audit (2026-08-16) supersedes any older item below that uses the word "current":
 
-- Build `3` contains the final compact-recipe accessibility fix; exact-source archive, IPA, upload, and hosted-CI evidence must be recorded after the build-3 source commit is finalized.
-- The 2026-08-16 audit fixes pass 100 unit/rendering tests, all 6 UI tests, and a normal signing-enabled simulator `build-for-testing` run locally. A fresh exact-commit Apple Distribution archive and IPA for build `3` remain required; hosted CI remains pending.
-- Repository metadata is final for a free worldwide launch. App Store Connect entry/verification, authenticated upload/processing, TestFlight, and physical-device camera/Photos/accessibility QA remain open. A signed binary is not submission proof.
+- Build `3` contains the final compact-recipe accessibility fix; the exact-source archive, IPA, upload, and hosted-CI gates are complete for release candidate SHA `5ce57c55f7a50fd425b01bee40aa0c8a8a617c28`.
+- Hosted run [31992160265](https://github.com/dheeraj5612/filmy-camera/actions/runs/31992160265) passed all required jobs. The signed archive is `build/FilmyCamera-5ce57c5-manual-signed.xcarchive`; the independently validated IPA is `build/export-5ce57c5-direct/FilmyCamera.ipa` with SHA-256 `b55e656d5a8fc4679fa1e331dc46e18367294faee14e278ac2d56ebec16324df`.
+- Xcode uploaded build `1.0.0 (3)` to App Store Connect. Apple now reports Build 3 as `Complete` and `Ready to Submit`; the production version still requires final account-owner metadata and review steps.
+- Repository metadata is final for a free worldwide launch. App Store Connect screenshots and the app icon are present; physical-device camera/Photos/accessibility QA, privacy publication, pricing/availability confirmation, review contact, and final submission remain open. A signed binary is not submission proof.
 - The shipped product is intentionally local-only. There is no account, web client, backend, API, CloudKit, or cross-device sync implementation; adding synchronization requires a separate architecture/security/privacy review and revised App Store privacy answers.
 
 ### Historical evidence
