@@ -29,7 +29,7 @@
 - [x] Keep release-script syntax, ShellCheck, and fail-closed upload-preparation checks in CI.
 - [x] Run a signed Release archive for a generic iOS device destination and validate the app bundle with the Apple Distribution certificate and App Store profile `Filmy Camera App Store 1.0.0`; generated archives use `build/FilmyCamera-<source-sha>-signed.xcarchive` and are restamped after every checkout change.
 - [x] Export and independently validate a distribution IPA from the latest exact-head archive; generated exports use `build/export-<source-sha>/FilmyCamera.ipa` and their SHA-256 is recorded at export time.
-- [x] Validate `Info.plist`, launch behavior, app icon, version `1.0.0`, and build number `2`.
+- [x] Validate `Info.plist`, launch behavior, app icon, version `1.0.0`, and build number `3`.
 - [ ] Run App Store Connect upload validation and retain the archive plus dSYM/ symbol artifacts.
 - [x] Final App Store metadata prepared for a free worldwide launch; pricing and availability are explicitly resolved in `docs/app-store/metadata-en-US.md`.
 - [ ] Enter and verify the final metadata in App Store Connect, upload real-device screenshots, and confirm the support contact.
@@ -85,9 +85,8 @@ The hosted workflow keeps the release-script gate on metadata and checklist chan
 
 Current audit (2026-08-16) supersedes any older item below that uses the word "current":
 
-- The audited launch-hardening source commit is `251c0f0b92213f136f7b4499ac057fbb3588fe2a`; hosted CI for this commit remains required before merging.
-- `scripts/release/validate-archive.sh build/FilmyCamera-251c0f0-manual-signed.xcarchive` and `scripts/release/validate-ipa.sh --ipa build/export-251c0f0-direct/FilmyCamera.ipa --archive build/FilmyCamera-251c0f0-manual-signed.xcarchive` both pass for version `1.0.0 (2)` and Apple Distribution team `6ALSCF5GBV`; IPA SHA-256 is `7dffd86d780dd354fc4fb69c9c23ddce4b22458a24de6c787801657b9a3f7d92`.
-- The 2026-08-16 audit fixes pass 100 unit/rendering tests, all 6 UI tests, and a normal signing-enabled simulator `build-for-testing` run locally. Its exact-commit Apple Distribution archive and IPA were validated locally; hosted CI remains pending.
+- Build `3` contains the final compact-recipe accessibility fix; exact-source archive, IPA, upload, and hosted-CI evidence must be recorded after the build-3 source commit is finalized.
+- The 2026-08-16 audit fixes pass 100 unit/rendering tests, all 6 UI tests, and a normal signing-enabled simulator `build-for-testing` run locally. A fresh exact-commit Apple Distribution archive and IPA for build `3` remain required; hosted CI remains pending.
 - Repository metadata is final for a free worldwide launch. App Store Connect entry/verification, authenticated upload/processing, TestFlight, and physical-device camera/Photos/accessibility QA remain open. A signed binary is not submission proof.
 - The shipped product is intentionally local-only. There is no account, web client, backend, API, CloudKit, or cross-device sync implementation; adding synchronization requires a separate architecture/security/privacy review and revised App Store privacy answers.
 
