@@ -12,6 +12,23 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         XCTAssertEqual(camera.statusMessage, "Camera is ready")
     }
 
+    func testVideoRotationUsesTheFullInterfaceOrientation() {
+        let portraitSize = CGSize(width: 390, height: 844)
+
+        XCTAssertEqual(CameraService.videoRotationAngle(for: .portrait, fallbackViewSize: portraitSize), 90)
+        XCTAssertEqual(CameraService.videoRotationAngle(for: .portraitUpsideDown, fallbackViewSize: portraitSize), 270)
+        XCTAssertEqual(CameraService.videoRotationAngle(for: .landscapeLeft, fallbackViewSize: portraitSize), 0)
+        XCTAssertEqual(CameraService.videoRotationAngle(for: .landscapeRight, fallbackViewSize: portraitSize), 180)
+        XCTAssertEqual(CameraService.videoRotationAngle(for: nil, fallbackViewSize: portraitSize), 90)
+        XCTAssertEqual(
+            CameraService.videoRotationAngle(
+                for: .unknown,
+                fallbackViewSize: CGSize(width: 844, height: 390)
+            ),
+            0
+        )
+    }
+
     func testAvailabilityCasesHaveStablePersistenceValues() {
         let cases: [CameraService.Availability] = [
             .idle,

@@ -173,6 +173,7 @@ run_project_preflight() {
 
 run_store_metadata_preflight() {
   "${script_dir}/validate-store-metadata.sh" --final
+  "${script_dir}/validate-store-media.sh"
 }
 
 has_distribution_identity() {

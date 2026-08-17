@@ -199,7 +199,24 @@ enum PhotoLibraryCachePath {
 @MainActor
 final class PhotoLibraryService: ObservableObject {
     private final class IdentifierBox: @unchecked Sendable {
-        var value: String?
+        private let lock = NSLock()
+        private var value: String?
+
+        func set(_ value: String?) {
+            lock.lock()
+            self.value = value
+            lock.unlock()
+        }
+
+        func get() -> String? {
+            lock.lock()
+            defer { lock.unlock() }
+            return value
+        }
+    }
+
+    private struct CachedThumbnail: @unchecked Sendable {
+        let image: UIImage?
     }
 
     private final class ImageRequestState: @unchecked Sendable {
@@ -476,11 +493,11 @@ final class PhotoLibraryService: ObservableObject {
                     request = PHAssetChangeRequest.creationRequestForAsset(from: image)
                 }
                 request.creationDate = capturedAt
-                assetIdentifierBox.value = request.placeholderForCreatedAsset?.localIdentifier
+                assetIdentifierBox.set(request.placeholderForCreatedAsset?.localIdentifier)
             } completionHandler: { [weak self] success, _ in
                 guard let self else { return }
                 Task { @MainActor in
-                    guard success, let assetIdentifier = assetIdentifierBox.value else {
+                    guard success, let assetIdentifier = assetIdentifierBox.get() else {
                         completion(false)
                         return
                     }
@@ -1027,12 +1044,12 @@ final class PhotoLibraryService: ObservableObject {
             let albumTitle = self.albumTitle
             PHPhotoLibrary.shared().performChanges {
                 let request = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: albumTitle)
-                albumIdentifierBox.value = request.placeholderForCreatedAssetCollection.localIdentifier
+                albumIdentifierBox.set(request.placeholderForCreatedAssetCollection.localIdentifier)
             } completionHandler: { [weak self] success, _ in
                 guard let self else { return }
                 Task { @MainActor in
                     guard success,
-                          let albumIdentifier = albumIdentifierBox.value,
+                          let albumIdentifier = albumIdentifierBox.get(),
                           let createdAlbum = PHAssetCollection.fetchAssetCollections(
                               withLocalIdentifiers: [albumIdentifier],
                               options: nil
@@ -1076,7 +1093,16 @@ final class PhotoLibraryService: ObservableObject {
         case .photos(let photoAsset):
             return await image(for: photoAsset, targetSize: targetSize)
         case .cached(let frame):
-            return cachedImage(for: frame, targetSize: targetSize)
+            guard let resource = savedFrameResources[frame.assetIdentifier],
+                  PhotoLibraryAssetOwnership.contains(frame.assetIdentifier, in: savedAssetIdentifiers),
+                  let resourceURL = localFrameURL(for: resource.filename) else {
+                return nil
+            }
+            return await Task.detached(priority: .utility) {
+                CachedThumbnail(
+                    image: Self.cachedImage(at: resourceURL, targetSize: targetSize)
+                )
+            }.value.image
         }
     }
 
@@ -1117,11 +1143,8 @@ final class PhotoLibraryService: ObservableObject {
         })
     }
 
-    private func cachedImage(for frame: LocalSavedFrame, targetSize: CGSize) -> UIImage? {
-        guard let resource = savedFrameResources[frame.assetIdentifier],
-              PhotoLibraryAssetOwnership.contains(frame.assetIdentifier, in: savedAssetIdentifiers),
-              let resourceURL = localFrameURL(for: resource.filename),
-              let data = try? Data(contentsOf: resourceURL),
+    private nonisolated static func cachedImage(at resourceURL: URL, targetSize: CGSize) -> UIImage? {
+        guard let data = try? Data(contentsOf: resourceURL),
               let source = CGImageSourceCreateWithData(data as CFData, nil) else {
             return nil
         }

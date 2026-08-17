@@ -133,7 +133,10 @@ struct RecipePickerView: View {
         let isSelected = selectedRecipeID == recipe.id
 
         ZStack(alignment: .topTrailing) {
-            RecipeSwatch(recipe: recipe, isSelected: isSelected)
+            // Compact camera chrome has a deliberately short tile. Passing the
+            // compact variant here keeps the descriptor out of that 80pt tile
+            // and lets the recipe name use the compact, one-line treatment.
+            RecipeSwatch(recipe: recipe, isSelected: isSelected, compact: compact)
                 .frame(width: recipeTileSize.width, height: recipeTileSize.height)
 
             if isSelected {

@@ -2,7 +2,7 @@
 
 ## Current workspace gate
 
-- [x] Current hardening branch is `codex/security-hardening-20260813`; the exact source revision for any release artifact is recorded in `FilmyCamera.source-sha` and must equal the checked-out branch HEAD.
+- [x] Audited release candidate is `5ce57c55f7a50fd425b01bee40aa0c8a8a617c28`; every release artifact records `FilmyCamera.source-sha`, which equals the reviewed source commit.
 - [x] Reconcile the App Store signing configuration across `project.yml`, `FilmyCamera.xcodeproj/project.pbxproj`, `scripts/release/prepare-upload.sh`, `scripts/release/validate-archive.sh`, and `scripts/release/validate-project.sh` for Developer team `6ALSCF5GBV`.
 - [x] Verify the production Swift app target is present under `FilmyCamera/`.
 - [x] Exercise the production `FilmRecipe.builtIns` and `FilmRenderer.render` APIs from XCTest.
@@ -24,15 +24,15 @@
 
 - [x] Run `xcodegen generate` and verify generated-project reproducibility after reconciling the signing-team update.
 - [x] Run the credential-free release project preflight (`scripts/release/validate-project.sh`) against team `6ALSCF5GBV`.
-- [x] Compile the current source with `xcodebuild build-for-testing` on the available `FilmyCamera iPhone` iOS 18.5 simulator; full local runtime execution remains environment-blocked while the Mac is locked.
-- [x] Hosted hardening run [31788694032](https://github.com/dheeraj5612/filmy-camera/actions/runs/31788694032) passed on exact branch HEAD `9af4c07b9d74619cf4c59f7c81881fd12f48816e`; `change-scope`, `release-scripts`, unit tests, UI tests, artifact provenance, and cleanup all passed on Xcode 16.4.
+- [x] Compile and run the simulator unit and UI gates locally; retain the `.xcresult` bundle when a local Xcode/runtime defect causes a runner restart.
+- [x] Hosted run [31992160265](https://github.com/dheeraj5612/filmy-camera/actions/runs/31992160265) passed `change-scope`, `release-scripts`, and `build-and-test` on exact release-candidate SHA `5ce57c55f7a50fd425b01bee40aa0c8a8a617c28` with Xcode 16.4.
 - [x] Keep release-script syntax, ShellCheck, and fail-closed upload-preparation checks in CI.
 - [x] Run a signed Release archive for a generic iOS device destination and validate the app bundle with the Apple Distribution certificate and App Store profile `Filmy Camera App Store 1.0.0`; generated archives use `build/FilmyCamera-<source-sha>-signed.xcarchive` and are restamped after every checkout change.
 - [x] Export and independently validate a distribution IPA from the latest exact-head archive; generated exports use `build/export-<source-sha>/FilmyCamera.ipa` and their SHA-256 is recorded at export time.
-- [x] Validate `Info.plist`, launch behavior, app icon, version `1.0.0`, and build number `1`.
-- [ ] Run App Store Connect upload validation and retain the archive plus dSYM/ symbol artifacts.
-- [x] App Store metadata draft prepared.
-- [ ] Finalize App Store Connect metadata decisions: pricing, availability, screenshots, legal copy, and support contact.
+- [x] Validate `Info.plist`, launch behavior, app icon, version `1.0.0`, and build number `3`.
+- [x] Run App Store Connect upload validation and retain the archive plus dSYM/symbol artifacts; Xcode Organizer accepted build `1.0.0 (3)` and showed `Uploaded`.
+- [x] Final App Store metadata prepared for a free worldwide launch; pricing and availability are explicitly resolved in `docs/app-store/metadata-en-US.md`.
+- [ ] Enter and verify the final metadata in App Store Connect, upload real-device screenshots, and confirm the support contact.
 - [x] App Privacy answer matrix reviewed against the source tree in `docs/app-store/app-privacy.md`; entering the answers in App Store Connect remains an account-owner step.
 - [ ] Produce required device screenshots and an optional preview video.
 - [x] Confirm the privacy policy, public support URL, and marketing URL are live.
@@ -43,7 +43,7 @@
 - [x] Create the App Store Connect app record with bundle ID `com.dheeraj.filmycamera` (Apple ID `6801404866`).
 - [x] Register/verify the bundle identifier in the Apple Developer portal.
 - [x] Configure the local Apple Distribution certificate and App Store provisioning profile for device archives; CI remains simulator-only and does not receive signing material.
-- [ ] Create an App Store Connect API key or use an authenticated Xcode/Transporter account for upload.
+- [x] Use an authenticated Xcode account for the App Store Connect upload; API-key automation remains optional.
 - [ ] Complete App Privacy publication, pricing, availability, and tax/banking setup; age rating and export-compliance answers are saved.
 - [ ] Supply/verify the final support contact; privacy, support, and marketing URLs are saved in the App Store record.
 - [ ] Submit TestFlight build for review, test with external testers, and resolve review feedback.
@@ -62,7 +62,7 @@ Do not commit certificates, provisioning profiles, API keys, or App Store Connec
 
 ## Release automation
 
-After the physical device and Apple Distribution signing are available:
+After the reviewed source is committed in a clean checkout and Apple Distribution signing is available:
 
 ```sh
 scripts/release/archive-device.sh
@@ -82,6 +82,16 @@ For headless provisioning, `archive-device.sh --allow-provisioning-updates` acce
 The hosted workflow keeps the release-script gate on metadata and checklist changes, while the simulator build lane runs only when binary-affecting files change. Unknown or manually dispatched scopes fail open so required validation is never silently skipped.
 
 ## Verified evidence
+
+Current audit (2026-08-16) supersedes any older item below that uses the word "current":
+
+- Build `3` contains the final compact-recipe accessibility fix; the exact-source archive, IPA, upload, and hosted-CI gates are complete for release candidate SHA `5ce57c55f7a50fd425b01bee40aa0c8a8a617c28`.
+- Hosted run [31992160265](https://github.com/dheeraj5612/filmy-camera/actions/runs/31992160265) passed all required jobs. The signed archive is `build/FilmyCamera-5ce57c5-manual-signed.xcarchive`; the independently validated IPA is `build/export-5ce57c5-direct/FilmyCamera.ipa` with SHA-256 `b55e656d5a8fc4679fa1e331dc46e18367294faee14e278ac2d56ebec16324df`.
+- Xcode uploaded build `1.0.0 (3)` to App Store Connect. Apple now reports Build 3 as `Complete` and `Ready to Submit`; the production version still requires final account-owner metadata and review steps.
+- Repository metadata is final for a free worldwide launch. App Store Connect screenshots and the app icon are present; physical-device camera/Photos/accessibility QA, privacy publication, pricing/availability confirmation, review contact, and final submission remain open. A signed binary is not submission proof.
+- The shipped product is intentionally local-only. There is no account, web client, backend, API, CloudKit, or cross-device sync implementation; adding synchronization requires a separate architecture/security/privacy review and revised App Store privacy answers.
+
+### Historical evidence
 
 - Current repository evidence: branch `codex/security-hardening-20260813` contains the camera-shell UI revamp, typed Color Chrome/FX Blue/Grain controls, canonical public film vocabulary, public reference-settings cards, Dynamic Range and D Range Priority modes, named white-balance modes, persisted Kelvin color temperature, monochromatic color axes, Sepia coverage, capture identity hardening, accessibility coverage, Xcode 16.4 compatibility, interactive zoom presets, tab-aware camera lifecycle, transactional recipe editing, and team-aligned release configuration.
 - Current hosted evidence: [run 31792580155](https://github.com/dheeraj5612/filmy-camera/actions/runs/31792580155) passed on exact source revision `dd4d113f8871ee59f58b48587ee53a060690cb10`; [PR #55](https://github.com/dheeraj5612/filmy-camera/pull/55) remains open and draft.
@@ -110,4 +120,4 @@ The hosted workflow keeps the release-script gate on metadata and checklist chan
 - Current product evidence covers Natural Standard, typed camera-session recovery, deterministic UI-test mode, saved recipe/date provenance, original-resource share and owned-asset delete actions in Gallery, removable local-cache controls, in-app privacy/support links, VoiceOver center focus/exposure actions, tactile exposure controls, and release-script fail-closed behavior. The archive validator now fails closed on a missing profile, mismatched team/bundle/version/build, expired profile, enabled `get-task-allow`, development-device entitlements, missing dSYM/privacy manifest, or non-distribution signature. Signing is declared in the project settings for team `6ALSCF5GBV`; App Store submission remains unproven.
 - Mainline evidence now includes normalized spatial effect radii across preview and export, an explicit negative-clarity softening path, normalized vignette behavior, renderer-backed synthetic recipe rails, canonical look parity across quality tiers, typed monochrome channel response, hue-aware Color Chrome/FX Blue behavior, deterministic grain, explicit photo dimensions, capture provenance, filtered JPEG metadata, shared preview/still aspect-fill framing, and a fail-closed render path. The current PR-head SHA and hosted run above are green, but PR #55 is not merged into `main`; signed-device and App Store evidence remain open.
 - Signing follow-up: [PR #4](https://github.com/dheeraj5612/filmy-camera/pull/4) and [PR #5](https://github.com/dheeraj5612/filmy-camera/pull/5) merged with green simulator/XCTest checks.
-- Physical QA and App Store Connect submission remain open until the Mac is unlocked, a physical iPhone is connected and trusted, final price/availability and privacy publication are confirmed, and an authorized upload session or ASC API credentials are available. The current local `scripts/release/prepare-upload.sh --check` passes project/profile/archive validation and fails closed only on draft metadata plus missing ASC API credentials; no authenticated upload was attempted. A local IPA export was prepared separately from the validated archive so the binary artifact is ready when the account gate is cleared.
+- Physical QA and App Store Connect submission remain open until the Mac is unlocked, a physical iPhone is connected and trusted, the final metadata is entered, privacy publication is confirmed, and an authorized upload session or ASC API credentials are available. The current local `scripts/release/prepare-upload.sh --check` passes repository metadata validation and fails closed on the missing validated archive path and missing ASC API credentials; no authenticated upload was attempted. A local IPA export was prepared separately from the validated archive so the binary artifact is ready when the account gate is cleared.

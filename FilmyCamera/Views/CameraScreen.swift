@@ -119,6 +119,7 @@ struct CameraScreen: View {
 
             GeometryReader { proxy in
                 cameraChrome(for: proxy.size)
+                    .disabled(viewModel.isCapturing)
             }
 
             if let toastMessage = viewModel.toastMessage {

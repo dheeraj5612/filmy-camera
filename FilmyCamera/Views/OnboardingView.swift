@@ -359,6 +359,16 @@ struct OnboardingView: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Introduction page \(selectedPage + 1) of \(Self.pages.count)")
             .accessibilityValue("Swipe left or right to explore")
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment:
+                    selectedPage = min(selectedPage + 1, Self.pages.count - 1)
+                case .decrement:
+                    selectedPage = max(selectedPage - 1, 0)
+                @unknown default:
+                    break
+                }
+            }
 
             Button {
                 if selectedPage == Self.pages.count - 1 {
