@@ -488,7 +488,10 @@ struct RecipeSwatch: View {
                         .font((compact ? Font.caption : (dynamicTypeSize.isAccessibilitySize ? Font.body : Font.subheadline)).weight(.bold))
                         .foregroundStyle(.white)
                         .lineLimit(compact ? 1 : (dynamicTypeSize.isAccessibilitySize ? 3 : 2))
-                        .minimumScaleFactor(compact ? 0.84 : 0.78)
+                        // Compact camera tiles stay one line tall even at
+                        // accessibility sizes. Let longer recipe names shrink
+                        // before they ellipsize inside the fixed 132pt tile.
+                        .minimumScaleFactor(compact ? 0.60 : 0.78)
                         .allowsTightening(true)
                         .fixedSize(horizontal: false, vertical: true)
 
