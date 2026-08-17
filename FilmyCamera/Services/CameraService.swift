@@ -532,16 +532,45 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
     /// Keeps the preview and still output aligned with the current camera
     /// surface when the phone rotates or enters a split-screen layout.
+    @MainActor
     public func updateOrientation(for viewSize: CGSize) {
         guard viewSize.width > 0, viewSize.height > 0 else { return }
         publishPreviewViewportSize(viewSize)
-        let nextAngle: CGFloat = viewSize.width > viewSize.height ? 0 : 90
+        let activeWindowScene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first(where: { $0.activationState == .foregroundActive })
+        let interfaceOrientation: UIInterfaceOrientation?
+        if #available(iOS 26.0, *) {
+            interfaceOrientation = activeWindowScene?.effectiveGeometry.interfaceOrientation
+        } else {
+            interfaceOrientation = activeWindowScene?.interfaceOrientation
+        }
+        let nextAngle = Self.videoRotationAngle(
+            for: interfaceOrientation,
+            fallbackViewSize: viewSize
+        )
 
         sessionQueue.async { [weak self] in
             guard let self, self.rotationAngle != nextAngle else { return }
             self.rotationAngle = nextAngle
             guard self.isConfigured else { return }
             self.configureOrientation()
+        }
+    }
+
+    static func videoRotationAngle(
+        for interfaceOrientation: UIInterfaceOrientation?,
+        fallbackViewSize: CGSize
+    ) -> CGFloat {
+        switch interfaceOrientation {
+        case .portrait: 90
+        case .portraitUpsideDown: 270
+        case .landscapeLeft: 0
+        case .landscapeRight: 180
+        case .unknown, .none:
+            fallbackViewSize.width > fallbackViewSize.height ? 0 : 90
+        @unknown default:
+            fallbackViewSize.width > fallbackViewSize.height ? 0 : 90
         }
     }
 
@@ -2034,7 +2063,10 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func clampedNormalizedPoint(_ point: CGPoint) -> CGPoint {
-        CGPoint(
+        guard point.x.isFinite, point.y.isFinite else {
+            return CGPoint(x: 0.5, y: 0.5)
+        }
+        return CGPoint(
             x: min(max(point.x, 0), 1),
             y: min(max(point.y, 0), 1)
         )

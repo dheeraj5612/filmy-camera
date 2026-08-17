@@ -989,27 +989,63 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
 
     /// Copies only editable renderer controls from a persisted recipe onto a
     /// current built-in parent. Identity, descriptive text, schema, and
-    /// provenance stay owned by the current parent and migration layer.
+    /// provenance stay owned by the current parent and migration layer. Every
+    /// numeric value is sanitized at this persistence boundary so a damaged or
+    /// legacy UserDefaults record cannot publish NaN or out-of-range controls
+    /// into SwiftUI sliders.
     mutating func applyControlValues(from source: FilmRecipe) {
-        exposure = source.exposure
-        tone = source.tone
-        saturation = source.saturation
-        contrast = source.contrast
+        exposure = Self.sanitized(source.exposure, for: .exposure, fallback: exposure)
+        tone = Tone(
+            highlight: Self.sanitized(source.tone.highlight, for: .highlights, fallback: tone.highlight),
+            shadow: Self.sanitized(source.tone.shadow, for: .shadows, fallback: tone.shadow)
+        )
+        saturation = Self.sanitized(source.saturation, for: .color, fallback: saturation)
+        contrast = Self.sanitized(source.contrast, for: .contrast, fallback: contrast)
         dynamicRange = source.dynamicRange
         dRangePriority = source.dRangePriority
-        whiteBalance = source.whiteBalance
-        monochromaticColor = source.monochromaticColor
-        colorChrome = source.colorChrome
-        blueResponse = source.blueResponse
-        fxBlue = source.fxBlue
-        sharpness = source.sharpness
-        noiseReduction = source.noiseReduction
-        clarity = source.clarity
-        grain = source.grain
-        grainSize = source.grainSize
-        vignette = source.vignette
-        halation = source.halation
-        palette = source.palette
+        whiteBalance = WhiteBalanceShift(
+            temperature: Self.sanitized(source.whiteBalance.temperature, for: .temperature, fallback: whiteBalance.temperature),
+            tint: Self.sanitized(source.whiteBalance.tint, for: .tint, fallback: whiteBalance.tint),
+            mode: source.whiteBalance.mode,
+            kelvin: Self.sanitized(source.whiteBalance.kelvin, for: .colorTemperature, fallback: whiteBalance.kelvin)
+        )
+        monochromaticColor = MonochromaticColor(
+            warmCool: Self.sanitized(source.monochromaticColor.warmCool, for: .monochromaticWarmCool, fallback: monochromaticColor.warmCool),
+            greenMagenta: Self.sanitized(source.monochromaticColor.greenMagenta, for: .monochromaticGreenMagenta, fallback: monochromaticColor.greenMagenta)
+        )
+        colorChrome = Self.sanitized(source.colorChrome, for: .colorChrome, fallback: colorChrome)
+        blueResponse = Self.sanitized(source.blueResponse, for: .blueResponse, fallback: blueResponse)
+        fxBlue = Self.sanitized(source.fxBlue, for: .fxBlue, fallback: fxBlue)
+        sharpness = Self.sanitized(source.sharpness, for: .sharpness, fallback: sharpness)
+        noiseReduction = Self.sanitized(source.noiseReduction, for: .noiseReduction, fallback: noiseReduction)
+        clarity = Self.sanitized(source.clarity, for: .clarity, fallback: clarity)
+        grain = Self.sanitized(source.grain, for: .grain, fallback: grain)
+        grainSize = Self.sanitized(source.grainSize, for: .grainSize, fallback: grainSize)
+        vignette = Self.sanitized(source.vignette, for: .vignette, fallback: vignette)
+        halation = Self.sanitized(source.halation, for: .halation, fallback: halation)
+        palette = Palette(
+            redBias: Self.sanitized(source.palette.redBias, for: .paletteRedBias, fallback: palette.redBias),
+            greenBias: Self.sanitized(source.palette.greenBias, for: .paletteGreenBias, fallback: palette.greenBias),
+            blueBias: Self.sanitized(source.palette.blueBias, for: .paletteBlueBias, fallback: palette.blueBias),
+            redGreenMix: Self.sanitized(source.palette.redGreenMix, for: .paletteRedGreenMix, fallback: palette.redGreenMix),
+            greenBlueMix: Self.sanitized(source.palette.greenBlueMix, for: .paletteGreenBlueMix, fallback: palette.greenBlueMix),
+            blueRedMix: Self.sanitized(source.palette.blueRedMix, for: .paletteBlueRedMix, fallback: palette.blueRedMix),
+            saturation: Self.sanitized(source.palette.saturation, for: .paletteSaturation, fallback: palette.saturation)
+        )
+
+        if filmBase.monochromeFilter != nil {
+            saturation = 0
+            palette.saturation = 0
+        }
+    }
+
+    private static func sanitized(
+        _ value: Double,
+        for control: Control,
+        fallback: Double
+    ) -> Double {
+        guard value.isFinite else { return fallback }
+        return min(max(value, control.editorRange.lowerBound), control.editorRange.upperBound)
     }
 
     private enum CodingKeys: String, CodingKey {

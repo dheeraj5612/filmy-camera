@@ -173,6 +173,29 @@ final class RecipeInvariantsTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedRecipe.schemaVersion, FilmRecipe.currentSchemaVersion)
     }
 
+    @MainActor
+    func testPersistedOverridesAreSanitizedBeforePublishingToTheUI() throws {
+        var corrupted = FilmRecipe.builtIns[1]
+        corrupted.exposure = 99
+        corrupted.whiteBalance.kelvin = -5
+        corrupted.grainSize = 500
+        corrupted.palette.redBias = -40
+
+        UserDefaults.standard.set(corrupted.id, forKey: selectedRecipeKey)
+        UserDefaults.standard.set(
+            try JSONEncoder().encode([corrupted.id: corrupted]),
+            forKey: recipeOverridesKey
+        )
+
+        let selected = CameraViewModel().selectedRecipe
+
+        XCTAssertEqual(selected.exposure, FilmRecipe.Control.exposure.editorRange.upperBound)
+        XCTAssertEqual(selected.whiteBalance.kelvin, FilmRecipe.Control.colorTemperature.editorRange.lowerBound)
+        XCTAssertEqual(selected.grainSize, FilmRecipe.Control.grainSize.editorRange.upperBound)
+        XCTAssertEqual(selected.palette.redBias, FilmRecipe.Control.paletteRedBias.editorRange.lowerBound)
+        XCTAssertTrue(selected.isValid)
+    }
+
     func testBuiltInRecipesExposeCompleteApproximationProvenance() {
         for recipe in FilmRecipe.builtIns {
             XCTAssertEqual(recipe.schemaVersion, FilmRecipe.currentSchemaVersion, recipe.id)

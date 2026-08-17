@@ -2,7 +2,7 @@
 
 ## Current workspace gate
 
-- [x] Current hardening branch is `codex/security-hardening-20260813`; the exact source revision for any release artifact is recorded in `FilmyCamera.source-sha` and must equal the checked-out branch HEAD.
+- [x] Audited mainline baseline is `3fdd16f3402ffaf84c00668033cec86b37450425`; every release artifact records `FilmyCamera.source-sha`, which must equal the reviewed source commit.
 - [x] Reconcile the App Store signing configuration across `project.yml`, `FilmyCamera.xcodeproj/project.pbxproj`, `scripts/release/prepare-upload.sh`, `scripts/release/validate-archive.sh`, and `scripts/release/validate-project.sh` for Developer team `6ALSCF5GBV`.
 - [x] Verify the production Swift app target is present under `FilmyCamera/`.
 - [x] Exercise the production `FilmRecipe.builtIns` and `FilmRenderer.render` APIs from XCTest.
@@ -24,12 +24,12 @@
 
 - [x] Run `xcodegen generate` and verify generated-project reproducibility after reconciling the signing-team update.
 - [x] Run the credential-free release project preflight (`scripts/release/validate-project.sh`) against team `6ALSCF5GBV`.
-- [x] Compile the current source with `xcodebuild build-for-testing` on the available `FilmyCamera iPhone` iOS 18.5 simulator; full local runtime execution remains environment-blocked while the Mac is locked.
-- [x] Hosted hardening run [31788694032](https://github.com/dheeraj5612/filmy-camera/actions/runs/31788694032) passed on exact branch HEAD `9af4c07b9d74619cf4c59f7c81881fd12f48816e`; `change-scope`, `release-scripts`, unit tests, UI tests, artifact provenance, and cleanup all passed on Xcode 16.4.
+- [x] Compile and run the simulator unit and UI gates locally; retain the `.xcresult` bundle when a local Xcode/runtime defect causes a runner restart.
+- [x] Hosted run [31803175804](https://github.com/dheeraj5612/filmy-camera/actions/runs/31803175804) passed `change-scope`, `release-scripts`, and `build-and-test` on exact mainline SHA `3fdd16f3402ffaf84c00668033cec86b37450425` with Xcode 16.4.
 - [x] Keep release-script syntax, ShellCheck, and fail-closed upload-preparation checks in CI.
 - [x] Run a signed Release archive for a generic iOS device destination and validate the app bundle with the Apple Distribution certificate and App Store profile `Filmy Camera App Store 1.0.0`; generated archives use `build/FilmyCamera-<source-sha>-signed.xcarchive` and are restamped after every checkout change.
 - [x] Export and independently validate a distribution IPA from the latest exact-head archive; generated exports use `build/export-<source-sha>/FilmyCamera.ipa` and their SHA-256 is recorded at export time.
-- [x] Validate `Info.plist`, launch behavior, app icon, version `1.0.0`, and build number `1`.
+- [x] Validate `Info.plist`, launch behavior, app icon, version `1.0.0`, and build number `2`.
 - [ ] Run App Store Connect upload validation and retain the archive plus dSYM/ symbol artifacts.
 - [x] App Store metadata draft prepared.
 - [ ] Finalize App Store Connect metadata decisions: pricing, availability, screenshots, legal copy, and support contact.
@@ -62,7 +62,7 @@ Do not commit certificates, provisioning profiles, API keys, or App Store Connec
 
 ## Release automation
 
-After the physical device and Apple Distribution signing are available:
+After the reviewed source is committed in a clean checkout and Apple Distribution signing is available:
 
 ```sh
 scripts/release/archive-device.sh
@@ -82,6 +82,16 @@ For headless provisioning, `archive-device.sh --allow-provisioning-updates` acce
 The hosted workflow keeps the release-script gate on metadata and checklist changes, while the simulator build lane runs only when binary-affecting files change. Unknown or manually dispatched scopes fail open so required validation is never silently skipped.
 
 ## Verified evidence
+
+Current audit (2026-08-16) supersedes any older item below that uses the word "current":
+
+- `origin/main` and the audited baseline were `3fdd16f3402ffaf84c00668033cec86b37450425`; the protected hosted gate [31803175804](https://github.com/dheeraj5612/filmy-camera/actions/runs/31803175804) passed on that exact SHA.
+- `scripts/release/validate-archive.sh build/FilmyCamera-3fdd16f-manual-signed.xcarchive` and `scripts/release/validate-ipa.sh --ipa build/export-3fdd16f-direct/FilmyCamera.ipa --archive build/FilmyCamera-3fdd16f-manual-signed.xcarchive` both pass for version `1.0.0 (2)` and Apple Distribution team `6ALSCF5GBV`.
+- The 2026-08-16 audit fixes pass 100 unit/rendering tests, all 6 UI tests, and a normal signing-enabled simulator `build-for-testing` run locally. Its exact-commit Apple Distribution archive and IPA were validated locally; hosted CI remains pending.
+- Final metadata, pricing, availability, authenticated upload/processing, TestFlight, and physical-device camera/Photos/accessibility QA remain open. A signed binary is not submission proof.
+- The shipped product is intentionally local-only. There is no account, web client, backend, API, CloudKit, or cross-device sync implementation; adding synchronization requires a separate architecture/security/privacy review and revised App Store privacy answers.
+
+### Historical evidence
 
 - Current repository evidence: branch `codex/security-hardening-20260813` contains the camera-shell UI revamp, typed Color Chrome/FX Blue/Grain controls, canonical public film vocabulary, public reference-settings cards, Dynamic Range and D Range Priority modes, named white-balance modes, persisted Kelvin color temperature, monochromatic color axes, Sepia coverage, capture identity hardening, accessibility coverage, Xcode 16.4 compatibility, interactive zoom presets, tab-aware camera lifecycle, transactional recipe editing, and team-aligned release configuration.
 - Current hosted evidence: [run 31792580155](https://github.com/dheeraj5612/filmy-camera/actions/runs/31792580155) passed on exact source revision `dd4d113f8871ee59f58b48587ee53a060690cb10`; [PR #55](https://github.com/dheeraj5612/filmy-camera/pull/55) remains open and draft.

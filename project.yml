@@ -59,6 +59,7 @@ targets:
       - target: FilmyCamera
     settings:
       base:
+        GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.dheeraj.filmycamera.tests
         TARGETED_DEVICE_FAMILY: "1"
 
@@ -71,5 +72,6 @@ targets:
       - target: FilmyCamera
     settings:
       base:
+        GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.dheeraj.filmycamera.uitests
         TARGETED_DEVICE_FAMILY: "1"
