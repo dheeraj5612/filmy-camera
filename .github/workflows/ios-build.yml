@@ -435,6 +435,7 @@ jobs:
           bash -n scripts/release/*.sh
           shellcheck --severity=warning scripts/release/*.sh
           scripts/release/validate-store-metadata.sh
+          scripts/release/validate-store-media.sh
 
           draft_fixture="${RUNNER_TEMP}/filmycamera-draft-metadata.md"
           sed \
