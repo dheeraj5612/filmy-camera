@@ -203,7 +203,7 @@ final class PhotoLibraryMetadataTests: XCTestCase {
         )
         XCTAssertEqual(
             PhotoLibraryService.thumbnailMaxPixelSize(
-                for: CGSize(width: .nan, height: .infinity)
+                for: CGSize(width: CGFloat.nan, height: CGFloat.infinity)
             ),
             1
         )
@@ -220,5 +220,4 @@ final class PhotoLibraryMetadataTests: XCTestCase {
             1
         )
     }
-
 }
