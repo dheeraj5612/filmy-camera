@@ -1,0 +1,52 @@
+name: Apply session graph recovery v2
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply-session-recovery:
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      github.head_ref == 'codex/session-graph-recovery-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out recovery branch
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: codex/session-graph-recovery-v2
+          fetch-depth: 0
+
+      - name: Apply and validate recovery patch
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 scripts/codex/apply-session-graph-recovery-v2.py
+          git diff --check
+          grep -q 'resetSessionGraphOnQueue' \
+            FilmyCamera/Services/CameraService.swift
+          grep -q 'testConfiguredSessionGraphRebuildsOnlyWhenItsInputIsMissing' \
+            FilmyCameraTests/CameraServiceAvailabilityTests.swift
+
+      - name: Commit clean recovery diff
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git rm -- \
+            scripts/codex/apply-session-graph-recovery-v2.py \
+            .github/workflows/codex-session-graph-recovery-v2.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- \
+            FilmyCamera/Services/CameraService.swift \
+            FilmyCameraTests/CameraServiceAvailabilityTests.swift
+          git commit -m "Recover incomplete AVFoundation session graphs"
+          git push origin HEAD:codex/session-graph-recovery-v2
