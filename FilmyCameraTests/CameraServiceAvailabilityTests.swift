@@ -552,4 +552,70 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         XCTAssertEqual(invalidPoint, CGPoint(x: 0.5, y: 0.5))
     }
 
+    func testFocusLockPrefersOneShotAutofocusBeforeFreezingLensState() {
+        XCTAssertEqual(
+            CameraService.preferredFocusLockMode(
+                supportsAutoFocus: true,
+                supportsLocked: true
+            ),
+            .autoFocus
+        )
+        XCTAssertEqual(
+            CameraService.preferredFocusLockMode(
+                supportsAutoFocus: true,
+                supportsLocked: false
+            ),
+            .autoFocus
+        )
+    }
+
+    func testFocusLockFallsBackToLockedAndFailsClosedWithoutSupport() {
+        XCTAssertEqual(
+            CameraService.preferredFocusLockMode(
+                supportsAutoFocus: false,
+                supportsLocked: true
+            ),
+            .locked
+        )
+        XCTAssertNil(
+            CameraService.preferredFocusLockMode(
+                supportsAutoFocus: false,
+                supportsLocked: false
+            )
+        )
+    }
+
+    func testExposureLockPrefersOneShotAutoExposureBeforeFreezingState() {
+        XCTAssertEqual(
+            CameraService.preferredExposureLockMode(
+                supportsAutoExpose: true,
+                supportsLocked: true
+            ),
+            .autoExpose
+        )
+        XCTAssertEqual(
+            CameraService.preferredExposureLockMode(
+                supportsAutoExpose: true,
+                supportsLocked: false
+            ),
+            .autoExpose
+        )
+    }
+
+    func testExposureLockFallsBackToLockedAndFailsClosedWithoutSupport() {
+        XCTAssertEqual(
+            CameraService.preferredExposureLockMode(
+                supportsAutoExpose: false,
+                supportsLocked: true
+            ),
+            .locked
+        )
+        XCTAssertNil(
+            CameraService.preferredExposureLockMode(
+                supportsAutoExpose: false,
+                supportsLocked: false
+            )
+        )
+    }
+
 }

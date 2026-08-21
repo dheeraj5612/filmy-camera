@@ -799,18 +799,30 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                     device.exposurePointOfInterest = point
                 }
 
-                let canLockFocus = device.isFocusModeSupported(.locked)
-                let canLockExposure = device.isExposureModeSupported(.locked)
-                guard canLockFocus || canLockExposure else {
+                let focusMode = Self.preferredFocusLockMode(
+                    supportsAutoFocus: device.isFocusModeSupported(.autoFocus),
+                    supportsLocked: device.isFocusModeSupported(.locked)
+                )
+                let exposureMode = Self.preferredExposureLockMode(
+                    supportsAutoExpose: device.isExposureModeSupported(.autoExpose),
+                    supportsLocked: device.isExposureModeSupported(.locked)
+                )
+                guard focusMode != nil || exposureMode != nil else {
                     self.publishStatus("Focus lock is unavailable right now.")
                     return
                 }
 
-                if canLockFocus {
-                    device.focusMode = .locked
+                // One-shot autofocus and autoexposure meter at the selected
+                // point before AVFoundation transitions them to locked. A
+                // direct `.locked` assignment would freeze the preexisting
+                // lens and exposure state, potentially before the tap-driven
+                // adjustment has completed.
+                if let focusMode {
+                    device.focusMode = focusMode
                 }
-                if canLockExposure {
-                    device.exposureMode = .locked
+                if let exposureMode {
+                    device.exposureMode = exposureMode
+                    self.applyExposureBiasOnQueue(to: device)
                 }
                 self.focusExposureLocked = true
                 self.publishFocusExposureLocked(true)
@@ -881,6 +893,30 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     public static func quantizedExposureBias(_ value: Float) -> Float {
         guard value.isFinite else { return 0 }
         return (value * 3).rounded() / 3
+    }
+
+    /// A point-based lock should meter once before freezing the lens. Prefer
+    /// `.autoFocus`, which performs one adjustment and then locks, while
+    /// retaining `.locked` as a fallback for devices with narrower support.
+    static func preferredFocusLockMode(
+        supportsAutoFocus: Bool,
+        supportsLocked: Bool
+    ) -> AVCaptureDevice.FocusMode? {
+        if supportsAutoFocus { return .autoFocus }
+        if supportsLocked { return .locked }
+        return nil
+    }
+
+    /// A point-based exposure lock should meter once before freezing exposure.
+    /// Prefer `.autoExpose`, which performs one adjustment and then locks,
+    /// while retaining `.locked` as a fallback for unusual capture devices.
+    static func preferredExposureLockMode(
+        supportsAutoExpose: Bool,
+        supportsLocked: Bool
+    ) -> AVCaptureDevice.ExposureMode? {
+        if supportsAutoExpose { return .autoExpose }
+        if supportsLocked { return .locked }
+        return nil
     }
 
     private static func exposureBiasBounds(
