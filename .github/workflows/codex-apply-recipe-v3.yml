@@ -36,6 +36,7 @@ jobs:
           git diff --check --cached
 
           expected_files=(
+            .github/workflows/codex-apply-recipe-v3.yml
             FilmyCamera.xcodeproj/project.pbxproj
             FilmyCamera/ViewModels/CameraViewModel.swift
             FilmyCameraTests/CameraViewModelPersistenceTests.swift
