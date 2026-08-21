@@ -36,10 +36,22 @@ jobs:
           start = workflow.index(start_marker) + len(start_marker)
           end = workflow.index(end_marker, start)
           lines = workflow[start:end].splitlines()
-          script = "\n".join(
-              line[10:] if line.startswith("          ") else line
-              for line in lines
-          )
+
+          normalized_lines = []
+          in_raw_string = False
+          for line in lines:
+              if in_raw_string:
+                  normalized_lines.append(line)
+                  if line.lstrip().startswith("'''"):
+                      in_raw_string = False
+                  continue
+
+              normalized = line[10:] if line.startswith("          ") else line
+              normalized_lines.append(normalized)
+              if "r'''" in normalized and normalized.count("'''") == 1:
+                  in_raw_string = True
+
+          script = "\n".join(normalized_lines)
           exec(compile(script, str(workflow_path), 'exec'))
           RUNNER
 
