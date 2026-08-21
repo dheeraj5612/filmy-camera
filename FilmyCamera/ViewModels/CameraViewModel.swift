@@ -111,9 +111,22 @@ final class CameraViewModel: ObservableObject {
         let capturedAt: Date
     }
 
-    @Published var selectedRecipeID: String = UserDefaults.standard.string(forKey: "selectedRecipeID") ?? FilmRecipe.builtIns[0].id {
+    static let selectedRecipeIDKey = "selectedRecipeID"
+    static let recipeOverridesKey = "recipeOverrides"
+
+    private static let fallbackRecipeID = FilmRecipe.builtIns[0].id
+    private static let validRecipeIDs = Set(FilmRecipe.builtIns.map(\.id))
+
+    private let defaults: UserDefaults
+
+    @Published var selectedRecipeID: String {
         didSet {
-            UserDefaults.standard.set(selectedRecipeID, forKey: "selectedRecipeID")
+            guard Self.validRecipeIDs.contains(selectedRecipeID) else {
+                selectedRecipeID = Self.fallbackRecipeID
+                defaults.set(Self.fallbackRecipeID, forKey: Self.selectedRecipeIDKey)
+                return
+            }
+            defaults.set(selectedRecipeID, forKey: Self.selectedRecipeIDKey)
         }
     }
     @Published private(set) var isCapturing = false
@@ -130,15 +143,25 @@ final class CameraViewModel: ObservableObject {
     private var reviewImageData: Data?
     private var reviewCapturedAt: Date?
 
-    init() {
-        guard let data = UserDefaults.standard.data(forKey: "recipeOverrides"),
-              let savedRecipes = try? JSONDecoder().decode([String: FilmRecipe].self, from: data) else {
-            return
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+
+        let storedRecipeID = defaults.string(forKey: Self.selectedRecipeIDKey)
+        selectedRecipeID = storedRecipeID.flatMap {
+            Self.validRecipeIDs.contains($0) ? $0 : nil
+        } ?? Self.fallbackRecipeID
+        if storedRecipeID != selectedRecipeID {
+            defaults.set(selectedRecipeID, forKey: Self.selectedRecipeIDKey)
         }
 
+        let decoded = Self.decodeRecipeOverrides(
+            from: defaults.data(forKey: Self.recipeOverridesKey)
+        )
         var migratedRecipes: [String: FilmRecipe] = [:]
-        for savedRecipe in savedRecipes.values {
-            guard let parent = FilmRecipe.builtIns.first(where: { $0.id == savedRecipe.id }) else {
+        for savedRecipe in decoded.recipes.values {
+            guard let parent = FilmRecipe.builtIns.first(where: {
+                $0.id == savedRecipe.id
+            }) else {
                 continue
             }
             var migratedRecipe = parent
@@ -148,9 +171,44 @@ final class CameraViewModel: ObservableObject {
         }
         recipeOverrides = migratedRecipes
 
-        if migratedRecipes != savedRecipes {
+        if decoded.shouldRewrite || migratedRecipes != decoded.recipes {
             persistRecipeOverrides()
         }
+    }
+
+    nonisolated static func decodeRecipeOverrides(
+        from data: Data?
+    ) -> (recipes: [String: FilmRecipe], shouldRewrite: Bool) {
+        guard let data else { return ([:], false) }
+
+        let decoder = JSONDecoder()
+        if let recipes = try? decoder.decode(
+            [String: FilmRecipe].self,
+            from: data
+        ) {
+            return (recipes, false)
+        }
+
+        guard let object = try? JSONSerialization.jsonObject(with: data),
+              let rawRecipes = object as? [String: Any] else {
+            return ([:], true)
+        }
+
+        var recoveredRecipes: [String: FilmRecipe] = [:]
+        for (key, rawRecipe) in rawRecipes {
+            guard JSONSerialization.isValidJSONObject(rawRecipe),
+                  let recipeData = try? JSONSerialization.data(
+                      withJSONObject: rawRecipe
+                  ),
+                  let recipe = try? decoder.decode(
+                      FilmRecipe.self,
+                      from: recipeData
+                  ) else {
+                continue
+            }
+            recoveredRecipes[key] = recipe
+        }
+        return (recoveredRecipes, true)
     }
 
     var selectedRecipe: FilmRecipe {
@@ -160,6 +218,7 @@ final class CameraViewModel: ObservableObject {
     }
 
     func select(recipe: FilmRecipe) {
+        guard Self.validRecipeIDs.contains(recipe.id) else { return }
         selectedRecipeID = recipe.id
     }
 
@@ -168,14 +227,21 @@ final class CameraViewModel: ObservableObject {
     }
 
     func update(recipe: FilmRecipe) {
-        var customizedRecipe = recipe
-        customizedRecipe.markUserModified(parentRecipeID: originalRecipe(for: recipe.id).id)
-        recipeOverrides[recipe.id] = customizedRecipe
+        guard let parent = FilmRecipe.builtIns.first(where: {
+            $0.id == recipe.id
+        }) else {
+            return
+        }
+
+        var customizedRecipe = parent
+        customizedRecipe.applyControlValues(from: recipe)
+        customizedRecipe.markUserModified(parentRecipeID: parent.id)
+        recipeOverrides[parent.id] = customizedRecipe
         persistRecipeOverrides()
     }
 
     func reset(recipeID: String) {
-        recipeOverrides.removeValue(forKey: recipeID)
+        guard recipeOverrides.removeValue(forKey: recipeID) != nil else { return }
         persistRecipeOverrides()
     }
 
@@ -185,7 +251,7 @@ final class CameraViewModel: ObservableObject {
 
     private func persistRecipeOverrides() {
         guard let data = try? JSONEncoder().encode(recipeOverrides) else { return }
-        UserDefaults.standard.set(data, forKey: "recipeOverrides")
+        defaults.set(data, forKey: Self.recipeOverridesKey)
     }
 
     func capture(camera: CameraService) {
