@@ -1,0 +1,773 @@
+name: Apply sensor-aware camera orientation fixes
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply-orientation-fixes:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out orientation branch
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: codex/sensor-aware-camera-orientation
+          fetch-depth: 0
+
+      - name: Apply audited orientation and focus fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 <<'PY'
+          from pathlib import Path
+
+
+          def replace_once(relative_path: str, old: str, new: str) -> None:
+              path = Path(relative_path)
+              text = path.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(
+                      f"{relative_path}: expected one replacement target, found {count}"
+                  )
+              path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+          replace_once(
+              "FilmyCamera/Services/CameraService.swift",
+              '''    @Published public private(set) var previewFrameSize: CGSize = .zero
+    @Published public private(set) var previewViewportSize: CGSize = .zero
+
+    /// Receives unfiltered live frames on the main queue.
+''',
+              '''    @Published public private(set) var previewFrameSize: CGSize = .zero
+    @Published public private(set) var previewViewportSize: CGSize = .zero
+    @Published public private(set) var previewRotationAngle: CGFloat = 90
+    @Published public private(set) var previewMirrored = false
+
+    /// Receives unfiltered live frames on the main queue.
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/Services/CameraService.swift",
+              '''    private var activeConstituentObservation: NSKeyValueObservation?
+    private var observedVirtualDeviceID: String?
+    private var rotationAngle: CGFloat = 90
+    private var lastDeliveredFrameSize: CGSize = .zero
+''',
+              '''    private var activeConstituentObservation: NSKeyValueObservation?
+    private var observedVirtualDeviceID: String?
+    private var previewRotationAngleState: CGFloat = 90
+    private var captureRotationAngleState: CGFloat = 90
+    private var rotationCoordinatorToken = UUID()
+    private var rotationCoordinatorDeviceID: String?
+    private var activeRotationToken: UUID?
+    private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
+    private var previewRotationObservation: NSKeyValueObservation?
+    private var captureRotationObservation: NSKeyValueObservation?
+    private weak var rotationPreviewLayer: CALayer?
+    private var rotationPreviewLayerID: UUID?
+    private var rotationDevice: AVCaptureDevice?
+    private var lastDeliveredFrameSize: CGSize = .zero
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/Services/CameraService.swift",
+              '''    private final class PhotoCompletionBox: @unchecked Sendable {
+        let completion: PhotoCompletion
+
+        init(_ completion: @escaping PhotoCompletion) {
+            self.completion = completion
+        }
+    }
+
+    private final class MainWorkBox: @unchecked Sendable {
+''',
+              '''    private final class PhotoCompletionBox: @unchecked Sendable {
+        let completion: PhotoCompletion
+
+        init(_ completion: @escaping PhotoCompletion) {
+            self.completion = completion
+        }
+    }
+
+    private final class CaptureDeviceBox: @unchecked Sendable {
+        let device: AVCaptureDevice
+
+        init(_ device: AVCaptureDevice) {
+            self.device = device
+        }
+    }
+
+    private final class MainWorkBox: @unchecked Sendable {
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/Services/CameraService.swift",
+              '''        activeConstituentObservation?.invalidate()
+        activeConstituentObservation = nil
+        videoOutput.setSampleBufferDelegate(nil, queue: nil)
+''',
+              '''        activeConstituentObservation?.invalidate()
+        activeConstituentObservation = nil
+        previewRotationObservation?.invalidate()
+        captureRotationObservation?.invalidate()
+        previewRotationObservation = nil
+        captureRotationObservation = nil
+        rotationCoordinator = nil
+        videoOutput.setSampleBufferDelegate(nil, queue: nil)
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/Services/CameraService.swift",
+              '''    public func removeFrameHandler(_ id: UUID) {
+        guard frameHandlerID == id else { return }
+        frameHandlerID = nil
+        onFrame = nil
+    }
+
+    /// Keeps the preview and still output aligned with the current camera
+''',
+              '''    public func removeFrameHandler(_ id: UUID) {
+        guard frameHandlerID == id else { return }
+        frameHandlerID = nil
+        onFrame = nil
+    }
+
+    /// Registers the CALayer used by the custom Metal preview. Ownership is
+    /// tokenized so dismantling an older SwiftUI representable cannot detach a
+    /// newer preview layer from the active rotation coordinator.
+    @MainActor
+    @discardableResult
+    public func installPreviewLayer(_ layer: CALayer) -> UUID {
+        let id = UUID()
+        rotationPreviewLayerID = id
+        rotationPreviewLayer = layer
+        if let rotationDevice, let activeRotationToken {
+            installRotationCoordinatorOnMain(
+                for: rotationDevice,
+                token: activeRotationToken
+            )
+        }
+        return id
+    }
+
+    @MainActor
+    public func removePreviewLayer(_ id: UUID) {
+        guard rotationPreviewLayerID == id else { return }
+        rotationPreviewLayerID = nil
+        rotationPreviewLayer = nil
+        if let rotationDevice, let activeRotationToken {
+            installRotationCoordinatorOnMain(
+                for: rotationDevice,
+                token: activeRotationToken
+            )
+        }
+    }
+
+    /// Keeps the preview and still output aligned with the current camera
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/Services/CameraService.swift",
+              '''    @MainActor
+    public func updateOrientation(for viewSize: CGSize) {
+        guard viewSize.width > 0, viewSize.height > 0 else { return }
+        publishPreviewViewportSize(viewSize)
+        let activeWindowScene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first(where: { $0.activationState == .foregroundActive })
+        let interfaceOrientation: UIInterfaceOrientation?
+        if #available(iOS 26.0, *) {
+            interfaceOrientation = activeWindowScene?.effectiveGeometry.interfaceOrientation
+        } else {
+            interfaceOrientation = activeWindowScene?.interfaceOrientation
+        }
+        let nextAngle = Self.videoRotationAngle(
+            for: interfaceOrientation,
+            fallbackViewSize: viewSize
+        )
+
+        sessionQueue.async { [weak self] in
+            guard let self, self.rotationAngle != nextAngle else { return }
+            self.rotationAngle = nextAngle
+            guard self.isConfigured else { return }
+            self.configureOrientation()
+        }
+    }
+''',
+              '''    @MainActor
+    public func updateOrientation(for viewSize: CGSize) {
+        guard viewSize.width > 0, viewSize.height > 0 else { return }
+        publishPreviewViewportSize(viewSize)
+        let activeWindowScene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first(where: { $0.activationState == .foregroundActive })
+        let interfaceOrientation: UIInterfaceOrientation?
+        if #available(iOS 26.0, *) {
+            interfaceOrientation = activeWindowScene?.effectiveGeometry.interfaceOrientation
+        } else {
+            interfaceOrientation = activeWindowScene?.interfaceOrientation
+        }
+        let fallbackAngle = Self.videoRotationAngle(
+            for: interfaceOrientation,
+            fallbackViewSize: viewSize
+        )
+
+        // RotationCoordinator owns physical-camera angles once an input is
+        // installed. The interface-orientation mapping remains only as a safe
+        // simulator and preconfiguration fallback.
+        sessionQueue.async { [weak self] in
+            guard let self,
+                  self.rotationCoordinatorDeviceID == nil,
+                  self.previewRotationAngleState != fallbackAngle
+                    || self.captureRotationAngleState != fallbackAngle else {
+                return
+            }
+            self.previewRotationAngleState = fallbackAngle
+            self.captureRotationAngleState = fallbackAngle
+            self.configureOrientation()
+            self.publishPreviewRotationAngle(fallbackAngle)
+        }
+    }
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/Services/CameraService.swift",
+              '''    static func videoRotationAngle(
+        for interfaceOrientation: UIInterfaceOrientation?,
+        fallbackViewSize: CGSize
+    ) -> CGFloat {
+        switch interfaceOrientation {
+        case .portrait: 90
+        case .portraitUpsideDown: 270
+        case .landscapeLeft: 0
+        case .landscapeRight: 180
+        case .unknown, .none:
+            fallbackViewSize.width > fallbackViewSize.height ? 0 : 90
+        @unknown default:
+            fallbackViewSize.width > fallbackViewSize.height ? 0 : 90
+        }
+    }
+
+    /// Captures a still through AVCapturePhotoOutput. The completion is
+''',
+              '''    static func videoRotationAngle(
+        for interfaceOrientation: UIInterfaceOrientation?,
+        fallbackViewSize: CGSize
+    ) -> CGFloat {
+        switch interfaceOrientation {
+        case .portrait: 90
+        case .portraitUpsideDown: 270
+        case .landscapeLeft: 0
+        case .landscapeRight: 180
+        case .unknown, .none:
+            fallbackViewSize.width > fallbackViewSize.height ? 0 : 90
+        @unknown default:
+            fallbackViewSize.width > fallbackViewSize.height ? 0 : 90
+        }
+    }
+
+    /// Converts a point in the physically rotated and optionally mirrored
+    /// preview buffer back into the unrotated capture-device coordinate space
+    /// required by focusPointOfInterest and exposurePointOfInterest.
+    static func captureDevicePoint(
+        fromRotatedPreviewPoint point: CGPoint,
+        rotationAngle: CGFloat,
+        mirrored: Bool
+    ) -> CGPoint {
+        guard point.x.isFinite, point.y.isFinite else {
+            return CGPoint(x: 0.5, y: 0.5)
+        }
+
+        var previewX = min(max(point.x, 0), 1)
+        let previewY = min(max(point.y, 0), 1)
+        if mirrored {
+            previewX = 1 - previewX
+        }
+
+        let finiteAngle = rotationAngle.isFinite ? rotationAngle : 0
+        let normalizedAngle = (finiteAngle.truncatingRemainder(dividingBy: 360) + 360)
+            .truncatingRemainder(dividingBy: 360)
+        let quarterTurns = Int((normalizedAngle / 90).rounded()) % 4
+
+        let devicePoint: CGPoint
+        switch quarterTurns {
+        case 1:
+            devicePoint = CGPoint(x: previewY, y: 1 - previewX)
+        case 2:
+            devicePoint = CGPoint(x: 1 - previewX, y: 1 - previewY)
+        case 3:
+            devicePoint = CGPoint(x: 1 - previewY, y: previewX)
+        default:
+            devicePoint = CGPoint(x: previewX, y: previewY)
+        }
+
+        return CGPoint(
+            x: min(max(devicePoint.x, 0), 1),
+            y: min(max(devicePoint.y, 0), 1)
+        )
+    }
+
+    /// Captures a still through AVCapturePhotoOutput. The completion is
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/Services/CameraService.swift",
+              '''    private func installSessionObservers() {
+''',
+              '''    private func installRotationCoordinatorOnQueue(for device: AVCaptureDevice) {
+        let token = UUID()
+        rotationCoordinatorToken = token
+        rotationCoordinatorDeviceID = device.uniqueID
+        let deviceBox = CaptureDeviceBox(device)
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.installRotationCoordinatorOnMain(
+                for: deviceBox.device,
+                token: token
+            )
+        }
+    }
+
+    @MainActor
+    private func installRotationCoordinatorOnMain(
+        for device: AVCaptureDevice,
+        token: UUID
+    ) {
+        activeRotationToken = token
+        rotationDevice = device
+        previewRotationObservation?.invalidate()
+        captureRotationObservation?.invalidate()
+
+        let coordinator = AVCaptureDevice.RotationCoordinator(
+            device: device,
+            previewLayer: rotationPreviewLayer
+        )
+        rotationCoordinator = coordinator
+
+        previewRotationObservation = coordinator.observe(
+            \\.videoRotationAngleForHorizonLevelPreview,
+            options: [.initial, .new]
+        ) { [weak self] coordinator, change in
+            let angle = change.newValue
+                ?? coordinator.videoRotationAngleForHorizonLevelPreview
+            MainActor.assumeIsolated {
+                self?.applyPreviewRotationOnMain(angle, token: token)
+            }
+        }
+
+        captureRotationObservation = coordinator.observe(
+            \\.videoRotationAngleForHorizonLevelCapture,
+            options: [.initial, .new]
+        ) { [weak self] coordinator, change in
+            let angle = change.newValue
+                ?? coordinator.videoRotationAngleForHorizonLevelCapture
+            MainActor.assumeIsolated {
+                self?.applyCaptureRotationOnMain(angle, token: token)
+            }
+        }
+    }
+
+    @MainActor
+    private func applyPreviewRotationOnMain(_ angle: CGFloat, token: UUID) {
+        guard activeRotationToken == token, angle.isFinite else { return }
+        publishPreviewRotationAngle(angle)
+        sessionQueue.async { [weak self] in
+            guard let self, self.rotationCoordinatorToken == token else { return }
+            self.previewRotationAngleState = angle
+            self.configureOrientation()
+        }
+    }
+
+    @MainActor
+    private func applyCaptureRotationOnMain(_ angle: CGFloat, token: UUID) {
+        guard activeRotationToken == token, angle.isFinite else { return }
+        sessionQueue.async { [weak self] in
+            guard let self, self.rotationCoordinatorToken == token else { return }
+            self.captureRotationAngleState = angle
+            self.configureOrientation()
+        }
+    }
+
+    private func installSessionObservers() {
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/Services/CameraService.swift",
+              '''        session.addOutput(photoOutput)
+        photoOutput.maxPhotoQualityPrioritization = .quality
+        configurePhotoDimensions(for: device)
+        session.commitConfiguration()
+
+        configureCaptureCapabilitiesOnQueue(for: device)
+''',
+              '''        session.addOutput(photoOutput)
+        photoOutput.maxPhotoQualityPrioritization = .quality
+        configurePhotoDimensions(for: device)
+        session.commitConfiguration()
+
+        installRotationCoordinatorOnQueue(for: device)
+        configureCaptureCapabilitiesOnQueue(for: device)
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/Services/CameraService.swift",
+              '''        session.addInput(newInput)
+        configurePhotoDimensions(for: device)
+        configureOrientation()
+        session.commitConfiguration()
+        return true
+''',
+              '''        session.addInput(newInput)
+        configurePhotoDimensions(for: device)
+        configureOrientation()
+        session.commitConfiguration()
+        installRotationCoordinatorOnQueue(for: device)
+        return true
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/Services/CameraService.swift",
+              '''    private func configureOrientation() {
+        configureRotation(videoOutput.connection(with: .video), angle: rotationAngle)
+        configureRotation(photoOutput.connection(with: .video), angle: rotationAngle)
+    }
+''',
+              '''    private func configureOrientation() {
+        let previewConnection = videoOutput.connection(with: .video)
+        configureRotation(
+            previewConnection,
+            angle: previewRotationAngleState
+        )
+        configureRotation(
+            photoOutput.connection(with: .video),
+            angle: captureRotationAngleState
+        )
+        publishPreviewMirroring(previewConnection?.isVideoMirrored ?? false)
+    }
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/Services/CameraService.swift",
+              '''        publishZoomRange(minimum: 1, maximum: 1)
+        publishZoom(1)
+        publishCameraPosition(.back)
+    }
+''',
+              '''        publishZoomRange(minimum: 1, maximum: 1)
+        publishZoom(1)
+        publishCameraPosition(.back)
+        publishPreviewMirroring(false)
+    }
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/Services/CameraService.swift",
+              '''    private func publishPreviewViewportSize(_ size: CGSize) {
+        publishOnMain { [weak self] in
+            self?.previewViewportSize = size
+        }
+    }
+
+    private func publishStatus(_ message: String) {
+''',
+              '''    private func publishPreviewViewportSize(_ size: CGSize) {
+        publishOnMain { [weak self] in
+            self?.previewViewportSize = size
+        }
+    }
+
+    private func publishPreviewRotationAngle(_ angle: CGFloat) {
+        publishOnMain { [weak self] in
+            self?.previewRotationAngle = angle
+        }
+    }
+
+    private func publishPreviewMirroring(_ mirrored: Bool) {
+        publishOnMain { [weak self] in
+            self?.previewMirrored = mirrored
+        }
+    }
+
+    private func publishStatus(_ message: String) {
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/Views/FilteredCameraPreview.swift",
+              '''        let coordinator = context.coordinator
+        coordinator.previewView = view
+        view.update(
+''',
+              '''        let coordinator = context.coordinator
+        coordinator.previewView = view
+        coordinator.previewLayerID = cameraService.installPreviewLayer(view.layer)
+        view.update(
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/Views/FilteredCameraPreview.swift",
+              '''        if let frameHandlerID = coordinator.frameHandlerID {
+            coordinator.service?.removeFrameHandler(frameHandlerID)
+        }
+        coordinator.previewView = nil
+        uiView.clearImage()
+''',
+              '''        if let frameHandlerID = coordinator.frameHandlerID {
+            coordinator.service?.removeFrameHandler(frameHandlerID)
+        }
+        if let previewLayerID = coordinator.previewLayerID {
+            coordinator.service?.removePreviewLayer(previewLayerID)
+        }
+        coordinator.frameHandlerID = nil
+        coordinator.previewLayerID = nil
+        coordinator.previewView = nil
+        uiView.clearImage()
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/Views/FilteredCameraPreview.swift",
+              '''        fileprivate weak var service: CameraService?
+        fileprivate var frameHandlerID: UUID?
+        fileprivate var recipe: FilmRecipe
+''',
+              '''        fileprivate weak var service: CameraService?
+        fileprivate var frameHandlerID: UUID?
+        fileprivate var previewLayerID: UUID?
+        fileprivate var recipe: FilmRecipe
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/Views/CameraScreen.swift",
+              '''    private func normalizedFocusPoint(
+        for location: CGPoint,
+        in viewSize: CGSize
+    ) -> CGPoint {
+        guard viewSize.width > 0,
+              viewSize.height > 0,
+              camera.previewFrameSize.width > 0,
+              camera.previewFrameSize.height > 0 else {
+            return CGPoint(
+                x: min(max(location.x / max(viewSize.width, 1), 0), 1),
+                y: min(max(location.y / max(viewSize.height, 1), 0), 1)
+            )
+        }
+
+        let sourceSize = camera.previewFrameSize
+        let scale = max(
+            viewSize.width / sourceSize.width,
+            viewSize.height / sourceSize.height
+        )
+        let displayedSize = CGSize(
+            width: sourceSize.width * scale,
+            height: sourceSize.height * scale
+        )
+        let cropOffset = CGPoint(
+            x: (viewSize.width - displayedSize.width) / 2,
+            y: (viewSize.height - displayedSize.height) / 2
+        )
+
+        // The Metal preview uses Core Image's bottom-left coordinate space,
+        // while SwiftUI touch locations start at the top-left.
+        let imageX = (location.x - cropOffset.x) / scale
+        let imageY = (viewSize.height - location.y - cropOffset.y) / scale
+        return CGPoint(
+            x: min(max(imageX / sourceSize.width, 0), 1),
+            y: min(max(1 - imageY / sourceSize.height, 0), 1)
+        )
+    }
+''',
+              '''    private func normalizedFocusPoint(
+        for location: CGPoint,
+        in viewSize: CGSize
+    ) -> CGPoint {
+        let rotatedPreviewPoint: CGPoint
+        if viewSize.width > 0,
+           viewSize.height > 0,
+           camera.previewFrameSize.width > 0,
+           camera.previewFrameSize.height > 0 {
+            let sourceSize = camera.previewFrameSize
+            let scale = max(
+                viewSize.width / sourceSize.width,
+                viewSize.height / sourceSize.height
+            )
+            let displayedSize = CGSize(
+                width: sourceSize.width * scale,
+                height: sourceSize.height * scale
+            )
+            let cropOffset = CGPoint(
+                x: (viewSize.width - displayedSize.width) / 2,
+                y: (viewSize.height - displayedSize.height) / 2
+            )
+
+            // Core Image uses bottom-left coordinates while SwiftUI touch
+            // locations start at the top-left. Resolve aspect-fill first in
+            // the rotated preview buffer, then undo rotation and mirroring.
+            let imageX = (location.x - cropOffset.x) / scale
+            let imageY = (viewSize.height - location.y - cropOffset.y) / scale
+            rotatedPreviewPoint = CGPoint(
+                x: min(max(imageX / sourceSize.width, 0), 1),
+                y: min(max(1 - imageY / sourceSize.height, 0), 1)
+            )
+        } else {
+            rotatedPreviewPoint = CGPoint(
+                x: min(max(location.x / max(viewSize.width, 1), 0), 1),
+                y: min(max(location.y / max(viewSize.height, 1), 0), 1)
+            )
+        }
+
+        return CameraService.captureDevicePoint(
+            fromRotatedPreviewPoint: rotatedPreviewPoint,
+            rotationAngle: camera.previewRotationAngle,
+            mirrored: camera.previewMirrored
+        )
+    }
+'''
+          )
+
+          replace_once(
+              "FilmyCameraTests/CameraServiceAvailabilityTests.swift",
+              '''    func testCameraActivityPolicyHoldsAnActiveInterruptedSessionForObserverRecovery() {
+        XCTAssertEqual(
+            CameraActivityPolicy.action(
+                hasReview: false,
+                sceneIsActive: true,
+                isCameraTabActive: true,
+                availability: .interrupted
+            ),
+            .hold
+        )
+    }
+
+}
+''',
+              '''    func testCameraActivityPolicyHoldsAnActiveInterruptedSessionForObserverRecovery() {
+        XCTAssertEqual(
+            CameraActivityPolicy.action(
+                hasReview: false,
+                sceneIsActive: true,
+                isCameraTabActive: true,
+                availability: .interrupted
+            ),
+            .hold
+        )
+    }
+
+    func testCaptureDevicePointUndoesCardinalPreviewRotations() {
+        let previewPoint = CGPoint(x: 0.2, y: 0.3)
+        let zero = CameraService.captureDevicePoint(
+            fromRotatedPreviewPoint: previewPoint,
+            rotationAngle: 0,
+            mirrored: false
+        )
+        let ninety = CameraService.captureDevicePoint(
+            fromRotatedPreviewPoint: previewPoint,
+            rotationAngle: 90,
+            mirrored: false
+        )
+        let oneEighty = CameraService.captureDevicePoint(
+            fromRotatedPreviewPoint: previewPoint,
+            rotationAngle: 180,
+            mirrored: false
+        )
+        let twoSeventy = CameraService.captureDevicePoint(
+            fromRotatedPreviewPoint: previewPoint,
+            rotationAngle: 270,
+            mirrored: false
+        )
+
+        XCTAssertEqual(zero.x, 0.2, accuracy: 0.0001)
+        XCTAssertEqual(zero.y, 0.3, accuracy: 0.0001)
+        XCTAssertEqual(ninety.x, 0.3, accuracy: 0.0001)
+        XCTAssertEqual(ninety.y, 0.8, accuracy: 0.0001)
+        XCTAssertEqual(oneEighty.x, 0.8, accuracy: 0.0001)
+        XCTAssertEqual(oneEighty.y, 0.7, accuracy: 0.0001)
+        XCTAssertEqual(twoSeventy.x, 0.7, accuracy: 0.0001)
+        XCTAssertEqual(twoSeventy.y, 0.2, accuracy: 0.0001)
+    }
+
+    func testCaptureDevicePointUndoesPreviewMirroringBeforeRotation() {
+        let point = CameraService.captureDevicePoint(
+            fromRotatedPreviewPoint: CGPoint(x: 0.2, y: 0.3),
+            rotationAngle: 90,
+            mirrored: true
+        )
+
+        XCTAssertEqual(point.x, 0.3, accuracy: 0.0001)
+        XCTAssertEqual(point.y, 0.2, accuracy: 0.0001)
+    }
+
+    func testCaptureDevicePointNormalizesAnglesAndInvalidCoordinates() {
+        let negativeAngle = CameraService.captureDevicePoint(
+            fromRotatedPreviewPoint: CGPoint(x: 0.2, y: 0.3),
+            rotationAngle: -90,
+            mirrored: false
+        )
+        let invalidPoint = CameraService.captureDevicePoint(
+            fromRotatedPreviewPoint: CGPoint(x: .nan, y: .infinity),
+            rotationAngle: .nan,
+            mirrored: false
+        )
+
+        XCTAssertEqual(negativeAngle.x, 0.7, accuracy: 0.0001)
+        XCTAssertEqual(negativeAngle.y, 0.2, accuracy: 0.0001)
+        XCTAssertEqual(invalidPoint, CGPoint(x: 0.5, y: 0.5))
+    }
+
+}
+'''
+          )
+          PY
+
+      - name: Validate generated patch
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git diff --check
+          grep -q 'AVCaptureDevice.RotationCoordinator' FilmyCamera/Services/CameraService.swift
+          grep -q 'captureDevicePoint' FilmyCamera/Views/CameraScreen.swift
+          grep -q 'installPreviewLayer' FilmyCamera/Views/FilteredCameraPreview.swift
+          grep -q 'testCaptureDevicePointUndoesCardinalPreviewRotations' \
+            FilmyCameraTests/CameraServiceAvailabilityTests.swift
+
+      - name: Commit sensor-aware orientation fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git rm -- .github/workflows/codex-apply-orientation-fixes.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- \
+            FilmyCamera/Services/CameraService.swift \
+            FilmyCamera/Views/CameraScreen.swift \
+            FilmyCamera/Views/FilteredCameraPreview.swift \
+            FilmyCameraTests/CameraServiceAvailabilityTests.swift
+          git commit -m "Use sensor-aware camera rotation"
+          git push origin HEAD:codex/sensor-aware-camera-orientation
