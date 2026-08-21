@@ -1,0 +1,428 @@
+name: Apply recipe persistence recovery
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply-recipe-persistence:
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      github.head_ref == 'codex/recipe-persistence-recovery'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out persistence branch
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: codex/recipe-persistence-recovery
+          fetch-depth: 0
+
+      - name: Apply audited persistence fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 <<'PY'
+          from pathlib import Path
+
+
+          def replace_once(relative_path: str, old: str, new: str) -> None:
+              path = Path(relative_path)
+              text = path.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(
+                      f"{relative_path}: expected one replacement target, found {count}"
+                  )
+              path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+          replace_once(
+              "FilmyCamera/ViewModels/CameraViewModel.swift",
+              '''    @Published var selectedRecipeID: String = UserDefaults.standard.string(forKey: "selectedRecipeID") ?? FilmRecipe.builtIns[0].id {
+        didSet {
+            UserDefaults.standard.set(selectedRecipeID, forKey: "selectedRecipeID")
+        }
+    }
+    @Published private(set) var isCapturing = false
+    @Published private(set) var isSaving = false
+    @Published private(set) var saveErrorMessage: String?
+    @Published private(set) var toastMessage: String?
+    @Published private(set) var toastStyle: ToastStyle = .success
+    @Published private(set) var lastCaptureDate: Date?
+    @Published private(set) var reviewImage: UIImage?
+    @Published private(set) var reviewRecipe: FilmRecipe?
+    @Published private var recipeOverrides: [String: FilmRecipe] = [:]
+
+    private var toastTask: Task<Void, Never>?
+    private var reviewImageData: Data?
+    private var reviewCapturedAt: Date?
+
+    init() {
+        guard let data = UserDefaults.standard.data(forKey: "recipeOverrides"),
+              let savedRecipes = try? JSONDecoder().decode([String: FilmRecipe].self, from: data) else {
+            return
+        }
+
+        var migratedRecipes: [String: FilmRecipe] = [:]
+        for savedRecipe in savedRecipes.values {
+            guard let parent = FilmRecipe.builtIns.first(where: { $0.id == savedRecipe.id }) else {
+                continue
+            }
+            var migratedRecipe = parent
+            migratedRecipe.applyControlValues(from: savedRecipe)
+            migratedRecipe.markUserModified(parentRecipeID: parent.id)
+            migratedRecipes[parent.id] = migratedRecipe
+        }
+        recipeOverrides = migratedRecipes
+
+        if migratedRecipes != savedRecipes {
+            persistRecipeOverrides()
+        }
+    }
+
+    var selectedRecipe: FilmRecipe {
+        recipeOverrides[selectedRecipeID]
+            ?? FilmRecipe.builtIns.first(where: { $0.id == selectedRecipeID })
+            ?? FilmRecipe.builtIns[0]
+    }
+
+    func select(recipe: FilmRecipe) {
+        selectedRecipeID = recipe.id
+    }
+
+    func originalRecipe(for id: String) -> FilmRecipe {
+        FilmRecipe.builtIns.first(where: { $0.id == id }) ?? FilmRecipe.builtIns[0]
+    }
+
+    func update(recipe: FilmRecipe) {
+        var customizedRecipe = recipe
+        customizedRecipe.markUserModified(parentRecipeID: originalRecipe(for: recipe.id).id)
+        recipeOverrides[recipe.id] = customizedRecipe
+        persistRecipeOverrides()
+    }
+
+    func reset(recipeID: String) {
+        recipeOverrides.removeValue(forKey: recipeID)
+        persistRecipeOverrides()
+    }
+
+    func isCustomized(_ recipe: FilmRecipe) -> Bool {
+        recipeOverrides[recipe.id] != nil
+    }
+
+    private func persistRecipeOverrides() {
+        guard let data = try? JSONEncoder().encode(recipeOverrides) else { return }
+        UserDefaults.standard.set(data, forKey: "recipeOverrides")
+    }
+''',
+              '''    static let selectedRecipeIDKey = "selectedRecipeID"
+    static let recipeOverridesKey = "recipeOverrides"
+
+    private static let fallbackRecipeID = FilmRecipe.builtIns[0].id
+    private static let validRecipeIDs = Set(FilmRecipe.builtIns.map(\\.id))
+
+    private let defaults: UserDefaults
+
+    @Published var selectedRecipeID: String {
+        didSet {
+            guard Self.validRecipeIDs.contains(selectedRecipeID) else {
+                selectedRecipeID = Self.fallbackRecipeID
+                defaults.set(Self.fallbackRecipeID, forKey: Self.selectedRecipeIDKey)
+                return
+            }
+            defaults.set(selectedRecipeID, forKey: Self.selectedRecipeIDKey)
+        }
+    }
+    @Published private(set) var isCapturing = false
+    @Published private(set) var isSaving = false
+    @Published private(set) var saveErrorMessage: String?
+    @Published private(set) var toastMessage: String?
+    @Published private(set) var toastStyle: ToastStyle = .success
+    @Published private(set) var lastCaptureDate: Date?
+    @Published private(set) var reviewImage: UIImage?
+    @Published private(set) var reviewRecipe: FilmRecipe?
+    @Published private var recipeOverrides: [String: FilmRecipe] = [:]
+
+    private var toastTask: Task<Void, Never>?
+    private var reviewImageData: Data?
+    private var reviewCapturedAt: Date?
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+
+        let storedRecipeID = defaults.string(forKey: Self.selectedRecipeIDKey)
+        selectedRecipeID = storedRecipeID.flatMap {
+            Self.validRecipeIDs.contains($0) ? $0 : nil
+        } ?? Self.fallbackRecipeID
+        if storedRecipeID != selectedRecipeID {
+            defaults.set(selectedRecipeID, forKey: Self.selectedRecipeIDKey)
+        }
+
+        let decoded = Self.decodeRecipeOverrides(
+            from: defaults.data(forKey: Self.recipeOverridesKey)
+        )
+        var migratedRecipes: [String: FilmRecipe] = [:]
+        for savedRecipe in decoded.recipes.values {
+            guard let parent = FilmRecipe.builtIns.first(where: {
+                $0.id == savedRecipe.id
+            }) else {
+                continue
+            }
+            var migratedRecipe = parent
+            migratedRecipe.applyControlValues(from: savedRecipe)
+            migratedRecipe.markUserModified(parentRecipeID: parent.id)
+            migratedRecipes[parent.id] = migratedRecipe
+        }
+        recipeOverrides = migratedRecipes
+
+        if decoded.shouldRewrite || migratedRecipes != decoded.recipes {
+            persistRecipeOverrides()
+        }
+    }
+
+    nonisolated static func decodeRecipeOverrides(
+        from data: Data?
+    ) -> (recipes: [String: FilmRecipe], shouldRewrite: Bool) {
+        guard let data else { return ([:], false) }
+
+        let decoder = JSONDecoder()
+        if let recipes = try? decoder.decode(
+            [String: FilmRecipe].self,
+            from: data
+        ) {
+            return (recipes, false)
+        }
+
+        guard let object = try? JSONSerialization.jsonObject(with: data),
+              let rawRecipes = object as? [String: Any] else {
+            return ([:], true)
+        }
+
+        var recoveredRecipes: [String: FilmRecipe] = [:]
+        for (key, rawRecipe) in rawRecipes {
+            guard JSONSerialization.isValidJSONObject(rawRecipe),
+                  let recipeData = try? JSONSerialization.data(
+                      withJSONObject: rawRecipe
+                  ),
+                  let recipe = try? decoder.decode(
+                      FilmRecipe.self,
+                      from: recipeData
+                  ) else {
+                continue
+            }
+            recoveredRecipes[key] = recipe
+        }
+        return (recoveredRecipes, true)
+    }
+
+    var selectedRecipe: FilmRecipe {
+        recipeOverrides[selectedRecipeID]
+            ?? FilmRecipe.builtIns.first(where: { $0.id == selectedRecipeID })
+            ?? FilmRecipe.builtIns[0]
+    }
+
+    func select(recipe: FilmRecipe) {
+        guard Self.validRecipeIDs.contains(recipe.id) else { return }
+        selectedRecipeID = recipe.id
+    }
+
+    func originalRecipe(for id: String) -> FilmRecipe {
+        FilmRecipe.builtIns.first(where: { $0.id == id }) ?? FilmRecipe.builtIns[0]
+    }
+
+    func update(recipe: FilmRecipe) {
+        guard let parent = FilmRecipe.builtIns.first(where: {
+            $0.id == recipe.id
+        }) else {
+            return
+        }
+
+        var customizedRecipe = parent
+        customizedRecipe.applyControlValues(from: recipe)
+        customizedRecipe.markUserModified(parentRecipeID: parent.id)
+        recipeOverrides[parent.id] = customizedRecipe
+        persistRecipeOverrides()
+    }
+
+    func reset(recipeID: String) {
+        guard recipeOverrides.removeValue(forKey: recipeID) != nil else { return }
+        persistRecipeOverrides()
+    }
+
+    func isCustomized(_ recipe: FilmRecipe) -> Bool {
+        recipeOverrides[recipe.id] != nil
+    }
+
+    private func persistRecipeOverrides() {
+        guard let data = try? JSONEncoder().encode(recipeOverrides) else { return }
+        defaults.set(data, forKey: Self.recipeOverridesKey)
+    }
+'''
+          )
+
+          test_path = Path(
+              "FilmyCameraTests/CameraViewModelPersistenceTests.swift"
+          )
+          test_path.write_text(
+              '''import Foundation
+import XCTest
+@testable import FilmyCamera
+
+@MainActor
+final class CameraViewModelPersistenceTests: XCTestCase {
+    func testInvalidSelectedRecipeIDIsNormalizedAndRewritten() throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(
+            "removed-recipe",
+            forKey: CameraViewModel.selectedRecipeIDKey
+        )
+
+        let viewModel = CameraViewModel(defaults: defaults)
+        let fallbackID = FilmRecipe.builtIns[0].id
+
+        XCTAssertEqual(viewModel.selectedRecipeID, fallbackID)
+        XCTAssertEqual(
+            defaults.string(forKey: CameraViewModel.selectedRecipeIDKey),
+            fallbackID
+        )
+
+        viewModel.selectedRecipeID = "still-invalid"
+        XCTAssertEqual(viewModel.selectedRecipeID, fallbackID)
+        XCTAssertEqual(
+            defaults.string(forKey: CameraViewModel.selectedRecipeIDKey),
+            fallbackID
+        )
+    }
+
+    func testValidSelectedRecipeIDIsPreserved() throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let selectedID = FilmRecipe.builtIns[3].id
+        defaults.set(
+            selectedID,
+            forKey: CameraViewModel.selectedRecipeIDKey
+        )
+
+        let viewModel = CameraViewModel(defaults: defaults)
+
+        XCTAssertEqual(viewModel.selectedRecipeID, selectedID)
+        XCTAssertEqual(viewModel.selectedRecipe.id, selectedID)
+    }
+
+    func testCorruptOverrideDoesNotDiscardValidCustomRecipes() throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        var validRecipe = FilmRecipe.builtIns[1]
+        validRecipe.exposure = 1.25
+        validRecipe.contrast = 1.4
+
+        let validData = try JSONEncoder().encode(validRecipe)
+        let validObject = try JSONSerialization.jsonObject(with: validData)
+        let mixedObject: [String: Any] = [
+            validRecipe.id: validObject,
+            "broken-recipe": ["id": 42]
+        ]
+        defaults.set(
+            try JSONSerialization.data(withJSONObject: mixedObject),
+            forKey: CameraViewModel.recipeOverridesKey
+        )
+        defaults.set(
+            validRecipe.id,
+            forKey: CameraViewModel.selectedRecipeIDKey
+        )
+
+        let viewModel = CameraViewModel(defaults: defaults)
+
+        XCTAssertTrue(viewModel.isCustomized(validRecipe))
+        XCTAssertEqual(viewModel.selectedRecipe.exposure, 1.25, accuracy: 0.0001)
+        XCTAssertEqual(viewModel.selectedRecipe.contrast, 1.4, accuracy: 0.0001)
+
+        let rewrittenData = try XCTUnwrap(
+            defaults.data(forKey: CameraViewModel.recipeOverridesKey)
+        )
+        let rewritten = try JSONDecoder().decode(
+            [String: FilmRecipe].self,
+            from: rewrittenData
+        )
+        XCTAssertEqual(Set(rewritten.keys), [validRecipe.id])
+    }
+
+    func testUnknownUpdatesAreIgnoredAndKnownUpdatesAreSanitized() throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let viewModel = CameraViewModel(defaults: defaults)
+        let initialID = viewModel.selectedRecipeID
+        let unknownRecipe = FilmRecipe(
+            id: "unknown-recipe",
+            name: "Unknown",
+            subtitle: "Not part of the current catalog"
+        )
+
+        viewModel.select(recipe: unknownRecipe)
+        viewModel.update(recipe: unknownRecipe)
+
+        XCTAssertEqual(viewModel.selectedRecipeID, initialID)
+        XCTAssertFalse(viewModel.isCustomized(unknownRecipe))
+
+        let parent = FilmRecipe.builtIns[2]
+        var damagedEdit = parent
+        damagedEdit.exposure = .infinity
+        damagedEdit.saturation = 99
+        viewModel.update(recipe: damagedEdit)
+        viewModel.select(recipe: parent)
+
+        XCTAssertEqual(
+            viewModel.selectedRecipe.exposure,
+            parent.exposure,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(viewModel.selectedRecipe.saturation, 2, accuracy: 0.0001)
+        XCTAssertEqual(viewModel.selectedRecipe.id, parent.id)
+    }
+
+    private func makeDefaults() throws -> (UserDefaults, String) {
+        let suiteName = "CameraViewModelPersistenceTests.\\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        return (defaults, suiteName)
+    }
+}
+''',
+              encoding="utf-8"
+          )
+          PY
+
+      - name: Validate generated persistence patch
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git diff --check
+          grep -q 'decodeRecipeOverrides' \
+            FilmyCamera/ViewModels/CameraViewModel.swift
+          grep -q 'CameraViewModel(defaults: defaults)' \
+            FilmyCameraTests/CameraViewModelPersistenceTests.swift
+          grep -q 'testCorruptOverrideDoesNotDiscardValidCustomRecipes' \
+            FilmyCameraTests/CameraViewModelPersistenceTests.swift
+
+      - name: Commit persistence recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git rm -- .github/workflows/codex-apply-recipe-persistence.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- \
+            FilmyCamera/ViewModels/CameraViewModel.swift \
+            FilmyCameraTests/CameraViewModelPersistenceTests.swift
+          git commit -m "Recover persisted recipe state"
+          git push origin HEAD:codex/recipe-persistence-recovery
