@@ -918,6 +918,23 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         return nil
     }
 
+    /// A configured session without an active device is structurally broken.
+    /// Reusing it would leave every later Resume action in needsRecovery.
+    static func shouldRebuildConfiguredSessionGraph(
+        isConfigured: Bool,
+        hasActiveDevice: Bool
+    ) -> Bool {
+        isConfigured && !hasActiveDevice
+    }
+
+    /// A failed input swap is recoverable only when the previous input was
+    /// restored. Otherwise the remaining outputs belong to an unusable graph.
+    static func shouldResetSessionGraphAfterFailedInputReplacement(
+        restoredPreviousInput: Bool
+    ) -> Bool {
+        !restoredPreviousInput
+    }
+
     private static func exposureBiasBounds(
         lowerBound: Float,
         upperBound: Float
@@ -1035,16 +1052,9 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
 
         // A stopped session keeps its inputs and outputs. Reuse the existing
-        // graph when returning from background or another tab instead of
-        // trying to add duplicate AVFoundation objects.
-        if isConfigured {
-            guard let device = activeDevice() else {
-                resetCaptureCapabilitiesOnQueue()
-                publishRunning(false)
-                publishAvailability(.needsRecovery)
-                publishStatus("Camera needs to be reopened.")
-                return
-            }
+        // graph when returning from background or another tab. If AVFoundation
+        // lost its input, tear down the incomplete graph and rebuild below.
+        if isConfigured, let device = activeDevice() {
             refreshCaptureCapabilitiesOnQueue(for: device)
             configureOrientation()
             session.startRunning()
@@ -1053,6 +1063,14 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             publishAvailability(running ? .running : .unavailable)
             publishStatus(running ? "Camera ready" : "Camera could not start.")
             return
+        }
+        if Self.shouldRebuildConfiguredSessionGraph(
+            isConfigured: isConfigured,
+            hasActiveDevice: activeDevice() != nil
+        ) {
+            resetSessionGraphOnQueue(
+                pendingCaptureStatus: "Camera needs to be reopened."
+            )
         }
 
         guard let device = cameraDeviceForPositionOnQueue(requestedCameraPosition) else {
@@ -1386,7 +1404,13 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
 
         guard replaceCameraInputOnQueue(with: desiredDevice) else {
-            publishStatus("The \(position.title.lowercased()) camera is unavailable right now.")
+            if isConfigured {
+                publishStatus("The \(position.title.lowercased()) camera is unavailable right now.")
+            } else {
+                publishRunning(false)
+                publishAvailability(.needsRecovery)
+                publishStatus("Camera needs to be reopened.")
+            }
             return
         }
 
@@ -1443,7 +1467,13 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
 
         guard replaceCameraInputOnQueue(with: alternateDevice) else {
-            publishStatus("That lens is unavailable right now.")
+            if isConfigured {
+                publishStatus("That lens is unavailable right now.")
+            } else {
+                publishRunning(false)
+                publishAvailability(.needsRecovery)
+                publishStatus("Camera needs to be reopened.")
+            }
             return
         }
 
@@ -1573,10 +1603,22 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
 
         guard session.canAddInput(newInput) else {
+            let restoredPreviousInput: Bool
             if let oldInput, session.canAddInput(oldInput) {
                 session.addInput(oldInput)
+                restoredPreviousInput = true
+            } else {
+                restoredPreviousInput = false
             }
             session.commitConfiguration()
+
+            if Self.shouldResetSessionGraphAfterFailedInputReplacement(
+                restoredPreviousInput: restoredPreviousInput
+            ) {
+                resetSessionGraphOnQueue(
+                    pendingCaptureStatus: "Camera needs to be reopened."
+                )
+            }
             return false
         }
 
@@ -1586,6 +1628,45 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         session.commitConfiguration()
         installRotationCoordinatorOnQueue(for: device)
         return true
+    }
+
+    private func resetSessionGraphOnQueue(pendingCaptureStatus: String) {
+        cancelPendingPhotoOnQueue(status: pendingCaptureStatus)
+        activeConstituentObservation?.invalidate()
+        activeConstituentObservation = nil
+        observedVirtualDeviceID = nil
+
+        let rotationToken = UUID()
+        rotationCoordinatorToken = rotationToken
+        rotationCoordinatorDeviceID = nil
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  self.rotationCoordinatorToken == rotationToken else {
+                return
+            }
+            self.previewRotationObservation?.invalidate()
+            self.captureRotationObservation?.invalidate()
+            self.previewRotationObservation = nil
+            self.captureRotationObservation = nil
+            self.rotationCoordinator = nil
+            self.activeRotationToken = nil
+            self.rotationDevice = nil
+        }
+
+        session.beginConfiguration()
+        for input in session.inputs {
+            session.removeInput(input)
+        }
+        for output in session.outputs {
+            session.removeOutput(output)
+        }
+        session.commitConfiguration()
+
+        isConfigured = false
+        configuredPhotoDimensions = CMVideoDimensions(width: 0, height: 0)
+        focusExposureLocked = false
+        publishFocusExposureLocked(false)
+        resetCaptureCapabilitiesOnQueue()
     }
 
     private func configureStartupLensOnQueue(for device: AVCaptureDevice) {
