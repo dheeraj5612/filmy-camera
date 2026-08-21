@@ -1,0 +1,54 @@
+name: Apply focus and exposure lock metering
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply-focus-lock-fix:
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      github.head_ref == 'codex/focus-exposure-lock-metering'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out focus lock branch
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: codex/focus-exposure-lock-metering
+          fetch-depth: 0
+
+      - name: Apply audited focus lock patch
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 scripts/codex/apply-focus-lock-fix.py
+          git diff --check
+          grep -q 'preferredFocusLockMode' \
+            FilmyCamera/Services/CameraService.swift
+          grep -q 'preferredExposureLockMode' \
+            FilmyCamera/Services/CameraService.swift
+          grep -q 'testFocusLockPrefersOneShotAutofocusBeforeFreezingLensState' \
+            FilmyCameraTests/CameraServiceAvailabilityTests.swift
+
+      - name: Commit focus lock fix
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git rm -- \
+            scripts/codex/apply-focus-lock-fix.py \
+            .github/workflows/codex-focus-lock-trigger.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- \
+            FilmyCamera/Services/CameraService.swift \
+            FilmyCameraTests/CameraServiceAvailabilityTests.swift
+          git commit -m "Meter before locking focus and exposure"
+          git push origin HEAD:codex/focus-exposure-lock-metering
