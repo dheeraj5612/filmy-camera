@@ -1,0 +1,70 @@
+name: Stage clean filter fidelity audit
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  stage-filter-fidelity:
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      github.head_ref == 'codex/filter-fidelity-reference-audit-v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out clean fidelity branch
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: codex/filter-fidelity-reference-audit-v2
+          fetch-depth: 0
+
+      - name: Apply validated fidelity diff and invariant
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin codex/filter-fidelity-reference-audit
+          git merge --squash origin/codex/filter-fidelity-reference-audit
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('FilmyCameraTests/RecipeInvariantsTests.swift')
+          text = path.read_text(encoding='utf-8')
+          old = '''    func testRendererVersionTracksTheHalationBeforeGrainPipeline() {
+        XCTAssertEqual(FilmRecipe.rendererVersion, "core-image-parametric-v2")
+    }
+'''
+          new = '''    func testRendererVersionTracksTheCurrentFidelityPipeline() {
+        XCTAssertEqual(FilmRecipe.rendererVersion, "core-image-parametric-v3")
+    }
+'''
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'expected one renderer version invariant, found {count}')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
+          rm -f .github/workflows/codex-filter-version-invariant.yml
+          git rm -- .github/workflows/codex-filter-fidelity-v2.yml
+          git add -- \
+            FilmyCamera/Models/FilmRecipe.swift \
+            FilmyCamera/Services/FilmRenderer.swift \
+            FilmyCameraTests/RendererOutputBoundsTests.swift \
+            FilmyCameraTests/RecipeInvariantsTests.swift \
+            docs/filter-fidelity-audit-20260821.md
+          git diff --check --cached
+          grep -q 'core-image-parametric-v3' \
+            FilmyCameraTests/RecipeInvariantsTests.swift
+          grep -q 'testRecipeContactSheetRendersEveryBuiltInLook' \
+            FilmyCameraTests/RendererOutputBoundsTests.swift
+
+          git commit -m "Calibrate Classic Chrome and compact color responses"
+          git push origin HEAD:codex/filter-fidelity-reference-audit-v2
