@@ -647,4 +647,38 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         )
     }
 
+    func testConfiguredSessionGraphRebuildsOnlyWhenItsInputIsMissing() {
+        XCTAssertTrue(
+            CameraService.shouldRebuildConfiguredSessionGraph(
+                isConfigured: true,
+                hasActiveDevice: false
+            )
+        )
+        XCTAssertFalse(
+            CameraService.shouldRebuildConfiguredSessionGraph(
+                isConfigured: true,
+                hasActiveDevice: true
+            )
+        )
+        XCTAssertFalse(
+            CameraService.shouldRebuildConfiguredSessionGraph(
+                isConfigured: false,
+                hasActiveDevice: false
+            )
+        )
+    }
+
+    func testFailedInputReplacementResetsOnlyWhenPreviousInputWasLost() {
+        XCTAssertFalse(
+            CameraService.shouldResetSessionGraphAfterFailedInputReplacement(
+                restoredPreviousInput: true
+            )
+        )
+        XCTAssertTrue(
+            CameraService.shouldResetSessionGraphAfterFailedInputReplacement(
+                restoredPreviousInput: false
+            )
+        )
+    }
+
 }
