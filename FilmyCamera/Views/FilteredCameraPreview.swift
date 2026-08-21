@@ -47,6 +47,7 @@ public struct FilteredCameraPreview: UIViewRepresentable {
         let view = FilteredCameraPreviewView(frame: .zero)
         let coordinator = context.coordinator
         coordinator.previewView = view
+        coordinator.previewLayerID = cameraService.installPreviewLayer(view.layer)
         view.update(
             recipe: recipe,
             quality: quality,
@@ -84,6 +85,11 @@ public struct FilteredCameraPreview: UIViewRepresentable {
         if let frameHandlerID = coordinator.frameHandlerID {
             coordinator.service?.removeFrameHandler(frameHandlerID)
         }
+        if let previewLayerID = coordinator.previewLayerID {
+            coordinator.service?.removePreviewLayer(previewLayerID)
+        }
+        coordinator.frameHandlerID = nil
+        coordinator.previewLayerID = nil
         coordinator.previewView = nil
         uiView.clearImage()
     }
@@ -92,6 +98,7 @@ public struct FilteredCameraPreview: UIViewRepresentable {
         fileprivate weak var previewView: FilteredCameraPreviewView?
         fileprivate weak var service: CameraService?
         fileprivate var frameHandlerID: UUID?
+        fileprivate var previewLayerID: UUID?
         fileprivate var recipe: FilmRecipe
         fileprivate var quality: FilmRenderer.Quality
 

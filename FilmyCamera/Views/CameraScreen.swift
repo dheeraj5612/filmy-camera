@@ -851,37 +851,45 @@ struct CameraScreen: View {
         for location: CGPoint,
         in viewSize: CGSize
     ) -> CGPoint {
-        guard viewSize.width > 0,
-              viewSize.height > 0,
-              camera.previewFrameSize.width > 0,
-              camera.previewFrameSize.height > 0 else {
-            return CGPoint(
+        let rotatedPreviewPoint: CGPoint
+        if viewSize.width > 0,
+           viewSize.height > 0,
+           camera.previewFrameSize.width > 0,
+           camera.previewFrameSize.height > 0 {
+            let sourceSize = camera.previewFrameSize
+            let scale = max(
+                viewSize.width / sourceSize.width,
+                viewSize.height / sourceSize.height
+            )
+            let displayedSize = CGSize(
+                width: sourceSize.width * scale,
+                height: sourceSize.height * scale
+            )
+            let cropOffset = CGPoint(
+                x: (viewSize.width - displayedSize.width) / 2,
+                y: (viewSize.height - displayedSize.height) / 2
+            )
+
+            // Core Image uses bottom-left coordinates while SwiftUI touch
+            // locations start at the top-left. Resolve aspect-fill first in
+            // the rotated preview buffer, then undo rotation and mirroring.
+            let imageX = (location.x - cropOffset.x) / scale
+            let imageY = (viewSize.height - location.y - cropOffset.y) / scale
+            rotatedPreviewPoint = CGPoint(
+                x: min(max(imageX / sourceSize.width, 0), 1),
+                y: min(max(1 - imageY / sourceSize.height, 0), 1)
+            )
+        } else {
+            rotatedPreviewPoint = CGPoint(
                 x: min(max(location.x / max(viewSize.width, 1), 0), 1),
                 y: min(max(location.y / max(viewSize.height, 1), 0), 1)
             )
         }
 
-        let sourceSize = camera.previewFrameSize
-        let scale = max(
-            viewSize.width / sourceSize.width,
-            viewSize.height / sourceSize.height
-        )
-        let displayedSize = CGSize(
-            width: sourceSize.width * scale,
-            height: sourceSize.height * scale
-        )
-        let cropOffset = CGPoint(
-            x: (viewSize.width - displayedSize.width) / 2,
-            y: (viewSize.height - displayedSize.height) / 2
-        )
-
-        // The Metal preview uses Core Image's bottom-left coordinate space,
-        // while SwiftUI touch locations start at the top-left.
-        let imageX = (location.x - cropOffset.x) / scale
-        let imageY = (viewSize.height - location.y - cropOffset.y) / scale
-        return CGPoint(
-            x: min(max(imageX / sourceSize.width, 0), 1),
-            y: min(max(1 - imageY / sourceSize.height, 0), 1)
+        return CameraService.captureDevicePoint(
+            fromRotatedPreviewPoint: rotatedPreviewPoint,
+            rotationAngle: camera.previewRotationAngle,
+            mirrored: camera.previewMirrored
         )
     }
 

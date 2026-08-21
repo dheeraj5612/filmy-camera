@@ -491,4 +491,65 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         )
     }
 
+    func testCaptureDevicePointUndoesCardinalPreviewRotations() {
+        let previewPoint = CGPoint(x: 0.2, y: 0.3)
+        let zero = CameraService.captureDevicePoint(
+            fromRotatedPreviewPoint: previewPoint,
+            rotationAngle: 0,
+            mirrored: false
+        )
+        let ninety = CameraService.captureDevicePoint(
+            fromRotatedPreviewPoint: previewPoint,
+            rotationAngle: 90,
+            mirrored: false
+        )
+        let oneEighty = CameraService.captureDevicePoint(
+            fromRotatedPreviewPoint: previewPoint,
+            rotationAngle: 180,
+            mirrored: false
+        )
+        let twoSeventy = CameraService.captureDevicePoint(
+            fromRotatedPreviewPoint: previewPoint,
+            rotationAngle: 270,
+            mirrored: false
+        )
+
+        XCTAssertEqual(zero.x, 0.2, accuracy: 0.0001)
+        XCTAssertEqual(zero.y, 0.3, accuracy: 0.0001)
+        XCTAssertEqual(ninety.x, 0.3, accuracy: 0.0001)
+        XCTAssertEqual(ninety.y, 0.8, accuracy: 0.0001)
+        XCTAssertEqual(oneEighty.x, 0.8, accuracy: 0.0001)
+        XCTAssertEqual(oneEighty.y, 0.7, accuracy: 0.0001)
+        XCTAssertEqual(twoSeventy.x, 0.7, accuracy: 0.0001)
+        XCTAssertEqual(twoSeventy.y, 0.2, accuracy: 0.0001)
+    }
+
+    func testCaptureDevicePointUndoesPreviewMirroringBeforeRotation() {
+        let point = CameraService.captureDevicePoint(
+            fromRotatedPreviewPoint: CGPoint(x: 0.2, y: 0.3),
+            rotationAngle: 90,
+            mirrored: true
+        )
+
+        XCTAssertEqual(point.x, 0.3, accuracy: 0.0001)
+        XCTAssertEqual(point.y, 0.2, accuracy: 0.0001)
+    }
+
+    func testCaptureDevicePointNormalizesAnglesAndInvalidCoordinates() {
+        let negativeAngle = CameraService.captureDevicePoint(
+            fromRotatedPreviewPoint: CGPoint(x: 0.2, y: 0.3),
+            rotationAngle: -90,
+            mirrored: false
+        )
+        let invalidPoint = CameraService.captureDevicePoint(
+            fromRotatedPreviewPoint: CGPoint(x: CGFloat.nan, y: CGFloat.infinity),
+            rotationAngle: CGFloat.nan,
+            mirrored: false
+        )
+
+        XCTAssertEqual(negativeAngle.x, 0.7, accuracy: 0.0001)
+        XCTAssertEqual(negativeAngle.y, 0.2, accuracy: 0.0001)
+        XCTAssertEqual(invalidPoint, CGPoint(x: 0.5, y: 0.5))
+    }
+
 }
