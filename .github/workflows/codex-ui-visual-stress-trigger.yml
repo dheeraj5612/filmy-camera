@@ -1,0 +1,80 @@
+name: Apply UI visual stress pass
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply-ui-stress-pass:
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      github.head_ref == 'codex/ui-visual-stress-pass'
+    runs-on: macos-15
+    timeout-minutes: 15
+    env:
+      XCODEGEN_VERSION: 2.45.4
+      XCODEGEN_SHA256: 090ec29491aad50aec10631bf6e62253fed733c50f3aab0f5ffc86bc170bdbef
+      XCODEGEN_BINARY_SHA256: 6aa2b4da95304b343bea12890c59f9655aa428c08b351d57d592cfab4e88a9f1
+
+    steps:
+      - name: Check out UI branch
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: codex/ui-visual-stress-pass
+          fetch-depth: 0
+
+      - name: Apply audited UI patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/codex/apply-ui-visual-stress-pass.py
+          git diff --check
+          grep -q 'RecipeDetailCommitPolicy' FilmyCamera/Views/RecipePickerView.swift
+          grep -q 'proxy.scrollTo(newValue' FilmyCamera/Views/RecipePickerView.swift
+          grep -q 'testReturningCustomizedRecipeToOriginalRequestsReset' \
+            FilmyCameraTests/RecipeDetailCommitPolicyTests.swift
+
+      - name: Install pinned XcodeGen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive_path="${RUNNER_TEMP}/xcodegen.zip"
+          gh release download "${XCODEGEN_VERSION}" \
+            --repo yonaskolb/XcodeGen \
+            --pattern xcodegen.zip \
+            --output "${archive_path}"
+          echo "${XCODEGEN_SHA256}  ${archive_path}" | shasum -a 256 --check
+          mkdir -p .ci
+          unzip -q "${archive_path}" -d .ci
+          xcodegen_path="${GITHUB_WORKSPACE}/.ci/xcodegen/bin/xcodegen"
+          [[ -x "${xcodegen_path}" && ! -L "${xcodegen_path}" ]]
+          echo "${XCODEGEN_BINARY_SHA256}  ${xcodegen_path}" | shasum -a 256 --check
+          grep -Fxq "Version: ${XCODEGEN_VERSION}" <<<"$("${xcodegen_path}" --version 2>&1)"
+          echo "${GITHUB_WORKSPACE}/.ci/xcodegen/bin" >> "${GITHUB_PATH}"
+
+      - name: Synchronize project and commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodegen generate --spec project.yml
+          git diff --check
+          grep -q 'RecipeDetailCommitPolicyTests.swift' \
+            FilmyCamera.xcodeproj/project.pbxproj
+
+          git rm -- \
+            scripts/codex/apply-ui-visual-stress-pass.py \
+            .github/workflows/codex-ui-visual-stress-trigger.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- \
+            FilmyCamera/Views/RecipePickerView.swift \
+            FilmyCameraTests/RecipeDetailCommitPolicyTests.swift \
+            FilmyCamera.xcodeproj
+          git commit -m "Stress harden recipe editor UI"
+          git push origin HEAD:codex/ui-visual-stress-pass
