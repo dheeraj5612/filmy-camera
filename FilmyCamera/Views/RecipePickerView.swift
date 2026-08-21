@@ -23,12 +23,20 @@ struct RecipePickerView: View {
 
     private var recipeTileSize: CGSize {
         if compact {
-            return CGSize(width: 132, height: 80)
+            return CGSize(width: 120, height: 76)
         }
 
         return dynamicTypeSize.isAccessibilitySize
-            ? CGSize(width: 174, height: 138)
+            ? CGSize(width: 160, height: 120)
             : CGSize(width: 142, height: 86)
+    }
+
+    private var tileSpacing: CGFloat {
+        compact ? 10 : 12
+    }
+
+    private var railHeight: CGFloat {
+        recipeTileSize.height + 10
     }
 
     private var selectedRecipe: FilmRecipe? {
@@ -37,38 +45,14 @@ struct RecipePickerView: View {
 
     var body: some View {
         ScrollViewReader { proxy in
-            VStack(alignment: .leading, spacing: 9) {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text("CURRENT LOOK")
-                        .font(.system(.caption2, design: .monospaced).weight(.bold))
-                        .tracking(1.2)
-                        .foregroundStyle(FilmyTheme.tertiary)
-
-                    if let selectedRecipe {
-                        Text(selectedRecipe.name)
-                            .font(.system(.caption, design: .rounded).weight(.semibold))
-                            .foregroundStyle(FilmyTheme.primary)
-                            .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    Spacer(minLength: 8)
-
-                    if recipes.count > 1 {
-                        Label("Swipe to browse", systemImage: "arrow.left.and.right")
-                            .font(.system(.caption2, design: .rounded).weight(.semibold))
-                            .foregroundStyle(FilmyTheme.tertiary)
-                            .accessibilityHidden(true)
-                    }
+            VStack(alignment: .leading, spacing: compact ? 0 : 8) {
+                if !compact {
+                    pickerHeader
                 }
-                .padding(.horizontal, 3)
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Current look")
-                .accessibilityValue(selectedRecipe?.name ?? "None selected")
 
                 ZStack {
                     ScrollView(.horizontal, showsIndicators: false) {
-                        LazyHStack(spacing: 12) {
+                        LazyHStack(spacing: tileSpacing) {
                             ForEach(recipes) { recipe in
                                 Button {
                                     withAnimation(reduceMotion ? nil : .snappy(duration: 0.22)) {
@@ -94,6 +78,7 @@ struct RecipePickerView: View {
                                     }
                                 }
                             }
+                        }
                         .scrollTargetLayout()
                         .padding(.horizontal, 3)
                         .padding(.vertical, 5)
@@ -112,30 +97,89 @@ struct RecipePickerView: View {
                     }
 
                     HStack {
-                        LinearGradient(colors: [FilmyTheme.background, .clear], startPoint: .leading, endPoint: .trailing)
-                            .frame(width: 14)
+                        LinearGradient(
+                            colors: [FilmyTheme.background, .clear],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: 12)
+
                         Spacer()
-                        LinearGradient(colors: [.clear, FilmyTheme.background], startPoint: .leading, endPoint: .trailing)
-                            .frame(width: 28)
+
+                        LinearGradient(
+                            colors: [.clear, FilmyTheme.background],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: compact ? 18 : 26)
                     }
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
                 }
+                .frame(height: railHeight)
+                .accessibilityIdentifier("recipe-rail")
             }
-        }
+            .fixedSize(horizontal: false, vertical: true)
         }
         .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("recipe-picker")
         .accessibilityLabel("Film recipe picker. Swipe left or right to browse looks.")
+    }
+
+    private var pickerHeader: some View {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("BROWSE LOOKS")
+                        .font(.system(.caption2, design: .monospaced).weight(.bold))
+                        .tracking(1.2)
+                        .foregroundStyle(FilmyTheme.tertiary)
+
+                    if let selectedRecipe {
+                        Text(selectedRecipe.name)
+                            .font(.system(.caption, design: .rounded).weight(.semibold))
+                            .foregroundStyle(FilmyTheme.primary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text("BROWSE LOOKS")
+                        .font(.system(.caption2, design: .monospaced).weight(.bold))
+                        .tracking(1.2)
+                        .foregroundStyle(FilmyTheme.tertiary)
+
+                    if let selectedRecipe {
+                        Text(selectedRecipe.name)
+                            .font(.system(.caption, design: .rounded).weight(.semibold))
+                            .foregroundStyle(FilmyTheme.primary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    if recipes.count > 1 {
+                        Label("Swipe", systemImage: "arrow.left.and.right")
+                            .font(.system(.caption2, design: .rounded).weight(.semibold))
+                            .foregroundStyle(FilmyTheme.tertiary)
+                            .accessibilityHidden(true)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 3)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Browse looks")
+        .accessibilityValue(selectedRecipe?.name ?? "None selected")
     }
 
     @ViewBuilder
     private func recipeTile(_ recipe: FilmRecipe) -> some View {
         let isSelected = selectedRecipeID == recipe.id
+        let cornerRadius: CGFloat = compact ? 16 : 20
 
         ZStack(alignment: .topTrailing) {
-            // Compact camera chrome has a deliberately short tile. Passing the
-            // compact variant here keeps the descriptor out of that 80pt tile
-            // and lets the recipe name use the compact, one-line treatment.
             RecipeSwatch(recipe: recipe, isSelected: isSelected, compact: compact)
                 .frame(width: recipeTileSize.width, height: recipeTileSize.height)
 
@@ -146,21 +190,21 @@ struct RecipePickerView: View {
                     Text("LIVE")
                         .font(.system(size: 10, weight: .black, design: .rounded))
                 }
-                    .foregroundStyle(FilmyTheme.background)
-                    .padding(.horizontal, 8)
-                    .frame(minHeight: 26)
-                    .background(FilmyTheme.accent, in: Capsule())
-                    .padding(7)
-                    .transition(.scale.combined(with: .opacity))
-                    .accessibilityHidden(true)
+                .foregroundStyle(FilmyTheme.background)
+                .padding(.horizontal, 8)
+                .frame(minHeight: 26)
+                .background(FilmyTheme.accent, in: Capsule())
+                .padding(7)
+                .transition(.scale.combined(with: .opacity))
+                .accessibilityHidden(true)
             }
         }
         .background(
             isSelected ? FilmyTheme.accent.opacity(0.14) : Color.white.opacity(0.035),
-            in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+            in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         )
         .overlay {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .stroke(
                     isSelected ? FilmyTheme.accent.opacity(0.72) : Color.white.opacity(0.1),
                     lineWidth: isSelected ? 1.5 : 1
