@@ -434,11 +434,14 @@ final class RecipeInvariantsTests: XCTestCase {
         UserDefaults.standard.set("recipe-that-no-longer-exists", forKey: selectedRecipeKey)
 
         let model = await CameraViewModel()
-        let persistedID = await model.selectedRecipeID
+        let fallbackID = FilmRecipe.builtIns[0].id
+        let selectedID = await model.selectedRecipeID
         let resolvedRecipe = await model.selectedRecipe
+        let rewrittenID = UserDefaults.standard.string(forKey: selectedRecipeKey)
 
-        XCTAssertEqual(persistedID, "recipe-that-no-longer-exists")
+        XCTAssertEqual(selectedID, fallbackID)
         XCTAssertEqual(resolvedRecipe, FilmRecipe.builtIns[0])
+        XCTAssertEqual(rewrittenID, fallbackID)
     }
 
     func testCaptureFailureReturnsToIdleWithoutLeavingAReviewFrame() async {
