@@ -140,3 +140,62 @@ The public Fujifilm material still defines the user-facing recipe controls, not
 the sensor/ISP transfer functions or a general-purpose LUT. Model-specific
 downloadable LUTs and community profiles therefore remain excluded from the
 commercial bundle without explicit redistribution rights and calibration data.
+
+## Film-response and camera-pipeline audit — 2026-08-19
+
+This pass rechecked the current app against source snapshots rather than only
+repository descriptions:
+
+- [GPUImage3 `84466fc3`](https://github.com/BradLarson/GPUImage3/tree/84466fc344e1220238c1c07e94e91207caaabe51)
+  (BSD-3-Clause) bounds in-flight camera-frame work and bridges native YUV
+  buffers into its reusable Metal pipeline.
+- [MetalPetal `f9b78897`](https://github.com/MetalPetal/MetalPetal/tree/f9b78897bd4214bb097f352a1bde0a4f4a1e2ddb)
+  (MIT) treats input and output color spaces as explicit boundaries, reuses a
+  heavyweight render context, and keeps intermediate image graphs immutable.
+- [NextLevel `2fa42500`](https://github.com/NextLevel/NextLevel/tree/2fa42500caf7edd7136d23b64d9ecb5684d93d07)
+  (MIT) isolates capture-session interruption/runtime-error handling from the
+  view layer.
+- [dazz-retro-camera `c8a7f269`](https://github.com/ganjmeng/dazz-retro-camera/tree/c8a7f269900cacfb9388d0beb3998036af1f5104)
+  (MIT) is a similar app-idea reference whose documented finishing pipeline
+  derives bloom/halation before adding grain and vignette.
+- [Filmulator `57fbaec5`](https://github.com/CarVac/filmulator-gui/tree/57fbaec57555432d86d3aa632990cd8fa09114ad)
+  (GPL-3.0-or-later) models spatial development effects and highlight
+  compression. It is research-only here: no source or algorithm was copied.
+- [SilverGrain `0db9850c`](https://github.com/kjerk/silvergrain/tree/0db9850cd93b07bea2f833b869e4ed8b1594bd3d)
+  (AGPL-3.0) demonstrates deterministic, resolution-aware, luminance-preserving
+  grain. It is also research-only; its implementation was not incorporated.
+
+The resulting code changes remain original and dependency-free. AVFoundation
+color attachments are now preserved when a preview `CIImage` is created, then
+converted only at FilmRenderer's explicit sRGB materialization boundary.
+Halation is derived before grain so the synthetic texture cannot contaminate
+the highlight mask. Session interruptions and runtime errors now terminate any
+pending photo request before recovery, preventing a permanently busy shutter.
+
+The audit intentionally did not port Filmulator or SilverGrain code because
+doing so would add reciprocal-license obligations to this App Store target. It
+also did not adopt third-party LUTs or stock calibration data.
+
+## G7 X-inspired compact look — 2026-08-19
+
+The `g7x-compact` recipe is an original approximation based only on Canon's
+public [PowerShot G7 X Mark III specifications](https://www.usa.canon.com/support/p/powershot-g7-x-mark-iii)
+and [Camera Museum overview](https://global.canon/en/c-museum/product/dcc884.html).
+Those sources establish the relevant product envelope: a 20.1-megapixel
+one-inch stacked CMOS sensor, DIGIC 8 processing, a 24–100 mm-equivalent
+f/1.8–2.8 zoom, Auto ambience/white-priority balance, and a Standard Picture
+Style option. They do not publish a transferable tone curve, color matrix, or
+Picture Style payload.
+
+The implementation therefore targets the observable intent rather than an
+exact match: clean compact-camera color, slightly warm portrait midtones,
+crisp greens and blues, moderate contrast, smooth highlight protection,
+controlled noise reduction, and no synthetic film grain or halation. Its
+dedicated parametric film base and editable recipe controls run through the
+same deterministic preview/photo/export pipeline as every other look.
+
+The app records Canon-specific public references and a not-calibrated-to-Canon
+status in saved-photo provenance. It makes no claim to reproduce the physical
+camera's sensor, 24–100 mm lens, DIGIC processing, optical depth of field, or
+pixel-identical JPEG output; no Canon LUT, Picture Style file, firmware,
+sample-image pixels, code, or calibration data is included.

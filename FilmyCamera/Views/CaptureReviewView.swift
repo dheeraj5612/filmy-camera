@@ -21,12 +21,11 @@ struct CaptureReviewView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("REVIEW FRAME")
-                                .font(.system(.caption2, design: .rounded).weight(.black))
-                                .tracking(1.5)
+                            Text("Review")
+                                .font(.system(.caption, design: .default).weight(.semibold))
                                 .foregroundStyle(FilmyTheme.accent)
                             Text(recipe.name)
-                                .font(.system(.title3, design: .rounded).weight(.black))
+                                .font(.system(.title2, design: .default).weight(.bold))
                                 .foregroundStyle(FilmyTheme.primary)
                                 .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 2)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -42,7 +41,7 @@ struct CaptureReviewView: View {
                                 .font(.system(size: 13, weight: .bold))
                                 .foregroundStyle(FilmyTheme.primary)
                                 .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
-                                .background(FilmyTheme.panel, in: Circle())
+                                .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Discard frame")
@@ -82,7 +81,7 @@ struct CaptureReviewView: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 10)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                         .overlay {
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
                                 .stroke(Color.white.opacity(0.16), lineWidth: 1)
@@ -91,9 +90,9 @@ struct CaptureReviewView: View {
                         .accessibilityElement(children: .combine)
                         .accessibilityLabel("Recipe \(recipe.name)")
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .overlay {
-                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
                             .stroke(Color.white.opacity(0.14), lineWidth: 1)
                     }
                     .accessibilityElement(children: .combine)
@@ -176,10 +175,10 @@ struct CaptureReviewView: View {
             dismiss()
         } label: {
             Label("Retake", systemImage: "arrow.counterclockwise")
-                .font(.system(.body, design: .rounded).weight(.bold))
+                .font(.system(.body, design: .default).weight(.semibold))
                 .foregroundStyle(FilmyTheme.primary)
                 .frame(maxWidth: .infinity, minHeight: 52)
-                .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
         .disabled(isSaving)
@@ -197,18 +196,10 @@ struct CaptureReviewView: View {
                     Label("Keep Frame", systemImage: "checkmark")
                 }
             }
-            .font(.system(.body, design: .rounded).weight(.bold))
-            .foregroundStyle(FilmyTheme.background)
+            .font(.system(.body, design: .default).weight(.semibold))
+            .foregroundStyle(.white)
             .frame(maxWidth: .infinity, minHeight: 52)
-            .background(
-                LinearGradient(
-                    colors: [FilmyTheme.accent, FilmyTheme.accentWarm],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-            )
-            .shadow(color: FilmyTheme.accent.opacity(0.24), radius: 14, y: 7)
+            .background(FilmyTheme.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
         .disabled(isSaving)

@@ -41,7 +41,7 @@ struct OnboardingView: View {
             message: "When you choose to keep a frame, Photos access lets you save it and revisit the recipe details in Roll.",
             icon: "photo.on.rectangle.angled",
             detail: "Save only when you choose",
-            accent: Color(red: 0.89, green: 0.52, blue: 0.38)
+            accent: FilmyTheme.accentWarm
         )
     ]
 
@@ -56,17 +56,9 @@ struct OnboardingView: View {
                 .ignoresSafeArea()
 
             LinearGradient(
-                colors: [Self.pages[selectedPage].accent.opacity(0.13), .clear, Color.black.opacity(0.22)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
-
-            RadialGradient(
-                colors: [Self.pages[selectedPage].accent.opacity(0.15), .clear],
-                center: .topTrailing,
-                startRadius: 12,
-                endRadius: 390
+                colors: [Self.pages[selectedPage].accent.opacity(0.1), .clear],
+                startPoint: .top,
+                endPoint: .center
             )
             .ignoresSafeArea()
 
@@ -92,20 +84,14 @@ struct OnboardingView: View {
     private var header: some View {
         HStack(alignment: .center, spacing: 12) {
             HStack(spacing: 9) {
-                ZStack {
-                    Circle()
-                        .fill(FilmyTheme.accent.opacity(0.14))
-                        .frame(width: 30, height: 30)
-
-                    Image(systemName: "circle.lefthalf.filled")
-                        .font(.system(.caption, weight: .bold))
-                        .foregroundStyle(FilmyTheme.accent)
-                }
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(FilmyTheme.accent)
+                    .frame(width: 4, height: 26)
                 .accessibilityHidden(true)
 
-                Text("FILMY CAMERA")
-                    .font(.system(size: 12, weight: .black, design: .rounded))
-                    .tracking(1.8)
+                Text("FILMY")
+                    .font(.system(size: 14, weight: .bold))
+                    .tracking(0.4)
                     .foregroundStyle(FilmyTheme.primary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.78)
@@ -114,7 +100,7 @@ struct OnboardingView: View {
             Spacer(minLength: 12)
 
             Text("\(String(format: "%02d", selectedPage + 1)) / \(String(format: "%02d", Self.pages.count))")
-                .font(.system(.caption2, design: .monospaced).weight(.bold))
+                .font(.system(.caption2, design: .default).weight(.semibold))
                 .foregroundStyle(Self.pages[selectedPage].accent)
                 .monospacedDigit()
                 .accessibilityLabel("Introduction page \(selectedPage + 1) of \(Self.pages.count)")
@@ -122,7 +108,7 @@ struct OnboardingView: View {
             Button("Skip") {
                 onFinish()
             }
-            .font(.system(.subheadline, design: .rounded).weight(.semibold))
+            .font(.system(.subheadline, design: .default).weight(.semibold))
             .foregroundStyle(FilmyTheme.secondary)
             .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
             .contentShape(Rectangle())
@@ -141,12 +127,11 @@ struct OnboardingView: View {
 
                 VStack(alignment: .leading, spacing: 10) {
                     Text(page.eyebrow)
-                        .font(.system(.caption2, design: .rounded).weight(.black))
-                        .tracking(1.6)
+                        .font(.system(.caption, design: .default).weight(.semibold))
                         .foregroundStyle(page.accent)
 
                     Text(page.title)
-                        .font(.system(.largeTitle, design: .rounded).weight(.bold))
+                        .font(.system(size: 38, weight: .bold, design: .default))
                         .foregroundStyle(FilmyTheme.primary)
                         .fixedSize(horizontal: false, vertical: true)
 
@@ -162,16 +147,15 @@ struct OnboardingView: View {
                         .font(.system(.headline, weight: .semibold))
                         .foregroundStyle(page.accent)
                         .frame(width: 38, height: 38)
-                        .background(page.accent.opacity(0.12), in: Circle())
+                            .background(page.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text("THE POINT")
-                            .font(.system(.caption2, design: .rounded).weight(.black))
-                            .tracking(1.2)
+                            .font(.system(.caption2, design: .default).weight(.semibold))
                             .foregroundStyle(FilmyTheme.tertiary)
 
                         Text(page.detail)
-                            .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                            .font(.system(.subheadline, design: .default).weight(.semibold))
                             .foregroundStyle(FilmyTheme.primary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -212,7 +196,7 @@ struct OnboardingView: View {
 
     private func visual(for page: Page) -> some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(
                     LinearGradient(
                         colors: [page.accent.opacity(0.18), FilmyTheme.panel.opacity(0.96), Color.black.opacity(0.8)],
@@ -249,7 +233,7 @@ struct OnboardingView: View {
                 Spacer(minLength: 8)
 
                 ZStack {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(
                             LinearGradient(
                                 colors: [page.accent.opacity(0.75), page.accent.opacity(0.16), Color.black.opacity(0.72)],
@@ -275,7 +259,7 @@ struct OnboardingView: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: 158)
                 .overlay {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .stroke(Color.white.opacity(0.16), lineWidth: 1)
                 }
                 .overlay(alignment: .topLeading) {
@@ -309,10 +293,10 @@ struct OnboardingView: View {
         .frame(maxWidth: .infinity)
         .frame(height: 284)
         .overlay {
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Color.white.opacity(0.12), lineWidth: 1)
         }
-        .shadow(color: page.accent.opacity(0.1), radius: 24, y: 12)
+        .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
         .accessibilityHidden(true)
         // The viewfinder card is decorative and already has an accessible
         // semantic explanation below it. Keep its typography bounded so a
@@ -351,7 +335,7 @@ struct OnboardingView: View {
                 Spacer(minLength: 12)
 
                 Text("Swipe or tap continue")
-                    .font(.system(.caption2, design: .rounded).weight(.semibold))
+                        .font(.system(.caption2, design: .default).weight(.semibold))
                     .foregroundStyle(FilmyTheme.tertiary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
@@ -387,20 +371,13 @@ struct OnboardingView: View {
                     Image(systemName: selectedPage == Self.pages.count - 1 ? "camera.fill" : "arrow.right")
                         .accessibilityHidden(true)
                 }
-                .font(.system(.headline, design: .rounded).weight(.bold))
-                .foregroundStyle(FilmyTheme.background)
+                .font(.system(.headline, design: .default).weight(.semibold))
+                .foregroundStyle(.white)
                 .frame(maxWidth: .infinity, minHeight: 56)
-                .background(
-                    LinearGradient(
-                        colors: [FilmyTheme.accent, FilmyTheme.accent.opacity(0.82)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    in: RoundedRectangle(cornerRadius: 17, style: .continuous)
-                )
+                .background(FilmyTheme.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 17, style: .continuous)
-                        .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
                 }
             }
             .buttonStyle(.plain)
@@ -410,7 +387,7 @@ struct OnboardingView: View {
             Button("Skip for now") {
                 onFinish()
             }
-            .font(.system(.subheadline, design: .rounded).weight(.semibold))
+            .font(.system(.subheadline, design: .default).weight(.semibold))
             .foregroundStyle(FilmyTheme.secondary)
             .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
             .contentShape(Rectangle())

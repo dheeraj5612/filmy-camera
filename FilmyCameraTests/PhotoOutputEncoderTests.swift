@@ -130,6 +130,42 @@ final class PhotoOutputEncoderTests: XCTestCase {
         XCTAssertEqual(metadata.provenance.calibration, .notCalibratedToFujifilmHardware)
     }
 
+    func testJPEGProvenancePreservesG7XCanonBoundary() throws {
+        var recipe = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == "g7x-compact" })
+        recipe.markUserModified(parentRecipeID: recipe.id)
+
+        let colorSpace = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        let context = try XCTUnwrap(CGContext(
+            data: nil,
+            width: 1,
+            height: 1,
+            bitsPerComponent: 8,
+            bytesPerRow: 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        let image = try XCTUnwrap(context.makeImage())
+        let output = try XCTUnwrap(PhotoOutputEncoder.jpegData(
+            for: image,
+            sourceData: try sourceJPEG(for: image),
+            capturedAt: Date(timeIntervalSince1970: 0),
+            recipe: recipe
+        ))
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(output as CFData, nil))
+        let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any])
+        let exif = try XCTUnwrap(properties[kCGImagePropertyExifDictionary as String] as? [String: Any])
+        let comment = try XCTUnwrap(exif[kCGImagePropertyExifUserComment as String] as? String)
+        let data = try XCTUnwrap(comment.data(using: .utf8))
+        let metadata = try JSONDecoder().decode(PhotoOutputEncoder.RecipeProvenanceMetadata.self, from: data)
+
+        XCTAssertEqual(metadata.recipeID, "g7x-compact")
+        XCTAssertEqual(metadata.filmBase, .compactDigital)
+        XCTAssertEqual(metadata.provenance.source, .userModified)
+        XCTAssertEqual(metadata.provenance.calibration, .notCalibratedToCanonHardware)
+        XCTAssertEqual(metadata.provenance.references, FilmRecipe.g7XPublicReferences)
+        XCTAssertTrue(metadata.provenance.isComplete)
+    }
+
     private func sourceJPEG(for image: CGImage) throws -> Data {
         let data = NSMutableData()
         let destination = try XCTUnwrap(CGImageDestinationCreateWithData(

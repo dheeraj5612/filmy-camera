@@ -12,11 +12,13 @@ final class RecipeReferenceCatalogTests: XCTestCase {
         XCTAssertEqual(Set(entries.map(\.currentRecipeID)).count, entries.count)
         XCTAssertEqual(
             Set(entries.map(\.currentRecipeID)),
-            Set(FilmRecipe.builtIns.map(\.id).filter { $0 != "sepia-archive" })
+            Set(FilmRecipe.builtIns.map(\.id).filter {
+                !["sepia-archive", "g7x-compact"].contains($0)
+            })
         )
         XCTAssertEqual(
             FilmRecipeReferenceCatalog.document.intentionallyUnlistedBuiltInRecipeIDs,
-            ["sepia-archive"]
+            ["sepia-archive", "g7x-compact"]
         )
     }
 

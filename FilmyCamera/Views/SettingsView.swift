@@ -45,56 +45,20 @@ struct SettingsView: View {
     }
 
     private var settingsHeader: some View {
-        VStack(alignment: .leading, spacing: 13) {
-            SectionHeading(eyebrow: "Control room", title: "Settings")
-
-            HStack(spacing: 8) {
-                Image(systemName: "dial.medium")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(FilmyTheme.accent)
-                    .accessibilityHidden(true)
-
-                Text("FILMY CAMERA / SYSTEM")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .tracking(1.0)
-                    .foregroundStyle(FilmyTheme.tertiary)
-
-                Spacer(minLength: 8)
-
-                Text(appVersion)
-                    .font(FilmyTheme.metadataFont)
-                    .foregroundStyle(FilmyTheme.secondary)
-            }
-            .padding(.horizontal, 12)
-            .frame(minHeight: 34)
-            .background(Color.black.opacity(0.2), in: Capsule())
-            .overlay {
-                Capsule()
-                    .stroke(FilmyTheme.line.opacity(0.8), lineWidth: 1)
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("Filmy Camera version \(appVersion)")
-        }
+        SectionHeading(eyebrow: "Filmy \(appVersion)", title: "Settings")
+            .accessibilityLabel("Filmy Camera settings, version \(appVersion)")
     }
 
     private var introCard: some View {
         GlassCard(padding: 0) {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .top, spacing: 14) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 17, style: .continuous)
-                            .fill(FilmyTheme.accent.opacity(0.15))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 17, style: .continuous)
-                                    .stroke(FilmyTheme.accent.opacity(0.25), lineWidth: 1)
-                            }
-
-                        Image(systemName: "camera.aperture")
-                            .font(.system(size: 25, weight: .semibold))
-                            .foregroundStyle(FilmyTheme.accent)
-                            .accessibilityHidden(true)
-                    }
-                    .frame(width: 58, height: 58)
+                    Image(systemName: "camera.aperture")
+                        .font(.system(size: 21, weight: .semibold))
+                        .foregroundStyle(FilmyTheme.accent)
+                        .frame(width: 44, height: 44)
+                        .background(FilmyTheme.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                        .accessibilityHidden(true)
 
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -107,7 +71,6 @@ struct SettingsView: View {
                             Circle()
                                 .fill(FilmyTheme.mint)
                                 .frame(width: 7, height: 7)
-                                .shadow(color: FilmyTheme.mint.opacity(0.6), radius: 5)
                                 .accessibilityHidden(true)
                         }
 
@@ -118,20 +81,14 @@ struct SettingsView: View {
                     }
                 }
                 .padding(18)
-                .overlay(alignment: .leading) {
-                    Capsule()
-                        .fill(FilmyTheme.accent)
-                        .frame(width: 3, height: 34)
-                        .padding(.leading, 1)
-                }
 
                 Divider()
                     .overlay(FilmyTheme.line)
 
                 HStack(spacing: 8) {
-                    settingsBadge(systemName: "slider.horizontal.3", title: "CAPTURE")
-                    settingsBadge(systemName: "lock.fill", title: "PRIVATE")
-                    settingsBadge(systemName: "sparkles", title: "FILMY")
+                    settingsBadge(systemName: "slider.horizontal.3", title: "Capture")
+                    settingsBadge(systemName: "lock.fill", title: "Private")
+                    settingsBadge(systemName: "sparkles", title: "Recipes")
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 18)
@@ -155,9 +112,9 @@ struct SettingsView: View {
         .foregroundStyle(FilmyTheme.tertiary)
         .padding(.horizontal, 9)
         .padding(.vertical, 7)
-        .background(Color.white.opacity(0.055), in: Capsule())
+        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
         .overlay {
-            Capsule()
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .stroke(Color.white.opacity(0.08), lineWidth: 1)
         }
     }

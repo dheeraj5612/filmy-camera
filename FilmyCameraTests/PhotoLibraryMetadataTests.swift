@@ -3,6 +3,21 @@ import XCTest
 @testable import FilmyCamera
 
 final class PhotoLibraryMetadataTests: XCTestCase {
+    func testPhotoLibraryCompletionBridgeHopsToMainActor() async {
+        let completionExpectation = expectation(description: "Main actor completion")
+        let callback = PhotoLibraryCompletionBridge.mainActor { success in
+            MainActor.assertIsolated()
+            XCTAssertTrue(success)
+            completionExpectation.fulfill()
+        }
+
+        DispatchQueue(label: "PhotoLibraryMetadataTests.callback").async {
+            callback(true, nil)
+        }
+
+        await fulfillment(of: [completionExpectation], timeout: 2)
+    }
+
     func testSavedFrameMetadataPreservesRecipeAndCaptureDate() throws {
         let recipe = FilmRecipe.builtIns[3]
         let capturedAt = Date(timeIntervalSince1970: 1_754_000_123.456)
