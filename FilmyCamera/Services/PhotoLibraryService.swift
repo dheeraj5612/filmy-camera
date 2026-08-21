@@ -73,6 +73,31 @@ enum PhotoLibraryAuthorizationPolicy {
     }
 }
 
+struct PhotoLibraryImageRequestKey: Hashable, Sendable {
+    let assetIdentifier: String
+    let authorizationStatusRawValue: Int?
+}
+
+enum PhotoLibraryGalleryImagePolicy {
+    static func canLoad(
+        isPhotosAsset: Bool,
+        authorizationStatus: PHAuthorizationStatus
+    ) -> Bool {
+        !isPhotosAsset || PhotoLibraryAuthorizationPolicy.canRead(authorizationStatus)
+    }
+
+    static func requestKey(
+        assetIdentifier: String,
+        isPhotosAsset: Bool,
+        authorizationStatus: PHAuthorizationStatus
+    ) -> PhotoLibraryImageRequestKey {
+        PhotoLibraryImageRequestKey(
+            assetIdentifier: assetIdentifier,
+            authorizationStatusRawValue: isPhotosAsset ? authorizationStatus.rawValue : nil
+        )
+    }
+}
+
 enum PhotoLibraryServiceError: LocalizedError, Sendable {
     case accessDenied
     case notOwned
@@ -1143,17 +1168,34 @@ final class PhotoLibraryService: ObservableObject {
         })
     }
 
+    nonisolated static func thumbnailMaxPixelSize(for targetSize: CGSize) -> Int {
+        let width = targetSize.width.isFinite && targetSize.width > 0
+            ? targetSize.width
+            : 0
+        let height = targetSize.height.isFinite && targetSize.height > 0
+            ? targetSize.height
+            : 0
+        let maximumDimension = max(width, height)
+        guard maximumDimension > 0 else { return 1 }
+        return Int(min(max(maximumDimension.rounded(.up), 1), 8_192))
+    }
+
     private nonisolated static func cachedImage(at resourceURL: URL, targetSize: CGSize) -> UIImage? {
-        guard let data = try? Data(contentsOf: resourceURL),
-              let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+        let sourceOptions: [CFString: Any] = [
+            kCGImageSourceShouldCache: false
+        ]
+        guard let source = CGImageSourceCreateWithURL(
+            resourceURL as CFURL,
+            sourceOptions as CFDictionary
+        ) else {
             return nil
         }
 
-        let maxPixelSize = max(Int(targetSize.width), Int(targetSize.height), 1)
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
+            kCGImageSourceThumbnailMaxPixelSize: thumbnailMaxPixelSize(for: targetSize),
+            kCGImageSourceShouldCacheImmediately: true
         ]
         guard let image = CGImageSourceCreateThumbnailAtIndex(
             source,

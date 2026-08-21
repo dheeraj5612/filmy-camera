@@ -151,4 +151,73 @@ final class PhotoLibraryMetadataTests: XCTestCase {
         XCTAssertTrue(fileManager.fileExists(atPath: retryableURL.path))
         XCTAssertFalse(fileManager.fileExists(atPath: removableURL.path))
     }
+
+    func testGalleryImagePolicyReloadsPhotosAssetsAfterAuthorizationChanges() {
+        let deniedKey = PhotoLibraryGalleryImagePolicy.requestKey(
+            assetIdentifier: "photos-asset",
+            isPhotosAsset: true,
+            authorizationStatus: .denied
+        )
+        let authorizedKey = PhotoLibraryGalleryImagePolicy.requestKey(
+            assetIdentifier: "photos-asset",
+            isPhotosAsset: true,
+            authorizationStatus: .authorized
+        )
+
+        XCTAssertFalse(PhotoLibraryGalleryImagePolicy.canLoad(
+            isPhotosAsset: true,
+            authorizationStatus: .denied
+        ))
+        XCTAssertTrue(PhotoLibraryGalleryImagePolicy.canLoad(
+            isPhotosAsset: true,
+            authorizationStatus: .authorized
+        ))
+        XCTAssertNotEqual(deniedKey, authorizedKey)
+    }
+
+    func testGalleryImagePolicyKeepsCachedFramesIndependentOfPhotosAuthorization() {
+        let deniedKey = PhotoLibraryGalleryImagePolicy.requestKey(
+            assetIdentifier: "cached-frame",
+            isPhotosAsset: false,
+            authorizationStatus: .denied
+        )
+        let authorizedKey = PhotoLibraryGalleryImagePolicy.requestKey(
+            assetIdentifier: "cached-frame",
+            isPhotosAsset: false,
+            authorizationStatus: .authorized
+        )
+
+        XCTAssertTrue(PhotoLibraryGalleryImagePolicy.canLoad(
+            isPhotosAsset: false,
+            authorizationStatus: .denied
+        ))
+        XCTAssertEqual(deniedKey, authorizedKey)
+    }
+
+    func testCachedThumbnailPixelSizeIsFiniteBoundedAndRoundedUp() {
+        XCTAssertEqual(
+            PhotoLibraryService.thumbnailMaxPixelSize(
+                for: CGSize(width: 360.1, height: 440.1)
+            ),
+            441
+        )
+        XCTAssertEqual(
+            PhotoLibraryService.thumbnailMaxPixelSize(
+                for: CGSize(width: CGFloat.nan, height: CGFloat.infinity)
+            ),
+            1
+        )
+        XCTAssertEqual(
+            PhotoLibraryService.thumbnailMaxPixelSize(
+                for: CGSize(width: 20_000, height: 100)
+            ),
+            8_192
+        )
+        XCTAssertEqual(
+            PhotoLibraryService.thumbnailMaxPixelSize(
+                for: CGSize(width: -1, height: 0)
+            ),
+            1
+        )
+    }
 }

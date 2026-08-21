@@ -439,4 +439,56 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         )
     }
 
+
+    func testCameraActivityPolicyStartsOnlyForVisibleCameraWithoutReview() {
+        XCTAssertEqual(
+            CameraActivityPolicy.action(
+                hasReview: false,
+                sceneIsActive: true,
+                isCameraTabActive: true,
+                availability: .paused
+            ),
+            .start
+        )
+        XCTAssertEqual(
+            CameraActivityPolicy.action(
+                hasReview: true,
+                sceneIsActive: true,
+                isCameraTabActive: true,
+                availability: .running
+            ),
+            .stop
+        )
+        XCTAssertEqual(
+            CameraActivityPolicy.action(
+                hasReview: false,
+                sceneIsActive: false,
+                isCameraTabActive: true,
+                availability: .running
+            ),
+            .stop
+        )
+        XCTAssertEqual(
+            CameraActivityPolicy.action(
+                hasReview: false,
+                sceneIsActive: true,
+                isCameraTabActive: false,
+                availability: .running
+            ),
+            .stop
+        )
+    }
+
+    func testCameraActivityPolicyHoldsAnActiveInterruptedSessionForObserverRecovery() {
+        XCTAssertEqual(
+            CameraActivityPolicy.action(
+                hasReview: false,
+                sceneIsActive: true,
+                isCameraTabActive: true,
+                availability: .interrupted
+            ),
+            .hold
+        )
+    }
+
 }
