@@ -28,7 +28,6 @@ jobs:
 
           python3 <<'RUNNER'
           from pathlib import Path
-          import textwrap
 
           workflow_path = Path('.github/workflows/codex-apply-orientation-fixes.yml')
           workflow = workflow_path.read_text(encoding='utf-8')
@@ -36,7 +35,11 @@ jobs:
           end_marker = "\n          PY\n"
           start = workflow.index(start_marker) + len(start_marker)
           end = workflow.index(end_marker, start)
-          script = textwrap.dedent(workflow[start:end])
+          lines = workflow[start:end].splitlines()
+          script = "\n".join(
+              line[10:] if line.startswith("          ") else line
+              for line in lines
+          )
           exec(compile(script, str(workflow_path), 'exec'))
           RUNNER
 
