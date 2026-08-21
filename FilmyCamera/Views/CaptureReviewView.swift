@@ -197,7 +197,7 @@ struct CaptureReviewView: View {
                 }
             }
             .font(.system(.body, design: .default).weight(.semibold))
-            .foregroundStyle(.white)
+            .foregroundStyle(FilmyTheme.background)
             .frame(maxWidth: .infinity, minHeight: 52)
             .background(FilmyTheme.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }

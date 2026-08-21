@@ -131,7 +131,7 @@ struct OnboardingView: View {
                         .foregroundStyle(page.accent)
 
                     Text(page.title)
-                        .font(.system(size: 38, weight: .bold, design: .default))
+                        .font(.system(.largeTitle, design: .default).weight(.bold))
                         .foregroundStyle(FilmyTheme.primary)
                         .fixedSize(horizontal: false, vertical: true)
 
@@ -372,7 +372,7 @@ struct OnboardingView: View {
                         .accessibilityHidden(true)
                 }
                 .font(.system(.headline, design: .default).weight(.semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(FilmyTheme.background)
                 .frame(maxWidth: .infinity, minHeight: 56)
                 .background(FilmyTheme.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay {

@@ -1285,15 +1285,13 @@ struct CameraScreen: View {
     }
 
     private var viewfinderFirstActionPlate: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 8) {
             CameraActionButton(
                 systemName: "square.grid.2x2",
                 title: "Roll",
                 accessibilityLabel: "Open roll",
                 action: onOpenGallery
             )
-
-            Spacer(minLength: 0)
 
             CaptureButton(
                 isCapturing: viewModel.isCapturing,
@@ -1305,10 +1303,8 @@ struct CameraScreen: View {
                 viewModel.capture(camera: camera)
             }
 
-            Spacer(minLength: 0)
-
             minimalRecipeMenu
-                .frame(width: 138)
+                .frame(minWidth: 0, maxWidth: .infinity)
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 4)

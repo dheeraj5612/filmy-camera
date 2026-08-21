@@ -550,7 +550,7 @@ private struct RollEmptyState: View {
                     if let actionTitle, let action {
                         Button(actionTitle, action: action)
                             .font(.system(.subheadline, design: .default).weight(.semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(FilmyTheme.background)
                             .frame(maxWidth: .infinity, minHeight: 50)
                             .background(FilmyTheme.accent, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
                             .accessibilityHint("Opens the relevant permission settings")
