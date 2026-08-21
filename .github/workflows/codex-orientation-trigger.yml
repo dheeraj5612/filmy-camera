@@ -40,6 +40,10 @@ jobs:
               line[10:] if line.startswith("          ") else line
               for line in lines
           )
+          script = script.replace(
+              'f"{relative_path}: expected one replacement target, found {count}"',
+              'f"{relative_path}: expected one replacement target, found {count}; target={old[:180]!r}"'
+          )
           exec(compile(script, str(workflow_path), 'exec'))
           RUNNER
 
