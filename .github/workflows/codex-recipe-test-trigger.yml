@@ -1,4 +1,4 @@
-name: Trigger stale recipe invariant update
+name: Align stale recipe persistence invariant
 
 on:
   pull_request:
@@ -12,7 +12,7 @@ jobs:
   update-recipe-invariant:
     if: >-
       github.actor != 'github-actions[bot]' &&
-      github.head_ref == 'codex/recipe-persistence-recovery'
+      github.head_ref == 'codex/recipe-persistence-recovery-v2'
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -20,7 +20,7 @@ jobs:
       - name: Check out persistence branch
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: codex/recipe-persistence-recovery
+          ref: codex/recipe-persistence-recovery-v2
           fetch-depth: 0
 
       - name: Update and commit stale selection invariant
@@ -68,11 +68,9 @@ jobs:
           grep -q 'XCTAssertEqual(rewrittenID, fallbackID)' \
             FilmyCameraTests/RecipeInvariantsTests.swift
 
-          git rm -- \
-            .github/workflows/codex-update-recipe-fallback-test.yml \
-            .github/workflows/codex-recipe-test-trigger.yml
+          git rm -- .github/workflows/codex-recipe-test-trigger.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -- FilmyCameraTests/RecipeInvariantsTests.swift
           git commit -m "Align stale recipe persistence invariant"
-          git push origin HEAD:codex/recipe-persistence-recovery
+          git push origin HEAD:codex/recipe-persistence-recovery-v2
