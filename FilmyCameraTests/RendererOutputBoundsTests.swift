@@ -79,6 +79,198 @@ final class RendererOutputBoundsTests: XCTestCase {
         )
     }
 
+    func testClassicChromeSuppressesMagentaAndCoolsShadowsRelativeToProvia() throws {
+        let extent = CGRect(x: 0, y: 0, width: 8, height: 8)
+        let context = CIContext(options: [
+            .useSoftwareRenderer: true,
+            .cacheIntermediates: false
+        ])
+        let classicChrome = try XCTUnwrap(
+            FilmRecipe.builtIns.first { $0.id == "classic-chrome" }
+        )
+        let provia = try XCTUnwrap(
+            FilmRecipe.builtIns.first { $0.id == "provia-standard" }
+        )
+        let magenta = CIImage(
+            color: CIColor(red: 0.72, green: 0.22, blue: 0.64, alpha: 1)
+        ).cropped(to: extent)
+        let coolShadow = CIImage(
+            color: CIColor(red: 0.12, green: 0.17, blue: 0.34, alpha: 1)
+        ).cropped(to: extent)
+
+        let classicMagenta = pixel(
+            renderFloatPixels(
+                FilmRenderer.render(magenta, recipe: classicChrome, quality: .photo),
+                extent: extent,
+                context: context
+            ),
+            width: 8,
+            x: 4,
+            y: 4
+        )
+        let proviaMagenta = pixel(
+            renderFloatPixels(
+                FilmRenderer.render(magenta, recipe: provia, quality: .photo),
+                extent: extent,
+                context: context
+            ),
+            width: 8,
+            x: 4,
+            y: 4
+        )
+        let classicShadow = pixel(
+            renderFloatPixels(
+                FilmRenderer.render(coolShadow, recipe: classicChrome, quality: .photo),
+                extent: extent,
+                context: context
+            ),
+            width: 8,
+            x: 4,
+            y: 4
+        )
+        let proviaShadow = pixel(
+            renderFloatPixels(
+                FilmRenderer.render(coolShadow, recipe: provia, quality: .photo),
+                extent: extent,
+                context: context
+            ),
+            width: 8,
+            x: 4,
+            y: 4
+        )
+
+        let classicMagentaBias = (
+            Double(classicMagenta[0]) + Double(classicMagenta[2])
+        ) / 2 - Double(classicMagenta[1])
+        let proviaMagentaBias = (
+            Double(proviaMagenta[0]) + Double(proviaMagenta[2])
+        ) / 2 - Double(proviaMagenta[1])
+
+        XCTAssertLessThan(
+            classicMagentaBias,
+            proviaMagentaBias - 0.002,
+            "Classic Chrome should selectively suppress magenta"
+        )
+        XCTAssertGreaterThan(
+            Double(classicShadow[2] - classicShadow[0]),
+            Double(proviaShadow[2] - proviaShadow[0]) + 0.002,
+            "Classic Chrome should preserve cooler shadow separation"
+        )
+    }
+
+    func testG7XCompactStrengthensBlueAndFoliageWithoutTintingNeutralGray() throws {
+        let extent = CGRect(x: 0, y: 0, width: 8, height: 8)
+        let context = CIContext(options: [
+            .useSoftwareRenderer: true,
+            .cacheIntermediates: false
+        ])
+        let compact = try XCTUnwrap(
+            FilmRecipe.builtIns.first { $0.id == "g7x-compact" }
+        )
+        let neutral = FilmRecipe(
+            id: "compact-reference-control",
+            name: "Compact Reference Control",
+            subtitle: "Test control"
+        )
+        let fixtures = [
+            CIColor(red: 0.18, green: 0.38, blue: 0.76, alpha: 1),
+            CIColor(red: 0.18, green: 0.52, blue: 0.24, alpha: 1),
+            CIColor(red: 0.50, green: 0.50, blue: 0.50, alpha: 1)
+        ]
+
+        let compactPixels = fixtures.map { color in
+            pixel(
+                renderFloatPixels(
+                    FilmRenderer.render(
+                        CIImage(color: color).cropped(to: extent),
+                        recipe: compact,
+                        quality: .photo
+                    ),
+                    extent: extent,
+                    context: context
+                ),
+                width: 8,
+                x: 4,
+                y: 4
+            )
+        }
+        let neutralPixels = fixtures.map { color in
+            pixel(
+                renderFloatPixels(
+                    FilmRenderer.render(
+                        CIImage(color: color).cropped(to: extent),
+                        recipe: neutral,
+                        quality: .photo
+                    ),
+                    extent: extent,
+                    context: context
+                ),
+                width: 8,
+                x: 4,
+                y: 4
+            )
+        }
+
+        XCTAssertGreaterThan(
+            chroma(compactPixels[0]),
+            chroma(neutralPixels[0]) + 0.003,
+            "G7 X Compact should keep blue sky crisp"
+        )
+        XCTAssertGreaterThan(
+            chroma(compactPixels[1]),
+            chroma(neutralPixels[1]) + 0.003,
+            "G7 X Compact should keep foliage crisp"
+        )
+        XCTAssertLessThan(
+            chroma(compactPixels[2]),
+            0.08,
+            "G7 X Compact should not impose a strong cast on neutral gray"
+        )
+        XCTAssertEqual(compact.grain, 0, accuracy: 0.0001)
+        XCTAssertEqual(compact.halation, 0, accuracy: 0.0001)
+    }
+
+    func testFidelityReferenceLooksMatchAcrossQualityTiers() throws {
+        let extent = CGRect(x: 0, y: 0, width: 64, height: 48)
+        let input = resolutionFixture(size: extent.size)
+        let context = CIContext(options: [
+            .useSoftwareRenderer: true,
+            .cacheIntermediates: false
+        ])
+        let recipes = try ["classic-chrome", "g7x-compact"].map { identifier in
+            try XCTUnwrap(
+                FilmRecipe.builtIns.first { $0.id == identifier },
+                "Missing fidelity reference recipe \(identifier)"
+            )
+        }
+
+        for recipe in recipes {
+            let outputs = [FilmRenderer.Quality.preview, .photo, .export].map {
+                renderFloatPixels(
+                    FilmRenderer.render(
+                        input,
+                        recipe: recipe,
+                        quality: $0,
+                        grainSeed: 0x2468,
+                        grainPhase: CGPoint(x: 91.5, y: 37.25)
+                    ),
+                    extent: extent,
+                    context: context
+                )
+            }
+            guard let reference = outputs.first else {
+                return XCTFail("Expected output for \(recipe.id)")
+            }
+            for output in outputs.dropFirst() {
+                XCTAssertLessThan(
+                    meanAbsoluteRGBDifference(reference, output),
+                    0.0001,
+                    "\(recipe.id) changed across quality tiers"
+                )
+            }
+        }
+    }
+
     func testEmptyInputIsReturnedWithoutExpandingBounds() {
         let empty = CIImage.empty()
         let output = FilmRenderer.render(
@@ -1142,6 +1334,69 @@ final class RendererOutputBoundsTests: XCTestCase {
         XCTAssertEqual(image?.cgImage?.height, Int(size.height))
     }
 
+    func testRecipeContactSheetRendersEveryBuiltInLook() throws {
+        let tileSize = CGSize(width: 264, height: 160)
+        let labelHeight: CGFloat = 30
+        let columns = 3
+        let thumbnails = try FilmRecipe.builtIns.map { recipe in
+            (
+                recipe,
+                try XCTUnwrap(
+                    FilmRenderer.thumbnail(for: recipe, size: tileSize),
+                    "Missing thumbnail for \(recipe.id)"
+                )
+            )
+        }
+        let rows = Int(
+            ceil(Double(thumbnails.count) / Double(columns))
+        )
+        let canvasSize = CGSize(
+            width: tileSize.width * CGFloat(columns),
+            height: (tileSize.height + labelHeight) * CGFloat(rows)
+        )
+        let image = UIGraphicsImageRenderer(size: canvasSize).image { context in
+            context.cgContext.setFillColor(UIColor.black.cgColor)
+            context.cgContext.fill(CGRect(origin: .zero, size: canvasSize))
+
+            let paragraphStyle = NSMutableParagraphStyle()
+            paragraphStyle.alignment = .center
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: UIFont.monospacedSystemFont(
+                    ofSize: 12,
+                    weight: .semibold
+                ),
+                .foregroundColor: UIColor.white,
+                .paragraphStyle: paragraphStyle
+            ]
+
+            for (index, entry) in thumbnails.enumerated() {
+                let column = index % columns
+                let row = index / columns
+                let origin = CGPoint(
+                    x: CGFloat(column) * tileSize.width,
+                    y: CGFloat(row) * (tileSize.height + labelHeight)
+                )
+                entry.1.draw(in: CGRect(origin: origin, size: tileSize))
+                (entry.0.name as NSString).draw(
+                    in: CGRect(
+                        x: origin.x,
+                        y: origin.y + tileSize.height + 5,
+                        width: tileSize.width,
+                        height: labelHeight - 5
+                    ),
+                    withAttributes: attributes
+                )
+            }
+        }
+
+        XCTAssertGreaterThan(image.size.width, 0)
+        XCTAssertGreaterThan(image.size.height, 0)
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "all-recipe-contact-sheet"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     func testAspectFillCropMatchesThePreviewViewport() {
         let source = CGRect(x: 0, y: 0, width: 4000, height: 3000)
         let portraitCrop = CameraFrameLayout.aspectFillCrop(
@@ -1258,6 +1513,13 @@ final class RendererOutputBoundsTests: XCTestCase {
         0.2126 * Double(pixel[0])
             + 0.7152 * Double(pixel[1])
             + 0.0722 * Double(pixel[2])
+    }
+
+    private func chroma(_ pixel: [Float]) -> Double {
+        let red = Double(pixel[0])
+        let green = Double(pixel[1])
+        let blue = Double(pixel[2])
+        return max(red, max(green, blue)) - min(red, min(green, blue))
     }
 
     private func meanAbsoluteRGBDifference(_ lhs: [Float], _ rhs: [Float]) -> Double {
