@@ -1,0 +1,59 @@
+name: Align filter renderer version invariant
+
+on:
+  push:
+    branches:
+      - codex/filter-fidelity-reference-audit
+
+permissions:
+  contents: write
+
+jobs:
+  update-version-invariant:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out filter audit branch
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: codex/filter-fidelity-reference-audit
+          fetch-depth: 0
+
+      - name: Update and commit version invariant
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('FilmyCameraTests/RecipeInvariantsTests.swift')
+          text = path.read_text(encoding='utf-8')
+          old = '''    func testRendererVersionTracksTheHalationBeforeGrainPipeline() {
+        XCTAssertEqual(FilmRecipe.rendererVersion, "core-image-parametric-v2")
+    }
+'''
+          new = '''    func testRendererVersionTracksTheCurrentFidelityPipeline() {
+        XCTAssertEqual(FilmRecipe.rendererVersion, "core-image-parametric-v3")
+    }
+'''
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'expected one renderer version invariant, found {count}')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
+          git diff --check
+          grep -q 'testRendererVersionTracksTheCurrentFidelityPipeline' \
+            FilmyCameraTests/RecipeInvariantsTests.swift
+
+          git rm -- \
+            .github/workflows/codex-filter-version-invariant.yml \
+            scripts/codex/trigger-filter-version.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- FilmyCameraTests/RecipeInvariantsTests.swift
+          git commit -m "Align renderer version invariant"
+          git push origin HEAD:codex/filter-fidelity-reference-audit
