@@ -1,0 +1,52 @@
+name: Apply UI visual regression fixes
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply-ui-fix:
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      github.head_ref == 'codex/ui-visual-regression-audit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out UI audit branch
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: codex/ui-visual-regression-audit
+          fetch-depth: 0
+
+      - name: Apply and validate UI fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 scripts/codex/apply-ui-visual-regression-fix.py
+          git diff --check
+          grep -q 'accessibilityIdentifier("recipe-picker")' \
+            FilmyCamera/Views/RecipePickerView.swift
+          grep -q 'Compact recipe rail should not expand into an empty panel' \
+            FilmyCameraUITests/FilmyCameraUITests.swift
+
+      - name: Commit clean UI diff
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git rm -- \
+            scripts/codex/apply-ui-visual-regression-fix.py \
+            .github/workflows/codex-ui-visual-regression.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- \
+            FilmyCamera/Views/RecipePickerView.swift \
+            FilmyCameraUITests/FilmyCameraUITests.swift
+          git commit -m "Keep recipe rails content-sized"
+          git push origin HEAD:codex/ui-visual-regression-audit
