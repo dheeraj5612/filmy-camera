@@ -20,7 +20,16 @@ final class FilmyCameraUITests: XCTestCase {
         assertMinimumHitTarget(cameraTab, named: "Camera tab")
         XCTAssertTrue(app.staticTexts["FILMY CAMERA"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["Natural Standard"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["CURRENT LOOK"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["BROWSE LOOKS"].waitForExistence(timeout: 5))
+
+        let recipePicker = app.descendants(matching: .any)["recipe-picker"]
+        XCTAssertTrue(recipePicker.waitForExistence(timeout: 5))
+        XCTAssertLessThanOrEqual(
+            recipePicker.frame.height,
+            150,
+            "The standard recipe picker should remain content-sized"
+        )
+        attachScreenshot(named: "camera-shell-expanded")
 
         let classicChrome = app.buttons.matching(
             NSPredicate(format: "label BEGINSWITH 'Muted Color'")
@@ -107,11 +116,29 @@ final class FilmyCameraUITests: XCTestCase {
         ).firstMatch
         assertMinimumHitTarget(tune, named: "Accessibility-size Tune")
 
+        let recipePicker = accessibilityApp.descendants(matching: .any)["recipe-picker"]
+        XCTAssertTrue(recipePicker.waitForExistence(timeout: 5))
+        XCTAssertLessThanOrEqual(
+            recipePicker.frame.height,
+            96,
+            "Compact recipe rail should not expand into an empty panel"
+        )
+        XCTAssertLessThan(
+            recipePicker.frame.maxY,
+            roll.frame.minY,
+            "Compact recipe rail must remain above the camera actions"
+        )
+        XCTAssertLessThanOrEqual(
+            roll.frame.minY - recipePicker.frame.maxY,
+            32,
+            "The compact recipe rail should remain visually connected to its actions"
+        )
+
         let captureNotice = accessibilityApp.staticTexts[
             "Capture is available on a physical iPhone"
         ]
         XCTAssertTrue(captureNotice.waitForExistence(timeout: 5))
-        attachScreenshot(named: "accessibility-camera-shell")
+        attachScreenshot(named: "accessibility-camera-shell-bounded")
     }
 
     func testViewfinderFirstChromePreviewKeepsCameraQuiet() throws {
