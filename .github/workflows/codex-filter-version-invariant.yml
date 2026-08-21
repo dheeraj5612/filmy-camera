@@ -1,18 +1,16 @@
 name: Align filter renderer version invariant
 
 on:
-  pull_request:
+  push:
     branches:
-      - main
+      - codex/filter-fidelity-reference-audit
 
 permissions:
   contents: write
 
 jobs:
   update-version-invariant:
-    if: >-
-      github.actor != 'github-actions[bot]' &&
-      github.head_ref == 'codex/filter-fidelity-reference-audit'
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
