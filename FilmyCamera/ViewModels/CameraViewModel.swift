@@ -29,6 +29,7 @@ extension FilmRecipe {
         case "classic-negative": return "Warm highlights, restrained greens, and a textured negative feel for street scenes and quiet rooms."
         case "nostalgic-negative": return "Amber light, softened blues, and gentle contrast for a memory-like everyday palette."
         case "reala-ace": return "Natural color, open shadows, and a clean negative finish that lets the scene stay itself."
+        case "g7x-compact": return "A G7 X-inspired compact-camera finish with warm skin, crisp detail, clean color, and restrained noise. It approximates the JPEG character only; iPhone optics and depth of field remain unchanged."
         default: return subtitle
         }
     }
@@ -42,6 +43,7 @@ extension FilmRecipe {
         case .eterna, .eternaBleachBypass: return "film.stack"
         case .acros, .acrosYellow, .acrosRed, .acrosGreen, .monochrome: return "circle.lefthalf.filled"
         case .sepia: return "clock.arrow.circlepath"
+        case .compactDigital: return "camera.fill"
         case .standard, .provia: return "camera.aperture"
         }
     }
@@ -74,6 +76,8 @@ extension FilmRecipe {
             return [Color(red: 0.18, green: 0.23, blue: 0.26), Color(red: 0.72, green: 0.48, blue: 0.34), Color(red: 0.89, green: 0.71, blue: 0.50)]
         case "reala-ace":
             return [Color(red: 0.16, green: 0.25, blue: 0.27), Color(red: 0.58, green: 0.51, blue: 0.42), Color(red: 0.86, green: 0.79, blue: 0.66)]
+        case "g7x-compact":
+            return [Color(red: 0.08, green: 0.10, blue: 0.12), Color(red: 0.63, green: 0.34, blue: 0.24), Color(red: 0.20, green: 0.48, blue: 0.66)]
         default:
             return Self.previewColors
         }

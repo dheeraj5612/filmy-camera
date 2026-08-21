@@ -1,5 +1,6 @@
 import XCTest
 @preconcurrency import AVFoundation
+import CoreVideo
 @testable import FilmyCamera
 
 @MainActor
@@ -226,6 +227,34 @@ final class CameraServiceAvailabilityTests: XCTestCase {
             CameraService.preferredPreviewPixelFormat(available: [kCVPixelFormatType_32BGRA]),
             kCVPixelFormatType_32BGRA
         )
+    }
+
+    func testPreviewImagePreservesCameraColorSpaceAttachment() throws {
+        var pixelBuffer: CVPixelBuffer?
+        let status = CVPixelBufferCreate(
+            nil,
+            2,
+            2,
+            kCVPixelFormatType_32BGRA,
+            [
+                kCVPixelBufferCGImageCompatibilityKey: true,
+                kCVPixelBufferCGBitmapContextCompatibilityKey: true
+            ] as CFDictionary,
+            &pixelBuffer
+        )
+        XCTAssertEqual(status, kCVReturnSuccess)
+        let buffer = try XCTUnwrap(pixelBuffer)
+        let displayP3 = try XCTUnwrap(CGColorSpace(name: CGColorSpace.displayP3))
+        CVBufferSetAttachment(
+            buffer,
+            kCVImageBufferCGColorSpaceKey,
+            displayP3,
+            .shouldPropagate
+        )
+
+        let image = CameraService.previewImage(from: buffer)
+
+        XCTAssertEqual(image.colorSpace?.name, CGColorSpace.displayP3)
     }
 
     func testExposureBiasClampsNonFiniteAndOutOfRangeValues() {

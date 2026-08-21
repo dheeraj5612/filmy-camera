@@ -2,81 +2,65 @@ import SwiftUI
 import UIKit
 
 enum FilmyTheme {
-    static let background = Color(red: 0.027, green: 0.031, blue: 0.039)
-    static let backgroundRaised = Color(red: 0.055, green: 0.062, blue: 0.075)
-    static let panel = Color(red: 0.075, green: 0.083, blue: 0.098)
-    static let panelRaised = Color(red: 0.13, green: 0.143, blue: 0.165)
-    static let line = Color.white.opacity(0.12)
-    static let lineStrong = Color.white.opacity(0.18)
-    static let primary = Color.white.opacity(0.94)
-    static let secondary = Color.white.opacity(0.62)
-    // Keep small section labels above contrast-safe opacity on dark surfaces.
-    static let tertiary = Color.white.opacity(0.56)
-    static let accent = Color(red: 0.98, green: 0.73, blue: 0.28)
-    static let accentWarm = Color(red: 1.0, green: 0.55, blue: 0.32)
-    static let mint = Color(red: 0.47, green: 0.83, blue: 0.73)
-    static let chromeFill = Color.black.opacity(0.48)
-    static let cornerRadius: CGFloat = 24
-    static let controlRadius: CGFloat = 14
-    static let actionPlateRadius: CGFloat = 28
+    static let background = Color(red: 0.026, green: 0.031, blue: 0.042)
+    static let backgroundRaised = Color(red: 0.045, green: 0.054, blue: 0.073)
+    static let panel = Color(red: 0.063, green: 0.074, blue: 0.096)
+    static let panelRaised = Color(red: 0.088, green: 0.105, blue: 0.137)
+    static let line = Color.white.opacity(0.09)
+    static let lineStrong = Color.white.opacity(0.14)
+    static let primary = Color.white.opacity(0.97)
+    static let secondary = Color.white.opacity(0.66)
+    static let tertiary = Color.white.opacity(0.48)
+    static let accent = Color(red: 0.30, green: 0.68, blue: 1.0)
+    // Kept as a secondary system color for existing gradients, now in the same cool spectrum.
+    static let accentWarm = Color(red: 0.48, green: 0.42, blue: 1.0)
+    static let mint = Color(red: 0.35, green: 0.90, blue: 0.69)
+    static let chromeFill = Color(red: 0.055, green: 0.065, blue: 0.085).opacity(0.92)
+    static let cornerRadius: CGFloat = 16
+    static let controlRadius: CGFloat = 11
+    static let actionPlateRadius: CGFloat = 18
     static let minimumHitTarget: CGFloat = 44
 
-    static let titleFont = Font.system(.title2, design: .rounded).weight(.bold)
-    static let bodyFont = Font.system(.body, design: .rounded)
-    static let metadataFont = Font.system(.caption, design: .monospaced).weight(.semibold)
+    static let titleFont = Font.system(.title2, design: .default).weight(.bold)
+    static let bodyFont = Font.system(.body, design: .default)
+    static let metadataFont = Font.system(.caption, design: .default).weight(.semibold)
 
     static let pageGradient = LinearGradient(
-        colors: [backgroundRaised.opacity(0.84), background, background],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
+        colors: [backgroundRaised.opacity(0.72), background, Color.black.opacity(0.96)],
+        startPoint: .top,
+        endPoint: .bottom
     )
 
     static let plateGradient = LinearGradient(
-        colors: [Color.white.opacity(0.13), Color.white.opacity(0.045)],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
+        colors: [panelRaised.opacity(0.98), panel.opacity(0.98)],
+        startPoint: .top,
+        endPoint: .bottom
     )
 
     static let chromeGradient = LinearGradient(
-        colors: [Color.white.opacity(0.14), Color.white.opacity(0.055)],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
+        colors: [Color.white.opacity(0.07), Color.white.opacity(0.025)],
+        startPoint: .top,
+        endPoint: .bottom
     )
 
     static let navBarGradient = LinearGradient(
-        colors: [Color.white.opacity(0.14), Color.white.opacity(0.065)],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
+        colors: [panelRaised.opacity(0.98), panel.opacity(0.98)],
+        startPoint: .top,
+        endPoint: .bottom
     )
 }
 
 struct FilmyPageBackground: View {
     var body: some View {
-        GeometryReader { proxy in
-            ZStack {
-                FilmyTheme.pageGradient
+        ZStack(alignment: .top) {
+            FilmyTheme.pageGradient
 
-                Circle()
-                    .fill(FilmyTheme.accentWarm.opacity(0.075))
-                    .frame(width: min(proxy.size.width * 0.9, 380))
-                    .blur(radius: 70)
-                    .offset(x: proxy.size.width * 0.34, y: -proxy.size.height * 0.38)
-
-                Circle()
-                    .fill(FilmyTheme.accent.opacity(0.045))
-                    .frame(width: min(proxy.size.width * 0.76, 320))
-                    .blur(radius: 80)
-                    .offset(x: -proxy.size.width * 0.48, y: proxy.size.height * 0.35)
-
-                Rectangle()
-                    .fill(
-                        LinearGradient(
-                            colors: [.clear, Color.black.opacity(0.18)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-            }
+            LinearGradient(
+                colors: [FilmyTheme.accent.opacity(0.09), .clear],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 220)
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)
@@ -90,14 +74,13 @@ struct SectionHeading: View {
 
     var body: some View {
         HStack(alignment: .lastTextBaseline) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(eyebrow.uppercased())
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .tracking(1.4)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(eyebrow)
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(FilmyTheme.accent)
 
                 Text(title)
-                    .font(.system(size: 25, weight: .bold, design: .rounded))
+                    .font(.system(size: 30, weight: .bold))
                     .foregroundStyle(FilmyTheme.primary)
             }
 
@@ -105,7 +88,7 @@ struct SectionHeading: View {
 
             if let trailing {
                 Text(trailing)
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(FilmyTheme.secondary)
             }
         }
@@ -128,16 +111,12 @@ struct GlassCard<Content: View>: View {
     var body: some View {
         content
             .padding(padding)
-            .background(
-                FilmyTheme.chromeGradient,
-                in: RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous)
-            )
-            .background(FilmyTheme.panel.opacity(0.92), in: RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous))
+            .background(FilmyTheme.panel.opacity(0.96), in: RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous)
                     .stroke(FilmyTheme.lineStrong, lineWidth: 1)
             }
-            .shadow(color: .black.opacity(0.22), radius: 24, y: 12)
+            .shadow(color: .black.opacity(0.16), radius: 8, y: 3)
     }
 }
 
@@ -154,11 +133,12 @@ struct FilmyIconButton: View {
                 .foregroundStyle(isProminent ? FilmyTheme.background : FilmyTheme.primary)
                 .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
                 .background(
-                    isProminent ? FilmyTheme.accent : Color.black.opacity(0.38),
-                    in: Circle()
+                    isProminent ? FilmyTheme.accent : FilmyTheme.chromeFill,
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                 )
                 .overlay {
-                    Circle().stroke(Color.white.opacity(isProminent ? 0 : 0.18), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.white.opacity(isProminent ? 0 : 0.12), lineWidth: 1)
                 }
         }
         .buttonStyle(.plain)
@@ -179,7 +159,7 @@ struct CameraActionButton: View {
                 Image(systemName: systemName)
                     .font(.system(size: 15, weight: .bold))
                 Text(title)
-                    .font(.system(.caption, design: .rounded).weight(.bold))
+                    .font(.system(.caption, design: .default).weight(.semibold))
                     .lineLimit(2)
                     .minimumScaleFactor(0.78)
                     .allowsTightening(true)
@@ -566,20 +546,20 @@ struct CaptureButton: View {
         Button(action: action) {
             ZStack {
                 Circle()
-                    .fill(Color.black.opacity(0.42))
-                    .frame(width: 102, height: 102)
+                    .fill(FilmyTheme.chromeFill)
+                    .frame(width: 96, height: 96)
 
                 Circle()
-                    .stroke(FilmyTheme.accent.opacity(0.82), lineWidth: 1.5)
-                    .frame(width: 98, height: 98)
+                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                    .frame(width: 94, height: 94)
 
                 Circle()
-                    .fill(Color.white.opacity(0.96))
-                    .frame(width: 80, height: 80)
+                    .fill(Color.white)
+                    .frame(width: 74, height: 74)
 
                 Circle()
-                    .stroke(FilmyTheme.accent.opacity(0.3), lineWidth: 2)
-                    .frame(width: 68, height: 68)
+                    .stroke(FilmyTheme.background.opacity(0.14), lineWidth: 1)
+                    .frame(width: 64, height: 64)
 
                 if isCapturing {
                     ProgressView()
@@ -593,7 +573,7 @@ struct CaptureButton: View {
         }
         .buttonStyle(.plain)
         .opacity(isEnabled ? 1 : 0.52)
-        .shadow(color: FilmyTheme.accent.opacity(isEnabled ? 0.22 : 0), radius: 16, y: 6)
+        .shadow(color: .black.opacity(isEnabled ? 0.3 : 0), radius: 8, y: 3)
         .disabled(isCapturing || !isEnabled)
         .accessibilityLabel(
             isCapturing
@@ -709,18 +689,18 @@ struct EmptyStateCard: View {
         GlassCard {
             VStack(spacing: 14) {
                 Image(systemName: systemName)
-                    .font(.system(size: 24, weight: .semibold))
+                    .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(FilmyTheme.accent)
-                    .frame(width: 52, height: 52)
-                    .background(FilmyTheme.accent.opacity(0.12), in: Circle())
+                    .frame(width: 48, height: 48)
+                    .background(FilmyTheme.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                 VStack(spacing: 5) {
                     Text(title)
-                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .font(.system(size: 17, weight: .bold))
                         .foregroundStyle(FilmyTheme.primary)
 
                     Text(message)
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(FilmyTheme.secondary)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
@@ -728,12 +708,12 @@ struct EmptyStateCard: View {
 
                 if let actionTitle, let action {
                     Button(actionTitle, action: action)
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(FilmyTheme.background)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)
                         .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
-                        .background(FilmyTheme.accent, in: Capsule())
+                        .background(FilmyTheme.accent, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
                         .accessibilityHint("Opens the relevant permission settings")
                 }
             }
@@ -834,10 +814,10 @@ struct PreviewPlaceholder: View {
 
                     VStack(spacing: 5) {
                         Text(isSimulator ? "Preview mode" : "Camera unavailable")
-                            .font(.system(size: 19, weight: .bold, design: .rounded))
+                    .font(.system(size: 19, weight: .bold))
                             .foregroundStyle(.white)
                         Text(message ?? (isSimulator ? "Shoot this look on an iPhone." : "Check camera access in Settings, then try again."))
-                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                            .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(.white.opacity(0.72))
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 28)
@@ -845,12 +825,12 @@ struct PreviewPlaceholder: View {
 
                     if let actionTitle, let action {
                         Button(actionTitle, action: action)
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .font(.system(size: 13, weight: .bold))
                             .foregroundStyle(FilmyTheme.background)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 10)
                             .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
-                            .background(FilmyTheme.accent, in: Capsule())
+                            .background(FilmyTheme.accent, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
                             .accessibilityIdentifier(actionTitle == "Open Settings" ? "camera-permission-action" : "camera-recovery-action")
                             .accessibilityHint(actionTitle == "Open Settings" ? "Opens Filmy Camera permissions" : "Attempts to resume the camera")
                     }
@@ -858,9 +838,9 @@ struct PreviewPlaceholder: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 18)
                 .padding(.top, max(proxy.safeAreaInsets.top + 72, 96))
-                .background(Color.black.opacity(0.28), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .background(Color.black.opacity(0.34), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .stroke(Color.white.opacity(0.18), lineWidth: 1)
                 }
             }

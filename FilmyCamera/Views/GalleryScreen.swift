@@ -21,35 +21,14 @@ struct GalleryScreen: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 18) {
-                        HStack(spacing: 8) {
-                            Circle()
-                                .fill(FilmyTheme.mint)
-                                .frame(width: 6, height: 6)
-
-                            Text("FILMY CAMERA / ROLL")
-                                .font(FilmyTheme.metadataFont)
-                                .tracking(1.2)
-                                .foregroundStyle(FilmyTheme.tertiary)
-
-                            Spacer(minLength: 8)
-
-                            Text("ARCHIVE")
-                                .font(.system(size: 10, weight: .bold, design: .rounded))
-                                .tracking(1)
-                                .foregroundStyle(FilmyTheme.accent)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(FilmyTheme.accent.opacity(0.12), in: Capsule())
-                        }
-
                         SectionHeading(
-                            eyebrow: "The archive",
+                            eyebrow: "Library",
                             title: "Roll",
                             trailing: photoLibrary.galleryAssets.isEmpty ? nil : "\(photoLibrary.galleryAssets.count) frames"
                         )
 
-                        Text("A considered contact sheet for the frames worth keeping.")
-                            .font(.system(.subheadline, design: .rounded).weight(.medium))
+                        Text("Every finished frame, organized in one place.")
+                            .font(.subheadline.weight(.medium))
                             .foregroundStyle(FilmyTheme.secondary)
                             .fixedSize(horizontal: false, vertical: true)
 
@@ -100,24 +79,20 @@ struct GalleryScreen: View {
     }
 
     private var archiveSummary: some View {
-        VStack(alignment: .leading, spacing: 15) {
+        VStack(alignment: .leading, spacing: 13) {
             HStack(spacing: 12) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(FilmyTheme.accent.opacity(0.14))
-                    Image(systemName: "rectangle.on.rectangle.angled")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(FilmyTheme.accent)
-                }
-                .frame(width: 46, height: 46)
+                Image(systemName: "rectangle.on.rectangle.angled")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(FilmyTheme.accent)
+                    .frame(width: 38, height: 38)
+                    .background(FilmyTheme.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("CONTACT SHEET")
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
-                        .tracking(1.2)
+                    Text("Contact sheet")
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(FilmyTheme.accent)
                     Text("Recent frames, recipe by recipe")
-                        .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(FilmyTheme.primary)
                 }
 
@@ -127,9 +102,8 @@ struct GalleryScreen: View {
                     Text("\(photoLibrary.galleryAssets.count)")
                         .font(.system(size: 27, weight: .bold, design: .rounded))
                         .foregroundStyle(FilmyTheme.primary)
-                    Text("FRAMES")
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
-                        .tracking(1)
+                    Text("frames")
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(FilmyTheme.tertiary)
                 }
             }
@@ -148,19 +122,11 @@ struct GalleryScreen: View {
             }
         }
         .padding(16)
-        .background(
-            LinearGradient(
-                colors: [FilmyTheme.panelRaised.opacity(0.68), FilmyTheme.panel.opacity(0.78)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ),
-            in: RoundedRectangle(cornerRadius: 22, style: .continuous)
-        )
+        .background(FilmyTheme.panel.opacity(0.96), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(FilmyTheme.line, lineWidth: 1)
         }
-        .shadow(color: FilmyTheme.accentWarm.opacity(0.08), radius: 24, y: 12)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Contact sheet")
         .accessibilityValue(
@@ -516,11 +482,7 @@ private struct RollEmptyState: View {
         GlassCard(padding: 0) {
             VStack(alignment: .leading, spacing: 0) {
                 ZStack {
-                    LinearGradient(
-                        colors: [FilmyTheme.panelRaised, FilmyTheme.panel],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
+                    FilmyTheme.panel
 
                     HStack(spacing: 7) {
                         ForEach(0..<5, id: \.self) { _ in
@@ -535,7 +497,7 @@ private struct RollEmptyState: View {
 
                     VStack(spacing: 10) {
                         ZStack {
-                            Circle()
+                            RoundedRectangle(cornerRadius: 13, style: .continuous)
                                 .fill(FilmyTheme.accent.opacity(0.14))
                             Image(systemName: systemName)
                                 .font(.system(size: 24, weight: .semibold))
@@ -566,11 +528,11 @@ private struct RollEmptyState: View {
                 VStack(alignment: .leading, spacing: 16) {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(title)
-                            .font(.system(.title3, design: .rounded).weight(.bold))
+                            .font(.system(.title3, design: .default).weight(.bold))
                             .foregroundStyle(FilmyTheme.primary)
                             .fixedSize(horizontal: false, vertical: true)
                         Text(message)
-                            .font(.system(.subheadline, design: .rounded).weight(.medium))
+                            .font(.system(.subheadline, design: .default).weight(.medium))
                             .foregroundStyle(FilmyTheme.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -580,24 +542,17 @@ private struct RollEmptyState: View {
                             .font(.system(size: 13, weight: .bold))
                             .foregroundStyle(FilmyTheme.mint)
                         Text("Finished frames stay here with their recipe and capture time.")
-                            .font(.system(.caption, design: .rounded).weight(.semibold))
+                            .font(.system(.caption, design: .default).weight(.semibold))
                             .foregroundStyle(FilmyTheme.mint)
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
                     if let actionTitle, let action {
                         Button(actionTitle, action: action)
-                            .font(.system(.subheadline, design: .rounded).weight(.bold))
+                            .font(.system(.subheadline, design: .default).weight(.semibold))
                             .foregroundStyle(FilmyTheme.background)
                             .frame(maxWidth: .infinity, minHeight: 50)
-                            .background(
-                                LinearGradient(
-                                    colors: [FilmyTheme.accent, FilmyTheme.accentWarm],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                ),
-                                in: RoundedRectangle(cornerRadius: 15, style: .continuous)
-                            )
+                            .background(FilmyTheme.accent, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
                             .accessibilityHint("Opens the relevant permission settings")
                     }
                 }

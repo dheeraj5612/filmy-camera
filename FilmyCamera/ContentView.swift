@@ -18,9 +18,9 @@ struct ContentView: View {
         selectedTabContent
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 tabBar
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                    .padding(.bottom, 7)
+                    .padding(.horizontal, 18)
+                    .padding(.top, 7)
+                    .padding(.bottom, 6)
             }
             .tint(FilmyTheme.accent)
             .background(FilmyPageBackground())
@@ -46,16 +46,19 @@ struct ContentView: View {
     }
 
     private var tabBar: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 4) {
             tabButton(.camera, title: "Camera", systemImage: "camera.fill")
             tabButton(.gallery, title: "Roll", systemImage: "square.grid.2x2.fill")
             tabButton(.settings, title: "Settings", systemImage: "slider.horizontal.3")
         }
-        .padding(6)
-        .background(.ultraThinMaterial, in: Capsule())
-        .background(FilmyTheme.navBarGradient, in: Capsule())
-        .overlay { Capsule().stroke(FilmyTheme.lineStrong, lineWidth: 1) }
-        .shadow(color: .black.opacity(0.38), radius: 25, y: 12)
+        .padding(5)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(FilmyTheme.navBarGradient, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(FilmyTheme.lineStrong, lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.3), radius: 12, y: 6)
     }
 
     private func tabButton(_ tab: Tab, title: String, systemImage: String) -> some View {
@@ -69,19 +72,20 @@ struct ContentView: View {
                     .font(.system(size: 15, weight: .bold))
 
                 Text(title)
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .font(.system(size: 12, weight: .semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
-            .foregroundStyle(selectedTab == tab ? FilmyTheme.background : FilmyTheme.primary)
-            .frame(maxWidth: .infinity, minHeight: 48)
+            .foregroundStyle(selectedTab == tab ? .white : FilmyTheme.secondary)
+            .frame(maxWidth: .infinity, minHeight: 46)
             .background(
-                selectedTab == tab ? FilmyTheme.accent : Color.white.opacity(0.02),
-                in: Capsule()
+                selectedTab == tab ? FilmyTheme.accent.opacity(0.22) : Color.clear,
+                in: RoundedRectangle(cornerRadius: 13, style: .continuous)
             )
             .overlay {
-                if selectedTab != tab {
-                    Capsule().stroke(Color.white.opacity(0.06), lineWidth: 1)
+                if selectedTab == tab {
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        .stroke(FilmyTheme.accent.opacity(0.38), lineWidth: 1)
                 }
             }
             .contentShape(Rectangle())

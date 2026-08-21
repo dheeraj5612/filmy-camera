@@ -259,6 +259,10 @@ public final class FilmRenderer {
         output = applyMonochromaticColorAxes(to: output, recipe: safeRecipe)
         output = applyDetailControls(to: output, recipe: safeRecipe)
         output = applyClarity(to: output, recipe: safeRecipe)
+        // Halation is light scattered inside the film stack, so derive its
+        // highlight mask before adding the final grain texture. Otherwise the
+        // synthetic grain itself can create or modulate red highlight bloom.
+        output = applyHalation(to: output, recipe: safeRecipe, quality: quality)
         output = applyGrain(
             to: output,
             recipe: safeRecipe,
@@ -267,7 +271,6 @@ public final class FilmRenderer {
             phase: grainPhase
         )
         output = applyVignette(to: output, recipe: safeRecipe)
-        output = applyHalation(to: output, recipe: safeRecipe, quality: quality)
         output = clampOutput(toNormalizedRange: output)
         output = restoreAlpha(of: output, from: image)
 
@@ -1042,6 +1045,35 @@ public final class FilmRenderer {
         case .realaAce:
             saturate(0.99)
             mappedBlue += 0.006 * shadowWeight
+        case .compactDigital:
+            // Original compact-camera response inspired by the G7 X Mark III
+            // product envelope: clean Standard-style color, warm portrait
+            // mids, crisp blues/greens, and smooth highlights. This is a
+            // parametric approximation, not Canon Picture Style data.
+            let chroma = max(mappedRed, max(mappedGreen, mappedBlue))
+                - min(mappedRed, min(mappedGreen, mappedBlue))
+            let hue = rgbHue(
+                red: mappedRed,
+                green: mappedGreen,
+                blue: mappedBlue,
+                chroma: chroma
+            )
+            let midtoneWeight = smoothstep(0.12, 0.42, luma)
+                * (1 - smoothstep(0.78, 0.98, luma))
+            let skinWeight = hueSectorWeight(hue, center: 0.075, halfWidth: 0.095)
+                * smoothstep(0.035, 0.32, chroma)
+                * midtoneWeight
+            let greenWeight = hueSectorWeight(hue, center: 0.32, halfWidth: 0.14)
+                * smoothstep(0.04, 0.34, chroma)
+            let blueWeight = hueSectorWeight(hue, center: 0.60, halfWidth: 0.13)
+                * smoothstep(0.04, 0.34, chroma)
+
+            saturate(1.025)
+            mappedRed += 0.018 * skinWeight + 0.004 * highlightWeight
+            mappedGreen += 0.004 * skinWeight + 0.006 * greenWeight
+            mappedBlue -= 0.009 * skinWeight
+            mappedBlue += 0.010 * blueWeight
+            mappedRed -= 0.002 * blueWeight
         }
 
         return (mappedRed, mappedGreen, mappedBlue)

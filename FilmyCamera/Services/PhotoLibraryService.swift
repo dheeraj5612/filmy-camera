@@ -115,6 +115,34 @@ enum PhotoLibraryServiceError: LocalizedError, Sendable {
     }
 }
 
+enum PhotoLibraryCompletionBridge {
+    private final class MainActorCompletionBox: @unchecked Sendable {
+        private let completion: @MainActor (Bool) -> Void
+
+        init(completion: @escaping @MainActor (Bool) -> Void) {
+            self.completion = completion
+        }
+
+        nonisolated func callAsynchronously(with success: Bool) {
+            Task { @MainActor in
+                completion(success)
+            }
+        }
+    }
+
+    /// PhotoKit invokes change completions on its own serial queue. Build the
+    /// callback outside main-actor isolation, then explicitly hop before
+    /// touching service state or SwiftUI-facing completion handlers.
+    nonisolated static func mainActor(
+        _ completion: @escaping @MainActor (Bool) -> Void
+    ) -> @Sendable (Bool, Error?) -> Void {
+        let box = MainActorCompletionBox(completion: completion)
+        return { success, _ in
+            box.callAsynchronously(with: success)
+        }
+    }
+}
+
 enum PhotoLibraryAssetOwnership {
     static func contains(_ assetIdentifier: String, in savedIdentifiers: [String]) -> Bool {
         guard !assetIdentifier.isEmpty else { return false }
@@ -508,7 +536,36 @@ final class PhotoLibraryService: ObservableObject {
             let cacheData = imageData.flatMap { $0.isEmpty ? nil : $0 }
                 ?? image.jpegData(compressionQuality: 0.95)
 
-            PHPhotoLibrary.shared().performChanges {
+            let photoWriteCompletion = PhotoLibraryCompletionBridge.mainActor { [weak self] success in
+                guard let self else { return }
+                guard success, let assetIdentifier = assetIdentifierBox.get() else {
+                    completion(false)
+                    return
+                }
+
+                self.rememberSavedAsset(
+                    assetIdentifier,
+                    metadata: metadata,
+                    imageData: cacheData,
+                    image: image
+                )
+                guard canManageAppAlbum else {
+                    self.refresh()
+                    completion(true)
+                    return
+                }
+
+                self.addToAppAlbum(assetIdentifier: assetIdentifier) { albumSaved in
+                    self.refresh()
+                    // The image is already safely in Photos if album organization
+                    // fails. Do not report a false save failure or ask the user to
+                    // retry and create a duplicate asset.
+                    _ = albumSaved
+                    completion(true)
+                }
+            }
+
+            PHPhotoLibrary.shared().performChanges({
                 let request: PHAssetChangeRequest
                 if let imageData, !imageData.isEmpty {
                     let creationRequest = PHAssetCreationRequest()
@@ -519,36 +576,7 @@ final class PhotoLibraryService: ObservableObject {
                 }
                 request.creationDate = capturedAt
                 assetIdentifierBox.set(request.placeholderForCreatedAsset?.localIdentifier)
-            } completionHandler: { [weak self] success, _ in
-                guard let self else { return }
-                Task { @MainActor in
-                    guard success, let assetIdentifier = assetIdentifierBox.get() else {
-                        completion(false)
-                        return
-                    }
-
-                    self.rememberSavedAsset(
-                        assetIdentifier,
-                        metadata: metadata,
-                        imageData: cacheData,
-                        image: image
-                    )
-                    guard canManageAppAlbum else {
-                        self.refresh()
-                        completion(true)
-                        return
-                    }
-
-                    self.addToAppAlbum(assetIdentifier: assetIdentifier) { albumSaved in
-                        self.refresh()
-                        // The image is already safely in Photos if album organization
-                        // fails. Do not report a false save failure or ask the user to
-                        // retry and create a duplicate asset.
-                        _ = albumSaved
-                        completion(true)
-                    }
-                }
-            }
+            }, completionHandler: photoWriteCompletion)
         }
     }
 
@@ -575,21 +603,21 @@ final class PhotoLibraryService: ObservableObject {
             completion(.failure(.notOwned))
             return
         }
-        PHPhotoLibrary.shared().performChanges {
-            PHAssetChangeRequest.deleteAssets([asset] as NSArray)
-        } completionHandler: { [weak self] success, _ in
-            Task { @MainActor in
-                guard let self else { return }
-                guard success else {
-                    completion(.failure(.changeFailed))
-                    return
-                }
-
-                self.forgetSavedAsset(assetIdentifier)
-                self.refresh()
-                completion(.success(()))
+        let photoDeleteCompletion = PhotoLibraryCompletionBridge.mainActor { [weak self] success in
+            guard let self else { return }
+            guard success else {
+                completion(.failure(.changeFailed))
+                return
             }
+
+            self.forgetSavedAsset(assetIdentifier)
+            self.refresh()
+            completion(.success(()))
         }
+
+        PHPhotoLibrary.shared().performChanges({
+            PHAssetChangeRequest.deleteAssets([asset] as NSArray)
+        }, completionHandler: photoDeleteCompletion)
     }
 
     func delete(
@@ -1067,24 +1095,24 @@ final class PhotoLibraryService: ObservableObject {
         guard let album = appAlbum() else {
             let albumIdentifierBox = IdentifierBox()
             let albumTitle = self.albumTitle
-            PHPhotoLibrary.shared().performChanges {
+            let albumCreationCompletion = PhotoLibraryCompletionBridge.mainActor { [weak self] success in
+                guard let self else { return }
+                guard success,
+                      let albumIdentifier = albumIdentifierBox.get(),
+                      let createdAlbum = PHAssetCollection.fetchAssetCollections(
+                          withLocalIdentifiers: [albumIdentifier],
+                          options: nil
+                      ).firstObject else {
+                    completion(false)
+                    return
+                }
+                self.addAsset(assetIdentifier, to: createdAlbum, completion: completion)
+            }
+
+            PHPhotoLibrary.shared().performChanges({
                 let request = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: albumTitle)
                 albumIdentifierBox.set(request.placeholderForCreatedAssetCollection.localIdentifier)
-            } completionHandler: { [weak self] success, _ in
-                guard let self else { return }
-                Task { @MainActor in
-                    guard success,
-                          let albumIdentifier = albumIdentifierBox.get(),
-                          let createdAlbum = PHAssetCollection.fetchAssetCollections(
-                              withLocalIdentifiers: [albumIdentifier],
-                              options: nil
-                          ).firstObject else {
-                        completion(false)
-                        return
-                    }
-                    self.addAsset(assetIdentifier, to: createdAlbum, completion: completion)
-                }
-            }
+            }, completionHandler: albumCreationCompletion)
             return
         }
 
@@ -1104,13 +1132,10 @@ final class PhotoLibraryService: ObservableObject {
             return
         }
 
-        PHPhotoLibrary.shared().performChanges {
+        let albumAddCompletion = PhotoLibraryCompletionBridge.mainActor(completion)
+        PHPhotoLibrary.shared().performChanges({
             PHAssetCollectionChangeRequest(for: album)?.addAssets([asset] as NSArray)
-        } completionHandler: { success, _ in
-            Task { @MainActor in
-                completion(success)
-            }
-        }
+        }, completionHandler: albumAddCompletion)
     }
 
     func image(for asset: PhotoLibraryGalleryAsset, targetSize: CGSize) async -> UIImage? {

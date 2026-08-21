@@ -13,13 +13,19 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     /// adds the canonical camera mode controls introduced by the fidelity pass;
     /// version 5 adds persisted Kelvin white-balance control.
     public static let currentSchemaVersion = 5
-    public static let rendererVersion = "core-image-parametric-v1"
+    public static let rendererVersion = "core-image-parametric-v2"
 
     /// The product-level disclosure that accompanies every current recipe.
     /// It intentionally rules out an exact-output or hardware-calibration
     /// claim.
     public static let independentApproximationDisclaimer =
         "Filmy Camera is an independent implementation inspired by public Fujifilm terminology and controls. Its renders are original approximations, not pixel-identical Fujifilm camera output. It is not affiliated with, endorsed by, or calibrated to Fujifilm, and it contains no proprietary LUTs, firmware, or calibration data."
+
+    /// Product-specific disclosure for the compact-camera look. The recipe
+    /// uses only public Canon specifications and control names as references;
+    /// it does not contain Canon Picture Style data or camera calibration.
+    public static let g7XApproximationDisclaimer =
+        "G7 X Compact is an independent, original approximation inspired by public Canon PowerShot G7 X Mark III specifications. It cannot reproduce that camera's one-inch sensor, lens, DIGIC processing, or depth of field, is not pixel-identical Canon output, and is not affiliated with, endorsed by, or calibrated to Canon."
 
     /// Disclosure for recipes decoded from the pre-provenance persistence
     /// format. The old record is retained for compatibility, but its origin
@@ -44,6 +50,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         case classicNegative
         case nostalgicNegative
         case realaAce
+        case compactDigital
         case monochrome
         case sepia
 
@@ -64,12 +71,13 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             case .classicNegative: return "Warm Negative"
             case .nostalgicNegative: return "Memory Negative"
             case .realaAce: return "Natural Negative"
+            case .compactDigital: return "Premium Compact"
             case .monochrome: return "Fine Monochrome"
             case .sepia: return "Sepia Archive"
             }
         }
 
-        /// Canonical public Fujifilm vocabulary retained separately from the
+        /// Canonical public camera vocabulary retained separately from the
         /// product's more inviting recipe names.
         public var officialName: String {
             switch self {
@@ -85,6 +93,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             case .classicNegative: return "CLASSIC Neg."
             case .nostalgicNegative: return "NOSTALGIC Neg."
             case .realaAce: return "REALA ACE"
+            case .compactDigital: return "STANDARD"
             case .monochrome: return "MONOCHROME"
             case .sepia: return "SEPIA"
             }
@@ -403,6 +412,8 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     public enum PublicReference: String, CaseIterable, Codable, Hashable, Sendable {
         case xt5ImageQualitySetting
         case filmSimulationOverview
+        case g7XMarkIIITechnicalSpecifications
+        case g7XMarkIIICameraMuseum
 
         public var title: String {
             switch self {
@@ -410,6 +421,10 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
                 return "FUJIFILM X-T5 Image Quality Setting"
             case .filmSimulationOverview:
                 return "FUJIFILM Film Simulation overview"
+            case .g7XMarkIIITechnicalSpecifications:
+                return "Canon PowerShot G7 X Mark III technical specifications"
+            case .g7XMarkIIICameraMuseum:
+                return "Canon Camera Museum: PowerShot G7 X Mark III"
             }
         }
 
@@ -419,6 +434,10 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
                 return "https://fujifilm-dsc.com/en/manual/x-t5/menu_shooting/image_quality_setting/"
             case .filmSimulationOverview:
                 return "https://www.fujifilm-x.com/en-us/products/film-simulation/"
+            case .g7XMarkIIITechnicalSpecifications:
+                return "https://www.usa.canon.com/support/p/powershot-g7-x-mark-iii"
+            case .g7XMarkIIICameraMuseum:
+                return "https://global.canon/en/c-museum/product/dcc884.html"
             }
         }
 
@@ -428,9 +447,23 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
                 return "Public names, option descriptions, and control groupings"
             case .filmSimulationOverview:
                 return "Public film-simulation names and subject-oriented descriptions"
+            case .g7XMarkIIITechnicalSpecifications:
+                return "Public sensor, lens, white-balance, and Picture Style option specifications"
+            case .g7XMarkIIICameraMuseum:
+                return "Public compact-camera imaging, low-light, and lens characteristics"
             }
         }
     }
+
+    public static let fujifilmPublicReferences: [PublicReference] = [
+        .xt5ImageQualitySetting,
+        .filmSimulationOverview
+    ]
+
+    public static let g7XPublicReferences: [PublicReference] = [
+        .g7XMarkIIITechnicalSpecifications,
+        .g7XMarkIIICameraMuseum
+    ]
 
     /// Machine-readable provenance attached to a recipe and persisted with
     /// saved-frame metadata. The enum surface contains no exact-match or
@@ -438,6 +471,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     public struct Provenance: Codable, Hashable, Sendable {
         public enum Source: String, CaseIterable, Codable, Hashable, Sendable {
             case publicOfficialDocumentation
+            case publicCanonDocumentation
             case userModified
             case legacyRecordWithoutProvenance
         }
@@ -449,6 +483,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
 
         public enum Calibration: String, CaseIterable, Codable, Hashable, Sendable {
             case notCalibratedToFujifilmHardware
+            case notCalibratedToCanonHardware
             case unknownLegacyRecord
         }
 
@@ -500,7 +535,9 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         public var disclaimer: String {
             switch implementation {
             case .originalParametricApproximation:
-                return FilmRecipe.independentApproximationDisclaimer
+                return calibration == .notCalibratedToCanonHardware
+                    ? FilmRecipe.g7XApproximationDisclaimer
+                    : FilmRecipe.independentApproximationDisclaimer
             case .unknownLegacyRecord:
                 return FilmRecipe.legacyProvenanceDisclaimer
             }
@@ -509,10 +546,20 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         /// A complete record has the expected source, implementation status,
         /// calibration disclosure, and the complete official reference set.
         public var isComplete: Bool {
-            (source == .publicOfficialDocumentation || source == .userModified)
+            let hasMatchingSourceAndReferences: Bool
+            switch (source, calibration) {
+            case (.publicOfficialDocumentation, .notCalibratedToFujifilmHardware),
+                 (.userModified, .notCalibratedToFujifilmHardware):
+                hasMatchingSourceAndReferences = references == FilmRecipe.fujifilmPublicReferences
+            case (.publicCanonDocumentation, .notCalibratedToCanonHardware),
+                 (.userModified, .notCalibratedToCanonHardware):
+                hasMatchingSourceAndReferences = references == FilmRecipe.g7XPublicReferences
+            default:
+                hasMatchingSourceAndReferences = false
+            }
+
+            return hasMatchingSourceAndReferences
                 && implementation == .originalParametricApproximation
-                && calibration == .notCalibratedToFujifilmHardware
-                && references == PublicReference.allCases
                 && rendererVersion == FilmRecipe.rendererVersion
         }
     }
@@ -521,7 +568,14 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         source: .publicOfficialDocumentation,
         implementation: .originalParametricApproximation,
         calibration: .notCalibratedToFujifilmHardware,
-        references: PublicReference.allCases
+        references: fujifilmPublicReferences
+    )
+
+    public static let g7XProvenance = Provenance(
+        source: .publicCanonDocumentation,
+        implementation: .originalParametricApproximation,
+        calibration: .notCalibratedToCanonHardware,
+        references: g7XPublicReferences
     )
 
     /// Used only when decoding the old JSON shape that had no provenance
@@ -944,10 +998,11 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         grainSize: Double = 1,
         vignette: Double = 0,
         halation: Double = 0,
-        palette: Palette = Palette()
+        palette: Palette = Palette(),
+        provenance: Provenance = Self.currentProvenance
     ) {
         self.schemaVersion = Self.currentSchemaVersion
-        self.provenance = Self.currentProvenance
+        self.provenance = provenance
         self.id = id
         self.name = name
         self.subtitle = subtitle
@@ -977,11 +1032,12 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     /// source references remain useful for the parent look, but the edited
     /// record is no longer presented as an untouched built-in recipe.
     public mutating func markUserModified(parentRecipeID: String) {
+        let parentProvenance = provenance
         provenance = Provenance(
             source: .userModified,
             implementation: .originalParametricApproximation,
-            calibration: .notCalibratedToFujifilmHardware,
-            references: Self.currentProvenance.references,
+            calibration: parentProvenance.calibration,
+            references: parentProvenance.references,
             parentRecipeID: parentRecipeID,
             rendererVersion: Self.rendererVersion
         )
@@ -1663,6 +1719,43 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
                 blueRedMix: 0.006,
                 saturation: 0.99
             )
+        ),
+        FilmRecipe(
+            id: "g7x-compact",
+            name: "G7 X Compact",
+            subtitle: "Warm skin / crisp compact color",
+            filmBase: .compactDigital,
+            exposure: 0.05,
+            tone: Tone(highlight: 0.08, shadow: 0.10),
+            saturation: 1.06,
+            contrast: 1.08,
+            dynamicRange: .dr200,
+            dRangePriority: .off,
+            whiteBalance: WhiteBalanceShift(
+                temperature: 0.04,
+                tint: 0.01,
+                mode: .ambiencePriority
+            ),
+            colorChrome: 0,
+            blueResponse: 0.08,
+            fxBlue: 0,
+            sharpness: 0.18,
+            noiseReduction: 0.08,
+            clarity: 0.10,
+            grain: 0,
+            grainSize: 0.75,
+            vignette: 0.05,
+            halation: 0,
+            palette: Palette(
+                redBias: 0.015,
+                greenBias: 0.002,
+                blueBias: -0.006,
+                redGreenMix: 0.012,
+                greenBlueMix: 0.004,
+                blueRedMix: -0.008,
+                saturation: 1.01
+            ),
+            provenance: g7XProvenance
         )
     ]
 }

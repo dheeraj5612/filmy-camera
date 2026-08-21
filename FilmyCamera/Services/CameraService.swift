@@ -337,7 +337,6 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     )
     private let videoOutput = AVCaptureVideoDataOutput()
     private let photoOutput = AVCapturePhotoOutput()
-    private let sRGBColorSpace = CGColorSpace(name: CGColorSpace.sRGB)
     private let frameDeliveryGate = FrameDeliveryGate()
 
     // These values are accessed only by sessionQueue, except for immutable
@@ -1224,6 +1223,11 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             ) { [weak self] _ in
                 self?.sessionQueue.async { [weak self] in
                     guard let self, self.wantsToRun else { return }
+                    // An interrupted photo request is not guaranteed to
+                    // deliver a terminal delegate callback. Complete it now
+                    // so the shutter UI cannot remain stuck in a busy state;
+                    // any late callback is rejected by its cleared unique ID.
+                    self.cancelPendingPhotoOnQueue(status: "Capture interrupted.")
                     self.publishRunning(false)
                     self.publishAvailability(.interrupted)
                     self.publishStatus("Camera temporarily unavailable.")
@@ -1256,6 +1260,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         // runtime errors remain visible so the UI can explain the recovery
         // path instead of silently presenting a frozen preview.
         guard wantsToRun else { return }
+        cancelPendingPhotoOnQueue(status: "Capture interrupted.")
         if codeRawValue == AVError.Code.mediaServicesWereReset.rawValue, isConfigured {
             session.startRunning()
             let running = session.isRunning
@@ -2332,6 +2337,14 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         return kCVPixelFormatType_32BGRA
     }
 
+    /// Preserve the color space attached by AVFoundation at the camera input
+    /// boundary. FilmRenderer performs the deliberate conversion to the app's
+    /// sRGB output contract; assigning sRGB here would reinterpret wide-color
+    /// samples instead of converting them.
+    static func previewImage(from pixelBuffer: CVPixelBuffer) -> CIImage {
+        CIImage(cvPixelBuffer: pixelBuffer)
+    }
+
     static func acceptsPhotoCallback(
         pendingUniqueID: Int64?,
         callbackUniqueID: Int64
@@ -2360,12 +2373,7 @@ extension CameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
             publishPreviewFrameSize(frameSize)
         }
 
-        let image: CIImage
-        if let sRGBColorSpace {
-            image = CIImage(cvPixelBuffer: pixelBuffer, options: [.colorSpace: sRGBColorSpace])
-        } else {
-            image = CIImage(cvPixelBuffer: pixelBuffer)
-        }
+        let image = Self.previewImage(from: pixelBuffer)
 
         // CIImage is immutable and the callback is intentionally delivered on
         // main, where SwiftUI/Metal preview views can consume it safely. The

@@ -45,6 +45,40 @@ final class RendererOutputBoundsTests: XCTestCase {
         }
     }
 
+    func testG7XCompactLookProducesADistinctWarmCompactResponse() throws {
+        let extent = CGRect(x: 0, y: 0, width: 8, height: 8)
+        let skinTone = CIImage(
+            color: CIColor(red: 0.70, green: 0.43, blue: 0.30, alpha: 1)
+        ).cropped(to: extent)
+        let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+        let recipe = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == "g7x-compact" })
+        let neutral = FilmRecipe(
+            id: "compact-neutral-control",
+            name: "Compact Neutral Control",
+            subtitle: "Test control"
+        )
+
+        let compactPixels = renderFloatPixels(
+            FilmRenderer.render(skinTone, recipe: recipe, quality: .photo),
+            extent: extent,
+            context: context
+        )
+        let neutralPixels = renderFloatPixels(
+            FilmRenderer.render(skinTone, recipe: neutral, quality: .photo),
+            extent: extent,
+            context: context
+        )
+
+        XCTAssertGreaterThan(meanAbsoluteRGBDifference(compactPixels, neutralPixels), 0.005)
+        let compactPixel = pixel(compactPixels, width: 8, x: 4, y: 4)
+        let neutralPixel = pixel(neutralPixels, width: 8, x: 4, y: 4)
+        XCTAssertGreaterThan(
+            compactPixel[0] - compactPixel[2],
+            neutralPixel[0] - neutralPixel[2],
+            "The compact recipe should preserve its intended warm portrait separation"
+        )
+    }
+
     func testEmptyInputIsReturnedWithoutExpandingBounds() {
         let empty = CIImage.empty()
         let output = FilmRenderer.render(
@@ -539,6 +573,56 @@ final class RendererOutputBoundsTests: XCTestCase {
             .map { abs(Double($0.0) - Double($0.1)) }
             .reduce(0, +)
         XCTAssertLessThan(difference, 0.0001)
+    }
+
+    func testHalationIsDerivedBeforeFinalGrainTexture() {
+        let extent = CGRect(x: 0, y: 0, width: 64, height: 48)
+        let background = CIImage(
+            color: CIColor(red: 0.16, green: 0.14, blue: 0.12, alpha: 1)
+        ).cropped(to: extent)
+        let highlight = CIImage(
+            color: CIColor(red: 0.98, green: 0.92, blue: 0.82, alpha: 1)
+        )
+        .cropped(to: CGRect(x: 26, y: 18, width: 12, height: 12))
+        let source = highlight.composited(over: background)
+        let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+
+        let base = FilmRecipe(
+            id: "finishing-order",
+            name: "Finishing Order",
+            subtitle: "Test",
+            filmBase: .standard,
+            saturation: 1,
+            contrast: 1,
+            grain: 0,
+            vignette: 0,
+            halation: 0
+        )
+        var halationOnly = base
+        halationOnly.halation = 0.8
+        var grainOnly = base
+        grainOnly.grain = 0.7
+        grainOnly.grainSize = 1.2
+        var combined = grainOnly
+        combined.halation = halationOnly.halation
+
+        let combinedPixels = renderFloatPixels(
+            FilmRenderer.render(source, recipe: combined, quality: .photo, grainSeed: 91),
+            extent: extent,
+            context: context
+        )
+        let halated = FilmRenderer.render(source, recipe: halationOnly, quality: .photo)
+        let sequentialPixels = renderFloatPixels(
+            FilmRenderer.render(halated, recipe: grainOnly, quality: .photo, grainSeed: 91),
+            extent: extent,
+            context: context
+        )
+
+        XCTAssertLessThan(
+            meanAbsoluteRGBDifference(combinedPixels, sequentialPixels),
+            0.001,
+            "Combined finishing should match halation followed by grain"
+        )
     }
 
     func testGrainSeedChangesSpatialPatternWithoutChangingRecipe() {

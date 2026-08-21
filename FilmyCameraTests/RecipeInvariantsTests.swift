@@ -10,6 +10,10 @@ final class RecipeInvariantsTests: XCTestCase {
     private var hadRecipeOverridesValue = false
     private var previousRecipeOverrides: Data?
 
+    func testRendererVersionTracksTheHalationBeforeGrainPipeline() {
+        XCTAssertEqual(FilmRecipe.rendererVersion, "core-image-parametric-v2")
+    }
+
     override func setUp() {
         super.setUp()
 
@@ -200,10 +204,17 @@ final class RecipeInvariantsTests: XCTestCase {
         for recipe in FilmRecipe.builtIns {
             XCTAssertEqual(recipe.schemaVersion, FilmRecipe.currentSchemaVersion, recipe.id)
             XCTAssertTrue(recipe.provenance.isComplete, recipe.id)
-            XCTAssertEqual(recipe.provenance.source, .publicOfficialDocumentation, recipe.id)
             XCTAssertEqual(recipe.provenance.implementation, .originalParametricApproximation, recipe.id)
-            XCTAssertEqual(recipe.provenance.calibration, .notCalibratedToFujifilmHardware, recipe.id)
-            XCTAssertEqual(recipe.provenance.references, FilmRecipe.PublicReference.allCases, recipe.id)
+
+            if recipe.id == "g7x-compact" {
+                XCTAssertEqual(recipe.provenance.source, .publicCanonDocumentation, recipe.id)
+                XCTAssertEqual(recipe.provenance.calibration, .notCalibratedToCanonHardware, recipe.id)
+                XCTAssertEqual(recipe.provenance.references, FilmRecipe.g7XPublicReferences, recipe.id)
+            } else {
+                XCTAssertEqual(recipe.provenance.source, .publicOfficialDocumentation, recipe.id)
+                XCTAssertEqual(recipe.provenance.calibration, .notCalibratedToFujifilmHardware, recipe.id)
+                XCTAssertEqual(recipe.provenance.references, FilmRecipe.fujifilmPublicReferences, recipe.id)
+            }
 
             for reference in recipe.provenance.references {
                 XCTAssertTrue(reference.url.hasPrefix("https://"), reference.rawValue)
@@ -212,11 +223,30 @@ final class RecipeInvariantsTests: XCTestCase {
             }
 
             let disclaimer = recipe.provenance.disclaimer
-            XCTAssertTrue(disclaimer.contains("original approximations"), recipe.id)
+            XCTAssertTrue(disclaimer.contains("original"), recipe.id)
             XCTAssertTrue(disclaimer.contains("not pixel-identical"), recipe.id)
             XCTAssertTrue(disclaimer.contains("not affiliated"), recipe.id)
-            XCTAssertTrue(disclaimer.contains("no proprietary LUTs"), recipe.id)
         }
+    }
+
+    func testG7XCompactRecipeHasAnExplicitIndependentCameraContract() throws {
+        let recipe = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == "g7x-compact" })
+
+        XCTAssertEqual(recipe.name, "G7 X Compact")
+        XCTAssertEqual(recipe.filmBase, .compactDigital)
+        XCTAssertEqual(recipe.grainEffectLevel, .off)
+        XCTAssertGreaterThan(recipe.sharpness, 0)
+        XCTAssertGreaterThan(recipe.noiseReduction, 0)
+        XCTAssertEqual(recipe.provenance, FilmRecipe.g7XProvenance)
+        XCTAssertTrue(recipe.provenance.disclaimer.contains("one-inch sensor"))
+        XCTAssertTrue(recipe.provenance.disclaimer.contains("not pixel-identical Canon output"))
+
+        var customized = recipe
+        customized.markUserModified(parentRecipeID: recipe.id)
+        XCTAssertEqual(customized.provenance.source, .userModified)
+        XCTAssertEqual(customized.provenance.calibration, .notCalibratedToCanonHardware)
+        XCTAssertEqual(customized.provenance.references, FilmRecipe.g7XPublicReferences)
+        XCTAssertTrue(customized.provenance.isComplete)
     }
 
     func testControlContractHasStableSemanticsAndUniqueIdentifiers() {

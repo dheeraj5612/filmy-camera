@@ -333,38 +333,34 @@ struct CameraScreen: View {
     private var header: some View {
         HStack(alignment: .center, spacing: 12) {
             HStack(spacing: 10) {
-                ZStack {
-                    Circle()
-                        .fill(FilmyTheme.accent.opacity(0.15))
-                    Circle()
-                        .stroke(FilmyTheme.accent.opacity(0.35), lineWidth: 1)
-                        .padding(4)
-                    Image(systemName: "camera.aperture")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(FilmyTheme.accent)
-                }
-                .frame(width: 36, height: 36)
-
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 7) {
                         Text("FILMY CAMERA")
-                            .font(.system(.caption, design: .rounded).weight(.black))
-                            .tracking(2.0)
+                            .font(.system(size: 15, weight: .bold))
+                            .tracking(0.4)
 
                         Text(sessionLabel)
-                            .font(.system(.caption2, design: .rounded).weight(.black))
-                            .tracking(0.8)
+                            .font(.system(size: 10, weight: .bold))
+                            .tracking(0.5)
                             .foregroundStyle(camera.isRunning ? FilmyTheme.mint : FilmyTheme.accent)
                     }
                         .foregroundStyle(.white)
 
                     Text(viewModel.selectedRecipe.name + "  ·  " + viewModel.selectedRecipe.descriptor)
-                        .font(.system(.caption2, design: .rounded).weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.6))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.62))
                         .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
                         .minimumScaleFactor(0.7)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(Color.black.opacity(0.38), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
             }
 
             Spacer(minLength: 8)
@@ -381,14 +377,6 @@ struct CameraScreen: View {
                 )
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .background(Color.black.opacity(0.2), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(Color.white.opacity(0.16), lineWidth: 1)
-        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
             "Filmy Camera. \(viewModel.selectedRecipe.name). \(camera.statusMessage)"
@@ -397,37 +385,33 @@ struct CameraScreen: View {
 
     private var compactHeader: some View {
         HStack(spacing: 8) {
-            ZStack {
-                Circle()
-                    .fill(FilmyTheme.accent.opacity(0.15))
-                Circle()
-                    .stroke(FilmyTheme.accent.opacity(0.35), lineWidth: 1)
-                    .padding(3)
-                Image(systemName: "camera.aperture")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(FilmyTheme.accent)
-            }
-            .frame(width: 30, height: 30)
-
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
                     Text("FILMY CAMERA")
-                        .font(.system(size: 14, weight: .black, design: .rounded))
-                        .tracking(1.2)
+                        .font(.system(size: 14, weight: .bold))
+                        .tracking(0.3)
                         .foregroundStyle(.white)
 
                     Text(sessionLabel)
-                        .font(.system(size: 10, weight: .black, design: .rounded))
-                        .tracking(0.6)
+                        .font(.system(size: 9, weight: .bold))
+                        .tracking(0.4)
                         .foregroundStyle(camera.isRunning ? FilmyTheme.mint : FilmyTheme.accent)
                 }
 
                 Text(viewModel.selectedRecipe.name)
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.white.opacity(0.62))
                     .lineLimit(1)
             }
             .layoutPriority(1)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 7)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .background(Color.black.opacity(0.38), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+            }
 
             Spacer(minLength: 4)
             HStack(spacing: 5) {
@@ -437,14 +421,6 @@ struct CameraScreen: View {
 
                 compactStatusPill
             }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .background(Color.black.opacity(0.2), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.white.opacity(0.16), lineWidth: 1)
         }
         // Keep the compact header's individual stock and product labels
         // discoverable at large Dynamic Type sizes. The parent still exposes
@@ -942,13 +918,13 @@ struct CameraScreen: View {
         .padding(.horizontal, 14)
         .padding(.top, 15)
         .padding(.bottom, 12)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: FilmyTheme.actionPlateRadius, style: .continuous))
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: FilmyTheme.actionPlateRadius, style: .continuous))
         .background(FilmyTheme.plateGradient, in: RoundedRectangle(cornerRadius: FilmyTheme.actionPlateRadius, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: FilmyTheme.actionPlateRadius, style: .continuous)
-                .stroke(Color.white.opacity(0.17), lineWidth: 1)
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
         }
-        .shadow(color: .black.opacity(0.34), radius: 30, y: 14)
+        .shadow(color: .black.opacity(0.28), radius: 12, y: 5)
     }
 
     private var landscapeBottomControls: some View {
@@ -1000,13 +976,13 @@ struct CameraScreen: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .background(FilmyTheme.plateGradient, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(FilmyTheme.plateGradient, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(Color.white.opacity(0.18), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
         }
-        .shadow(color: .black.opacity(0.26), radius: 20, y: 8)
+        .shadow(color: .black.opacity(0.24), radius: 10, y: 4)
     }
 
     private var landscapeRecipeMenu: some View {
@@ -1212,12 +1188,12 @@ struct CameraScreen: View {
         .padding(.horizontal, 14)
         .padding(.top, 14)
         .padding(.bottom, 12)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .stroke(Color.white.opacity(0.18), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
         }
-        .shadow(color: .black.opacity(0.26), radius: 28, y: 12)
+        .shadow(color: .black.opacity(0.22), radius: 10, y: 4)
         // The camera chrome is a constrained overlay rather than a scrolling
         // document. Cap its visual scale one step below the largest Dynamic
         // Type sizes so every capture, Roll, and Tune action remains reachable.
@@ -1299,26 +1275,23 @@ struct CameraScreen: View {
         .padding(.horizontal, 12)
         .padding(.top, 11)
         .padding(.bottom, 10)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .background(FilmyTheme.plateGradient, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(FilmyTheme.plateGradient, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(Color.white.opacity(0.17), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
         }
-        .shadow(color: .black.opacity(0.3), radius: 24, y: 10)
+        .shadow(color: .black.opacity(0.24), radius: 10, y: 4)
     }
 
     private var viewfinderFirstActionPlate: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 8) {
             CameraActionButton(
                 systemName: "square.grid.2x2",
                 title: "Roll",
                 accessibilityLabel: "Open roll",
                 action: onOpenGallery
             )
-
-            minimalRecipeMenu
-                .frame(maxWidth: .infinity)
 
             CaptureButton(
                 isCapturing: viewModel.isCapturing,
@@ -1329,17 +1302,12 @@ struct CameraScreen: View {
                 }
                 viewModel.capture(camera: camera)
             }
+
+            minimalRecipeMenu
+                .frame(minWidth: 0, maxWidth: .infinity)
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 10)
-        .padding(.bottom, 9)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .background(FilmyTheme.plateGradient, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(Color.white.opacity(0.17), lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.3), radius: 24, y: 10)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 4)
     }
 
     private var minimalRecipeMenu: some View {
@@ -1364,36 +1332,32 @@ struct CameraScreen: View {
                 recipeForDetail = viewModel.selectedRecipe
             }
         } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "film.stack")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(FilmyTheme.accent)
-
+            HStack(spacing: 6) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("CURRENT LOOK")
-                        .font(.system(size: 9, weight: .black, design: .rounded))
-                        .tracking(1.2)
+                        .font(.system(size: 9, weight: .bold))
+                        .tracking(0.8)
                         .foregroundStyle(FilmyTheme.accent)
 
                     Text(viewModel.selectedRecipe.name)
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.72)
                 }
 
-                Spacer(minLength: 3)
+                Spacer(minLength: 2)
 
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 10, weight: .black))
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(.white.opacity(0.68))
             }
             .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
-            .padding(.horizontal, 11)
-            .background(Color.black.opacity(0.34), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+            .padding(.horizontal, 10)
+            .background(Color.black.opacity(0.56), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 15, style: .continuous)
-                    .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.white.opacity(0.12), lineWidth: 1)
             }
         }
         .buttonStyle(.plain)
