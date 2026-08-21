@@ -415,6 +415,14 @@ private struct GalleryThumbnail: View {
 
     @State private var image: UIImage?
 
+    private var imageRequestKey: PhotoLibraryImageRequestKey {
+        PhotoLibraryGalleryImagePolicy.requestKey(
+            assetIdentifier: asset.assetIdentifier,
+            isPhotosAsset: asset.isPhotosAsset,
+            authorizationStatus: photoLibrary.authorizationStatus
+        )
+    }
+
     var body: some View {
         ZStack {
             if let image {
@@ -477,16 +485,21 @@ private struct GalleryThumbnail: View {
             }
         }
         .shadow(color: .black.opacity(0.24), radius: 10, y: 6)
-        .task(id: asset.id) {
-            image = await photoLibrary.image(for: asset, targetSize: CGSize(width: 360, height: 440))
-        }
-        .onChange(of: photoLibrary.authorizationStatus) { _, status in
-            guard asset.isPhotosAsset,
-                  status == .authorized || status == .limited else {
-                if asset.isPhotosAsset { image = nil }
+        .task(id: imageRequestKey) {
+            image = nil
+            guard PhotoLibraryGalleryImagePolicy.canLoad(
+                isPhotosAsset: asset.isPhotosAsset,
+                authorizationStatus: photoLibrary.authorizationStatus
+            ) else {
                 return
             }
-            image = nil
+
+            let loadedImage = await photoLibrary.image(
+                for: asset,
+                targetSize: CGSize(width: 360, height: 440)
+            )
+            guard !Task.isCancelled else { return }
+            image = loadedImage
         }
     }
 }
@@ -612,6 +625,14 @@ private struct GalleryDetailView: View {
     @State private var imageOffset: CGSize = .zero
     @State private var dragBaseOffset: CGSize = .zero
 
+    private var imageRequestKey: PhotoLibraryImageRequestKey {
+        PhotoLibraryGalleryImagePolicy.requestKey(
+            assetIdentifier: asset.assetIdentifier,
+            isPhotosAsset: asset.isPhotosAsset,
+            authorizationStatus: photoLibrary.authorizationStatus
+        )
+    }
+
     var body: some View {
         ZStack {
             FilmyTheme.background.ignoresSafeArea()
@@ -686,14 +707,21 @@ private struct GalleryDetailView: View {
                 }
             }
         }
-        .task {
-            image = await photoLibrary.image(for: asset, targetSize: CGSize(width: 1600, height: 2200))
-        }
-        .onChange(of: photoLibrary.authorizationStatus) { _, status in
-            guard asset.isPhotosAsset else { return }
-            if status != .authorized && status != .limited {
-                image = nil
+        .task(id: imageRequestKey) {
+            image = nil
+            guard PhotoLibraryGalleryImagePolicy.canLoad(
+                isPhotosAsset: asset.isPhotosAsset,
+                authorizationStatus: photoLibrary.authorizationStatus
+            ) else {
+                return
             }
+
+            let loadedImage = await photoLibrary.image(
+                for: asset,
+                targetSize: CGSize(width: 1600, height: 2200)
+            )
+            guard !Task.isCancelled else { return }
+            image = loadedImage
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             detailToolbar

@@ -2,6 +2,29 @@ import Foundation
 import SwiftUI
 import UIKit
 
+enum CameraActivityAction: Equatable {
+    case start
+    case stop
+    case hold
+}
+
+enum CameraActivityPolicy {
+    static func action(
+        hasReview: Bool,
+        sceneIsActive: Bool,
+        isCameraTabActive: Bool,
+        availability: CameraService.Availability
+    ) -> CameraActivityAction {
+        if hasReview || !sceneIsActive || !isCameraTabActive {
+            return .stop
+        }
+        if availability == .interrupted {
+            return .hold
+        }
+        return .start
+    }
+}
+
 struct CameraScreen: View {
     @ObservedObject var camera: CameraService
     @ObservedObject var viewModel: CameraViewModel
@@ -178,6 +201,10 @@ struct CameraScreen: View {
             } else {
                 updateCameraActivity()
             }
+        }
+        .onChange(of: viewModel.isCapturing) { _, isCapturing in
+            guard !isCapturing, viewModel.reviewImage == nil else { return }
+            updateCameraActivity()
         }
         // The simulator placeholder contains a renderer-backed swatch with a
         // non-zero ideal size. Keep that child from expanding the camera shell
@@ -803,12 +830,20 @@ struct CameraScreen: View {
     }
 
     private func updateCameraActivity() {
-        if viewModel.reviewImage != nil {
-            camera.stop()
-        } else if scenePhase == .active && isCameraTabActive {
+        let action = CameraActivityPolicy.action(
+            hasReview: viewModel.reviewImage != nil,
+            sceneIsActive: scenePhase == .active,
+            isCameraTabActive: isCameraTabActive,
+            availability: camera.availability
+        )
+
+        switch action {
+        case .start:
             camera.start()
-        } else {
+        case .stop:
             camera.stop()
+        case .hold:
+            break
         }
     }
 

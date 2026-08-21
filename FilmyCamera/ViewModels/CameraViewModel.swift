@@ -233,13 +233,11 @@ final class CameraViewModel: ObservableObject {
 
                     DispatchQueue.main.async {
                         guard let self else { return }
-                        self.isCapturing = false
                         guard let renderedPhoto else {
-                            // The review sheet never appears on a render
-                            // failure, so explicitly resume the active camera
-                            // session instead of waiting for another lifecycle
-                            // event or tab transition.
-                            camera.start()
+                            // CameraScreen owns session lifecycle. Ending the
+                            // capture without a review lets its visibility-aware
+                            // policy decide whether the camera should resume.
+                            self.isCapturing = false
                             self.showToast("The selected look could not be rendered. Try the capture again.", style: .error)
                             return
                         }
@@ -247,6 +245,7 @@ final class CameraViewModel: ObservableObject {
                         self.reviewImageData = renderedPhoto.data
                         self.reviewCapturedAt = renderedPhoto.capturedAt
                         self.reviewRecipe = recipe
+                        self.isCapturing = false
                     }
                 }
             }

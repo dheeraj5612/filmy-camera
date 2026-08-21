@@ -1009,6 +1009,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                     self.publishRunning(false)
                     self.publishAvailability(.interrupted)
                     self.publishStatus("Camera temporarily unavailable.")
+                    self.cancelPendingPhotoOnQueue(status: "Camera temporarily unavailable.")
                 }
             },
             notificationCenter.addObserver(
@@ -1043,12 +1044,18 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             publishRunning(running)
             publishAvailability(running ? .running : .needsRecovery)
             publishStatus(running ? "Camera ready" : "Camera needs to be reopened.")
+            cancelPendingPhotoOnQueue(
+                status: running
+                    ? "Capture was interrupted. Try again."
+                    : "Camera needs to be reopened."
+            )
             return
         }
 
         publishRunning(false)
         publishAvailability(.needsRecovery)
         publishStatus("Camera needs to be reopened.")
+        cancelPendingPhotoOnQueue(status: "Camera needs to be reopened.")
     }
 
     private static let discoveryDeviceTypes: [AVCaptureDevice.DeviceType] = [
