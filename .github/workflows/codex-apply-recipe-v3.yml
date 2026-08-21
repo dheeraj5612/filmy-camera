@@ -28,6 +28,8 @@ jobs:
         run: |
           set -euo pipefail
 
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin codex/recipe-persistence-recovery-v2
           git merge --squash origin/codex/recipe-persistence-recovery-v2
           git rm -- .github/workflows/codex-apply-recipe-v3.yml
@@ -45,7 +47,5 @@ jobs:
             printf '%s\n' "${changed_files[@]}" | grep -Fxq "${expected}"
           done
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "Recover persisted recipe state"
           git push origin HEAD:codex/recipe-persistence-recovery-v3
