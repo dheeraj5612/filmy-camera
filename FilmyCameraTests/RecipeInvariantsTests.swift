@@ -10,6 +10,10 @@ final class RecipeInvariantsTests: XCTestCase {
     private var hadRecipeOverridesValue = false
     private var previousRecipeOverrides: Data?
 
+    func testRendererVersionTracksTheHalationBeforeGrainPipeline() {
+        XCTAssertEqual(FilmRecipe.rendererVersion, "core-image-parametric-v2")
+    }
+
     override func setUp() {
         super.setUp()
 
