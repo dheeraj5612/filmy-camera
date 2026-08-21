@@ -318,6 +318,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     @Published public private(set) var isFocusExposureLocked = false
     @Published public private(set) var previewFrameSize: CGSize = .zero
     @Published public private(set) var previewViewportSize: CGSize = .zero
+    @Published public private(set) var previewRotationAngle: CGFloat = 90
+    @Published public private(set) var previewMirrored = false
 
     /// Receives unfiltered live frames on the main queue.
     public var onFrame: FrameHandler?
@@ -360,7 +362,17 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private var sessionObservers: [NSObjectProtocol] = []
     private var activeConstituentObservation: NSKeyValueObservation?
     private var observedVirtualDeviceID: String?
-    private var rotationAngle: CGFloat = 90
+    private var previewRotationAngleState: CGFloat = 90
+    private var captureRotationAngleState: CGFloat = 90
+    private var rotationCoordinatorToken = UUID()
+    private var rotationCoordinatorDeviceID: String?
+    private var activeRotationToken: UUID?
+    private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
+    private var previewRotationObservation: NSKeyValueObservation?
+    private var captureRotationObservation: NSKeyValueObservation?
+    private weak var rotationPreviewLayer: CALayer?
+    private var rotationPreviewLayerID: UUID?
+    private var rotationDevice: AVCaptureDevice?
     private var lastDeliveredFrameSize: CGSize = .zero
 
     /// Identifies whether a saved lens ID belongs to a virtual input's
@@ -377,6 +389,14 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
         init(_ completion: @escaping PhotoCompletion) {
             self.completion = completion
+        }
+    }
+
+    private final class CaptureDeviceBox: @unchecked Sendable {
+        let device: AVCaptureDevice
+
+        init(_ device: AVCaptureDevice) {
+            self.device = device
         }
     }
 
@@ -410,6 +430,11 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         sessionObservers.forEach(NotificationCenter.default.removeObserver)
         activeConstituentObservation?.invalidate()
         activeConstituentObservation = nil
+        previewRotationObservation?.invalidate()
+        captureRotationObservation?.invalidate()
+        previewRotationObservation = nil
+        captureRotationObservation = nil
+        rotationCoordinator = nil
         videoOutput.setSampleBufferDelegate(nil, queue: nil)
 
         let session = session
@@ -530,6 +555,37 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         onFrame = nil
     }
 
+    /// Registers the CALayer used by the custom Metal preview. Ownership is
+    /// tokenized so dismantling an older SwiftUI representable cannot detach a
+    /// newer preview layer from the active rotation coordinator.
+    @MainActor
+    @discardableResult
+    public func installPreviewLayer(_ layer: CALayer) -> UUID {
+        let id = UUID()
+        rotationPreviewLayerID = id
+        rotationPreviewLayer = layer
+        if let rotationDevice, let activeRotationToken {
+            installRotationCoordinatorOnMain(
+                for: rotationDevice,
+                token: activeRotationToken
+            )
+        }
+        return id
+    }
+
+    @MainActor
+    public func removePreviewLayer(_ id: UUID) {
+        guard rotationPreviewLayerID == id else { return }
+        rotationPreviewLayerID = nil
+        rotationPreviewLayer = nil
+        if let rotationDevice, let activeRotationToken {
+            installRotationCoordinatorOnMain(
+                for: rotationDevice,
+                token: activeRotationToken
+            )
+        }
+    }
+
     /// Keeps the preview and still output aligned with the current camera
     /// surface when the phone rotates or enters a split-screen layout.
     @MainActor
@@ -545,16 +601,25 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         } else {
             interfaceOrientation = activeWindowScene?.interfaceOrientation
         }
-        let nextAngle = Self.videoRotationAngle(
+        let fallbackAngle = Self.videoRotationAngle(
             for: interfaceOrientation,
             fallbackViewSize: viewSize
         )
 
+        // RotationCoordinator owns physical-camera angles once an input is
+        // installed. The interface-orientation mapping remains only as a safe
+        // simulator and preconfiguration fallback.
         sessionQueue.async { [weak self] in
-            guard let self, self.rotationAngle != nextAngle else { return }
-            self.rotationAngle = nextAngle
-            guard self.isConfigured else { return }
+            guard let self,
+                  self.rotationCoordinatorDeviceID == nil,
+                  self.previewRotationAngleState != fallbackAngle
+                    || self.captureRotationAngleState != fallbackAngle else {
+                return
+            }
+            self.previewRotationAngleState = fallbackAngle
+            self.captureRotationAngleState = fallbackAngle
             self.configureOrientation()
+            self.publishPreviewRotationAngle(fallbackAngle)
         }
     }
 
@@ -572,6 +637,47 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         @unknown default:
             fallbackViewSize.width > fallbackViewSize.height ? 0 : 90
         }
+    }
+
+    /// Converts a point in the physically rotated and optionally mirrored
+    /// preview buffer back into the unrotated capture-device coordinate space
+    /// required by focusPointOfInterest and exposurePointOfInterest.
+    static func captureDevicePoint(
+        fromRotatedPreviewPoint point: CGPoint,
+        rotationAngle: CGFloat,
+        mirrored: Bool
+    ) -> CGPoint {
+        guard point.x.isFinite, point.y.isFinite else {
+            return CGPoint(x: 0.5, y: 0.5)
+        }
+
+        var previewX = min(max(point.x, 0), 1)
+        let previewY = min(max(point.y, 0), 1)
+        if mirrored {
+            previewX = 1 - previewX
+        }
+
+        let finiteAngle = rotationAngle.isFinite ? rotationAngle : 0
+        let normalizedAngle = (finiteAngle.truncatingRemainder(dividingBy: 360) + 360)
+            .truncatingRemainder(dividingBy: 360)
+        let quarterTurns = Int((normalizedAngle / 90).rounded()) % 4
+
+        let devicePoint: CGPoint
+        switch quarterTurns {
+        case 1:
+            devicePoint = CGPoint(x: previewY, y: 1 - previewX)
+        case 2:
+            devicePoint = CGPoint(x: 1 - previewX, y: 1 - previewY)
+        case 3:
+            devicePoint = CGPoint(x: 1 - previewY, y: previewX)
+        default:
+            devicePoint = CGPoint(x: previewX, y: previewY)
+        }
+
+        return CGPoint(
+            x: min(max(devicePoint.x, 0), 1),
+            y: min(max(devicePoint.y, 0), 1)
+        )
     }
 
     /// Captures a still through AVCapturePhotoOutput. The completion is
@@ -972,6 +1078,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         configurePhotoDimensions(for: device)
         session.commitConfiguration()
 
+        installRotationCoordinatorOnQueue(for: device)
         configureCaptureCapabilitiesOnQueue(for: device)
         configureStartupLensOnQueue(for: device)
         refreshCameraInventoryOnQueue(for: device)
@@ -984,6 +1091,81 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         publishRunning(running)
         publishAvailability(running ? .running : .unavailable)
         publishStatus(running ? "Camera ready" : "Camera could not start.")
+    }
+
+    private func installRotationCoordinatorOnQueue(for device: AVCaptureDevice) {
+        let token = UUID()
+        rotationCoordinatorToken = token
+        rotationCoordinatorDeviceID = device.uniqueID
+        let deviceBox = CaptureDeviceBox(device)
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.installRotationCoordinatorOnMain(
+                for: deviceBox.device,
+                token: token
+            )
+        }
+    }
+
+    @MainActor
+    private func installRotationCoordinatorOnMain(
+        for device: AVCaptureDevice,
+        token: UUID
+    ) {
+        activeRotationToken = token
+        rotationDevice = device
+        previewRotationObservation?.invalidate()
+        captureRotationObservation?.invalidate()
+
+        let coordinator = AVCaptureDevice.RotationCoordinator(
+            device: device,
+            previewLayer: rotationPreviewLayer
+        )
+        rotationCoordinator = coordinator
+
+        previewRotationObservation = coordinator.observe(
+            \.videoRotationAngleForHorizonLevelPreview,
+            options: [.initial, .new]
+        ) { [weak self] coordinator, change in
+            let angle = change.newValue
+                ?? coordinator.videoRotationAngleForHorizonLevelPreview
+            MainActor.assumeIsolated {
+                self?.applyPreviewRotationOnMain(angle, token: token)
+            }
+        }
+
+        captureRotationObservation = coordinator.observe(
+            \.videoRotationAngleForHorizonLevelCapture,
+            options: [.initial, .new]
+        ) { [weak self] coordinator, change in
+            let angle = change.newValue
+                ?? coordinator.videoRotationAngleForHorizonLevelCapture
+            MainActor.assumeIsolated {
+                self?.applyCaptureRotationOnMain(angle, token: token)
+            }
+        }
+    }
+
+    @MainActor
+    private func applyPreviewRotationOnMain(_ angle: CGFloat, token: UUID) {
+        guard activeRotationToken == token, angle.isFinite else { return }
+        publishPreviewRotationAngle(angle)
+        sessionQueue.async { [weak self] in
+            guard let self, self.rotationCoordinatorToken == token else { return }
+            self.previewRotationAngleState = angle
+            self.configureOrientation()
+        }
+    }
+
+    @MainActor
+    private func applyCaptureRotationOnMain(_ angle: CGFloat, token: UUID) {
+        guard activeRotationToken == token, angle.isFinite else { return }
+        sessionQueue.async { [weak self] in
+            guard let self, self.rotationCoordinatorToken == token else { return }
+            self.captureRotationAngleState = angle
+            self.configureOrientation()
+        }
     }
 
     private func installSessionObservers() {
@@ -1361,6 +1543,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         configurePhotoDimensions(for: device)
         configureOrientation()
         session.commitConfiguration()
+        installRotationCoordinatorOnQueue(for: device)
         return true
     }
 
@@ -1615,8 +1798,16 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func configureOrientation() {
-        configureRotation(videoOutput.connection(with: .video), angle: rotationAngle)
-        configureRotation(photoOutput.connection(with: .video), angle: rotationAngle)
+        let previewConnection = videoOutput.connection(with: .video)
+        configureRotation(
+            previewConnection,
+            angle: previewRotationAngleState
+        )
+        configureRotation(
+            photoOutput.connection(with: .video),
+            angle: captureRotationAngleState
+        )
+        publishPreviewMirroring(previewConnection?.isVideoMirrored ?? false)
     }
 
     private func configurePreviewFrameRate(for device: AVCaptureDevice) {
@@ -1847,6 +2038,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         publishZoomRange(minimum: 1, maximum: 1)
         publishZoom(1)
         publishCameraPosition(.back)
+        publishPreviewMirroring(false)
     }
 
     private func configureRotation(
@@ -2043,6 +2235,18 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private func publishPreviewViewportSize(_ size: CGSize) {
         publishOnMain { [weak self] in
             self?.previewViewportSize = size
+        }
+    }
+
+    private func publishPreviewRotationAngle(_ angle: CGFloat) {
+        publishOnMain { [weak self] in
+            self?.previewRotationAngle = angle
+        }
+    }
+
+    private func publishPreviewMirroring(_ mirrored: Bool) {
+        publishOnMain { [weak self] in
+            self?.previewMirrored = mirrored
         }
     }
 
