@@ -35,15 +35,22 @@ jobs:
           end_marker = "\n          PY\n"
           start = workflow.index(start_marker) + len(start_marker)
           end = workflow.index(end_marker, start)
-          lines = workflow[start:end].splitlines()
-          script = "\n".join(
-              line[10:] if line.startswith("          ") else line
-              for line in lines
-          )
-          script = script.replace(
-              'f"{relative_path}: expected one replacement target, found {count}"',
-              'f"{relative_path}: expected one replacement target, found {count}; target={old[:180]!r}"'
-          )
+
+          output_lines = []
+          inside_swift_literal = False
+          for line in workflow[start:end].splitlines():
+              if inside_swift_literal:
+                  output_lines.append(line)
+                  if line.count("'''") % 2 == 1:
+                      inside_swift_literal = False
+                  continue
+
+              normalized = line[10:] if line.startswith("          ") else line
+              output_lines.append(normalized)
+              if normalized.count("'''") % 2 == 1:
+                  inside_swift_literal = True
+
+          script = "\n".join(output_lines)
           exec(compile(script, str(workflow_path), 'exec'))
           RUNNER
 
