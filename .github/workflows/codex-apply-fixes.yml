@@ -1,0 +1,650 @@
+name: Apply audited reliability fixes
+
+on:
+  push:
+    branches:
+      - codex/camera-gallery-reliability-audit
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fixes:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out audit branch
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: codex/camera-gallery-reliability-audit
+          fetch-depth: 0
+
+      - name: Apply targeted source fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 <<'PY'
+          from pathlib import Path
+
+
+          def replace_once(relative_path: str, old: str, new: str) -> None:
+              path = Path(relative_path)
+              text = path.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(
+                      f"{relative_path}: expected one replacement target, found {count}"
+                  )
+              path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+          def append_before_final_brace(relative_path: str, addition: str) -> None:
+              path = Path(relative_path)
+              text = path.read_text(encoding="utf-8")
+              if not text.endswith("}\n"):
+                  raise SystemExit(f"{relative_path}: unexpected file ending")
+              path.write_text(text[:-2] + addition + "}\n", encoding="utf-8")
+
+
+          replace_once(
+              "FilmyCamera/Services/CameraService.swift",
+              r'''                    guard let self, self.wantsToRun else { return }
+                    self.publishRunning(false)
+                    self.publishAvailability(.interrupted)
+                    self.publishStatus("Camera temporarily unavailable.")
+''',
+              r'''                    guard let self, self.wantsToRun else { return }
+                    self.publishRunning(false)
+                    self.publishAvailability(.interrupted)
+                    self.publishStatus("Camera temporarily unavailable.")
+                    self.cancelPendingPhotoOnQueue(status: "Camera temporarily unavailable.")
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/Services/CameraService.swift",
+              r'''    private func handleRuntimeError(codeRawValue: Int?) {
+        // Apple recommends restarting after media services reset. Other
+        // runtime errors remain visible so the UI can explain the recovery
+        // path instead of silently presenting a frozen preview.
+        guard wantsToRun else { return }
+        if codeRawValue == AVError.Code.mediaServicesWereReset.rawValue, isConfigured {
+            session.startRunning()
+            let running = session.isRunning
+            publishRunning(running)
+            publishAvailability(running ? .running : .needsRecovery)
+            publishStatus(running ? "Camera ready" : "Camera needs to be reopened.")
+            return
+        }
+
+        publishRunning(false)
+        publishAvailability(.needsRecovery)
+        publishStatus("Camera needs to be reopened.")
+    }
+''',
+              r'''    private func handleRuntimeError(codeRawValue: Int?) {
+        // Apple recommends restarting after media services reset. Other
+        // runtime errors remain visible so the UI can explain the recovery
+        // path instead of silently presenting a frozen preview.
+        guard wantsToRun else { return }
+        if codeRawValue == AVError.Code.mediaServicesWereReset.rawValue, isConfigured {
+            session.startRunning()
+            let running = session.isRunning
+            publishRunning(running)
+            publishAvailability(running ? .running : .needsRecovery)
+            publishStatus(running ? "Camera ready" : "Camera needs to be reopened.")
+            cancelPendingPhotoOnQueue(
+                status: running
+                    ? "Capture was interrupted. Try again."
+                    : "Camera needs to be reopened."
+            )
+            return
+        }
+
+        publishRunning(false)
+        publishAvailability(.needsRecovery)
+        publishStatus("Camera needs to be reopened.")
+        cancelPendingPhotoOnQueue(status: "Camera needs to be reopened.")
+    }
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/ViewModels/CameraViewModel.swift",
+              r'''                    DispatchQueue.main.async {
+                        guard let self else { return }
+                        self.isCapturing = false
+                        guard let renderedPhoto else {
+                            // The review sheet never appears on a render
+                            // failure, so explicitly resume the active camera
+                            // session instead of waiting for another lifecycle
+                            // event or tab transition.
+                            camera.start()
+                            self.showToast("The selected look could not be rendered. Try the capture again.", style: .error)
+                            return
+                        }
+                        self.reviewImage = renderedPhoto.image
+                        self.reviewImageData = renderedPhoto.data
+                        self.reviewCapturedAt = renderedPhoto.capturedAt
+                        self.reviewRecipe = recipe
+                    }
+''',
+              r'''                    DispatchQueue.main.async {
+                        guard let self else { return }
+                        guard let renderedPhoto else {
+                            // CameraScreen owns session lifecycle. Ending the
+                            // capture without a review lets its visibility-aware
+                            // policy decide whether the camera should resume.
+                            self.isCapturing = false
+                            self.showToast("The selected look could not be rendered. Try the capture again.", style: .error)
+                            return
+                        }
+                        self.reviewImage = renderedPhoto.image
+                        self.reviewImageData = renderedPhoto.data
+                        self.reviewCapturedAt = renderedPhoto.capturedAt
+                        self.reviewRecipe = recipe
+                        self.isCapturing = false
+                    }
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/Views/CameraScreen.swift",
+              r'''import Foundation
+import SwiftUI
+import UIKit
+
+struct CameraScreen: View {
+''',
+              r'''import Foundation
+import SwiftUI
+import UIKit
+
+enum CameraActivityAction: Equatable {
+    case start
+    case stop
+    case hold
+}
+
+enum CameraActivityPolicy {
+    static func action(
+        hasReview: Bool,
+        sceneIsActive: Bool,
+        isCameraTabActive: Bool,
+        availability: CameraService.Availability
+    ) -> CameraActivityAction {
+        if hasReview || !sceneIsActive || !isCameraTabActive {
+            return .stop
+        }
+        if availability == .interrupted {
+            return .hold
+        }
+        return .start
+    }
+}
+
+struct CameraScreen: View {
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/Views/CameraScreen.swift",
+              r'''        .onChange(of: viewModel.reviewImage != nil) { _, hasReview in
+            if hasReview {
+                camera.stop()
+            } else {
+                updateCameraActivity()
+            }
+        }
+        // The simulator placeholder contains a renderer-backed swatch with a
+''',
+              r'''        .onChange(of: viewModel.reviewImage != nil) { _, hasReview in
+            if hasReview {
+                camera.stop()
+            } else {
+                updateCameraActivity()
+            }
+        }
+        .onChange(of: viewModel.isCapturing) { _, isCapturing in
+            guard !isCapturing, viewModel.reviewImage == nil else { return }
+            updateCameraActivity()
+        }
+        // The simulator placeholder contains a renderer-backed swatch with a
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/Views/CameraScreen.swift",
+              r'''    private func updateCameraActivity() {
+        if viewModel.reviewImage != nil {
+            camera.stop()
+        } else if scenePhase == .active && isCameraTabActive {
+            camera.start()
+        } else {
+            camera.stop()
+        }
+    }
+''',
+              r'''    private func updateCameraActivity() {
+        let action = CameraActivityPolicy.action(
+            hasReview: viewModel.reviewImage != nil,
+            sceneIsActive: scenePhase == .active,
+            isCameraTabActive: isCameraTabActive,
+            availability: camera.availability
+        )
+
+        switch action {
+        case .start:
+            camera.start()
+        case .stop:
+            camera.stop()
+        case .hold:
+            break
+        }
+    }
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/Services/PhotoLibraryService.swift",
+              r'''enum PhotoLibraryAuthorizationPolicy {
+    static func canRead(_ status: PHAuthorizationStatus) -> Bool {
+        status == .authorized || status == .limited
+    }
+
+    static func canAdd(_ status: PHAuthorizationStatus) -> Bool {
+        // Limited access is a read/write concept. The add-only access level
+        // reports .authorized when the app may create new Photos assets.
+        status == .authorized
+    }
+
+    static func canManageCollections(_ status: PHAuthorizationStatus) -> Bool {
+        status == .authorized
+    }
+}
+
+enum PhotoLibraryServiceError: LocalizedError, Sendable {
+''',
+              r'''enum PhotoLibraryAuthorizationPolicy {
+    static func canRead(_ status: PHAuthorizationStatus) -> Bool {
+        status == .authorized || status == .limited
+    }
+
+    static func canAdd(_ status: PHAuthorizationStatus) -> Bool {
+        // Limited access is a read/write concept. The add-only access level
+        // reports .authorized when the app may create new Photos assets.
+        status == .authorized
+    }
+
+    static func canManageCollections(_ status: PHAuthorizationStatus) -> Bool {
+        status == .authorized
+    }
+}
+
+struct PhotoLibraryImageRequestKey: Hashable, Sendable {
+    let assetIdentifier: String
+    let authorizationStatusRawValue: Int?
+}
+
+enum PhotoLibraryGalleryImagePolicy {
+    static func canLoad(
+        isPhotosAsset: Bool,
+        authorizationStatus: PHAuthorizationStatus
+    ) -> Bool {
+        !isPhotosAsset || PhotoLibraryAuthorizationPolicy.canRead(authorizationStatus)
+    }
+
+    static func requestKey(
+        assetIdentifier: String,
+        isPhotosAsset: Bool,
+        authorizationStatus: PHAuthorizationStatus
+    ) -> PhotoLibraryImageRequestKey {
+        PhotoLibraryImageRequestKey(
+            assetIdentifier: assetIdentifier,
+            authorizationStatusRawValue: isPhotosAsset ? authorizationStatus.rawValue : nil
+        )
+    }
+}
+
+enum PhotoLibraryServiceError: LocalizedError, Sendable {
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/Services/PhotoLibraryService.swift",
+              r'''    private nonisolated static func cachedImage(at resourceURL: URL, targetSize: CGSize) -> UIImage? {
+        guard let data = try? Data(contentsOf: resourceURL),
+              let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+            return nil
+        }
+
+        let maxPixelSize = max(Int(targetSize.width), Int(targetSize.height), 1)
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(
+            source,
+            0,
+            options as CFDictionary
+        ) else {
+            return nil
+        }
+        return UIImage(cgImage: image)
+    }
+''',
+              r'''    nonisolated static func thumbnailMaxPixelSize(for targetSize: CGSize) -> Int {
+        let width = targetSize.width.isFinite && targetSize.width > 0
+            ? targetSize.width
+            : 0
+        let height = targetSize.height.isFinite && targetSize.height > 0
+            ? targetSize.height
+            : 0
+        let maximumDimension = max(width, height)
+        guard maximumDimension > 0 else { return 1 }
+        return Int(min(max(maximumDimension.rounded(.up), 1), 8_192))
+    }
+
+    private nonisolated static func cachedImage(at resourceURL: URL, targetSize: CGSize) -> UIImage? {
+        let sourceOptions: [CFString: Any] = [
+            kCGImageSourceShouldCache: false
+        ]
+        guard let source = CGImageSourceCreateWithURL(
+            resourceURL as CFURL,
+            sourceOptions as CFDictionary
+        ) else {
+            return nil
+        }
+
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: thumbnailMaxPixelSize(for: targetSize),
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(
+            source,
+            0,
+            options as CFDictionary
+        ) else {
+            return nil
+        }
+        return UIImage(cgImage: image)
+    }
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/Views/GalleryScreen.swift",
+              r'''    @State private var image: UIImage?
+
+    var body: some View {
+''',
+              r'''    @State private var image: UIImage?
+
+    private var imageRequestKey: PhotoLibraryImageRequestKey {
+        PhotoLibraryGalleryImagePolicy.requestKey(
+            assetIdentifier: asset.assetIdentifier,
+            isPhotosAsset: asset.isPhotosAsset,
+            authorizationStatus: photoLibrary.authorizationStatus
+        )
+    }
+
+    var body: some View {
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/Views/GalleryScreen.swift",
+              r'''        .task(id: asset.id) {
+            image = await photoLibrary.image(for: asset, targetSize: CGSize(width: 360, height: 440))
+        }
+        .onChange(of: photoLibrary.authorizationStatus) { _, status in
+            guard asset.isPhotosAsset,
+                  status == .authorized || status == .limited else {
+                if asset.isPhotosAsset { image = nil }
+                return
+            }
+            image = nil
+        }
+''',
+              r'''        .task(id: imageRequestKey) {
+            image = nil
+            guard PhotoLibraryGalleryImagePolicy.canLoad(
+                isPhotosAsset: asset.isPhotosAsset,
+                authorizationStatus: photoLibrary.authorizationStatus
+            ) else {
+                return
+            }
+
+            let loadedImage = await photoLibrary.image(
+                for: asset,
+                targetSize: CGSize(width: 360, height: 440)
+            )
+            guard !Task.isCancelled else { return }
+            image = loadedImage
+        }
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/Views/GalleryScreen.swift",
+              r'''    @State private var imageOffset: CGSize = .zero
+    @State private var dragBaseOffset: CGSize = .zero
+
+    var body: some View {
+''',
+              r'''    @State private var imageOffset: CGSize = .zero
+    @State private var dragBaseOffset: CGSize = .zero
+
+    private var imageRequestKey: PhotoLibraryImageRequestKey {
+        PhotoLibraryGalleryImagePolicy.requestKey(
+            assetIdentifier: asset.assetIdentifier,
+            isPhotosAsset: asset.isPhotosAsset,
+            authorizationStatus: photoLibrary.authorizationStatus
+        )
+    }
+
+    var body: some View {
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/Views/GalleryScreen.swift",
+              r'''        .task {
+            image = await photoLibrary.image(for: asset, targetSize: CGSize(width: 1600, height: 2200))
+        }
+        .onChange(of: photoLibrary.authorizationStatus) { _, status in
+            guard asset.isPhotosAsset else { return }
+            if status != .authorized && status != .limited {
+                image = nil
+            }
+        }
+''',
+              r'''        .task(id: imageRequestKey) {
+            image = nil
+            guard PhotoLibraryGalleryImagePolicy.canLoad(
+                isPhotosAsset: asset.isPhotosAsset,
+                authorizationStatus: photoLibrary.authorizationStatus
+            ) else {
+                return
+            }
+
+            let loadedImage = await photoLibrary.image(
+                for: asset,
+                targetSize: CGSize(width: 1600, height: 2200)
+            )
+            guard !Task.isCancelled else { return }
+            image = loadedImage
+        }
+'''
+          )
+
+          append_before_final_brace(
+              "FilmyCameraTests/PhotoLibraryMetadataTests.swift",
+              r'''
+    func testGalleryImagePolicyReloadsPhotosAssetsAfterAuthorizationChanges() {
+        let deniedKey = PhotoLibraryGalleryImagePolicy.requestKey(
+            assetIdentifier: "photos-asset",
+            isPhotosAsset: true,
+            authorizationStatus: .denied
+        )
+        let authorizedKey = PhotoLibraryGalleryImagePolicy.requestKey(
+            assetIdentifier: "photos-asset",
+            isPhotosAsset: true,
+            authorizationStatus: .authorized
+        )
+
+        XCTAssertFalse(PhotoLibraryGalleryImagePolicy.canLoad(
+            isPhotosAsset: true,
+            authorizationStatus: .denied
+        ))
+        XCTAssertTrue(PhotoLibraryGalleryImagePolicy.canLoad(
+            isPhotosAsset: true,
+            authorizationStatus: .authorized
+        ))
+        XCTAssertNotEqual(deniedKey, authorizedKey)
+    }
+
+    func testGalleryImagePolicyKeepsCachedFramesIndependentOfPhotosAuthorization() {
+        let deniedKey = PhotoLibraryGalleryImagePolicy.requestKey(
+            assetIdentifier: "cached-frame",
+            isPhotosAsset: false,
+            authorizationStatus: .denied
+        )
+        let authorizedKey = PhotoLibraryGalleryImagePolicy.requestKey(
+            assetIdentifier: "cached-frame",
+            isPhotosAsset: false,
+            authorizationStatus: .authorized
+        )
+
+        XCTAssertTrue(PhotoLibraryGalleryImagePolicy.canLoad(
+            isPhotosAsset: false,
+            authorizationStatus: .denied
+        ))
+        XCTAssertEqual(deniedKey, authorizedKey)
+    }
+
+    func testCachedThumbnailPixelSizeIsFiniteBoundedAndRoundedUp() {
+        XCTAssertEqual(
+            PhotoLibraryService.thumbnailMaxPixelSize(
+                for: CGSize(width: 360.1, height: 440.1)
+            ),
+            441
+        )
+        XCTAssertEqual(
+            PhotoLibraryService.thumbnailMaxPixelSize(
+                for: CGSize(width: .nan, height: .infinity)
+            ),
+            1
+        )
+        XCTAssertEqual(
+            PhotoLibraryService.thumbnailMaxPixelSize(
+                for: CGSize(width: 20_000, height: 100)
+            ),
+            8_192
+        )
+        XCTAssertEqual(
+            PhotoLibraryService.thumbnailMaxPixelSize(
+                for: CGSize(width: -1, height: 0)
+            ),
+            1
+        )
+    }
+
+'''
+          )
+
+          append_before_final_brace(
+              "FilmyCameraTests/CameraServiceAvailabilityTests.swift",
+              r'''
+    func testCameraActivityPolicyStartsOnlyForVisibleCameraWithoutReview() {
+        XCTAssertEqual(
+            CameraActivityPolicy.action(
+                hasReview: false,
+                sceneIsActive: true,
+                isCameraTabActive: true,
+                availability: .paused
+            ),
+            .start
+        )
+        XCTAssertEqual(
+            CameraActivityPolicy.action(
+                hasReview: true,
+                sceneIsActive: true,
+                isCameraTabActive: true,
+                availability: .running
+            ),
+            .stop
+        )
+        XCTAssertEqual(
+            CameraActivityPolicy.action(
+                hasReview: false,
+                sceneIsActive: false,
+                isCameraTabActive: true,
+                availability: .running
+            ),
+            .stop
+        )
+        XCTAssertEqual(
+            CameraActivityPolicy.action(
+                hasReview: false,
+                sceneIsActive: true,
+                isCameraTabActive: false,
+                availability: .running
+            ),
+            .stop
+        )
+    }
+
+    func testCameraActivityPolicyHoldsAnActiveInterruptedSessionForObserverRecovery() {
+        XCTAssertEqual(
+            CameraActivityPolicy.action(
+                hasReview: false,
+                sceneIsActive: true,
+                isCameraTabActive: true,
+                availability: .interrupted
+            ),
+            .hold
+        )
+    }
+
+'''
+          )
+          PY
+
+      - name: Validate generated changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git diff --check
+          grep -q 'cancelPendingPhotoOnQueue(status: "Camera temporarily unavailable.")' \
+            FilmyCamera/Services/CameraService.swift
+          grep -q 'CGImageSourceCreateWithURL' FilmyCamera/Services/PhotoLibraryService.swift
+          ! grep -q 'Data(contentsOf: resourceURL)' FilmyCamera/Services/PhotoLibraryService.swift
+          grep -q 'task(id: imageRequestKey)' FilmyCamera/Views/GalleryScreen.swift
+
+      - name: Commit audited fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm .github/workflows/codex-apply-fixes.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            .github/workflows/codex-apply-fixes.yml \
+            FilmyCamera/Services/CameraService.swift \
+            FilmyCamera/Services/PhotoLibraryService.swift \
+            FilmyCamera/ViewModels/CameraViewModel.swift \
+            FilmyCamera/Views/CameraScreen.swift \
+            FilmyCamera/Views/GalleryScreen.swift \
+            FilmyCameraTests/CameraServiceAvailabilityTests.swift \
+            FilmyCameraTests/PhotoLibraryMetadataTests.swift
+          git commit -m "Fix camera and gallery reliability"
+          git push origin HEAD:codex/camera-gallery-reliability-audit
