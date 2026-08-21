@@ -1,0 +1,56 @@
+name: Apply filter fidelity reference audit
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply-filter-fidelity:
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      github.head_ref == 'codex/filter-fidelity-reference-audit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out filter audit branch
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: codex/filter-fidelity-reference-audit
+          fetch-depth: 0
+
+      - name: Apply and validate fidelity changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 scripts/codex/apply-filter-fidelity-audit.py
+          git diff --check
+          grep -q 'magenta-suppressing color with cool shadows' \
+            FilmyCamera/Services/FilmRenderer.swift
+          grep -q 'testRecipeContactSheetRendersEveryBuiltInLook' \
+            FilmyCameraTests/RendererOutputBoundsTests.swift
+          grep -q 'core-image-parametric-v3' \
+            FilmyCamera/Models/FilmRecipe.swift
+
+      - name: Commit clean fidelity diff
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git rm -- \
+            scripts/codex/apply-filter-fidelity-audit.py \
+            .github/workflows/codex-filter-fidelity.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- \
+            FilmyCamera/Models/FilmRecipe.swift \
+            FilmyCamera/Services/FilmRenderer.swift \
+            FilmyCameraTests/RendererOutputBoundsTests.swift \
+            docs/filter-fidelity-audit-20260821.md
+          git commit -m "Calibrate Classic Chrome and compact color responses"
+          git push origin HEAD:codex/filter-fidelity-reference-audit
