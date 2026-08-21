@@ -542,8 +542,8 @@ final class CameraServiceAvailabilityTests: XCTestCase {
             mirrored: false
         )
         let invalidPoint = CameraService.captureDevicePoint(
-            fromRotatedPreviewPoint: CGPoint(x: .nan, y: .infinity),
-            rotationAngle: .nan,
+            fromRotatedPreviewPoint: CGPoint(x: CGFloat.nan, y: CGFloat.infinity),
+            rotationAngle: CGFloat.nan,
             mirrored: false
         )
 
