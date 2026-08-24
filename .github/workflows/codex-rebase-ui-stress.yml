@@ -1,6 +1,9 @@
 name: Rebase UI stress pass onto current main
 
 on:
+  push:
+    branches:
+      - codex/ui-visual-stress-pass
   pull_request:
     branches:
       - main
@@ -12,7 +15,8 @@ jobs:
   rebase-ui-stress:
     if: >-
       github.actor != 'github-actions[bot]' &&
-      github.head_ref == 'codex/ui-visual-stress-pass'
+      (github.event_name == 'push' ||
+      github.head_ref == 'codex/ui-visual-stress-pass')
     runs-on: macos-15
     timeout-minutes: 12
     env:
@@ -42,16 +46,15 @@ jobs:
           git reset --hard origin/main
 
           python3 <<'PY'
+          import os
           from pathlib import Path
 
           main_path = Path('FilmyCamera/Views/RecipePickerView.swift')
           main_text = main_path.read_text(encoding='utf-8')
-          ui_text = Path(
-              Path.home().parent.parent
-          )
-          ui_text = Path(
-              __import__('os').environ['RUNNER_TEMP']
-          ).joinpath('RecipePickerView.ui.swift').read_text(encoding='utf-8')
+          runner_temp = Path(os.environ['RUNNER_TEMP'])
+          ui_text = runner_temp.joinpath(
+              'RecipePickerView.ui.swift'
+          ).read_text(encoding='utf-8')
 
           detail_marker = 'struct RecipeDetailView: View {'
           policy_marker = 'enum RecipeDetailCommitAction: Equatable {'
@@ -86,9 +89,9 @@ jobs:
           merged = merged.replace(old_scroll, new_scroll, 1)
           main_path.write_text(merged, encoding='utf-8')
 
-          test_source = Path(
-              __import__('os').environ['RUNNER_TEMP']
-          ).joinpath('RecipeDetailCommitPolicyTests.swift')
+          test_source = runner_temp.joinpath(
+              'RecipeDetailCommitPolicyTests.swift'
+          )
           Path('FilmyCameraTests/RecipeDetailCommitPolicyTests.swift').write_text(
               test_source.read_text(encoding='utf-8'),
               encoding='utf-8'
