@@ -89,6 +89,11 @@ The G7 X target is explicitly split into two layers:
 - A retained XCTest contact sheet renders every built-in look through the real
   renderer for manual inspection in CI artifacts.
 
+The final pull-request head is intentionally unique so the protected-branch
+contexts are attached to this exact tree rather than inherited ambiguously from
+an earlier superseded pull request. The complete XcodeGen, unit, UI, and release
+script gate must pass again before merge.
+
 ## Path to tighter hardware matching
 
 A future calibration pass should photograph a controlled ColorChecker,
