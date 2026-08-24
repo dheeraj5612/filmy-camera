@@ -13,7 +13,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     /// adds the canonical camera mode controls introduced by the fidelity pass;
     /// version 5 adds persisted Kelvin white-balance control.
     public static let currentSchemaVersion = 5
-    public static let rendererVersion = "core-image-parametric-v2"
+    public static let rendererVersion = "core-image-parametric-v3"
 
     /// The product-level disclosure that accompanies every current recipe.
     /// It intentionally rules out an exact-output or hardware-calibration
@@ -1725,35 +1725,35 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             name: "G7 X Compact",
             subtitle: "Warm skin / crisp compact color",
             filmBase: .compactDigital,
-            exposure: 0.05,
-            tone: Tone(highlight: 0.08, shadow: 0.10),
-            saturation: 1.06,
-            contrast: 1.08,
+            exposure: 0.08,
+            tone: Tone(highlight: 0.06, shadow: -0.05),
+            saturation: 1.07,
+            contrast: 1.07,
             dynamicRange: .dr200,
             dRangePriority: .off,
             whiteBalance: WhiteBalanceShift(
-                temperature: 0.04,
-                tint: 0.01,
+                temperature: 0.035,
+                tint: 0.005,
                 mode: .ambiencePriority
             ),
             colorChrome: 0,
-            blueResponse: 0.08,
+            blueResponse: 0.10,
             fxBlue: 0,
-            sharpness: 0.18,
-            noiseReduction: 0.08,
-            clarity: 0.10,
+            sharpness: 0.20,
+            noiseReduction: 0.06,
+            clarity: 0.08,
             grain: 0,
             grainSize: 0.75,
-            vignette: 0.05,
+            vignette: 0.03,
             halation: 0,
             palette: Palette(
-                redBias: 0.015,
+                redBias: 0.012,
                 greenBias: 0.002,
-                blueBias: -0.006,
-                redGreenMix: 0.012,
-                greenBlueMix: 0.004,
-                blueRedMix: -0.008,
-                saturation: 1.01
+                blueBias: -0.004,
+                redGreenMix: 0.010,
+                greenBlueMix: 0.005,
+                blueRedMix: -0.006,
+                saturation: 1.015
             ),
             provenance: g7XProvenance
         )
