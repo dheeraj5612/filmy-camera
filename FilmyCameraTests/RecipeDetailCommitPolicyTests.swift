@@ -46,6 +46,24 @@ final class RecipeDetailCommitPolicyTests: XCTestCase {
         )
     }
 
+    func testEditingCustomizedDraftRequestsUpdatedCustomization() {
+        let original = FilmRecipe.builtIns[2]
+        var current = original
+        current.exposure = 0.5
+        current.markUserModified(parentRecipeID: original.id)
+        var draft = current
+        draft.contrast = 1.3
+
+        XCTAssertEqual(
+            RecipeDetailCommitPolicy.action(
+                draft: draft,
+                current: current,
+                original: original
+            ),
+            .update(draft)
+        )
+    }
+
     func testEditingAfterResetPreviewRequestsUpdateInsteadOfReset() {
         let original = FilmRecipe.builtIns[3]
         var current = original
