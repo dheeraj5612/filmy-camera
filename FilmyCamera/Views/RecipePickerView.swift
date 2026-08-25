@@ -629,7 +629,7 @@ struct RecipeDetailView: View {
                 Spacer(minLength: 12)
 
                 if onUpdate != nil {
-                    Button("Apply") {
+                    Button(hasPendingChanges ? "Apply" : "Done") {
                         commitDraft()
                         dismiss()
                     }
@@ -638,14 +638,21 @@ struct RecipeDetailView: View {
                     .padding(.horizontal, 12)
                     .frame(minHeight: FilmyTheme.minimumHitTarget)
                     .background(
-                        FilmyTheme.accent.opacity(hasPendingChanges ? 1 : 0.55),
+                        FilmyTheme.accent,
                         in: Capsule()
                     )
                     .buttonStyle(.plain)
-                    .disabled(!hasPendingChanges)
-                    .accessibilityLabel("Apply recipe changes")
+                    .accessibilityLabel(
+                        hasPendingChanges
+                            ? "Apply recipe changes"
+                            : "Done editing \(recipe.name)"
+                    )
                     .accessibilityValue(hasPendingChanges ? "Changes pending" : "No changes")
-                    .accessibilityHint("Saves the current recipe controls and closes the editor")
+                    .accessibilityHint(
+                        hasPendingChanges
+                            ? "Saves the current recipe controls and closes the editor"
+                            : "Closes the editor and returns to the camera"
+                    )
                 }
 
                 Button("Reset") {
