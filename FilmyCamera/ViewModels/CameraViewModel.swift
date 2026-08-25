@@ -216,8 +216,12 @@ final class CameraViewModel: ObservableObject {
     }
 
     var selectedRecipe: FilmRecipe {
-        recipeOverrides[selectedRecipeID]
-            ?? FilmRecipe.builtIns.first(where: { $0.id == selectedRecipeID })
+        recipe(for: selectedRecipeID)
+    }
+
+    func recipe(for id: String) -> FilmRecipe {
+        recipeOverrides[id]
+            ?? FilmRecipe.builtIns.first(where: { $0.id == id })
             ?? FilmRecipe.builtIns[0]
     }
 

@@ -198,6 +198,14 @@ public final class FilmRenderer {
             (
                 CGRect(x: width * 0.80, y: height * 0.56, width: width * 0.12, height: height * 0.22),
                 CIColor(red: 0.86, green: 0.86, blue: 0.82, alpha: 1)
+            ),
+            (
+                CGRect(x: width * 0.33, y: height * 0.57, width: width * 0.12, height: height * 0.18),
+                CIColor(red: 0.69, green: 0.18, blue: 0.58, alpha: 1)
+            ),
+            (
+                CGRect(x: width * 0.80, y: height * 0.80, width: width * 0.12, height: height * 0.14),
+                CIColor(red: 0.43, green: 0.44, blue: 0.45, alpha: 1)
             )
         ]
 
@@ -997,10 +1005,39 @@ public final class FilmRenderer {
         case .standard, .provia:
             break
         case .classicChrome:
-            saturate(0.94)
-            mappedRed += 0.010 * highlightWeight
-            mappedBlue += 0.012 * shadowWeight
-            mappedGreen += 0.006 * shadowWeight
+            // Fujifilm publicly characterizes Classic Chrome as subdued,
+            // magenta-suppressing color with cool shadows. Use feathered hue
+            // masks so that behavior is selective rather than a global cast.
+            let chroma = max(mappedRed, max(mappedGreen, mappedBlue))
+                - min(mappedRed, min(mappedGreen, mappedBlue))
+            let hue = rgbHue(
+                red: mappedRed,
+                green: mappedGreen,
+                blue: mappedBlue,
+                chroma: chroma
+            )
+            let magentaWeight = hueSectorWeight(
+                hue,
+                center: 0.88,
+                halfWidth: 0.13
+            ) * smoothstep(0.025, 0.34, chroma)
+            let coolShadowWeight = max(
+                hueSectorWeight(hue, center: 0.56, halfWidth: 0.16),
+                hueSectorWeight(hue, center: 0.65, halfWidth: 0.15)
+            ) * shadowWeight
+            let skinWeight = hueSectorWeight(
+                hue,
+                center: 0.075,
+                halfWidth: 0.10
+            ) * smoothstep(0.025, 0.30, chroma)
+
+            saturate(0.92)
+            mappedGreen += 0.030 * magentaWeight
+            mappedRed -= 0.010 * magentaWeight
+            mappedBlue -= 0.006 * magentaWeight
+            mappedRed += 0.008 * highlightWeight + 0.005 * skinWeight
+            mappedBlue += 0.020 * shadowWeight + 0.010 * coolShadowWeight
+            mappedGreen += 0.007 * shadowWeight + 0.003 * coolShadowWeight
         case .velvia:
             saturate(1.08 + 0.06 * smoothstep(0.18, 0.92, luma))
             mappedRed += 0.010 * highlightWeight
@@ -1046,10 +1083,10 @@ public final class FilmRenderer {
             saturate(0.99)
             mappedBlue += 0.006 * shadowWeight
         case .compactDigital:
-            // Original compact-camera response inspired by the G7 X Mark III
-            // product envelope: clean Standard-style color, warm portrait
-            // mids, crisp blues/greens, and smooth highlights. This is a
-            // parametric approximation, not Canon Picture Style data.
+            // Approximate Canon's Standard-style compact output with warm but
+            // bounded portrait mids, crisp foliage and blue sky, clean neutral
+            // grays, and restrained high-chroma boosts. This remains an
+            // original sRGB transform, not Canon Picture Style data.
             let chroma = max(mappedRed, max(mappedGreen, mappedBlue))
                 - min(mappedRed, min(mappedGreen, mappedBlue))
             let hue = rgbHue(
@@ -1058,22 +1095,28 @@ public final class FilmRenderer {
                 blue: mappedBlue,
                 chroma: chroma
             )
-            let midtoneWeight = smoothstep(0.12, 0.42, luma)
-                * (1 - smoothstep(0.78, 0.98, luma))
-            let skinWeight = hueSectorWeight(hue, center: 0.075, halfWidth: 0.095)
-                * smoothstep(0.035, 0.32, chroma)
+            let midtoneWeight = smoothstep(0.12, 0.40, luma)
+                * (1 - smoothstep(0.76, 0.96, luma))
+            let highChromaGuard = 1 - smoothstep(0.42, 0.76, chroma)
+            let skinWeight = hueSectorWeight(hue, center: 0.075, halfWidth: 0.10)
+                * smoothstep(0.03, 0.28, chroma)
                 * midtoneWeight
+                * highChromaGuard
             let greenWeight = hueSectorWeight(hue, center: 0.32, halfWidth: 0.14)
-                * smoothstep(0.04, 0.34, chroma)
-            let blueWeight = hueSectorWeight(hue, center: 0.60, halfWidth: 0.13)
-                * smoothstep(0.04, 0.34, chroma)
+                * smoothstep(0.035, 0.32, chroma)
+                * highChromaGuard
+            let blueWeight = hueSectorWeight(hue, center: 0.61, halfWidth: 0.14)
+                * smoothstep(0.035, 0.34, chroma)
+                * highChromaGuard
 
-            saturate(1.025)
-            mappedRed += 0.018 * skinWeight + 0.004 * highlightWeight
-            mappedGreen += 0.004 * skinWeight + 0.006 * greenWeight
-            mappedBlue -= 0.009 * skinWeight
-            mappedBlue += 0.010 * blueWeight
-            mappedRed -= 0.002 * blueWeight
+            saturate(1.03)
+            mappedRed += 0.022 * skinWeight + 0.003 * highlightWeight
+            mappedGreen += 0.006 * skinWeight + 0.010 * greenWeight
+            mappedBlue -= 0.012 * skinWeight
+            mappedRed -= 0.003 * greenWeight
+            mappedBlue += 0.014 * blueWeight
+            mappedGreen += 0.003 * blueWeight
+            mappedRed -= 0.004 * blueWeight
         }
 
         return (mappedRed, mappedGreen, mappedBlue)
