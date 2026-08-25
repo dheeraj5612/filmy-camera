@@ -42,7 +42,9 @@ final class FilmyCameraUITests: XCTestCase {
         details.tap()
 
         XCTAssertTrue(app.staticTexts["Recipe controls"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["Muted Color is selected"].waitForExistence(timeout: 5))
+        let done = app.buttons["Muted Color is selected"]
+        XCTAssertTrue(done.waitForExistence(timeout: 5))
+        XCTAssertTrue(done.isHittable, "Selected recipe details need an explicit dismissal control")
 
         let reset = app.buttons["Reset recipe controls"]
         XCTAssertTrue(reset.waitForExistence(timeout: 5))

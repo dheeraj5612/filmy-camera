@@ -335,18 +335,14 @@ struct RecipeDetailView: View {
                         .font(.system(.headline, design: .rounded).weight(.bold))
                         .foregroundStyle(FilmyTheme.background)
                         .frame(maxWidth: .infinity, minHeight: 56)
-                        .background(
-                            FilmyTheme.accent.opacity(primaryActionDisabled ? 0.55 : 1),
-                            in: RoundedRectangle(cornerRadius: 17, style: .continuous)
-                        )
+                        .background(FilmyTheme.accent, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
                     }
                     .buttonStyle(.plain)
-                    .disabled(primaryActionDisabled)
                     .accessibilityLabel(primaryActionAccessibilityLabel)
                     .accessibilityHint(
-                        primaryActionDisabled
-                            ? "This recipe is already active"
-                            : "Applies any pending changes and returns to the camera"
+                        hasPendingChanges
+                            ? "Applies pending changes and returns to the camera"
+                            : "Returns to the camera"
                     )
 
                     HStack(alignment: .top, spacing: 9) {
@@ -374,13 +370,9 @@ struct RecipeDetailView: View {
         draft != recipe
     }
 
-    private var primaryActionDisabled: Bool {
-        isSelected && !hasPendingChanges
-    }
-
     private var primaryActionTitle: String {
         if isSelected {
-            return hasPendingChanges ? "Apply to Selected Recipe" : "Selected Recipe"
+            return hasPendingChanges ? "Apply to Selected Recipe" : "Done"
         }
         return "Use This Recipe"
     }
