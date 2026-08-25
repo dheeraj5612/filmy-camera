@@ -115,6 +115,24 @@ final class CameraViewModelPersistenceTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedRecipe.id, parent.id)
     }
 
+    func testRecipeLookupReturnsPersistedOverrideForUnselectedRecipe() throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let viewModel = CameraViewModel(defaults: defaults)
+        let parent = FilmRecipe.builtIns[4]
+        var customized = parent
+        customized.exposure = 0.75
+
+        viewModel.update(recipe: customized)
+
+        XCTAssertTrue(viewModel.isCustomized(parent))
+        XCTAssertEqual(
+            viewModel.recipe(for: parent.id).exposure,
+            0.75,
+            accuracy: 0.0001
+        )
+    }
+
     private func makeDefaults() throws -> (UserDefaults, String) {
         let suiteName = "CameraViewModelPersistenceTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))

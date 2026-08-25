@@ -881,7 +881,7 @@ struct CameraScreen: View {
             RecipePickerView(
                 recipes: FilmRecipe.builtIns,
                 selectedRecipeID: $viewModel.selectedRecipeID,
-                onOpenDetail: { recipeForDetail = $0 }
+                onOpenDetail: { recipeForDetail = viewModel.recipe(for: $0.id) }
             )
             // The rail cards are 86pt tall with 5pt vertical scroll padding;
             // reserve the full footprint so labels stay clear of the action plate.
@@ -1115,7 +1115,7 @@ struct CameraScreen: View {
             RecipePickerView(
                 recipes: FilmRecipe.builtIns,
                 selectedRecipeID: $viewModel.selectedRecipeID,
-                onOpenDetail: { recipeForDetail = $0 }
+                onOpenDetail: { recipeForDetail = viewModel.recipe(for: $0.id) }
             )
 
             if dynamicTypeSize.isAccessibilitySize {
@@ -1220,7 +1220,7 @@ struct CameraScreen: View {
             RecipePickerView(
                 recipes: FilmRecipe.builtIns,
                 selectedRecipeID: $viewModel.selectedRecipeID,
-                onOpenDetail: { recipeForDetail = $0 },
+                onOpenDetail: { recipeForDetail = viewModel.recipe(for: $0.id) },
                 compact: true
             )
 

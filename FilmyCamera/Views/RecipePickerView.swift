@@ -90,9 +90,12 @@ struct RecipePickerView: View {
                         proxy.scrollTo(selectedRecipeID, anchor: .center)
                     }
                     .onChange(of: selectedRecipeID) { _, newValue in
-                        guard !reduceMotion else { return }
-                        withAnimation(.snappy(duration: 0.24)) {
+                        if reduceMotion {
                             proxy.scrollTo(newValue, anchor: .center)
+                        } else {
+                            withAnimation(.snappy(duration: 0.24)) {
+                                proxy.scrollTo(newValue, anchor: .center)
+                            }
                         }
                     }
 
@@ -215,6 +218,24 @@ struct RecipePickerView: View {
     }
 }
 
+enum RecipeDetailCommitAction: Equatable {
+    case none
+    case update(FilmRecipe)
+    case reset
+}
+
+enum RecipeDetailCommitPolicy {
+    static func action(
+        draft: FilmRecipe,
+        current: FilmRecipe,
+        original: FilmRecipe
+    ) -> RecipeDetailCommitAction {
+        guard draft != current else { return .none }
+        if draft == original { return .reset }
+        return .update(draft)
+    }
+}
+
 struct RecipeDetailView: View {
     private enum EditorSection: String, CaseIterable, Identifiable {
         case tone
@@ -260,6 +281,7 @@ struct RecipeDetailView: View {
     let onReset: (() -> Void)?
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var draft: FilmRecipe
     @State private var expandedSections: Set<EditorSection> = [.tone, .color]
 
@@ -301,20 +323,31 @@ struct RecipeDetailView: View {
                     Button {
                         commitDraft()
                         onSelect()
+                        dismiss()
                     } label: {
                         HStack(spacing: 10) {
-                            Image(systemName: isSelected ? "checkmark.circle.fill" : "camera.fill")
-                            Text(isSelected ? "Selected recipe" : "Use this recipe")
-                                .lineLimit(1)
+                            Image(systemName: primaryActionIcon)
+                            Text(primaryActionTitle)
+                                .lineLimit(2)
                                 .minimumScaleFactor(0.8)
+                                .multilineTextAlignment(.center)
                         }
                         .font(.system(.headline, design: .rounded).weight(.bold))
                         .foregroundStyle(FilmyTheme.background)
                         .frame(maxWidth: .infinity, minHeight: 56)
-                        .background(FilmyTheme.accent, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+                        .background(
+                            FilmyTheme.accent.opacity(primaryActionDisabled ? 0.55 : 1),
+                            in: RoundedRectangle(cornerRadius: 17, style: .continuous)
+                        )
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(isSelected ? "\(recipe.name) is selected" : "Use \(recipe.name) recipe")
+                    .disabled(primaryActionDisabled)
+                    .accessibilityLabel(primaryActionAccessibilityLabel)
+                    .accessibilityHint(
+                        primaryActionDisabled
+                            ? "This recipe is already active"
+                            : "Applies any pending changes and returns to the camera"
+                    )
 
                     HStack(alignment: .top, spacing: 9) {
                         Image(systemName: "camera.aperture")
@@ -335,6 +368,47 @@ struct RecipeDetailView: View {
             }
         }
         .accessibilityElement(children: .contain)
+    }
+
+    private var hasPendingChanges: Bool {
+        draft != recipe
+    }
+
+    private var primaryActionDisabled: Bool {
+        isSelected && !hasPendingChanges
+    }
+
+    private var primaryActionTitle: String {
+        if isSelected {
+            return hasPendingChanges ? "Apply to Selected Recipe" : "Selected Recipe"
+        }
+        return "Use This Recipe"
+    }
+
+    private var primaryActionIcon: String {
+        if isSelected {
+            return hasPendingChanges ? "checkmark.circle" : "checkmark.circle.fill"
+        }
+        return "camera.fill"
+    }
+
+    private var primaryActionAccessibilityLabel: String {
+        if isSelected {
+            return hasPendingChanges
+                ? "Apply changes to \(recipe.name)"
+                : "\(recipe.name) is selected"
+        }
+        return "Use \(recipe.name) recipe"
+    }
+
+    private var detailGridColumns: [GridItem] {
+        if dynamicTypeSize.isAccessibilitySize {
+            return [GridItem(.flexible())]
+        }
+        return [
+            GridItem(.flexible(), spacing: 12),
+            GridItem(.flexible(), spacing: 12)
+        ]
     }
 
     private var hero: some View {
@@ -420,7 +494,7 @@ struct RecipeDetailView: View {
     }
 
     private var controlSummary: some View {
-        LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 1) {
+        LazyVGrid(columns: detailGridColumns, spacing: 1) {
             ForEach(draft.controlSummary, id: \.0) { control in
                 VStack(alignment: .leading, spacing: 5) {
                     Text(control.0.uppercased())
@@ -500,7 +574,7 @@ struct RecipeDetailView: View {
             }
 
             LazyVGrid(
-                columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)],
+                columns: detailGridColumns,
                 alignment: .leading,
                 spacing: 1
             ) {
@@ -571,15 +645,19 @@ struct RecipeDetailView: View {
                     .foregroundStyle(FilmyTheme.background)
                     .padding(.horizontal, 12)
                     .frame(minHeight: FilmyTheme.minimumHitTarget)
-                    .background(FilmyTheme.accent, in: Capsule())
+                    .background(
+                        FilmyTheme.accent.opacity(hasPendingChanges ? 1 : 0.55),
+                        in: Capsule()
+                    )
                     .buttonStyle(.plain)
+                    .disabled(!hasPendingChanges)
                     .accessibilityLabel("Apply recipe changes")
+                    .accessibilityValue(hasPendingChanges ? "Changes pending" : "No changes")
                     .accessibilityHint("Saves the current recipe controls and closes the editor")
                 }
 
                 Button("Reset") {
                     draft = originalRecipe
-                    onReset?()
                 }
                 .font(.system(.subheadline, design: .rounded).weight(.bold))
                 .foregroundStyle(FilmyTheme.accent)
@@ -736,8 +814,18 @@ struct RecipeDetailView: View {
     }
 
     private func commitDraft() {
-        guard draft != recipe else { return }
-        onUpdate?(draft)
+        switch RecipeDetailCommitPolicy.action(
+            draft: draft,
+            current: recipe,
+            original: originalRecipe
+        ) {
+        case .none:
+            return
+        case .update(let updatedRecipe):
+            onUpdate?(updatedRecipe)
+        case .reset:
+            onReset?()
+        }
     }
 
     private var dynamicRangeBinding: Binding<FilmRecipe.DynamicRange> {
@@ -809,24 +897,44 @@ private struct RecipeChoiceRow<Selection: Hashable, Content: View>: View {
     @Binding var selection: Selection
     @ViewBuilder let content: () -> Content
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     var body: some View {
-        HStack(spacing: 12) {
-            Text(title)
-                .font(.system(.body, design: .rounded).weight(.semibold))
-                .foregroundStyle(FilmyTheme.primary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Spacer(minLength: 8)
-
-            Picker(title, selection: $selection, content: content)
-                .pickerStyle(.menu)
-                .tint(FilmyTheme.accent)
-                .font(.system(.subheadline, design: .rounded).weight(.bold))
-                .padding(.vertical, 5)
-                .frame(minHeight: FilmyTheme.minimumHitTarget)
-                .accessibilityIdentifier(title == "FX Blue" ? "fx-blue-control" : "recipe-choice-\(title)")
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 6) {
+                    titleLabel
+                    picker
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                HStack(spacing: 12) {
+                    titleLabel
+                    Spacer(minLength: 8)
+                    picker
+                }
+            }
         }
         .frame(minHeight: 52)
+    }
+
+    private var titleLabel: some View {
+        Text(title)
+            .font(.system(.body, design: .rounded).weight(.semibold))
+            .foregroundStyle(FilmyTheme.primary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var picker: some View {
+        Picker(title, selection: $selection, content: content)
+            .pickerStyle(.menu)
+            .tint(FilmyTheme.accent)
+            .font(.system(.subheadline, design: .rounded).weight(.bold))
+            .padding(.vertical, 5)
+            .frame(minHeight: FilmyTheme.minimumHitTarget)
+            .accessibilityIdentifier(
+                title == "FX Blue" ? "fx-blue-control" : "recipe-choice-\(title)"
+            )
     }
 }
 
@@ -836,6 +944,8 @@ private struct RecipeSliderRow: View {
     let range: ClosedRange<Double>
     let format: String
     let step: Double?
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     init(
         title: String,
@@ -853,20 +963,7 @@ private struct RecipeSliderRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text(title)
-                    .font(.system(.body, design: .rounded).weight(.semibold))
-                    .foregroundStyle(FilmyTheme.primary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Spacer(minLength: 8)
-
-                Text(String(format: format, value))
-                    .font(FilmyTheme.metadataFont)
-                    .foregroundStyle(FilmyTheme.secondary)
-                    .monospacedDigit()
-                    .lineLimit(1)
-            }
+            valueHeader
 
             if let step {
                 Slider(value: $value, in: range, step: step)
@@ -881,5 +978,36 @@ private struct RecipeSliderRow: View {
             }
         }
         .frame(minHeight: 52, alignment: .center)
+    }
+
+    @ViewBuilder
+    private var valueHeader: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 3) {
+                titleLabel
+                valueLabel
+            }
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                titleLabel
+                Spacer(minLength: 8)
+                valueLabel
+            }
+        }
+    }
+
+    private var titleLabel: some View {
+        Text(title)
+            .font(.system(.body, design: .rounded).weight(.semibold))
+            .foregroundStyle(FilmyTheme.primary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var valueLabel: some View {
+        Text(String(format: format, value))
+            .font(FilmyTheme.metadataFont)
+            .foregroundStyle(FilmyTheme.secondary)
+            .monospacedDigit()
+            .lineLimit(1)
     }
 }
