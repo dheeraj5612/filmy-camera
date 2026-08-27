@@ -1,36 +1,86 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#15100d"/>
-      <stop offset="0.55" stop-color="#302017"/>
-      <stop offset="1" stop-color="#0a0b0e"/>
+    <linearGradient id="background" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0" stop-color="#050504"/>
+      <stop offset="0.55" stop-color="#0d0a08"/>
+      <stop offset="1" stop-color="#15100c"/>
     </linearGradient>
-    <radialGradient id="lens" cx="42%" cy="35%" r="72%">
-      <stop offset="0" stop-color="#fff0cf"/>
-      <stop offset="0.16" stop-color="#f3a965"/>
-      <stop offset="0.34" stop-color="#6d3e37"/>
-      <stop offset="0.59" stop-color="#20333e"/>
-      <stop offset="0.78" stop-color="#101316"/>
-      <stop offset="1" stop-color="#050607"/>
+    <radialGradient id="ambient" cx="50%" cy="45%" r="62%">
+      <stop offset="0" stop-color="#ef9e42" stop-opacity="0.14"/>
+      <stop offset="0.58" stop-color="#9c421e" stop-opacity="0.05"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0"/>
     </radialGradient>
-    <linearGradient id="shine" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#fff7e3" stop-opacity=".85"/>
-      <stop offset=".4" stop-color="#ffca8e" stop-opacity=".12"/>
-      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    <linearGradient id="body" x1="12%" y1="12%" x2="90%" y2="88%">
+      <stop offset="0" stop-color="#f4bb59"/>
+      <stop offset="0.46" stop-color="#ef9739"/>
+      <stop offset="1" stop-color="#c94d25"/>
     </linearGradient>
-    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
-      <feDropShadow dx="0" dy="22" stdDeviation="18" flood-color="#000" flood-opacity=".42"/>
+    <linearGradient id="bodyEdge" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0" stop-color="#fff0bf" stop-opacity="0.55"/>
+      <stop offset="0.45" stop-color="#ef9e42" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#6f2414" stop-opacity="0.45"/>
+    </linearGradient>
+    <radialGradient id="aperture" cx="38%" cy="32%" r="76%">
+      <stop offset="0" stop-color="#ffc35a"/>
+      <stop offset="0.48" stop-color="#ef8b2f"/>
+      <stop offset="1" stop-color="#b83b20"/>
+    </radialGradient>
+    <filter id="cameraShadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="24" stdDeviation="24" flood-color="#000" flood-opacity="0.48"/>
+    </filter>
+    <filter id="dotGlow" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
     </filter>
   </defs>
-  <!-- Keep the source square opaque; iOS applies the platform mask. -->
-  <rect width="1024" height="1024" fill="url(#bg)"/>
-  <circle cx="512" cy="512" r="300" fill="#07090c" opacity=".82" filter="url(#shadow)"/>
-  <circle cx="512" cy="512" r="258" fill="none" stroke="#e8d3bd" stroke-opacity=".22" stroke-width="9"/>
-  <circle cx="512" cy="512" r="232" fill="url(#lens)" stroke="#eed9bf" stroke-opacity=".5" stroke-width="10"/>
-  <circle cx="512" cy="512" r="116" fill="#07090b" stroke="#c9a988" stroke-opacity=".65" stroke-width="10"/>
-  <circle cx="512" cy="512" r="53" fill="#020304"/>
-  <path d="M339 318c49-51 107-78 170-83" fill="none" stroke="url(#shine)" stroke-linecap="round" stroke-width="26"/>
-  <path d="M402 712c64 31 145 31 217-2" fill="none" stroke="#f39f71" stroke-opacity=".8" stroke-linecap="round" stroke-width="14"/>
-  <circle cx="714" cy="312" r="16" fill="#f5b982"/>
-  <circle cx="758" cy="356" r="8" fill="#9bd2c3"/>
+
+  <!-- Opaque square master. iOS supplies the platform corner mask. -->
+  <rect width="1024" height="1024" fill="url(#background)"/>
+  <rect width="1024" height="1024" fill="url(#ambient)"/>
+
+  <!-- A compact-camera silhouette built as one film-frame-like shape. -->
+  <path
+    d="M166 357 Q166 309 214 309 H349 L402 226 Q417 202 447 202 H650 Q680 202 695 226 L748 309 H810 Q858 309 858 357 V733 Q858 781 810 781 H214 Q166 781 166 733 Z"
+    fill="#000"
+    opacity="0.58"
+    filter="url(#cameraShadow)"
+  />
+  <path
+    d="M146 341 Q146 293 194 293 H345 L398 210 Q413 186 443 186 H646 Q676 186 691 210 L744 293 H830 Q878 293 878 341 V717 Q878 765 830 765 H194 Q146 765 146 717 Z"
+    fill="url(#body)"
+  />
+  <path
+    d="M194 306 H345 L398 223 Q413 199 443 199 H646 Q676 199 691 223 L744 306 H830"
+    fill="none"
+    stroke="url(#bodyEdge)"
+    stroke-width="14"
+    stroke-linecap="round"
+  />
+
+  <!-- Two bold negative windows make the camera body read as a film frame. -->
+  <rect x="186" y="393" width="54" height="106" rx="18" fill="#1a100a" opacity="0.9"/>
+  <rect x="186" y="525" width="54" height="106" rx="18" fill="#1a100a" opacity="0.9"/>
+
+  <!-- Oversized lens/aperture stays legible at small app-icon sizes. -->
+  <circle cx="512" cy="524" r="245" fill="#080807"/>
+  <circle cx="512" cy="524" r="224" fill="#15110e" stroke="#f2b55f" stroke-opacity="0.42" stroke-width="10"/>
+  <circle cx="512" cy="524" r="178" fill="url(#aperture)"/>
+
+  <g fill="none" stroke="#39150d" stroke-width="20" stroke-linecap="round">
+    <path d="M512 347 C512 405 529 459 556 499"/>
+    <path d="M512 347 C512 405 529 459 556 499" transform="rotate(60 512 524)"/>
+    <path d="M512 347 C512 405 529 459 556 499" transform="rotate(120 512 524)"/>
+    <path d="M512 347 C512 405 529 459 556 499" transform="rotate(180 512 524)"/>
+    <path d="M512 347 C512 405 529 459 556 499" transform="rotate(240 512 524)"/>
+    <path d="M512 347 C512 405 529 459 556 499" transform="rotate(300 512 524)"/>
+  </g>
+  <circle cx="512" cy="524" r="51" fill="#080807"/>
+  <circle cx="512" cy="524" r="178" fill="none" stroke="#080807" stroke-width="12"/>
+
+  <!-- The mint light mirrors the app's enabled-state accent. -->
+  <circle cx="802" cy="365" r="30" fill="#10100e" opacity="0.62"/>
+  <circle cx="802" cy="365" r="20" fill="#75d6a5" filter="url(#dotGlow)"/>
 </svg>
