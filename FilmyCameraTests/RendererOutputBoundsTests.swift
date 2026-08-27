@@ -50,6 +50,81 @@ final class RendererOutputBoundsTests: XCTestCase {
         XCTAssertLessThan(weakTexture, 0.015)
         XCTAssertGreaterThan(strongTexture, weakTexture * 1.8)
     }
+
+    func testGrainTextureIsDeterministicMonochromeAndApproximatelyGaussian() {
+        let first = FilmRenderer.deterministicGaussianGrainBytes(size: 128, seed: 42)
+        let repeated = FilmRenderer.deterministicGaussianGrainBytes(size: 128, seed: 42)
+        let differentSeed = FilmRenderer.deterministicGaussianGrainBytes(size: 128, seed: 43)
+
+        XCTAssertEqual(first, repeated)
+        XCTAssertNotEqual(first, differentSeed)
+
+        var samples: [Double] = []
+        samples.reserveCapacity(first.count / 4)
+        for index in stride(from: 0, to: first.count, by: 4) {
+            XCTAssertEqual(first[index], first[index + 1])
+            XCTAssertEqual(first[index], first[index + 2])
+            XCTAssertEqual(first[index + 3], 255)
+            samples.append(Double(first[index]))
+        }
+
+        let mean = samples.reduce(0, +) / Double(samples.count)
+        let variance = samples.reduce(0) { total, sample in
+            total + (sample - mean) * (sample - mean)
+        } / Double(samples.count)
+        let standardDeviation = sqrt(variance)
+        let withinOneSigma = Double(samples.filter { abs($0 - mean) <= standardDeviation }.count)
+            / Double(samples.count)
+        let withinTwoSigma = Double(samples.filter { abs($0 - mean) <= standardDeviation * 2 }.count)
+            / Double(samples.count)
+
+        XCTAssertEqual(mean, 127.5, accuracy: 0.5)
+        XCTAssertEqual(standardDeviation, 18, accuracy: 1)
+        XCTAssertTrue((0.64...0.72).contains(withinOneSigma))
+        XCTAssertTrue((0.93...0.98).contains(withinTwoSigma))
+    }
+
+    func testGrainLuminanceMaskConcentratesTextureInMidtones() {
+        let extent = CGRect(x: 0, y: 0, width: 128, height: 128)
+        let context = CIContext(options: [
+            .useSoftwareRenderer: true,
+            .cacheIntermediates: false
+        ])
+        var clean = FilmRecipe(id: "grain-mask-clean", name: "Clean", subtitle: "Test")
+        clean.grain = 0
+        var grain = clean
+        grain.grain = 1
+
+        func grainDifference(at luminance: CGFloat) -> Double {
+            let input = CIImage(
+                color: CIColor(red: luminance, green: luminance, blue: luminance, alpha: 1)
+            ).cropped(to: extent)
+            let cleanPixels = renderFloatPixels(
+                FilmRenderer.render(input, recipe: clean, quality: .photo, grainSeed: 17),
+                extent: extent,
+                context: context
+            )
+            let grainPixels = renderFloatPixels(
+                FilmRenderer.render(input, recipe: grain, quality: .photo, grainSeed: 17),
+                extent: extent,
+                context: context
+            )
+            return meanAbsoluteRGBDifference(cleanPixels, grainPixels)
+        }
+
+        let blackDifference = grainDifference(at: 0)
+        let shadowDifference = grainDifference(at: 0.08)
+        let midtoneDifference = grainDifference(at: 0.5)
+        let highlightDifference = grainDifference(at: 0.92)
+        let whiteDifference = grainDifference(at: 1)
+
+        XCTAssertGreaterThan(midtoneDifference, 0.001)
+        XCTAssertLessThan(blackDifference, midtoneDifference * 0.05)
+        XCTAssertLessThan(whiteDifference, midtoneDifference * 0.05)
+        XCTAssertLessThan(shadowDifference, midtoneDifference * 0.5)
+        XCTAssertLessThan(highlightDifference, midtoneDifference * 0.5)
+    }
+
     func testRendererPreservesInputExtentAtEveryQualityTier() {
         let sourceExtent = CGRect(x: -12, y: 7, width: 64, height: 48)
         let input = CIImage(color: CIColor(red: 0.82, green: 0.37, blue: 0.12, alpha: 1))

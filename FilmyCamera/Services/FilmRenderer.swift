@@ -181,7 +181,9 @@ public final class FilmRenderer {
             grainTexture = FilmRenderer.makeDeterministicGrainTexture()
             grainKernel = CIColorKernel(source: """
                 kernel vec4 filmyGrain(__sample image, __sample noise, float amplitude) {
-                    float delta = (noise.r - 0.5) * amplitude;
+                    float luminance = dot(image.rgb, vec3(0.2126, 0.7152, 0.0722));
+                    float luminanceMask = clamp(4.0 * luminance * (1.0 - luminance), 0.0, 1.0);
+                    float delta = (noise.r - 0.5) * amplitude * luminanceMask;
                     return vec4(clamp(image.rgb + vec3(delta), 0.0, 1.0), image.a);
                 }
                 """)
@@ -868,8 +870,10 @@ public final class FilmRenderer {
             .cropped(to: extent)
 
         // Add zero-mean luminance variation directly. The custom color kernel
-        // keeps source alpha intact and avoids the exposure shifts produced by
-        // nonlinear blend modes or premultiplied compositing.
+        // keeps source alpha intact, applies one delta to every color channel,
+        // and tapers the effect toward pure black and white so grain remains
+        // concentrated in the descriptive midtones instead of reading as
+        // uniform digital noise.
         return grainKernel.apply(
             extent: extent,
             arguments: [image, noise, amount]
@@ -1296,22 +1300,7 @@ public final class FilmRenderer {
         // Label the procedural bytes as linear so mid-gray remains the exact
         // zero point instead of being gamma-decoded below 0.5.
         guard let colorSpace = CGColorSpace(name: CGColorSpace.linearSRGB) else { return nil }
-        var bytes = [UInt8](repeating: 0, count: size * size * 4)
-        var state: UInt32 = 0x9E37_79B9
-
-        for index in stride(from: 0, to: bytes.count, by: 4) {
-            // A small xorshift generator gives us a stable, platform-neutral
-            // texture without relying on CIRandomGenerator's process state.
-            state ^= state << 13
-            state ^= state >> 17
-            state ^= state << 5
-            let centered = Int((state >> 24) & 0x3F) - 31
-            let value = UInt8(max(0, min(255, 128 + centered)))
-            bytes[index] = value
-            bytes[index + 1] = value
-            bytes[index + 2] = value
-            bytes[index + 3] = 255
-        }
+        var bytes = deterministicGaussianGrainBytes(size: size)
 
         guard let context = bytes.withUnsafeMutableBytes({ rawBuffer in
             CGContext(
@@ -1329,6 +1318,55 @@ public final class FilmRenderer {
         }
 
         return CIImage(cgImage: image)
+    }
+
+    /// Produces a stable, monochrome Gaussian field for the shared grain
+    /// texture. Box-Muller is evaluated once when immutable renderer resources
+    /// are initialized; live frames only tile and phase-shift the cached image.
+    static func deterministicGaussianGrainBytes(
+        size: Int,
+        seed: UInt32 = 0x9E37_79B9
+    ) -> [UInt8] {
+        guard size > 0 else { return [] }
+
+        let pixelCount = size * size
+        let sigma = 18.0
+        var bytes = [UInt8](repeating: 255, count: pixelCount * 4)
+        var state = seed == 0 ? UInt32(0xA341_316C) : seed
+
+        func nextUniform() -> Double {
+            state ^= state << 13
+            state ^= state >> 17
+            state ^= state << 5
+            // Half-step sampling keeps the logarithm away from zero while
+            // retaining a deterministic mapping across platforms.
+            return (Double(state) + 0.5) / (Double(UInt32.max) + 1.0)
+        }
+
+        func store(_ normal: Double, at pixelIndex: Int) {
+            let clipped = clamp(normal, lower: -3.0, upper: 3.0)
+            let value = UInt8(clamp(Int((127.5 + clipped * sigma).rounded()), lower: 0, upper: 255))
+            let byteIndex = pixelIndex * 4
+            bytes[byteIndex] = value
+            bytes[byteIndex + 1] = value
+            bytes[byteIndex + 2] = value
+        }
+
+        var pixelIndex = 0
+        while pixelIndex < pixelCount {
+            let firstUniform = max(nextUniform(), Double.leastNonzeroMagnitude)
+            let secondUniform = nextUniform()
+            let radius = sqrt(-2.0 * log(firstUniform))
+            let angle = 2.0 * Double.pi * secondUniform
+            store(radius * cos(angle), at: pixelIndex)
+            pixelIndex += 1
+            if pixelIndex < pixelCount {
+                store(radius * sin(angle), at: pixelIndex)
+                pixelIndex += 1
+            }
+        }
+
+        return bytes
     }
 
     private static func clamp<T: Comparable>(
