@@ -13,7 +13,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     /// adds the canonical camera mode controls introduced by the fidelity pass;
     /// version 5 adds persisted Kelvin white-balance control.
     public static let currentSchemaVersion = 5
-    public static let rendererVersion = "core-image-parametric-v3"
+    public static let rendererVersion = "core-image-parametric-v5"
 
     /// The product-level disclosure that accompanies every current recipe.
     /// It intentionally rules out an exact-output or hardware-calibration
@@ -412,6 +412,9 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     public enum PublicReference: String, CaseIterable, Codable, Hashable, Sendable {
         case xt5ImageQualitySetting
         case filmSimulationOverview
+        case fujifilmRecipeGuide
+        case fujifilmCreatorRecipes
+        case fujiXWeeklyRecipeLibrary
         case g7XMarkIIITechnicalSpecifications
         case g7XMarkIIICameraMuseum
 
@@ -421,6 +424,12 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
                 return "FUJIFILM X-T5 Image Quality Setting"
             case .filmSimulationOverview:
                 return "FUJIFILM Film Simulation overview"
+            case .fujifilmRecipeGuide:
+                return "FUJIFILM Film Simulation recipe guide"
+            case .fujifilmCreatorRecipes:
+                return "FUJIFILM creator FS RECIPE stories"
+            case .fujiXWeeklyRecipeLibrary:
+                return "Fuji X Weekly public recipe library"
             case .g7XMarkIIITechnicalSpecifications:
                 return "Canon PowerShot G7 X Mark III technical specifications"
             case .g7XMarkIIICameraMuseum:
@@ -434,6 +443,12 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
                 return "https://fujifilm-dsc.com/en/manual/x-t5/menu_shooting/image_quality_setting/"
             case .filmSimulationOverview:
                 return "https://www.fujifilm-x.com/en-us/products/film-simulation/"
+            case .fujifilmRecipeGuide:
+                return "https://shopusa.fujifilm-x.com/discover/how-to-make-a-film-simulation-recipe/"
+            case .fujifilmCreatorRecipes:
+                return "https://www.fujifilm-x.com/en-us/stories/"
+            case .fujiXWeeklyRecipeLibrary:
+                return "https://fujixweekly.com/recipes/"
             case .g7XMarkIIITechnicalSpecifications:
                 return "https://www.usa.canon.com/support/p/powershot-g7-x-mark-iii"
             case .g7XMarkIIICameraMuseum:
@@ -447,6 +462,12 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
                 return "Public names, option descriptions, and control groupings"
             case .filmSimulationOverview:
                 return "Public film-simulation names and subject-oriented descriptions"
+            case .fujifilmRecipeGuide:
+                return "Public recipe control semantics and an official example recipe"
+            case .fujifilmCreatorRecipes:
+                return "Public creator recipe settings published by Fujifilm"
+            case .fujiXWeeklyRecipeLibrary:
+                return "Public community recipe settings used as adaptation references"
             case .g7XMarkIIITechnicalSpecifications:
                 return "Public sensor, lens, white-balance, and Picture Style option specifications"
             case .g7XMarkIIICameraMuseum:
@@ -465,12 +486,20 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         .g7XMarkIIICameraMuseum
     ]
 
+    public static let fujifilmCreatorRecipeReferences: [PublicReference] =
+        fujifilmPublicReferences + [.fujifilmRecipeGuide, .fujifilmCreatorRecipes]
+
+    public static let communityRecipeReferences: [PublicReference] =
+        fujifilmPublicReferences + [.fujiXWeeklyRecipeLibrary]
+
     /// Machine-readable provenance attached to a recipe and persisted with
     /// saved-frame metadata. The enum surface contains no exact-match or
     /// hardware-calibrated state by design.
     public struct Provenance: Codable, Hashable, Sendable {
         public enum Source: String, CaseIterable, Codable, Hashable, Sendable {
             case publicOfficialDocumentation
+            case publicOfficialRecipe
+            case publicCommunityRecipe
             case publicCanonDocumentation
             case userModified
             case legacyRecordWithoutProvenance
@@ -549,8 +578,18 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             let hasMatchingSourceAndReferences: Bool
             switch (source, calibration) {
             case (.publicOfficialDocumentation, .notCalibratedToFujifilmHardware),
-                 (.userModified, .notCalibratedToFujifilmHardware):
+                 (.userModified, .notCalibratedToFujifilmHardware)
+                where references == FilmRecipe.fujifilmPublicReferences:
                 hasMatchingSourceAndReferences = references == FilmRecipe.fujifilmPublicReferences
+            case (.publicOfficialRecipe, .notCalibratedToFujifilmHardware):
+                hasMatchingSourceAndReferences = references == FilmRecipe.fujifilmCreatorRecipeReferences
+            case (.publicCommunityRecipe, .notCalibratedToFujifilmHardware):
+                hasMatchingSourceAndReferences = references == FilmRecipe.communityRecipeReferences
+            case (.userModified, .notCalibratedToFujifilmHardware):
+                hasMatchingSourceAndReferences = [
+                    FilmRecipe.fujifilmCreatorRecipeReferences,
+                    FilmRecipe.communityRecipeReferences
+                ].contains(references)
             case (.publicCanonDocumentation, .notCalibratedToCanonHardware),
                  (.userModified, .notCalibratedToCanonHardware):
                 hasMatchingSourceAndReferences = references == FilmRecipe.g7XPublicReferences
@@ -576,6 +615,20 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         implementation: .originalParametricApproximation,
         calibration: .notCalibratedToCanonHardware,
         references: g7XPublicReferences
+    )
+
+    public static let fujifilmCreatorRecipeProvenance = Provenance(
+        source: .publicOfficialRecipe,
+        implementation: .originalParametricApproximation,
+        calibration: .notCalibratedToFujifilmHardware,
+        references: fujifilmCreatorRecipeReferences
+    )
+
+    public static let communityRecipeProvenance = Provenance(
+        source: .publicCommunityRecipe,
+        implementation: .originalParametricApproximation,
+        calibration: .notCalibratedToFujifilmHardware,
+        references: communityRecipeReferences
     )
 
     /// Used only when decoding the old JSON shape that had no provenance
@@ -1259,6 +1312,113 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         Color(red: 0.68, green: 0.68, blue: 0.62)
     ]
 
+    /// Expanded looks adapted from public Fujifilm creator recipes and
+    /// established community recipes. IDs are stable so saved selections and
+    /// user overrides survive display-name changes.
+    public static let expandedInternetRecipeIDs: [String] = [
+        "nostalgic-summer",
+        "aurea-golden",
+        "eternal-pastel",
+        "crepuscolo-blue",
+        "black-ice",
+        "matter-monochrome",
+        "honey-portrait",
+        "pacifica-100",
+        "desert-daydream",
+        "quiet-provia",
+        "velvet-haze",
+        "pastel-400",
+        "archive-64",
+        "tungsten-800",
+        "pushed-tungsten",
+        "pacific-blues",
+        "green-800",
+        "hp5-texture"
+    ]
+
+    private static func clamp(_ value: Double, lower: Double, upper: Double) -> Double {
+        min(max(value, lower), upper)
+    }
+
+    /// Converts public camera-menu values into the renderer's normalized
+    /// controls. This mapping is deliberately simple and inspectable; it does
+    /// not claim that the Core Image pipeline matches Fujifilm hardware.
+    private static func researchedRecipe(
+        id: String,
+        name: String,
+        subtitle: String,
+        filmBase: FilmBase,
+        exposure: Double = 0,
+        highlight: Double,
+        shadow: Double,
+        color: Double,
+        dynamicRange: DynamicRange,
+        dRangePriority: DRangePriority = .off,
+        whiteBalanceMode: WhiteBalanceMode,
+        kelvin: Double = 6500,
+        redShift: Double = 0,
+        blueShift: Double = 0,
+        colorChrome: ColorChromeLevel,
+        fxBlue: FXBlueLevel,
+        sharpness: Double,
+        noiseReduction: Double,
+        clarity: Double,
+        grain: GrainEffectLevel,
+        grainSize: GrainSizeLevel,
+        monochromaticColor: MonochromaticColor = MonochromaticColor(),
+        vignette: Double = 0.08,
+        halation: Double = 0.02,
+        provenance: Provenance
+    ) -> FilmRecipe {
+        let monochrome = filmBase.monochromeFilter != nil || filmBase == .monochrome
+        let temperature = clamp((redShift - blueShift) * 0.018, lower: -1, upper: 1)
+        let tint = clamp((redShift + blueShift) * 0.008, lower: -1, upper: 1)
+
+        let baseBlueResponse: Double
+        switch filmBase {
+        case .classicChrome: baseBlueResponse = 0.14
+        case .classicNegative: baseBlueResponse = 0.24
+        case .nostalgicNegative: baseBlueResponse = 0.20
+        case .eterna, .eternaBleachBypass: baseBlueResponse = 0.08
+        default: baseBlueResponse = 0.04
+        }
+
+        return FilmRecipe(
+            id: id,
+            name: name,
+            subtitle: subtitle,
+            filmBase: filmBase,
+            exposure: clamp(exposure, lower: -2, upper: 2),
+            tone: Tone(
+                highlight: clamp(highlight / 4, lower: -1, upper: 1),
+                shadow: clamp(shadow / 4, lower: -1, upper: 1)
+            ),
+            saturation: monochrome ? 0 : clamp(1 + color * 0.07, lower: 0, upper: 2),
+            contrast: 1,
+            dynamicRange: dynamicRange,
+            dRangePriority: dRangePriority,
+            whiteBalance: WhiteBalanceShift(
+                temperature: temperature,
+                tint: tint,
+                mode: whiteBalanceMode,
+                kelvin: kelvin
+            ),
+            monochromaticColor: monochromaticColor,
+            colorChrome: colorChrome.scalarValue,
+            blueResponse: monochrome ? 0 : baseBlueResponse,
+            fxBlue: fxBlue.scalarValue,
+            sharpness: clamp(sharpness * 0.04, lower: -1, upper: 1),
+            noiseReduction: clamp((noiseReduction + 4) * 0.01, lower: 0, upper: 1),
+            clarity: clamp(clarity * 0.04, lower: -1, upper: 1),
+            grain: grain.scalarValue,
+            grainSize: grainSize.scalarValue,
+            vignette: vignette,
+            halation: halation,
+            palette: Palette(saturation: monochrome ? 0 : 1),
+            provenance: provenance
+        )
+    }
+
     /// The initial recipe library. Names refer to public film-camera
     /// conventions; the app is not affiliated with or calibrated by Fujifilm.
     public static let builtIns: [FilmRecipe] = [
@@ -1278,7 +1438,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             sharpness: 0.02,
             noiseReduction: 0.01,
             clarity: 0.02,
-            grain: 0.5,
+            grain: 0,
             grainSize: 0.75,
             vignette: 0.04,
             halation: 0.01,
@@ -1309,7 +1469,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             noiseReduction: 0.01,
             clarity: 0.10,
             grain: 0.5,
-            grainSize: 1.5,
+            grainSize: 0.75,
             vignette: 0.12,
             halation: 0.04,
             palette: Palette(
@@ -1338,7 +1498,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             sharpness: 0.16,
             noiseReduction: 0.01,
             clarity: 0.18,
-            grain: 0.5,
+            grain: 0,
             grainSize: 0.75,
             vignette: 0.10,
             halation: 0.02,
@@ -1368,7 +1528,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             sharpness: -0.02,
             noiseReduction: 0.03,
             clarity: 0.02,
-            grain: 0.5,
+            grain: 0,
             grainSize: 0.75,
             vignette: 0.08,
             halation: 0.03,
@@ -1398,7 +1558,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             sharpness: 0.12,
             noiseReduction: 0.03,
             clarity: 0.16,
-            grain: 0.5,
+            grain: 0,
             grainSize: 0.75,
             vignette: 0.06,
             halation: 0.01,
@@ -1428,8 +1588,8 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             sharpness: -0.04,
             noiseReduction: 0.05,
             clarity: -0.04,
-            grain: 0.5,
-            grainSize: 1.5,
+            grain: 0,
+            grainSize: 0.75,
             vignette: 0.16,
             halation: 0.10,
             palette: Palette(
@@ -1587,7 +1747,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             noiseReduction: 0.02,
             clarity: 0.06,
             grain: 0.5,
-            grainSize: 1.5,
+            grainSize: 0.75,
             vignette: 0.14,
             halation: 0.06,
             palette: Palette(
@@ -1647,7 +1807,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             noiseReduction: 0.02,
             clarity: 0.14,
             grain: 0.5,
-            grainSize: 1.5,
+            grainSize: 0.75,
             vignette: 0.18,
             halation: 0.04,
             palette: Palette(
@@ -1676,7 +1836,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             sharpness: -0.02,
             noiseReduction: 0.04,
             clarity: -0.04,
-            grain: 0.5,
+            grain: 0,
             grainSize: 0.75,
             vignette: 0.08,
             halation: 0.03,
@@ -1706,7 +1866,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             sharpness: 0.02,
             noiseReduction: 0.02,
             clarity: 0.02,
-            grain: 0.5,
+            grain: 0,
             grainSize: 0.75,
             vignette: 0.06,
             halation: 0.02,
@@ -1723,39 +1883,484 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         FilmRecipe(
             id: "g7x-compact",
             name: "G7 X Compact",
-            subtitle: "Warm skin / crisp compact color",
+            subtitle: "Clean skin / vivid compact JPEG",
             filmBase: .compactDigital,
-            exposure: 0.08,
-            tone: Tone(highlight: 0.06, shadow: -0.05),
-            saturation: 1.07,
-            contrast: 1.07,
-            dynamicRange: .dr200,
+            exposure: 0,
+            tone: Tone(highlight: 0.03, shadow: -0.08),
+            saturation: 1.0,
+            contrast: 1.0,
+            dynamicRange: .auto,
             dRangePriority: .off,
             whiteBalance: WhiteBalanceShift(
-                temperature: 0.035,
-                tint: 0.005,
+                // Ambience Priority already contributes a small warm bias.
+                // Counter most of that fixed offset so daylight neutrals stay
+                // clean; scene warmth is retained rather than painted on.
+                temperature: -0.035,
+                tint: 0,
                 mode: .ambiencePriority
             ),
             colorChrome: 0,
-            blueResponse: 0.10,
+            blueResponse: 0,
             fxBlue: 0,
-            sharpness: 0.20,
-            noiseReduction: 0.06,
-            clarity: 0.08,
+            sharpness: 0.16,
+            noiseReduction: 0,
+            clarity: 0.025,
             grain: 0,
             grainSize: 0.75,
-            vignette: 0.03,
+            vignette: 0,
             halation: 0,
-            palette: Palette(
-                redBias: 0.012,
-                greenBias: 0.002,
-                blueBias: -0.004,
-                redGreenMix: 0.010,
-                greenBlueMix: 0.005,
-                blueRedMix: -0.006,
-                saturation: 1.015
-            ),
+            palette: Palette(),
             provenance: g7XProvenance
+        ),
+
+        // Public Fujifilm creator-recipe adaptations. Source settings:
+        // https://www.fujifilm-x.com/en-gb/learning-centre/make-your-own-film-simulation-recipe/
+        // https://www.fujifilm-x.com/en-us/stories/x-e5-x-fs-recipe-davide-gazzotti/
+        // https://www.fujifilm-x.com/en-us/stories/acros-fs-recipe-x-allan-steele-dadzie/
+        // https://www.fujifilm-x.com/en-us/stories/acros-fs-recipe-x-agathe-poupeney/
+        researchedRecipe(
+            id: "nostalgic-summer",
+            name: "Nostalgic Summer",
+            subtitle: "Soft warmth / seaside color",
+            filmBase: .nostalgicNegative,
+            exposure: 0.67,
+            highlight: -1.5,
+            shadow: -1,
+            color: 3,
+            dynamicRange: .dr400,
+            whiteBalanceMode: .colorTemperature,
+            kelvin: 5600,
+            redShift: 0,
+            blueShift: -3,
+            colorChrome: .weak,
+            fxBlue: .weak,
+            sharpness: -1,
+            noiseReduction: 0,
+            clarity: 0,
+            grain: .weak,
+            grainSize: .large,
+            vignette: 0.10,
+            halation: 0.06,
+            provenance: fujifilmCreatorRecipeProvenance
+        ),
+        researchedRecipe(
+            id: "aurea-golden",
+            name: "Aurea Golden",
+            subtitle: "Golden light / warm portraits",
+            filmBase: .nostalgicNegative,
+            exposure: 0.33,
+            highlight: -1.5,
+            shadow: 0,
+            color: 2,
+            dynamicRange: .dr400,
+            whiteBalanceMode: .ambiencePriority,
+            redShift: 4,
+            blueShift: -5,
+            colorChrome: .weak,
+            fxBlue: .weak,
+            sharpness: -4,
+            noiseReduction: -4,
+            clarity: 0,
+            grain: .weak,
+            grainSize: .small,
+            vignette: 0.12,
+            halation: 0.08,
+            provenance: fujifilmCreatorRecipeProvenance
+        ),
+        researchedRecipe(
+            id: "eternal-pastel",
+            name: "Eternal Pastel",
+            subtitle: "Pastel color / suspended summer",
+            filmBase: .classicChrome,
+            exposure: 0.33,
+            highlight: -1,
+            shadow: -1.5,
+            color: 4,
+            dynamicRange: .dr400,
+            whiteBalanceMode: .colorTemperature,
+            kelvin: 5550,
+            redShift: 1,
+            blueShift: -4,
+            colorChrome: .strong,
+            fxBlue: .weak,
+            sharpness: -4,
+            noiseReduction: -4,
+            clarity: 0,
+            grain: .strong,
+            grainSize: .small,
+            vignette: 0.12,
+            halation: 0.06,
+            provenance: fujifilmCreatorRecipeProvenance
+        ),
+        researchedRecipe(
+            id: "crepuscolo-blue",
+            name: "Crepuscolo Blue",
+            subtitle: "Cool dusk / cinematic quiet",
+            filmBase: .nostalgicNegative,
+            highlight: -1,
+            shadow: -1.5,
+            color: 2,
+            dynamicRange: .dr400,
+            whiteBalanceMode: .ambiencePriority,
+            redShift: -4,
+            blueShift: 0,
+            colorChrome: .strong,
+            fxBlue: .weak,
+            sharpness: -2,
+            noiseReduction: -4,
+            clarity: 0,
+            grain: .strong,
+            grainSize: .small,
+            vignette: 0.16,
+            halation: 0.05,
+            provenance: fujifilmCreatorRecipeProvenance
+        ),
+        researchedRecipe(
+            id: "black-ice",
+            name: "Black Ice",
+            subtitle: "Hard city light / crisp texture",
+            filmBase: .acrosYellow,
+            highlight: 1.5,
+            shadow: 2.5,
+            color: 0,
+            dynamicRange: .dr200,
+            whiteBalanceMode: .auto,
+            colorChrome: .off,
+            fxBlue: .off,
+            sharpness: 2,
+            noiseReduction: -2,
+            clarity: 0,
+            grain: .strong,
+            grainSize: .small,
+            vignette: 0.16,
+            halation: 0.01,
+            provenance: fujifilmCreatorRecipeProvenance
+        ),
+        researchedRecipe(
+            id: "matter-monochrome",
+            name: "Matter Monochrome",
+            subtitle: "Worked surfaces / tactile grain",
+            filmBase: .acrosYellow,
+            highlight: 1,
+            shadow: 3,
+            color: 0,
+            dynamicRange: .dr400,
+            whiteBalanceMode: .auto,
+            redShift: 5,
+            blueShift: 0,
+            colorChrome: .strong,
+            fxBlue: .strong,
+            sharpness: 0,
+            noiseReduction: -3,
+            clarity: 3,
+            grain: .weak,
+            grainSize: .large,
+            monochromaticColor: MonochromaticColor(warmCool: -0.25, greenMagenta: -0.25),
+            vignette: 0.14,
+            halation: 0.01,
+            provenance: fujifilmCreatorRecipeProvenance
+        ),
+
+        // Additional official Fujifilm creator recipes:
+        // https://www.fujifilm-x.com/no-no/stories/astia-fs-recipe-x-mikaela-mertens/
+        // https://www.fujifilm-x.com/da-dk/stories/velvia-fs-recipe-x-dominic-stone/
+        // https://www.fujifilm-x.com/en-us/stories/velvia-fs-recipe-x-rodrigo-roher/
+        // https://www.fujifilm-x.com/en-us/stories/provia-fs-recipe-x-serkan-tekin/
+        // https://www.fujifilm-x.com/it-it/stories/pro-neg-std-fs-recipe-x-paolo-emanuele-barretta/
+        researchedRecipe(
+            id: "honey-portrait",
+            name: "Honey Portrait",
+            subtitle: "Warm skin / gentle wedding light",
+            filmBase: .astia,
+            exposure: 0.33,
+            highlight: -1,
+            shadow: 1,
+            color: 0,
+            dynamicRange: .dr100,
+            whiteBalanceMode: .daylight,
+            redShift: 5,
+            blueShift: -3,
+            colorChrome: .off,
+            fxBlue: .off,
+            sharpness: 0,
+            noiseReduction: 0,
+            clarity: -2,
+            grain: .weak,
+            grainSize: .small,
+            vignette: 0.08,
+            halation: 0.04,
+            provenance: fujifilmCreatorRecipeProvenance
+        ),
+        researchedRecipe(
+            id: "pacifica-100",
+            name: "Pacifica 100",
+            subtitle: "Deep ocean color / restrained vividness",
+            filmBase: .velvia,
+            highlight: 0,
+            shadow: 2.5,
+            color: -1,
+            dynamicRange: .dr100,
+            whiteBalanceMode: .auto,
+            redShift: 2,
+            blueShift: -2,
+            colorChrome: .weak,
+            fxBlue: .strong,
+            sharpness: 0,
+            noiseReduction: 1,
+            clarity: -2,
+            grain: .strong,
+            grainSize: .small,
+            vignette: 0.12,
+            halation: 0.02,
+            provenance: fujifilmCreatorRecipeProvenance
+        ),
+        researchedRecipe(
+            id: "desert-daydream",
+            name: "Desert Daydream",
+            subtitle: "Dusty warmth / saturated distance",
+            filmBase: .velvia,
+            highlight: -2,
+            shadow: 3,
+            color: 3,
+            dynamicRange: .dr100,
+            whiteBalanceMode: .daylight,
+            redShift: 2,
+            blueShift: -5,
+            colorChrome: .weak,
+            fxBlue: .weak,
+            sharpness: 0,
+            noiseReduction: -3,
+            clarity: -4,
+            grain: .weak,
+            grainSize: .small,
+            vignette: 0.10,
+            halation: 0.03,
+            provenance: fujifilmCreatorRecipeProvenance
+        ),
+        researchedRecipe(
+            id: "quiet-provia",
+            name: "Quiet Provia",
+            subtitle: "Muted street color / soft transitions",
+            filmBase: .provia,
+            highlight: -1,
+            shadow: 1,
+            color: -1,
+            dynamicRange: .dr100,
+            whiteBalanceMode: .auto,
+            colorChrome: .off,
+            fxBlue: .off,
+            sharpness: 1,
+            noiseReduction: -1,
+            clarity: 0,
+            grain: .off,
+            grainSize: .small,
+            vignette: 0.06,
+            halation: 0.01,
+            provenance: fujifilmCreatorRecipeProvenance
+        ),
+        researchedRecipe(
+            id: "velvet-haze",
+            name: "Velvet Haze",
+            subtitle: "Soft fashion / cinematic restraint",
+            filmBase: .proNegStandard,
+            highlight: -2,
+            shadow: -1,
+            color: 3,
+            dynamicRange: .dr400,
+            whiteBalanceMode: .colorTemperature,
+            kelvin: 4350,
+            redShift: 1,
+            blueShift: -1,
+            colorChrome: .strong,
+            fxBlue: .strong,
+            sharpness: 2,
+            noiseReduction: -4,
+            clarity: -5,
+            grain: .off,
+            grainSize: .small,
+            vignette: 0.10,
+            halation: 0.06,
+            provenance: fujifilmCreatorRecipeProvenance
+        ),
+
+        // Community adaptations based on publicly posted Fuji X Weekly menu
+        // settings. Product-facing names avoid claiming a film-stock match.
+        // https://fujixweekly.com/2020/05/10/my-fujifilm-x-t30-kodak-portra-400-film-simulation-recipe/
+        // https://fujixweekly.com/2019/08/02/my-fujifilm-x-t30-kodachrome-64-film-simulation-recipe/
+        // https://fujixweekly.com/2024/04/16/cinestill-800t-fujifilm-x-trans-v-film-simulation-recipe/
+        // https://fujixweekly.com/2022/05/18/fujifilm-x-e4-x-trans-iv-film-simulation-recipe-pushed-cinestill-800t/
+        researchedRecipe(
+            id: "pastel-400",
+            name: "Pastel 400",
+            subtitle: "Warm pastel / forgiving contrast",
+            filmBase: .classicChrome,
+            exposure: 0.83,
+            highlight: -1,
+            shadow: -1,
+            color: 2,
+            dynamicRange: .auto,
+            whiteBalanceMode: .daylight,
+            redShift: 4,
+            blueShift: -5,
+            colorChrome: .strong,
+            fxBlue: .off,
+            sharpness: -2,
+            noiseReduction: -4,
+            clarity: 0,
+            grain: .strong,
+            grainSize: .small,
+            vignette: 0.10,
+            halation: 0.05,
+            provenance: communityRecipeProvenance
+        ),
+        researchedRecipe(
+            id: "archive-64",
+            name: "Archive 64",
+            subtitle: "Warm archive color / crisp contrast",
+            filmBase: .classicChrome,
+            exposure: 0.67,
+            highlight: 1,
+            shadow: 2,
+            color: 0,
+            dynamicRange: .dr400,
+            whiteBalanceMode: .daylight,
+            redShift: 2,
+            blueShift: -5,
+            colorChrome: .weak,
+            fxBlue: .off,
+            sharpness: 2,
+            noiseReduction: -4,
+            clarity: 0,
+            grain: .weak,
+            grainSize: .small,
+            vignette: 0.09,
+            halation: 0.03,
+            provenance: communityRecipeProvenance
+        ),
+        researchedRecipe(
+            id: "tungsten-800",
+            name: "Tungsten 800",
+            subtitle: "Electric night / blooming highlights",
+            filmBase: .eterna,
+            exposure: 0.17,
+            highlight: 0,
+            shadow: 2,
+            color: 4,
+            dynamicRange: .dr400,
+            whiteBalanceMode: .fluorescent3,
+            redShift: -6,
+            blueShift: -4,
+            colorChrome: .strong,
+            fxBlue: .weak,
+            sharpness: -3,
+            noiseReduction: -4,
+            clarity: -5,
+            grain: .strong,
+            grainSize: .large,
+            vignette: 0.18,
+            halation: 0.20,
+            provenance: communityRecipeProvenance
+        ),
+        researchedRecipe(
+            id: "pushed-tungsten",
+            name: "Pushed Tungsten",
+            subtitle: "Cold overcast / dense cinema grain",
+            filmBase: .eternaBleachBypass,
+            exposure: 0.17,
+            highlight: -0.5,
+            shadow: -1.5,
+            color: 3,
+            dynamicRange: .dr400,
+            whiteBalanceMode: .colorTemperature,
+            kelvin: 7700,
+            redShift: -9,
+            blueShift: 5,
+            colorChrome: .strong,
+            fxBlue: .strong,
+            sharpness: 0,
+            noiseReduction: -4,
+            clarity: -3,
+            grain: .strong,
+            grainSize: .large,
+            vignette: 0.18,
+            halation: 0.14,
+            provenance: communityRecipeProvenance
+        ),
+
+        // https://fujixweekly.com/tag/pacific-blues/
+        // https://fujixweekly.com/2018/02/03/my-fujifilm-x100f-fujicolor-superia-800-film-simulation-recipe-pro-neg-std/
+        // https://fujixweekly.com/2022/03/23/fujifilm-x-trans-iv-film-simulation-recipe-ilford-hp5-plus-400/
+        researchedRecipe(
+            id: "pacific-blues",
+            name: "Pacific Blues",
+            subtitle: "Coastal cyan / bright summer color",
+            filmBase: .classicNegative,
+            exposure: 0.83,
+            highlight: -2,
+            shadow: 3,
+            color: 4,
+            dynamicRange: .dr400,
+            whiteBalanceMode: .colorTemperature,
+            kelvin: 5800,
+            redShift: 1,
+            blueShift: -3,
+            colorChrome: .strong,
+            fxBlue: .weak,
+            sharpness: -2,
+            noiseReduction: -4,
+            clarity: -3,
+            grain: .strong,
+            grainSize: .large,
+            vignette: 0.14,
+            halation: 0.05,
+            provenance: communityRecipeProvenance
+        ),
+        researchedRecipe(
+            id: "green-800",
+            name: "Green 800",
+            subtitle: "Punchy green / gritty low light",
+            filmBase: .proNegStandard,
+            exposure: 0.67,
+            highlight: 1,
+            shadow: 2,
+            color: 4,
+            dynamicRange: .dr200,
+            whiteBalanceMode: .auto,
+            redShift: -2,
+            blueShift: -3,
+            colorChrome: .off,
+            fxBlue: .off,
+            sharpness: 1,
+            noiseReduction: -3,
+            clarity: 0,
+            grain: .strong,
+            grainSize: .large,
+            vignette: 0.13,
+            halation: 0.04,
+            provenance: communityRecipeProvenance
+        ),
+        researchedRecipe(
+            id: "hp5-texture",
+            name: "HP5 Texture",
+            subtitle: "Open monochrome / coarse latitude",
+            filmBase: .monochrome,
+            highlight: -1,
+            shadow: 1,
+            color: 0,
+            dynamicRange: .dr400,
+            whiteBalanceMode: .daylight,
+            redShift: 1,
+            blueShift: -8,
+            colorChrome: .off,
+            fxBlue: .off,
+            sharpness: -2,
+            noiseReduction: -4,
+            clarity: 0,
+            grain: .strong,
+            grainSize: .large,
+            vignette: 0.16,
+            halation: 0.01,
+            provenance: communityRecipeProvenance
         )
     ]
 }

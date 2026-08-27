@@ -76,45 +76,101 @@ public final class FilmRenderer {
     }
 
     private final class CubeCache: @unchecked Sendable {
-        private let lock = NSLock()
-        private var storage: [CubeCacheKey: NSData] = [:]
-        private let maxEntries = 32
+        private final class Key: NSObject {
+            let value: CubeCacheKey
+
+            init(_ value: CubeCacheKey) {
+                self.value = value
+            }
+
+            override var hash: Int { value.hashValue }
+
+            override func isEqual(_ object: Any?) -> Bool {
+                guard let other = object as? Key else { return false }
+                return value == other.value
+            }
+        }
+
+        private let storage = NSCache<Key, NSData>()
+
+        init() {
+            // One 32³ RGBA float cube is about 512 KB. The count accommodates
+            // every built-in recipe without the previous browse-to-clear
+            // thrash, while the cost limit lets NSCache react to memory
+            // pressure before exploratory editor values grow unbounded.
+            storage.countLimit = 48
+            storage.totalCostLimit = 28 * 1024 * 1024
+        }
 
         func data(for key: CubeCacheKey, make: () -> NSData) -> NSData {
-            lock.lock()
-            if let cached = storage[key] {
-                lock.unlock()
+            let wrappedKey = Key(key)
+            if let cached = storage.object(forKey: wrappedKey) {
                 return cached
             }
-            lock.unlock()
 
-            // Cube generation is intentionally outside the lock. A recipe
-            // change should not stall an already-rendering frame or another
-            // thread requesting a different recipe.
+            // NSCache is thread-safe. Keep cube generation outside its own
+            // synchronization so distinct recipes can be prepared in
+            // parallel and a thumbnail miss cannot stall the live preview.
             let generated = make()
 
-            lock.lock()
-            defer { lock.unlock() }
-
             // Another thread may have generated the same cube while this
-            // thread was outside the lock. Reuse the first completed value.
-            if let cached = storage[key] {
+            // thread was working. Reuse that value when available.
+            if let cached = storage.object(forKey: wrappedKey) {
                 return cached
             }
 
-            // Slider changes can produce many distinct recipes. Keep the
-            // cache bounded without making a miss affect rendered output.
-            if storage.count >= maxEntries {
-                storage.removeAll(keepingCapacity: true)
+            storage.setObject(generated, forKey: wrappedKey, cost: generated.length)
+            return generated
+        }
+    }
+
+    private struct ThumbnailCacheKey: Hashable, Sendable {
+        let recipe: FilmRecipe
+        let width: Int
+        let height: Int
+    }
+
+    private final class ThumbnailCache: @unchecked Sendable {
+        private final class Key: NSObject {
+            let value: ThumbnailCacheKey
+
+            init(_ value: ThumbnailCacheKey) {
+                self.value = value
             }
 
-            storage[key] = generated
-            return generated
+            override var hash: Int { value.hashValue }
+
+            override func isEqual(_ object: Any?) -> Bool {
+                guard let other = object as? Key else { return false }
+                return value == other.value
+            }
+        }
+
+        private let storage = NSCache<Key, UIImage>()
+
+        init() {
+            storage.countLimit = 48
+            storage.totalCostLimit = 12 * 1024 * 1024
+        }
+
+        func image(for key: ThumbnailCacheKey) -> UIImage? {
+            storage.object(forKey: Key(key))
+        }
+
+        func insert(_ image: UIImage, for key: ThumbnailCacheKey) -> UIImage {
+            let wrappedKey = Key(key)
+            if let cached = storage.object(forKey: wrappedKey) {
+                return cached
+            }
+            let pixelCost = max(key.width * key.height * 4, 1)
+            storage.setObject(image, forKey: wrappedKey, cost: pixelCost)
+            return image
         }
     }
 
     private final class ImmutableResources: @unchecked Sendable {
         let grainTexture: CIImage?
+        let grainKernel: CIColorKernel?
         let clearImage: CIImage
         let zeroComponents: CIVector
         let oneComponents: CIVector
@@ -123,6 +179,12 @@ public final class FilmRenderer {
 
         init() {
             grainTexture = FilmRenderer.makeDeterministicGrainTexture()
+            grainKernel = CIColorKernel(source: """
+                kernel vec4 filmyGrain(__sample image, __sample noise, float amplitude) {
+                    float delta = (noise.r - 0.5) * amplitude;
+                    return vec4(clamp(image.rgb + vec3(delta), 0.0, 1.0), image.a);
+                }
+                """)
             clearImage = CIImage(color: .clear)
             zeroComponents = CIVector(x: 0, y: 0, z: 0, w: 0)
             oneComponents = CIVector(x: 1, y: 1, z: 1, w: 1)
@@ -132,6 +194,7 @@ public final class FilmRenderer {
     }
 
     private static let cubeCache = CubeCache()
+    private static let thumbnailCache = ThumbnailCache()
     private static let immutableResources = ImmutableResources()
     private static let sRGBColorSpace = CGColorSpace(name: CGColorSpace.sRGB)
     private static let spatialReferenceDimension: CGFloat = 1080
@@ -164,6 +227,14 @@ public final class FilmRenderer {
     ) -> UIImage? {
         let width = max(size.width.rounded(), 1)
         let height = max(size.height.rounded(), 1)
+        let cacheKey = ThumbnailCacheKey(
+            recipe: recipe,
+            width: Int(width),
+            height: Int(height)
+        )
+        if let cached = thumbnailCache.image(for: cacheKey) {
+            return cached
+        }
         let extent = CGRect(x: 0, y: 0, width: width, height: height)
         var reference = CIImage(
             color: CIColor(red: 0.15, green: 0.12, blue: 0.10, alpha: 1)
@@ -219,7 +290,7 @@ public final class FilmRenderer {
         guard let image = outputCGImage(rendered, from: extent) else {
             return nil
         }
-        return UIImage(cgImage: image)
+        return thumbnailCache.insert(UIImage(cgImage: image), for: cacheKey)
     }
 
     /// Materializes a display-referred still at the app's explicit output
@@ -260,6 +331,7 @@ public final class FilmRenderer {
 
         output = applyDynamicRange(to: output, recipe: safeRecipe)
         output = applyExposureAndTone(to: output, recipe: safeRecipe)
+        output = applyCompactDigitalTone(to: output, recipe: safeRecipe)
         output = applyWhiteBalance(to: output, recipe: safeRecipe)
         output = applyMonochromeFilter(to: output, recipe: safeRecipe)
         output = applyColorControls(to: output, recipe: safeRecipe)
@@ -457,6 +529,38 @@ public final class FilmRenderer {
         filter.setValue(highlightAmount, forKey: "inputHighlightAmount")
         filter.setValue(amount * 0.18, forKey: "inputShadowAmount")
         return filter.outputImage?.cropped(to: image.extent) ?? image
+    }
+
+    private static func applyCompactDigitalTone(
+        to image: CIImage,
+        recipe: FilmRecipe
+    ) -> CIImage {
+        guard recipe.filmBase == .compactDigital,
+              let toneCurve = CIFilter(name: "CIToneCurve") else {
+            return image
+        }
+
+        // A dedicated compact-JPEG curve complements the editable recipe
+        // controls. It keeps black anchored, opens useful shadow/midtone
+        // detail, and eases into a gentle highlight shoulder. The points are
+        // an original approximation of the public Standard Picture Style and
+        // automatic-lighting intent, not Canon calibration data.
+        let points: [(CGFloat, CGFloat)] = [
+            (0.00, 0.006),
+            (0.18, 0.205),
+            (0.50, 0.545),
+            (0.80, 0.825),
+            (1.00, 0.995)
+        ]
+
+        toneCurve.setValue(image, forKey: kCIInputImageKey)
+        for (index, point) in points.enumerated() {
+            toneCurve.setValue(
+                CIVector(x: point.0, y: point.1),
+                forKey: "inputPoint\(index)"
+            )
+        }
+        return toneCurve.outputImage?.cropped(to: image.extent) ?? image
     }
 
     private static func applyWhiteBalance(
@@ -727,10 +831,10 @@ public final class FilmRenderer {
         // procedural frequency to a reference image size so the same recipe
         // remains visually stable when the source changes from a video frame
         // to a full-resolution still.
-        let amount = clamp(recipe.grain, lower: 0, upper: 1)
+        let amount = grainBlendOpacity(for: recipe.grain)
         guard amount > 0.0001,
               let grainTexture = immutableResources.grainTexture,
-              let softLight = CIFilter(name: "CISoftLightBlendMode") else {
+              let grainKernel = immutableResources.grainKernel else {
             return image
         }
 
@@ -762,25 +866,22 @@ public final class FilmRenderer {
             ))
             .applyingFilter("CIAffineTile")
             .cropped(to: extent)
-            .applyingFilter("CIColorControls", parameters: [
-                kCIInputSaturationKey: 0,
-                kCIInputContrastKey: 1.45,
-                kCIInputBrightnessKey: -0.50
-            ])
 
-        softLight.setValue(noise, forKey: kCIInputImageKey)
-        softLight.setValue(image, forKey: kCIInputBackgroundImageKey)
-        guard let grainImage = softLight.outputImage?.cropped(to: extent),
-              let maskFilter = CIFilter(name: "CIBlendWithAlphaMask") else {
-            return image
-        }
+        // Add zero-mean luminance variation directly. The custom color kernel
+        // keeps source alpha intact and avoids the exposure shifts produced by
+        // nonlinear blend modes or premultiplied compositing.
+        return grainKernel.apply(
+            extent: extent,
+            arguments: [image, noise, amount]
+        )?.cropped(to: extent) ?? image
+    }
 
-        let maskColor = CIColor(red: 1, green: 1, blue: 1, alpha: amount)
-        let mask = CIImage(color: maskColor).cropped(to: extent)
-        maskFilter.setValue(grainImage, forKey: kCIInputImageKey)
-        maskFilter.setValue(image, forKey: kCIInputBackgroundImageKey)
-        maskFilter.setValue(mask, forKey: "inputMaskImage")
-        return maskFilter.outputImage?.cropped(to: extent) ?? image
+    /// Camera grain controls describe an effect level, not a literal blend
+    /// opacity. A perceptual curve keeps Weak genuinely subtle while leaving
+    /// Strong visibly available for intentionally textured looks.
+    static func grainBlendOpacity(for controlAmount: Double) -> Double {
+        let normalized = clamp(controlAmount, lower: 0, upper: 1)
+        return (0.04 * normalized) + (0.08 * normalized * normalized)
     }
 
     private static func applyVignette(
@@ -870,28 +971,30 @@ public final class FilmRenderer {
         dimension: Int,
         recipe: FilmRecipe
     ) -> Data {
-        var values: [Float] = []
-        values.reserveCapacity(dimension * dimension * dimension * 4)
+        let componentCount = dimension * dimension * dimension * 4
+        var data = Data(count: componentCount * MemoryLayout<Float>.stride)
 
         let divisor = Float(dimension - 1)
-        for blueIndex in 0..<dimension {
-            for greenIndex in 0..<dimension {
-                for redIndex in 0..<dimension {
-                    let red = Float(redIndex) / divisor
-                    let green = Float(greenIndex) / divisor
-                    let blue = Float(blueIndex) / divisor
-                    let mapped = mapColor(red: red, green: green, blue: blue, recipe: recipe)
-                    values.append(mapped.red)
-                    values.append(mapped.green)
-                    values.append(mapped.blue)
-                    values.append(1)
+        data.withUnsafeMutableBytes { rawBuffer in
+            let values = rawBuffer.bindMemory(to: Float.self)
+            var componentIndex = 0
+            for blueIndex in 0..<dimension {
+                for greenIndex in 0..<dimension {
+                    for redIndex in 0..<dimension {
+                        let red = Float(redIndex) / divisor
+                        let green = Float(greenIndex) / divisor
+                        let blue = Float(blueIndex) / divisor
+                        let mapped = mapColor(red: red, green: green, blue: blue, recipe: recipe)
+                        values[componentIndex] = mapped.red
+                        values[componentIndex + 1] = mapped.green
+                        values[componentIndex + 2] = mapped.blue
+                        values[componentIndex + 3] = 1
+                        componentIndex += 4
+                    }
                 }
             }
         }
-
-        return values.withUnsafeBytes { rawBuffer in
-            Data(bytes: rawBuffer.baseAddress!, count: rawBuffer.count)
-        }
+        return data
     }
 
     private static func mapColor(
@@ -1083,10 +1186,10 @@ public final class FilmRenderer {
             saturate(0.99)
             mappedBlue += 0.006 * shadowWeight
         case .compactDigital:
-            // Approximate Canon's Standard-style compact output with warm but
-            // bounded portrait mids, crisp foliage and blue sky, clean neutral
-            // grays, and restrained high-chroma boosts. This remains an
-            // original sRGB transform, not Canon Picture Style data.
+            // Original compact-camera response inspired by the G7 X Mark III
+            // product envelope: clean Standard-style color, warm portrait
+            // mids, selective red/blue punch, and smooth highlights. This is a
+            // parametric approximation, not Canon Picture Style data.
             let chroma = max(mappedRed, max(mappedGreen, mappedBlue))
                 - min(mappedRed, min(mappedGreen, mappedBlue))
             let hue = rgbHue(
@@ -1095,28 +1198,47 @@ public final class FilmRenderer {
                 blue: mappedBlue,
                 chroma: chroma
             )
-            let midtoneWeight = smoothstep(0.12, 0.40, luma)
-                * (1 - smoothstep(0.76, 0.96, luma))
-            let highChromaGuard = 1 - smoothstep(0.42, 0.76, chroma)
-            let skinWeight = hueSectorWeight(hue, center: 0.075, halfWidth: 0.10)
-                * smoothstep(0.03, 0.28, chroma)
-                * midtoneWeight
-                * highChromaGuard
-            let greenWeight = hueSectorWeight(hue, center: 0.32, halfWidth: 0.14)
+            let midtoneWeight = smoothstep(0.12, 0.42, luma)
+                * (1 - smoothstep(0.78, 0.98, luma))
+            let skinWeight = hueSectorWeight(hue, center: 0.075, halfWidth: 0.095)
                 * smoothstep(0.035, 0.32, chroma)
-                * highChromaGuard
-            let blueWeight = hueSectorWeight(hue, center: 0.61, halfWidth: 0.14)
-                * smoothstep(0.035, 0.34, chroma)
-                * highChromaGuard
+                * (1 - smoothstep(0.38, 0.62, chroma))
+                * midtoneWeight
+            let redWeight = hueSectorWeight(hue, center: 0.99, halfWidth: 0.075)
+                * smoothstep(0.055, 0.38, chroma)
+                * midtoneWeight
+            let greenWeight = hueSectorWeight(hue, center: 0.32, halfWidth: 0.14)
+                * smoothstep(0.04, 0.34, chroma)
+            let blueWeight = hueSectorWeight(hue, center: 0.60, halfWidth: 0.13)
+                * smoothstep(0.04, 0.34, chroma)
+            let deepShadowWeight = 1 - smoothstep(0.04, 0.26, luma)
+            let brightHighlightWeight = smoothstep(0.72, 0.98, luma)
 
-            saturate(1.03)
-            mappedRed += 0.022 * skinWeight + 0.003 * highlightWeight
-            mappedGreen += 0.006 * skinWeight + 0.010 * greenWeight
-            mappedBlue -= 0.012 * skinWeight
-            mappedRed -= 0.003 * greenWeight
-            mappedBlue += 0.014 * blueWeight
+            // Deep shadows and near-white highlights carry less chroma than
+            // the midtones. This avoids colorful shadow noise and hard color
+            // clipping. Reference JPEG/RAW pairs also show that the compact
+            // response concentrates color in reds, warm subjects, and blues
+            // instead of applying blanket saturation.
+            saturate(1 - 0.065 * deepShadowWeight - 0.045 * brightHighlightWeight)
+            mappedRed += 0.014 * redWeight
+            mappedGreen -= 0.004 * redWeight
+            mappedBlue -= 0.006 * redWeight
+            mappedRed += 0.016 * skinWeight + 0.003 * highlightWeight
+            mappedGreen += 0.005 * skinWeight + 0.003 * greenWeight
+            mappedBlue -= 0.007 * skinWeight
+
+            // Across the same-scene reference pairs, foliage was usually a
+            // little quieter than the independent RAW development. Pull only
+            // that hue sector toward luminance so greens retain separation
+            // without the fluorescent cast of a global saturation boost.
+            let greenRestraint = 0.065 * greenWeight
+            mappedRed = mix(mappedRed, luma, greenRestraint)
+            mappedGreen = mix(mappedGreen, luma, greenRestraint)
+            mappedBlue = mix(mappedBlue, luma, greenRestraint)
+
+            mappedBlue += 0.013 * blueWeight
             mappedGreen += 0.003 * blueWeight
-            mappedRed -= 0.004 * blueWeight
+            mappedRed -= 0.003 * blueWeight
         }
 
         return (mappedRed, mappedGreen, mappedBlue)
@@ -1170,7 +1292,10 @@ public final class FilmRenderer {
 
     private static func makeDeterministicGrainTexture() -> CIImage? {
         let size = 512
-        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
+        // The grain kernel operates in Core Image's linear working domain.
+        // Label the procedural bytes as linear so mid-gray remains the exact
+        // zero point instead of being gamma-decoded below 0.5.
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.linearSRGB) else { return nil }
         var bytes = [UInt8](repeating: 0, count: size * size * 4)
         var state: UInt32 = 0x9E37_79B9
 

@@ -189,8 +189,8 @@ Picture Style payload.
 
 The implementation therefore targets the observable intent rather than an
 exact match: clean compact-camera color, slightly warm portrait midtones,
-crisp greens and blues, moderate contrast, smooth highlight protection,
-controlled noise reduction, and no synthetic film grain or halation. Its
+selective red/blue presence, smooth highlight protection, restrained detail,
+and no synthetic film grain, halation, or blanket contrast. Its
 dedicated parametric film base and editable recipe controls run through the
 same deterministic preview/photo/export pipeline as every other look.
 
@@ -199,3 +199,91 @@ status in saved-photo provenance. It makes no claim to reproduce the physical
 camera's sensor, 24–100 mm lens, DIGIC processing, optical depth of field, or
 pixel-identical JPEG output; no Canon LUT, Picture Style file, firmware,
 sample-image pixels, code, or calibration data is included.
+
+## G7 X compact-profile fidelity pass — 2026-08-27
+
+The mode was re-audited against Canon's current public support specifications
+and the official PowerShot G7 X Mark III Advanced User Guide. Canon documents
+the one-inch 20.1 MP sensor and 24–100 mm-equivalent f/1.8–2.8 lens, Auto
+Lighting Optimizer, ambience- and white-priority auto white balance, and the
+Standard Picture Style as vivid, sharp, crisp, and suitable for most scenes.
+The guide also distinguishes Portrait's smoother skin rendering from Standard;
+Filmy Camera continues to target the general Standard-style compact JPEG rather
+than silently combining multiple Canon modes.
+
+### Real-image reference batch
+
+The second pass used Photography Blog's 31 downloadable, unmodified 20 MP
+SuperFine JPEG samples. EXIF verification identified every file as a Canon
+PowerShot G7 X Mark III, 5472 x 3648, sRGB image. Nine matching CR3 files first
+established the method; the final batch expanded to all 31 matching CR3 files
+and independently developed them through Apple's RAW pipeline. This
+made same-scene comparisons possible without storing or shipping any third-
+party image, embedded profile, or derived LUT in the app.
+
+Across the initial nine pairs, the camera JPEG opened dark tones and midtones while
+retaining a shoulder near white. Relative median saturation changes varied by
+source hue: approximately +11% red, +15% orange/warm subjects, +12% yellow,
+-5% green, +13% cyan/blue, and +4% magenta. Low-chroma neutral areas showed an
+equal-channel lift rather than a stable warm or green cast. Mid-frequency edge
+contrast was about 1.18x the independent development, but this combines Canon
+sharpening with differences in the RAW developer and must not be treated as a
+transferable camera kernel.
+
+These measurements are directional, not calibration data: the scenes are not
+a controlled color chart, Apple's RAW development is only a comparison
+baseline, and exposure/WB choices vary between photographs. They are useful
+for rejecting the earlier blanket warmth and saturation, not for claiming a
+pixel-identical match.
+
+The implementation now includes a dedicated compact-digital tone stage in
+addition to the inspectable recipe controls. Its original curve keeps a clean
+black point, opens shadow and midtone detail, and rolls into a softer highlight
+shoulder. The compact color transform treats luminance and hue separately: it
+keeps neutrals clean, warms only moderate-chroma portrait midtones, adds
+selective red and blue presence, restrains foliage, and reduces chroma in deep
+shadows and near-white highlights. The final built-in deliberately removes
+blanket contrast, noise reduction, vignette, palette bias, and extra blue
+response. It retains only fine sharpening and very low clarity, avoiding a
+second heavy local-contrast pass on already-processed iPhone/HEIC input.
+
+An instrumented, non-shipping calibration harness rendered all 31 independent
+RAW developments through candidate stage combinations and compared them with
+their same-scene Canon JPEGs. The earlier full-strength recipe increased mean
+absolute RGB error from 0.04209 to 0.06712 and improved only 2 of 31 pairs. The
+restrained dedicated compact transform plus the small tone, dynamic-range,
+sharpness, and clarity settings reduced it to 0.03391 and improved 22 of 31
+pairs: a 19.4% average reduction from the independent-development baseline.
+The external files and temporary harness are not included in the app or its
+test bundle.
+
+The camera UI labels the selection as a camera profile instead of film stock,
+and recipe details expose the processing intent, official Canon references,
+and the hardware/calibration boundary. Renderer provenance advances to
+`core-image-parametric-v5`; persisted user edits migrate onto the current
+built-in parent while retaining their editable values.
+
+The new regression fixtures verify a monotonic compact tone response, opened
+shadow/midtone luminance, a retained highlight shoulder, warm skin and red
+separation, restrained foliage, blue-sky separation, and tightly bounded
+neutral color. These tests are
+behavioral guardrails for the original approximation, not evidence of a
+pixel-identical G7 X match. Physical side-by-side calibration remains open.
+
+## Compact-camera interaction reference — 2026-08-27
+
+The public App Store listing and screenshots for
+[flag7x](https://apps.apple.com/us/app/flag7x-g7x-style-camera/id6747452095)
+were reviewed as an interaction reference, not as a source for code, assets,
+branding, or color transforms. Its strongest product principle is immediacy:
+the photograph dominates the screen while zoom, exposure, flash, composition,
+camera switching, and the shutter remain in the capture path.
+
+Filmy Camera adapts that principle to its own darkroom visual system. When the
+G7 X Compact profile is active, the viewfinder-first layout now exposes a
+bounded quick-control dock for zoom, EV, grid, and—when the active hardware
+supports them—flash, camera position, and lens selection. The dock keeps the
+selected camera profile beside the shutter, retains 44-point touch targets and
+VoiceOver state, and continues to scale across iPhone and iPad. Film recipes,
+photo import, provenance, and the existing detailed controls remain distinct
+Filmy Camera workflows.

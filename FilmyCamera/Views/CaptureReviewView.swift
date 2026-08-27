@@ -4,6 +4,7 @@ import UIKit
 struct CaptureReviewView: View {
     let image: UIImage
     let recipe: FilmRecipe
+    let source: CameraViewModel.ReviewSource
     let isSaving: Bool
     let saveErrorMessage: String?
     let onSave: () -> Void
@@ -42,12 +43,15 @@ struct CaptureReviewView: View {
                         }
                     }
                     .padding(.bottom, 16)
+                    .frame(maxWidth: FilmyLayout.readableMaxWidth)
                     .frame(maxWidth: .infinity)
                 }
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             actionBar
+                .frame(maxWidth: FilmyLayout.readableMaxWidth)
+                .frame(maxWidth: .infinity)
                 .padding(.horizontal, 20)
                 .padding(.top, 14)
                 .padding(.bottom, 8)
@@ -59,7 +63,7 @@ struct CaptureReviewView: View {
     private var header: some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Eyebrow(text: "REVIEW", color: FilmyTheme.accent)
+                Eyebrow(text: isImported ? "IMPORTED PHOTO" : "REVIEW", color: FilmyTheme.accent)
                 Text(recipe.name)
                     .font(.system(.title2, design: .rounded).weight(.bold))
                     .foregroundStyle(FilmyTheme.primary)
@@ -70,6 +74,7 @@ struct CaptureReviewView: View {
             Spacer(minLength: 8)
 
             Button {
+                HapticFeedback.play(.discard)
                 onRetake()
                 dismiss()
             } label: {
@@ -80,9 +85,13 @@ struct CaptureReviewView: View {
                     .background(FilmyTheme.panelRaised, in: Circle())
             }
             .buttonStyle(.pressable)
-            .accessibilityLabel("Discard frame")
+            .accessibilityLabel(isImported ? "Discard imported photo" : "Discard frame")
             .disabled(isSaving)
         }
+    }
+
+    private var isImported: Bool {
+        source == .photoLibrary
     }
 
     private func framePreview(maxWidth: CGFloat, maxHeight: CGFloat) -> some View {
@@ -107,7 +116,11 @@ struct CaptureReviewView: View {
             .shadow(color: .black.opacity(0.4), radius: 22, y: 10)
             .frame(maxWidth: .infinity)
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("Captured frame with \(recipe.name)")
+            .accessibilityLabel(
+                isImported
+                    ? "Imported photo with \(recipe.name)"
+                    : "Captured frame with \(recipe.name)"
+            )
     }
 
     /// Largest size with the image's aspect ratio that fits inside `bounds`.
@@ -136,7 +149,7 @@ struct CaptureReviewView: View {
                 Text(recipe.name)
                     .font(.system(size: 12, weight: .bold, design: .rounded))
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                Text("Full resolution")
+                Text(isImported ? "Filter applied · Full resolution" : "Full resolution")
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.78))
             }
@@ -191,10 +204,14 @@ struct CaptureReviewView: View {
 
     private var retakeButton: some View {
         Button {
+            HapticFeedback.play(.discard)
             onRetake()
             dismiss()
         } label: {
-            Label("Retake", systemImage: "arrow.counterclockwise")
+            Label(
+                isImported ? "Cancel" : "Retake",
+                systemImage: isImported ? "xmark" : "arrow.counterclockwise"
+            )
         }
         .buttonStyle(.filmySecondary)
         .disabled(isSaving)
@@ -209,13 +226,17 @@ struct CaptureReviewView: View {
                     ProgressView()
                         .tint(FilmyTheme.background)
                 } else {
-                    Label("Keep Frame", systemImage: "checkmark")
+                    Label(isImported ? "Save Photo" : "Keep Frame", systemImage: "checkmark")
                 }
             }
         }
         .buttonStyle(.filmyPrimary)
         .disabled(isSaving)
-        .accessibilityLabel(isSaving ? "Saving frame" : "Keep frame")
-        .accessibilityHint("Saves the finished frame to your Photos library")
+        .accessibilityLabel(
+            isSaving
+                ? "Saving photo"
+                : isImported ? "Save filtered photo" : "Keep frame"
+        )
+        .accessibilityHint("Saves the finished photo to your Photos library")
     }
 }

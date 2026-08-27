@@ -277,6 +277,7 @@ final class PhotoLibraryService: ObservableObject {
         private let imageManager: PHImageManager
         private var requestID: PHImageRequestID?
         private var continuation: CheckedContinuation<UIImage?, Never>?
+        private var fallbackImage: UIImage?
         private var didFinish = false
 
         init(imageManager: PHImageManager) {
@@ -309,13 +310,29 @@ final class PhotoLibraryService: ObservableObject {
             }
         }
 
-        func finish(with image: UIImage?, cancelRequest: Bool = false) {
+        func rememberFallback(_ image: UIImage?) {
+            guard let image else { return }
+
+            lock.lock()
+            if !didFinish {
+                fallbackImage = image
+            }
+            lock.unlock()
+        }
+
+        func finish(
+            with image: UIImage?,
+            cancelRequest: Bool = false,
+            allowFallback: Bool = false
+        ) {
             lock.lock()
             guard !didFinish else {
                 lock.unlock()
                 return
             }
             didFinish = true
+            let resolvedImage = image ?? (allowFallback ? fallbackImage : nil)
+            fallbackImage = nil
             let continuation = self.continuation
             self.continuation = nil
             let requestID = self.requestID
@@ -325,7 +342,7 @@ final class PhotoLibraryService: ObservableObject {
             if cancelRequest, let requestID {
                 imageManager.cancelImageRequest(requestID)
             }
-            continuation?.resume(returning: image)
+            continuation?.resume(returning: resolvedImage)
         }
 
         func cancel() {
@@ -565,10 +582,10 @@ final class PhotoLibraryService: ObservableObject {
                 }
             }
 
-            PHPhotoLibrary.shared().performChanges({
+            let photoWriteChanges: @Sendable () -> Void = {
                 let request: PHAssetChangeRequest
                 if let imageData, !imageData.isEmpty {
-                    let creationRequest = PHAssetCreationRequest()
+                    let creationRequest = PHAssetCreationRequest.forAsset()
                     creationRequest.addResource(with: .photo, data: imageData, options: nil)
                     request = creationRequest
                 } else {
@@ -576,7 +593,11 @@ final class PhotoLibraryService: ObservableObject {
                 }
                 request.creationDate = capturedAt
                 assetIdentifierBox.set(request.placeholderForCreatedAsset?.localIdentifier)
-            }, completionHandler: photoWriteCompletion)
+            }
+            PHPhotoLibrary.shared().performChanges(
+                photoWriteChanges,
+                completionHandler: photoWriteCompletion
+            )
         }
     }
 
@@ -1138,10 +1159,18 @@ final class PhotoLibraryService: ObservableObject {
         }, completionHandler: albumAddCompletion)
     }
 
-    func image(for asset: PhotoLibraryGalleryAsset, targetSize: CGSize) async -> UIImage? {
+    func image(
+        for asset: PhotoLibraryGalleryAsset,
+        targetSize: CGSize,
+        contentMode: PHImageContentMode = .aspectFill
+    ) async -> UIImage? {
         switch asset {
         case .photos(let photoAsset):
-            return await image(for: photoAsset, targetSize: targetSize)
+            return await image(
+                for: photoAsset,
+                targetSize: targetSize,
+                contentMode: contentMode
+            )
         case .cached(let frame):
             guard let resource = savedFrameResources[frame.assetIdentifier],
                   PhotoLibraryAssetOwnership.contains(frame.assetIdentifier, in: savedAssetIdentifiers),
@@ -1156,7 +1185,11 @@ final class PhotoLibraryService: ObservableObject {
         }
     }
 
-    func image(for asset: PHAsset, targetSize: CGSize) async -> UIImage? {
+    func image(
+        for asset: PHAsset,
+        targetSize: CGSize,
+        contentMode: PHImageContentMode = .aspectFill
+    ) async -> UIImage? {
         let imageManager = PHImageManager.default()
         let state = ImageRequestState(imageManager: imageManager)
 
@@ -1164,7 +1197,7 @@ final class PhotoLibraryService: ObservableObject {
             await withCheckedContinuation { continuation in
                 state.install(continuation)
                 let options = PHImageRequestOptions()
-                options.deliveryMode = .highQualityFormat
+                options.deliveryMode = .opportunistic
                 options.resizeMode = .fast
                 options.isNetworkAccessAllowed = true
                 options.isSynchronous = false
@@ -1172,19 +1205,25 @@ final class PhotoLibraryService: ObservableObject {
                 let requestID = imageManager.requestImage(
                     for: asset,
                     targetSize: targetSize,
-                    contentMode: .aspectFill,
+                    contentMode: contentMode,
                     options: options
                 ) { image, info in
                     let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
                     let isCancelled = (info?[PHImageCancelledKey] as? Bool) ?? false
                     let hasError = info?[PHImageErrorKey] != nil
 
-                    // Photos may deliver a fast degraded image before the final
-                    // high-quality result. Resume exactly once, and surface
-                    // cancellation/iCloud failures as a nil image.
-                    guard !isDegraded || isCancelled || hasError else { return }
+                    // Photos may deliver a usable preview before the final
+                    // high-quality result. Keep it as a fallback so an iCloud
+                    // fetch failure does not leave the viewer empty.
+                    if isDegraded && !isCancelled && !hasError {
+                        state.rememberFallback(image)
+                        return
+                    }
 
-                    state.finish(with: isCancelled || hasError ? nil : image)
+                    state.finish(
+                        with: isCancelled || hasError ? nil : image,
+                        allowFallback: !isCancelled
+                    )
                 }
                 state.install(requestID: requestID)
             }

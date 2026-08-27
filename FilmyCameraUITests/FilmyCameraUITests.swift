@@ -6,18 +6,45 @@ final class FilmyCameraUITests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
+        addUIInterruptionMonitor(withDescription: "Filmy Camera permissions") { alert in
+            let allowedButtons = [
+                "Allow",
+                "Allow Full Access",
+                "Allow Access to All Photos",
+                "OK"
+            ]
+
+            for title in allowedButtons {
+                let button = alert.buttons[title]
+                if button.exists {
+                    button.tap()
+                    return true
+                }
+            }
+            return false
+        }
         let launchedApp = MainActor.assumeIsolated {
+            XCUIDevice.shared.orientation = .portrait
             let launchedApp = XCUIApplication()
-            launchedApp.launchArguments = ["-ui-testing"]
+            launchedApp.launchArguments = [
+                "-ui-testing",
+                "-selectedRecipeID",
+                "classic-chrome"
+            ]
             launchedApp.launch()
             return launchedApp
         }
         app = launchedApp
+        // A no-op tap gives XCTest an interaction with which to invoke the
+        // interruption monitor when a first-launch permission alert is present.
+        app.tap()
     }
 
     func testCameraShellAndRecipeDetails() throws {
         let cameraTab = app.buttons["camera-tab"]
         assertMinimumHitTarget(cameraTab, named: "Camera tab")
+        let importPhoto = app.buttons["import-photo"]
+        assertMinimumHitTarget(importPhoto, named: "Import photo")
         XCTAssertTrue(app.buttons["Open roll"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["RECIPE"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Natural Standard"].waitForExistence(timeout: 5))
@@ -30,6 +57,11 @@ final class FilmyCameraUITests: XCTestCase {
             "The standard recipe picker should remain content-sized"
         )
         attachScreenshot(named: "camera-shell-expanded")
+
+        let controlsToggle = app.buttons["camera-chrome-toggle"]
+        if controlsToggle.exists, controlsToggle.label == "Show camera controls" {
+            controlsToggle.tap()
+        }
 
         let classicChrome = app.buttons.matching(
             NSPredicate(format: "label BEGINSWITH 'Muted Color'")
@@ -48,6 +80,7 @@ final class FilmyCameraUITests: XCTestCase {
 
         let reset = app.buttons["Reset recipe controls"]
         XCTAssertTrue(reset.waitForExistence(timeout: 5))
+        scrollToHittable(reset, in: app)
         XCTAssertTrue(reset.isHittable, "Reset recipe controls should be reachable")
 
         let exposure = app.descendants(matching: .any)["exposure-control"]
@@ -73,11 +106,156 @@ final class FilmyCameraUITests: XCTestCase {
         attachScreenshot(named: "recipe-details")
     }
 
+    func testExpandedRecipeCanLaunchSelected() throws {
+        app.terminate()
+
+        let expandedApp = XCUIApplication()
+        expandedApp.launchArguments = [
+            "-ui-testing",
+            "-selectedRecipeID",
+            "nostalgic-summer"
+        ]
+        expandedApp.launch()
+
+        XCTAssertTrue(expandedApp.staticTexts["Nostalgic Summer"].waitForExistence(timeout: 8))
+        XCTAssertTrue(expandedApp.buttons["Tune Nostalgic Summer"].waitForExistence(timeout: 5))
+
+        let selectedRecipe = expandedApp.buttons["recipe-nostalgic-summer"]
+        XCTAssertTrue(selectedRecipe.waitForExistence(timeout: 5))
+        XCTAssertEqual(selectedRecipe.value as? String, "Selected")
+    }
+
+    func testG7XModeExposesDedicatedCompactProfile() throws {
+        app.terminate()
+
+        let compactApp = XCUIApplication()
+        compactApp.launchArguments = [
+            "-ui-testing",
+            "-selectedRecipeID",
+            "g7x-compact"
+        ]
+        compactApp.launch()
+        defer { compactApp.terminate() }
+
+        XCTAssertTrue(compactApp.staticTexts["CAMERA PROFILE"].waitForExistence(timeout: 8))
+        XCTAssertTrue(compactApp.staticTexts["G7 X Compact"].waitForExistence(timeout: 5))
+
+        let tune = compactApp.buttons["Tune G7 X Compact"]
+        assertMinimumHitTarget(tune, named: "Tune G7 X profile")
+        tune.tap()
+
+        let profile = compactApp.descendants(matching: .any)["g7x-profile-details"]
+        scrollToHittable(profile, in: compactApp)
+        XCTAssertTrue(profile.waitForExistence(timeout: 5))
+        XCTAssertTrue(compactApp.staticTexts["G7 X PROFILE"].exists)
+        XCTAssertTrue(compactApp.staticTexts["Dedicated compact-digital pipeline"].exists)
+        attachScreenshot(named: "g7x-profile-details")
+    }
+
+    func testG7XModeKeepsCompactCaptureControlsOneTapAway() throws {
+        app.terminate()
+
+        let compactApp = XCUIApplication()
+        compactApp.launchArguments = [
+            "-ui-testing",
+            "-ui-testing-viewfinder-chrome",
+            "-selectedRecipeID",
+            "g7x-compact"
+        ]
+        compactApp.launch()
+        defer { compactApp.terminate() }
+
+        XCTAssertTrue(compactApp.staticTexts["CAMERA PROFILE"].waitForExistence(timeout: 8))
+
+        let captureControls = compactApp.descendants(matching: .any)["g7x-capture-controls"]
+        XCTAssertTrue(captureControls.waitForExistence(timeout: 5))
+        XCTAssertTrue(compactApp.descendants(matching: .any)["zoom-control"].exists)
+        XCTAssertTrue(compactApp.descendants(matching: .any)["exposure-control"].exists)
+
+        let grid = compactApp.buttons["g7x-grid-control"]
+        assertMinimumHitTarget(grid, named: "G7 X grid control")
+        let initialGridValue = grid.value as? String
+        XCTAssertTrue(initialGridValue == "On" || initialGridValue == "Off")
+        grid.tap()
+        XCTAssertNotEqual(grid.value as? String, initialGridValue)
+
+        XCTAssertTrue(compactApp.descendants(matching: .any)["recipe-picker"].exists)
+        attachScreenshot(named: "g7x-quick-capture-controls")
+    }
+
+    func testLandscapeCameraShell() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
+
+        let cameraTab = app.buttons["camera-tab"]
+        assertMinimumHitTarget(cameraTab, named: "Landscape camera tab")
+        let importPhoto = app.buttons["import-photo"]
+        assertMinimumHitTarget(importPhoto, named: "Landscape import photo")
+
+        let controlsToggle = app.buttons["camera-chrome-toggle"]
+        if controlsToggle.waitForExistence(timeout: 2), controlsToggle.label == "Show camera controls" {
+            controlsToggle.tap()
+        }
+
+        let recipeMenu = app.descendants(matching: .any)["landscape-recipe-picker"]
+        XCTAssertTrue(recipeMenu.waitForExistence(timeout: 8), "Landscape recipe menu should exist")
+        assertMinimumAccessibilityFrame(recipeMenu, named: "Landscape recipe menu")
+
+        let tune = app.buttons["Tune Muted Color"]
+        assertMinimumHitTarget(tune, named: "Landscape tune recipe")
+        attachScreenshot(named: "camera-landscape")
+    }
+
+    #if !targetEnvironment(simulator)
+    func testPhysicalImportAppliesCurrentRecipeAndSaves() throws {
+        let importPhoto = app.buttons["import-photo"]
+        assertMinimumHitTarget(importPhoto, named: "Import photo")
+        importPhoto.tap()
+
+        let firstPhoto = app.images.matching(
+            NSPredicate(format: "identifier == 'PXGGridLayout-Info'")
+        ).firstMatch
+        XCTAssertTrue(
+            firstPhoto.waitForExistence(timeout: 10),
+            "The system photo picker should expose at least one image"
+        )
+        let photoFrame = firstPhoto.frame
+        let appFrame = app.frame
+        app.coordinate(
+            withNormalizedOffset: CGVector(
+                dx: (photoFrame.midX - appFrame.minX) / appFrame.width,
+                dy: (photoFrame.midY - appFrame.minY) / appFrame.height
+            )
+        ).tap()
+
+        XCTAssertTrue(
+            app.staticTexts["Imported photo"].waitForExistence(timeout: 30),
+            "The imported image should reach filtered review"
+        )
+        XCTAssertTrue(app.staticTexts["Filter applied"].exists)
+        XCTAssertTrue(app.staticTexts["Full resolution"].exists)
+        attachScreenshot(named: "imported-photo-review")
+
+        let save = app.buttons["Save filtered photo"]
+        assertMinimumHitTarget(save, named: "Save filtered photo")
+        save.tap()
+        app.tap()
+
+        let savedToast = app.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH 'Saved with '")
+        ).firstMatch
+        XCTAssertTrue(
+            savedToast.waitForExistence(timeout: 20),
+            "The filtered photo should be committed to Photos"
+        )
+        attachScreenshot(named: "imported-photo-saved")
+    }
+    #endif
+
     #if targetEnvironment(simulator)
     func testSimulatorFallbackExposesReadableStateWithoutPreviewAction() throws {
         XCTAssertTrue(app.staticTexts["Preview mode"].waitForExistence(timeout: 8))
         XCTAssertTrue(
-            app.staticTexts["Shoot this look on an iPhone."].waitForExistence(timeout: 5)
+            app.staticTexts["Shoot this look on an iPhone or iPad."].waitForExistence(timeout: 5)
         )
 
         let cameraPreview = app.descendants(matching: .any)["camera-preview"]
@@ -137,7 +315,7 @@ final class FilmyCameraUITests: XCTestCase {
         )
 
         let captureNotice = accessibilityApp.staticTexts[
-            "Capture is available on a physical iPhone"
+            "Capture is available on a physical device"
         ]
         XCTAssertTrue(captureNotice.waitForExistence(timeout: 5))
         attachScreenshot(named: "accessibility-camera-shell-bounded")
@@ -148,7 +326,9 @@ final class FilmyCameraUITests: XCTestCase {
             let previewApp = XCUIApplication()
             previewApp.launchArguments = [
                 "-ui-testing",
-                "-ui-testing-viewfinder-chrome"
+                "-ui-testing-viewfinder-chrome",
+                "-selectedRecipeID",
+                "classic-chrome"
             ]
             previewApp.launch()
             return previewApp
@@ -190,6 +370,10 @@ final class FilmyCameraUITests: XCTestCase {
 
         let settingsHeading = app.staticTexts["Settings"]
         XCTAssertTrue(settingsHeading.waitForExistence(timeout: 5))
+
+        let hapticFeedback = app.switches["Haptic feedback"]
+        XCTAssertTrue(hapticFeedback.waitForExistence(timeout: 5))
+        XCTAssertTrue(hapticFeedback.isEnabled)
 
         XCTAssertFalse(
             app.buttons["camera-permission-request"].exists,
@@ -259,24 +443,26 @@ final class FilmyCameraUITests: XCTestCase {
 
     private func scrollToHittable(_ element: XCUIElement, in app: XCUIApplication) {
         XCTAssertTrue(element.waitForExistence(timeout: 5))
-        let scrollView = app.scrollViews.firstMatch
-        for _ in 0..<8 where !element.isHittable {
+        let recipeDetailScroll = app.scrollViews["recipe-detail-scroll"]
+        let scrollView = recipeDetailScroll.exists ? recipeDetailScroll : app.scrollViews.firstMatch
+        for _ in 0..<16 where !element.isHittable {
             if scrollView.exists {
-                scrollView.swipeUp()
+                scrollView.swipeUp(velocity: .slow)
             } else {
-                app.swipeUp()
+                app.swipeUp(velocity: .slow)
             }
         }
     }
 
     private func scrollBackToHittable(_ element: XCUIElement, in app: XCUIApplication) {
         XCTAssertTrue(element.waitForExistence(timeout: 5))
-        let scrollView = app.scrollViews.firstMatch
-        for _ in 0..<8 where !element.isHittable {
+        let recipeDetailScroll = app.scrollViews["recipe-detail-scroll"]
+        let scrollView = recipeDetailScroll.exists ? recipeDetailScroll : app.scrollViews.firstMatch
+        for _ in 0..<16 where !element.isHittable {
             if scrollView.exists {
-                scrollView.swipeDown()
+                scrollView.swipeDown(velocity: .slow)
             } else {
-                app.swipeDown()
+                app.swipeDown(velocity: .slow)
             }
         }
     }

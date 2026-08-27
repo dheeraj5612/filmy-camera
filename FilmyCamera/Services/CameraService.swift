@@ -495,7 +495,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             case .permissionDenied:
                 self.publishStatus("Camera access is disabled in Settings.")
             case .simulator:
-                self.publishStatus("Camera unavailable in Simulator. Use an iPhone to preview and capture.")
+                self.publishStatus("Camera unavailable in Simulator. Use an iPhone or iPad to preview and capture.")
             case .idle:
                 self.publishStatus("Camera is ready")
             case .unavailable:
@@ -846,7 +846,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         sessionQueue.async { [weak self] in
             guard let self else { return }
             guard let device = self.activeDevice() else {
-                self.publishStatus("Exposure control is available on iPhone.")
+                self.publishStatus("Exposure control is available on a physical device.")
                 return
             }
 
@@ -977,7 +977,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             resetCaptureCapabilitiesOnQueue()
             publishRunning(false)
             publishAvailability(.simulator)
-            publishStatus("Camera unavailable in Simulator. Use an iPhone to preview and capture.")
+            publishStatus("Camera unavailable in Simulator. Use an iPhone or iPad to preview and capture.")
             return
         }
 
@@ -1059,7 +1059,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             resetCaptureCapabilitiesOnQueue()
             publishRunning(false)
             publishAvailability(.simulator)
-            publishStatus("Camera unavailable in Simulator. Use an iPhone to preview and capture.")
+            publishStatus("Camera unavailable in Simulator. Use an iPhone or iPad to preview and capture.")
             return
         }
 
@@ -1231,7 +1231,6 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                     self.publishRunning(false)
                     self.publishAvailability(.interrupted)
                     self.publishStatus("Camera temporarily unavailable.")
-                    self.cancelPendingPhotoOnQueue(status: "Camera temporarily unavailable.")
                 }
             },
             notificationCenter.addObserver(
@@ -1267,18 +1266,12 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             publishRunning(running)
             publishAvailability(running ? .running : .needsRecovery)
             publishStatus(running ? "Camera ready" : "Camera needs to be reopened.")
-            cancelPendingPhotoOnQueue(
-                status: running
-                    ? "Capture was interrupted. Try again."
-                    : "Camera needs to be reopened."
-            )
             return
         }
 
         publishRunning(false)
         publishAvailability(.needsRecovery)
         publishStatus("Camera needs to be reopened.")
-        cancelPendingPhotoOnQueue(status: "Camera needs to be reopened.")
     }
 
     private static let discoveryDeviceTypes: [AVCaptureDevice.DeviceType] = [
@@ -1366,7 +1359,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
     private func setCameraPositionOnQueue(_ position: CameraPosition) {
         guard let desiredDevice = cameraDeviceForPositionOnQueue(position) else {
-            publishStatus("Camera switching is available on iPhone.")
+            publishStatus("Camera switching is available on a physical device.")
             publishAvailableCameraPositions([])
             return
         }
@@ -1410,7 +1403,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             return
         }
         guard let device = activeDevice() else {
-            publishStatus("Lens selection is available on iPhone.")
+            publishStatus("Lens selection is available on a physical device.")
             return
         }
 

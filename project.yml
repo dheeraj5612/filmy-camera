@@ -11,12 +11,11 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: minimal
-    TARGETED_DEVICE_FAMILY: "1"
+    TARGETED_DEVICE_FAMILY: "1,2"
     PRODUCT_BUNDLE_IDENTIFIER: com.dheeraj.filmycamera
     CURRENT_PROJECT_VERSION: "4"
     MARKETING_VERSION: "1.0.0"
     CODE_SIGN_STYLE: Automatic
-    CODE_SIGN_IDENTITY: ""
     DEVELOPMENT_TEAM: 6ALSCF5GBV
     SUPPORTS_MACCATALYST: NO
 
@@ -29,8 +28,7 @@ targets:
     settings:
       base:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        CODE_SIGN_IDENTITY: ""
-        TARGETED_DEVICE_FAMILY: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
         SWIFT_EMIT_LOC_STRINGS: YES
     info:
       path: FilmyCamera/Info.plist
@@ -40,10 +38,19 @@ targets:
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         NSCameraUsageDescription: Filmy Camera uses the camera to preview and capture photos with your selected film recipe.
         NSPhotoLibraryAddUsageDescription: Filmy Camera saves finished photos to your Photos library when you choose Save to Photos.
-        NSPhotoLibraryUsageDescription: Filmy Camera reads frames saved by Filmy Camera so you can review them in the in-app Roll.
+        NSPhotoLibraryUsageDescription: Filmy Camera lets you choose existing photos to apply film recipes and reads frames saved by Filmy Camera for the in-app Roll.
         ITSAppUsesNonExemptEncryption: false
         UILaunchScreen:
           UIColorName: LaunchBackground
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
     scheme:
       gatherCoverageData: false
       testTargets:
@@ -61,7 +68,7 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.dheeraj.filmycamera.tests
-        TARGETED_DEVICE_FAMILY: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
 
   FilmyCameraUITests:
     type: bundle.ui-testing
@@ -74,4 +81,4 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.dheeraj.filmycamera.uitests
-        TARGETED_DEVICE_FAMILY: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"

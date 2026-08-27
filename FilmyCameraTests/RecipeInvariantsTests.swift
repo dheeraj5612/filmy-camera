@@ -3,6 +3,29 @@ import XCTest
 @testable import FilmyCamera
 
 final class RecipeInvariantsTests: XCTestCase {
+    func testHapticEventsUseRestrainedSemanticPatterns() {
+        XCTAssertEqual(HapticFeedback.pattern(for: .capture), .mediumImpact)
+        XCTAssertEqual(HapticFeedback.pattern(for: .selection), .selection)
+        XCTAssertEqual(HapticFeedback.pattern(for: .controlStep), .selection)
+        XCTAssertEqual(HapticFeedback.pattern(for: .focus), .lightImpact)
+        XCTAssertEqual(HapticFeedback.pattern(for: .discard), .softImpact)
+        XCTAssertEqual(HapticFeedback.pattern(for: .success), .success)
+        XCTAssertEqual(HapticFeedback.pattern(for: .warning), .warning)
+        XCTAssertEqual(HapticFeedback.pattern(for: .error), .error)
+    }
+
+    func testHapticPreferenceDefaultsOnAndRespectsOptOut() throws {
+        let suiteName = "HapticFeedbackTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        XCTAssertTrue(HapticFeedback.isEnabled(in: defaults))
+        defaults.set(false, forKey: "hapticsEnabled")
+        XCTAssertFalse(HapticFeedback.isEnabled(in: defaults))
+        defaults.set(true, forKey: "hapticsEnabled")
+        XCTAssertTrue(HapticFeedback.isEnabled(in: defaults))
+    }
+
     private let selectedRecipeKey = "selectedRecipeID"
     private let recipeOverridesKey = "recipeOverrides"
     private var hadSelectedRecipeValue = false
@@ -10,8 +33,8 @@ final class RecipeInvariantsTests: XCTestCase {
     private var hadRecipeOverridesValue = false
     private var previousRecipeOverrides: Data?
 
-    func testRendererVersionTracksTheCurrentFidelityPipeline() {
-        XCTAssertEqual(FilmRecipe.rendererVersion, "core-image-parametric-v3")
+    func testRendererVersionTracksTheHalationBeforeGrainPipeline() {
+        XCTAssertEqual(FilmRecipe.rendererVersion, "core-image-parametric-v5")
     }
 
     override func setUp() {
@@ -56,6 +79,29 @@ final class RecipeInvariantsTests: XCTestCase {
             XCTAssertFalse(recipe.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             XCTAssertFalse(recipe.subtitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
+    }
+
+    func testExpandedInternetRecipeLibraryIsCompleteAndSelectable() {
+        XCTAssertEqual(FilmRecipe.expandedInternetRecipeIDs.count, 18)
+        XCTAssertEqual(Set(FilmRecipe.expandedInternetRecipeIDs).count, 18)
+        XCTAssertEqual(FilmRecipe.builtIns.count, 36)
+
+        let builtInIDs = Set(FilmRecipe.builtIns.map(\.id))
+        XCTAssertTrue(Set(FilmRecipe.expandedInternetRecipeIDs).isSubset(of: builtInIDs))
+    }
+
+    @MainActor
+    func testEffectiveRecipeCollectionResolvesPersistedOverrides() throws {
+        let viewModel = CameraViewModel()
+        var customized = try XCTUnwrap(FilmRecipe.builtIns.first)
+        customized.grain = 1
+        customized.saturation = 0.42
+        viewModel.update(recipe: customized)
+
+        let resolved = try XCTUnwrap(viewModel.recipes.first { $0.id == customized.id })
+        XCTAssertEqual(resolved.grain, 1)
+        XCTAssertEqual(resolved.saturation, 0.42)
+        XCTAssertEqual(viewModel.recipe(for: customized.id), resolved)
     }
 
     func testEverySelectableMonochromeFilterHasABuiltInRecipe() {
@@ -104,6 +150,24 @@ final class RecipeInvariantsTests: XCTestCase {
             XCTAssertTrue(strengthStates.contains(recipe.fxBlue), recipe.id)
             XCTAssertTrue(strengthStates.contains(recipe.grain), recipe.id)
             XCTAssertTrue(grainSizes.contains(recipe.grainSize), recipe.id)
+        }
+    }
+
+    func testBuiltInGrainDefaultsMatchTheReferenceCatalog() throws {
+        for entry in FilmRecipeReferenceCatalog.entries {
+            guard let controls = entry.publicControls else { continue }
+            let recipe = try XCTUnwrap(entry.currentRecipe, entry.currentRecipeID)
+
+            XCTAssertEqual(
+                recipe.grainEffectLevel.displayName.lowercased(),
+                controls.grainEffect.lowercased(),
+                "\(recipe.id) grain effect drifted from its documented reference"
+            )
+            XCTAssertEqual(
+                recipe.grainSizeLevel.displayName.lowercased(),
+                controls.grainSize.lowercased(),
+                "\(recipe.id) grain size drifted from its documented reference"
+            )
         }
     }
 
@@ -206,14 +270,23 @@ final class RecipeInvariantsTests: XCTestCase {
             XCTAssertTrue(recipe.provenance.isComplete, recipe.id)
             XCTAssertEqual(recipe.provenance.implementation, .originalParametricApproximation, recipe.id)
 
-            if recipe.id == "g7x-compact" {
+            switch recipe.provenance.source {
+            case .publicCanonDocumentation:
                 XCTAssertEqual(recipe.provenance.source, .publicCanonDocumentation, recipe.id)
                 XCTAssertEqual(recipe.provenance.calibration, .notCalibratedToCanonHardware, recipe.id)
                 XCTAssertEqual(recipe.provenance.references, FilmRecipe.g7XPublicReferences, recipe.id)
-            } else {
+            case .publicOfficialDocumentation:
                 XCTAssertEqual(recipe.provenance.source, .publicOfficialDocumentation, recipe.id)
                 XCTAssertEqual(recipe.provenance.calibration, .notCalibratedToFujifilmHardware, recipe.id)
                 XCTAssertEqual(recipe.provenance.references, FilmRecipe.fujifilmPublicReferences, recipe.id)
+            case .publicOfficialRecipe:
+                XCTAssertEqual(recipe.provenance.calibration, .notCalibratedToFujifilmHardware, recipe.id)
+                XCTAssertEqual(recipe.provenance.references, FilmRecipe.fujifilmCreatorRecipeReferences, recipe.id)
+            case .publicCommunityRecipe:
+                XCTAssertEqual(recipe.provenance.calibration, .notCalibratedToFujifilmHardware, recipe.id)
+                XCTAssertEqual(recipe.provenance.references, FilmRecipe.communityRecipeReferences, recipe.id)
+            case .userModified, .legacyRecordWithoutProvenance:
+                XCTFail("Built-in recipe has non-built-in provenance: \(recipe.id)")
             }
 
             for reference in recipe.provenance.references {
@@ -235,8 +308,12 @@ final class RecipeInvariantsTests: XCTestCase {
         XCTAssertEqual(recipe.name, "G7 X Compact")
         XCTAssertEqual(recipe.filmBase, .compactDigital)
         XCTAssertEqual(recipe.grainEffectLevel, .off)
+        XCTAssertEqual(recipe.dynamicRange, .auto)
+        XCTAssertEqual(recipe.whiteBalance.mode, .ambiencePriority)
         XCTAssertGreaterThan(recipe.sharpness, 0)
-        XCTAssertGreaterThan(recipe.noiseReduction, 0)
+        XCTAssertEqual(recipe.noiseReduction, 0)
+        XCTAssertLessThanOrEqual(recipe.clarity, 0.08)
+        XCTAssertEqual(recipe.halation, 0)
         XCTAssertEqual(recipe.provenance, FilmRecipe.g7XProvenance)
         XCTAssertTrue(recipe.provenance.disclaimer.contains("one-inch sensor"))
         XCTAssertTrue(recipe.provenance.disclaimer.contains("not pixel-identical Canon output"))

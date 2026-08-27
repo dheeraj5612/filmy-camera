@@ -29,6 +29,8 @@ struct SettingsView: View {
                         localCache
                         about
                     }
+                    .frame(maxWidth: FilmyLayout.readableMaxWidth)
+                    .frame(maxWidth: .infinity)
                     .padding(.horizontal, FilmyTheme.pageMargin)
                     .padding(.top, 18)
                     .padding(.bottom, 40)
@@ -66,10 +68,10 @@ struct SettingsView: View {
 
             SettingRow(
                 systemName: "hand.tap",
-                title: "Shutter feedback",
-                detail: "A subtle haptic when a frame is captured."
+                title: "Haptic feedback",
+                detail: "Subtle feedback for capture, selections, controls, and outcomes."
             ) {
-                Toggle("Shutter feedback", isOn: $hapticsEnabled)
+                Toggle("Haptic feedback", isOn: $hapticsEnabled)
                     .labelsHidden()
                     .tint(FilmyTheme.accent)
             }

@@ -39,7 +39,6 @@ struct CameraScreen: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @AppStorage("showGrid") private var showGrid = true
-    @AppStorage("hapticsEnabled") private var hapticsEnabled = true
     @State private var recipeForDetail: FilmRecipe?
     @State private var isShowingTools: Bool
     @State private var focusPoint: CGPoint?
@@ -81,6 +80,7 @@ struct CameraScreen: View {
                     .accessibilityValue(camera.isRunning ? "Showing the \(viewModel.selectedRecipe.name) look" : camera.statusMessage)
                     .accessibilityHint("Tap the preview to focus at that point. VoiceOver users can use the Focus and expose at center action.")
                     .accessibilityAction(named: "Focus and expose at center") {
+                        HapticFeedback.play(.focus)
                         let normalizedPoint = CGPoint(x: 0.5, y: 0.5)
                         camera.focus(at: normalizedPoint)
                         focusNormalizedPoint = normalizedPoint
@@ -94,6 +94,7 @@ struct CameraScreen: View {
                     .accessibilityHidden(shouldShowCameraEmptyState)
                     .gesture(
                         SpatialTapGesture().onEnded { value in
+                            HapticFeedback.play(.focus)
                             let normalizedPoint = normalizedFocusPoint(
                                 for: value.location,
                                 in: proxy.size
@@ -139,9 +140,18 @@ struct CameraScreen: View {
             }
 
             if let focusPoint {
+                // The tap gesture reports locations in the full-screen
+                // preview space (the GeometryReader ignores safe areas).
+                // Expand the reticle into that same space so the ring lands
+                // exactly where the user touched on every device and
+                // orientation, and keep it hit-test transparent so a visible
+                // reticle cannot swallow the next focus tap.
                 FocusReticle()
                     .position(focusPoint)
                     .transition(reduceMotion ? .opacity : .scale(scale: 1.15).combined(with: .opacity))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
                     .task(id: focusPoint) {
                         try? await Task.sleep(for: .seconds(1.2))
                         guard !Task.isCancelled else { return }
@@ -153,7 +163,7 @@ struct CameraScreen: View {
 
             GeometryReader { proxy in
                 chrome(for: proxy.size)
-                    .disabled(viewModel.isCapturing)
+                    .disabled(viewModel.isCapturing || viewModel.isImporting)
             }
 
             if let toastMessage = viewModel.toastMessage {
@@ -188,6 +198,7 @@ struct CameraScreen: View {
                 CaptureReviewView(
                     image: image,
                     recipe: recipe,
+                    source: viewModel.reviewSource,
                     isSaving: viewModel.isSaving,
                     saveErrorMessage: viewModel.saveErrorMessage,
                     onSave: { viewModel.saveReview(photoLibrary: photoLibrary) },
@@ -230,6 +241,17 @@ struct CameraScreen: View {
 
     private var isCompactChrome: Bool {
         dynamicTypeSize.isAccessibilitySize
+    }
+
+    /// The G7 X profile is a camera mode rather than a film stock: its
+    /// header reads "camera profile" and its capture controls stay one tap
+    /// away in the capture path instead of behind the tools toggle.
+    private var isCompactDigitalMode: Bool {
+        viewModel.selectedRecipe.filmBase == .compactDigital
+    }
+
+    private var recipeEyebrow: String {
+        isCompactDigitalMode ? "CAMERA PROFILE" : "RECIPE"
     }
 
     private func chrome(for size: CGSize) -> some View {
@@ -333,6 +355,8 @@ struct CameraScreen: View {
             VStack(spacing: 10) {
                 if isShowingTools {
                     toolStrip(minWidth: width - 32)
+                } else if isCompactDigitalMode, !shouldShowCameraEmptyState {
+                    compactDigitalQuickRail
                 }
 
                 HStack(alignment: .center, spacing: 14) {
@@ -348,18 +372,21 @@ struct CameraScreen: View {
             VStack(spacing: 10) {
                 if isShowingTools {
                     toolStrip(minWidth: width - 32)
+                } else if isCompactDigitalMode, !shouldShowCameraEmptyState || isViewfinderChromePreview {
+                    compactDigitalQuickRail
                 }
 
                 recipeHeader
 
                 RecipePickerView(
-                    recipes: FilmRecipe.builtIns,
+                    recipes: viewModel.recipes,
                     selectedRecipeID: $viewModel.selectedRecipeID,
                     onOpenDetail: { recipeForDetail = viewModel.recipe(for: $0.id) },
                     compact: isCompactChrome
                 )
 
                 captureRow
+                    .frame(maxWidth: FilmyLayout.dockMaxWidth)
                     .padding(.top, 2)
             }
         }
@@ -367,7 +394,7 @@ struct CameraScreen: View {
 
     private var recipeHeader: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Eyebrow(text: "RECIPE", color: FilmyTheme.accent)
+            Eyebrow(text: recipeEyebrow, color: FilmyTheme.accent)
 
             Text(viewModel.selectedRecipe.name)
                 .font(.system(.subheadline, design: .rounded).weight(.bold))
@@ -425,7 +452,7 @@ struct CameraScreen: View {
     }
 
     private var captureNotice: some View {
-        Label("Capture is available on a physical iPhone", systemImage: "iphone")
+        Label("Capture is available on a physical device", systemImage: "iphone")
             .font(.system(size: 11, weight: .semibold, design: .rounded))
             .foregroundStyle(.white.opacity(0.8))
             .multilineTextAlignment(.center)
@@ -497,10 +524,66 @@ struct CameraScreen: View {
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 
+    /// Compact-camera mode keeps its most useful controls in the capture
+    /// path. The viewfinder stays dominant while zoom, exposure, the grid,
+    /// and camera switching remain one tap away.
+    private var compactDigitalQuickRail: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ZoomControl(
+                    value: camera.zoomFactor,
+                    onAdjust: { direction in
+                        let delta: CGFloat = direction == .increment ? 0.5 : -0.5
+                        camera.setZoom(camera.zoomFactor + delta)
+                    },
+                    onSelect: camera.setZoom
+                )
+
+                ExposureControl(value: camera.exposureBias) { direction in
+                    let delta: Float = direction == .increment ? (1.0 / 3.0) : -(1.0 / 3.0)
+                    camera.setExposureBias(camera.exposureBias + delta)
+                }
+
+                Button {
+                    HapticFeedback.play(.selection)
+                    showGrid.toggle()
+                } label: {
+                    Image(systemName: showGrid ? "grid" : "grid.circle")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(showGrid ? FilmyTheme.background : .white)
+                        .frame(width: FilmyTheme.toolControlHeight, height: FilmyTheme.toolControlHeight)
+                        .background {
+                            if showGrid {
+                                Circle().fill(FilmyTheme.accent)
+                            } else {
+                                ChromeShapeBackground(shape: Circle())
+                            }
+                        }
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.pressable)
+                .accessibilityIdentifier("g7x-grid-control")
+                .accessibilityLabel(showGrid ? "Hide composition grid" : "Show composition grid")
+                .accessibilityValue(showGrid ? "On" : "Off")
+
+                if hasHardwareSelection {
+                    CameraHardwareControls(camera: camera)
+                }
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 4)
+        }
+        .scrollClipDisabled()
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("g7x-capture-controls")
+        .accessibilityLabel("G7 X quick capture controls")
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
     private var recipeMenu: some View {
         Menu {
-            Section("Recipe") {
-                ForEach(FilmRecipe.builtIns) { recipe in
+            Section(isCompactDigitalMode ? "Camera profile" : "Recipe") {
+                ForEach(viewModel.recipes) { recipe in
                     Button {
                         viewModel.select(recipe: recipe)
                     } label: {
@@ -529,7 +612,7 @@ struct CameraScreen: View {
                 .frame(width: 46, height: 32)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Eyebrow(text: "RECIPE", color: FilmyTheme.accent)
+                    Eyebrow(text: recipeEyebrow, color: FilmyTheme.accent)
 
                     Text(viewModel.selectedRecipe.name)
                         .font(.system(.subheadline, design: .rounded).weight(.bold))
@@ -631,9 +714,6 @@ struct CameraScreen: View {
     // MARK: - Actions
 
     private func capture() {
-        if hapticsEnabled {
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        }
         viewModel.capture(camera: camera)
     }
 
@@ -781,6 +861,7 @@ private struct CameraHardwareControls: View {
             HStack(spacing: 8) {
                 if showsCameraSwitch {
                     Button {
+                        HapticFeedback.play(.selection)
                         camera.toggleCameraPosition()
                     } label: {
                         Label(camera.cameraPosition.title, systemImage: "arrow.triangle.2.circlepath.camera")
@@ -801,6 +882,7 @@ private struct CameraHardwareControls: View {
                     Menu {
                         ForEach(camera.availableLenses) { lens in
                             Button {
+                                HapticFeedback.play(.selection)
                                 camera.setLens(id: lens.id)
                             } label: {
                                 if lens.id == camera.selectedLensID {

@@ -9,11 +9,13 @@ Filmy Camera is a native iPhone camera built around the feeling of choosing a fi
 - Native bi-planar YUV preview buffers when available, with a BGRA fallback, and a session-scoped grain phase shared by preview and capture for a more faithful WYSIWYG frame.
 - Sixteen editable recipe starting points based on public Fujifilm-style controls: film base, tone curve, color, white-balance shift, dynamic range, Color Chrome, FX Blue, sharpness, noise reduction, clarity, grain, grain size, halation, and vignette.
 - Full-resolution capture review with retake or explicit Save to Photos, so a frame is never committed silently.
+- System photo picker import that applies the selected recipe at full resolution while preserving the original framing.
 - First-run recipe-first onboarding with a direct handoff into the camera.
 - Warm, camera-first SwiftUI UI: edge-anchored viewfinder chrome, a film-strip recipe rail with renderer-backed swatches, a last-frame Roll thumbnail beside the shutter, persistent tuning, a recipe detail sheet, capture review, and a three-column contact-sheet Roll with zoom gestures.
+- Optional semantic haptics for shutter, recipe and camera selections, focus, editor commits, discards, saves, and failures.
 - iPhone hardware controls for front/back switching and available-lens selection, with simulator-safe preview behavior.
 - sRGB output normalization plus embedded recipe provenance metadata on saved JPEGs.
-- Simulator-safe empty state: the full interface runs without camera hardware and clearly asks for a physical iPhone for capture.
+- Simulator-safe empty state: the full interface runs without camera hardware and clearly asks for a physical iPhone or iPad for capture.
 
 ## Build
 

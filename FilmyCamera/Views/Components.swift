@@ -1,6 +1,85 @@
 import SwiftUI
 import UIKit
 
+/// Semantic haptics. Every call site names an intent rather than a pattern so
+/// the Settings toggle can silence all of them at once.
+enum HapticFeedback {
+    enum Event: Equatable, Sendable {
+        case capture
+        case selection
+        case controlStep
+        case focus
+        case discard
+        case success
+        case warning
+        case error
+    }
+
+    enum Pattern: Equatable, Sendable {
+        case selection
+        case lightImpact
+        case mediumImpact
+        case softImpact
+        case success
+        case warning
+        case error
+    }
+
+    static func pattern(for event: Event) -> Pattern {
+        switch event {
+        case .capture: .mediumImpact
+        case .selection, .controlStep: .selection
+        case .focus: .lightImpact
+        case .discard: .softImpact
+        case .success: .success
+        case .warning: .warning
+        case .error: .error
+        }
+    }
+
+    static func isEnabled(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: "hapticsEnabled") as? Bool ?? true
+    }
+
+    @MainActor private static let selectionGenerator = UISelectionFeedbackGenerator()
+    @MainActor private static let lightImpactGenerator = UIImpactFeedbackGenerator(style: .light)
+    @MainActor private static let mediumImpactGenerator = UIImpactFeedbackGenerator(style: .medium)
+    @MainActor private static let softImpactGenerator = UIImpactFeedbackGenerator(style: .soft)
+    @MainActor private static let notificationGenerator = UINotificationFeedbackGenerator()
+
+    @MainActor
+    static func play(_ event: Event) {
+        guard isEnabled() else { return }
+
+        switch pattern(for: event) {
+        case .selection:
+            selectionGenerator.prepare()
+            selectionGenerator.selectionChanged()
+        case .lightImpact:
+            lightImpactGenerator.prepare()
+            lightImpactGenerator.impactOccurred(intensity: 0.72)
+        case .mediumImpact:
+            mediumImpactGenerator.prepare()
+            mediumImpactGenerator.impactOccurred(intensity: 0.9)
+        case .softImpact:
+            softImpactGenerator.prepare()
+            softImpactGenerator.impactOccurred(intensity: 0.7)
+        case .success:
+            notify(.success)
+        case .warning:
+            notify(.warning)
+        case .error:
+            notify(.error)
+        }
+    }
+
+    @MainActor
+    private static func notify(_ type: UINotificationFeedbackGenerator.FeedbackType) {
+        notificationGenerator.prepare()
+        notificationGenerator.notificationOccurred(type)
+    }
+}
+
 // MARK: - Design tokens
 
 /// The visual system for Filmy Camera. Surfaces are near-black with a faint
@@ -71,6 +150,16 @@ enum FilmyTheme {
 }
 
 // MARK: - Backgrounds and chrome
+
+/// Width limits that keep pages readable on iPad without changing the
+/// compact-width layouts.
+enum FilmyLayout {
+    static let readableMaxWidth: CGFloat = 760
+    static let editorMaxWidth: CGFloat = 1_080
+    static let dockMaxWidth: CGFloat = 620
+    static let compactHorizontalMargin: CGFloat = 16
+    static let regularHorizontalMargin: CGFloat = 28
+}
 
 struct FilmyPageBackground: View {
     var body: some View {
@@ -398,7 +487,10 @@ struct FlashControl: View {
     }
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            HapticFeedback.play(.controlStep)
+            action()
+        } label: {
             Label(mode.title, systemImage: mode.systemImageName)
                 .font(.system(size: 12, weight: .bold, design: .rounded))
                 .foregroundStyle(mode == .off ? .white : FilmyTheme.accent)
@@ -498,6 +590,7 @@ struct ZoomControl: View {
             Section("Quick zoom") {
                 ForEach(zoomPresets, id: \.self) { preset in
                     Button {
+                        HapticFeedback.play(.controlStep)
                         onSelect(preset)
                     } label: {
                         if abs(value - preset) < 0.05 {
@@ -512,9 +605,11 @@ struct ZoomControl: View {
             Divider()
 
             Button("Zoom out", systemImage: "minus") {
+                HapticFeedback.play(.controlStep)
                 onAdjust(.decrement)
             }
             Button("Zoom in", systemImage: "plus") {
+                HapticFeedback.play(.controlStep)
                 onAdjust(.increment)
             }
         } label: {
@@ -526,10 +621,12 @@ struct ZoomControl: View {
                 .viewfinderCapsule()
         }
         .accessibilityElement()
+        .accessibilityIdentifier("zoom-control")
         .accessibilityLabel("Zoom")
         .accessibilityValue("\(value, specifier: "%.1f") times")
         .accessibilityHint("Choose a quick zoom, swipe up or down to adjust, or pinch the preview.")
         .accessibilityAdjustableAction { direction in
+            HapticFeedback.play(.controlStep)
             onAdjust(direction)
         }
     }
@@ -584,6 +681,7 @@ struct ExposureControl: View {
         .accessibilityValue(accessibilityValueText)
         .accessibilityHint("Swipe up or down to adjust exposure compensation.")
         .accessibilityAdjustableAction { direction in
+            HapticFeedback.play(.controlStep)
             onAdjust(direction)
         }
     }
@@ -593,6 +691,7 @@ struct ExposureControl: View {
         direction: AccessibilityAdjustmentDirection
     ) -> some View {
         Button {
+            HapticFeedback.play(.controlStep)
             onAdjust(direction)
         } label: {
             Image(systemName: systemName)
@@ -611,7 +710,10 @@ struct FocusLockControl: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            HapticFeedback.play(.selection)
+            action()
+        } label: {
             Label(
                 isLocked ? "AE/AF Locked" : "AE/AF Lock",
                 systemImage: isLocked ? "lock.fill" : "lock.open"
@@ -706,9 +808,17 @@ struct RecipeSwatch: View {
                 )
         }
         .task(id: recipe) {
-            thumbnailData = await Task.detached(priority: .utility) {
+            // Editor sliders mutate the draft many times per second, and each
+            // change re-runs this task. Debounce first so a drag cannot queue
+            // one full renderer pass per tick; .task(id:) cancels the sleeping
+            // predecessor whenever the recipe changes again.
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            let renderedData = await Task.detached(priority: .utility) {
                 FilmRenderer.thumbnail(for: recipe)?.pngData()
             }.value
+            guard !Task.isCancelled else { return }
+            thumbnailData = renderedData
         }
     }
 }
@@ -752,7 +862,10 @@ struct CaptureButton: View {
     }
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            HapticFeedback.play(.capture)
+            action()
+        } label: {
             ZStack {
                 Circle()
                     .strokeBorder(Color.white.opacity(0.92), lineWidth: 3.5)
@@ -781,7 +894,7 @@ struct CaptureButton: View {
         .accessibilityHint(
             isEnabled
                 ? "Captures the current frame using the selected recipe"
-                : "Capture is available on a physical iPhone"
+                : "Capture is available on a physical device"
         )
     }
 }
@@ -1029,7 +1142,7 @@ struct PreviewPlaceholder: View {
                             .font(.system(.title3, design: .default).weight(.bold))
                             .foregroundStyle(.white)
                             .multilineTextAlignment(.center)
-                        Text(message ?? (isSimulator ? "Shoot this look on an iPhone." : "Check camera access in Settings, then try again."))
+                        Text(message ?? (isSimulator ? "Shoot this look on an iPhone or iPad." : "Check camera access in Settings, then try again."))
                             .font(.system(.subheadline, design: .default).weight(.medium))
                             .foregroundStyle(.white.opacity(0.74))
                             .multilineTextAlignment(.center)

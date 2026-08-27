@@ -5,6 +5,51 @@ import XCTest
 @testable import FilmyCamera
 
 final class RendererOutputBoundsTests: XCTestCase {
+    func testGrainControlUsesRestrainedPerceptualBlendStrength() {
+        XCTAssertEqual(FilmRenderer.grainBlendOpacity(for: -1), 0, accuracy: 0.0001)
+        XCTAssertEqual(FilmRenderer.grainBlendOpacity(for: 0), 0, accuracy: 0.0001)
+        XCTAssertEqual(FilmRenderer.grainBlendOpacity(for: 0.5), 0.04, accuracy: 0.0001)
+        XCTAssertEqual(FilmRenderer.grainBlendOpacity(for: 1), 0.12, accuracy: 0.0001)
+        XCTAssertEqual(FilmRenderer.grainBlendOpacity(for: 2), 0.12, accuracy: 0.0001)
+    }
+
+    func testGrainAddsTextureWithoutMateriallyChangingAverageLuminance() {
+        let extent = CGRect(x: 0, y: 0, width: 128, height: 128)
+        let input = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 1))
+            .cropped(to: extent)
+        var clean = FilmRecipe(id: "clean", name: "Clean", subtitle: "Test")
+        clean.grain = 0
+        var weak = clean
+        weak.grain = 0.5
+        var strong = clean
+        strong.grain = 1
+        let context = CIContext(options: [.useSoftwareRenderer: true])
+
+        let cleanPixels = renderFloatPixels(
+            FilmRenderer.render(input, recipe: clean),
+            extent: extent,
+            context: context
+        )
+        let weakPixels = renderFloatPixels(
+            FilmRenderer.render(input, recipe: weak),
+            extent: extent,
+            context: context
+        )
+        let strongPixels = renderFloatPixels(
+            FilmRenderer.render(input, recipe: strong),
+            extent: extent,
+            context: context
+        )
+
+        XCTAssertLessThan(abs(meanLuminance(weakPixels) - meanLuminance(cleanPixels)), 0.01)
+        XCTAssertLessThan(abs(meanLuminance(strongPixels) - meanLuminance(cleanPixels)), 0.02)
+
+        let weakTexture = meanAbsoluteRGBDifference(cleanPixels, weakPixels)
+        let strongTexture = meanAbsoluteRGBDifference(cleanPixels, strongPixels)
+        XCTAssertGreaterThan(weakTexture, 0.0005)
+        XCTAssertLessThan(weakTexture, 0.015)
+        XCTAssertGreaterThan(strongTexture, weakTexture * 1.8)
+    }
     func testRendererPreservesInputExtentAtEveryQualityTier() {
         let sourceExtent = CGRect(x: -12, y: 7, width: 64, height: 48)
         let input = CIImage(color: CIColor(red: 0.82, green: 0.37, blue: 0.12, alpha: 1))
@@ -216,11 +261,6 @@ final class RendererOutputBoundsTests: XCTestCase {
             chroma(neutralPixels[0]) + 0.003,
             "G7 X Compact should keep blue sky crisp"
         )
-        XCTAssertGreaterThan(
-            chroma(compactPixels[1]),
-            chroma(neutralPixels[1]) + 0.003,
-            "G7 X Compact should keep foliage crisp"
-        )
         XCTAssertLessThan(
             chroma(compactPixels[2]),
             0.08,
@@ -269,6 +309,96 @@ final class RendererOutputBoundsTests: XCTestCase {
                 )
             }
         }
+    }
+
+    func testG7XCompactToneCurveIsMonotonicAndOpensUsefulMidtones() throws {
+        let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
+        let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+        let compact = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == "g7x-compact" })
+        let neutral = replacingFilmBase(of: compact, with: .standard)
+
+        func renderedLuma(_ value: CGFloat, recipe: FilmRecipe) -> Double {
+            let image = CIImage(
+                color: CIColor(red: value, green: value, blue: value, alpha: 1)
+            ).cropped(to: extent)
+            return luma(
+                renderFloatPixels(
+                    FilmRenderer.render(image, recipe: recipe, quality: .photo),
+                    extent: extent,
+                    context: context
+                )
+            )
+        }
+
+        let inputLevels: [CGFloat] = [0.02, 0.18, 0.50, 0.78, 0.95]
+        let compactLevels = inputLevels.map { renderedLuma($0, recipe: compact) }
+        for (lower, upper) in zip(compactLevels, compactLevels.dropFirst()) {
+            XCTAssertLessThan(lower, upper, "The compact tone response must remain monotonic")
+        }
+
+        XCTAssertGreaterThan(
+            renderedLuma(0.18, recipe: compact),
+            renderedLuma(0.18, recipe: neutral) + 0.005,
+            "The dedicated compact curve should recover useful shadow detail"
+        )
+        XCTAssertGreaterThan(
+            renderedLuma(0.50, recipe: compact),
+            renderedLuma(0.50, recipe: neutral) + 0.005,
+            "The dedicated compact curve should give midtones JPEG-style presence"
+        )
+        XCTAssertLessThan(compactLevels.last ?? 1, 0.995, "Highlights should retain a shoulder before clipping")
+    }
+
+    func testG7XCompactColorEmphasizesWarmSubjectsAndSkyWhileRestrainingFoliage() throws {
+        let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
+        let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+        let compact = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == "g7x-compact" })
+        let neutral = replacingFilmBase(of: compact, with: .standard)
+
+        func rendered(_ color: CIColor, recipe: FilmRecipe) -> [Float] {
+            renderFloatPixels(
+                FilmRenderer.render(
+                    CIImage(color: color).cropped(to: extent),
+                    recipe: recipe,
+                    quality: .photo
+                ),
+                extent: extent,
+                context: context
+            )
+        }
+
+        let skin = rendered(CIColor(red: 0.70, green: 0.43, blue: 0.30, alpha: 1), recipe: compact)
+        let neutralSkin = rendered(CIColor(red: 0.70, green: 0.43, blue: 0.30, alpha: 1), recipe: neutral)
+        XCTAssertGreaterThan(
+            Double(skin[0] - skin[2]),
+            Double(neutralSkin[0] - neutralSkin[2])
+        )
+
+        let red = rendered(CIColor(red: 0.72, green: 0.16, blue: 0.12, alpha: 1), recipe: compact)
+        let neutralRed = rendered(CIColor(red: 0.72, green: 0.16, blue: 0.12, alpha: 1), recipe: neutral)
+        XCTAssertGreaterThan(
+            Double(red[0] - max(red[1], red[2])),
+            Double(neutralRed[0] - max(neutralRed[1], neutralRed[2]))
+        )
+
+        let foliage = rendered(CIColor(red: 0.18, green: 0.56, blue: 0.20, alpha: 1), recipe: compact)
+        let neutralFoliage = rendered(CIColor(red: 0.18, green: 0.56, blue: 0.20, alpha: 1), recipe: neutral)
+        XCTAssertLessThan(
+            rgbChroma(foliage),
+            rgbChroma(neutralFoliage),
+            "Foliage should remain rich without receiving a blanket saturation boost"
+        )
+
+        let sky = rendered(CIColor(red: 0.16, green: 0.42, blue: 0.78, alpha: 1), recipe: compact)
+        let neutralSky = rendered(CIColor(red: 0.16, green: 0.42, blue: 0.78, alpha: 1), recipe: neutral)
+        XCTAssertGreaterThan(
+            Double(sky[2] - sky[0]),
+            Double(neutralSky[2] - neutralSky[0])
+        )
+
+        let gray = rendered(CIColor(red: 0.50, green: 0.50, blue: 0.50, alpha: 1), recipe: compact)
+        let grayChroma = Double(max(gray[0], max(gray[1], gray[2])) - min(gray[0], min(gray[1], gray[2])))
+        XCTAssertLessThan(grayChroma, 0.020, "Neutral subjects should not receive a strong color cast")
     }
 
     func testEmptyInputIsReturnedWithoutExpandingBounds() {
@@ -1282,56 +1412,74 @@ final class RendererOutputBoundsTests: XCTestCase {
         }
     }
 
-    func testPreviewPhotoAndExportUseIdenticalPixelsForFixedRecipePhase() {
+    func testEveryBuiltInUsesIdenticalPixelsAcrossPreviewPhotoAndExport() {
         let extent = CGRect(x: 0, y: 0, width: 64, height: 48)
         let input = resolutionFixture(size: extent.size)
-        var recipe = FilmRecipe.builtIns[7]
-        recipe.exposure = 0.35
-        recipe.clarity = -0.42
-        recipe.grain = 0.58
-        recipe.grainSize = 1.25
-        recipe.vignette = 0.44
-        recipe.halation = 0.52
         let phase = CGPoint(x: 173.5, y: 61.25)
         let context = CIContext(options: [
             .useSoftwareRenderer: true,
             .cacheIntermediates: false
         ])
 
-        let outputs = [FilmRenderer.Quality.preview, .photo, .export].map { quality in
-            renderFloatPixels(
-                FilmRenderer.render(
-                    input,
-                    recipe: recipe,
-                    quality: quality,
-                    grainSeed: 0x1234,
-                    grainPhase: phase
-                ),
-                extent: extent,
-                context: context
-            )
-        }
+        for recipe in FilmRecipe.builtIns {
+            let outputs = [FilmRenderer.Quality.preview, .photo, .export].map { quality in
+                renderFloatPixels(
+                    FilmRenderer.render(
+                        input,
+                        recipe: recipe,
+                        quality: quality,
+                        grainSeed: 0x1234,
+                        grainPhase: phase
+                    ),
+                    extent: extent,
+                    context: context
+                )
+            }
 
-        guard let reference = outputs.first else {
-            return XCTFail("Expected renderer output for the preview quality")
-        }
-        for (index, output) in outputs.dropFirst().enumerated() {
-            XCTAssertEqual(output.count, reference.count)
-            XCTAssertLessThan(
-                meanAbsoluteRGBDifference(reference, output),
-                0.0001,
-                "Quality tier \(index + 1) changed the recipe pixels"
-            )
+            guard let reference = outputs.first else {
+                return XCTFail("Expected renderer output for \(recipe.id)")
+            }
+            for (index, output) in outputs.dropFirst().enumerated() {
+                XCTAssertEqual(output.count, reference.count, recipe.id)
+                XCTAssertLessThan(
+                    meanAbsoluteRGBDifference(reference, output),
+                    0.0001,
+                    "\(recipe.id) changed at quality tier \(index + 1)"
+                )
+            }
         }
     }
 
-    func testRecipeThumbnailUsesTheRendererAndRequestedSize() {
+    func testEveryBuiltInThumbnailUsesTheRendererAndRequestedSize() {
         let size = CGSize(width: 120, height: 80)
-        let image = FilmRenderer.thumbnail(for: FilmRecipe.builtIns[1], size: size)
+        for recipe in FilmRecipe.builtIns {
+            let image = FilmRenderer.thumbnail(for: recipe, size: size)
 
-        XCTAssertNotNil(image)
-        XCTAssertEqual(image?.cgImage?.width, Int(size.width))
-        XCTAssertEqual(image?.cgImage?.height, Int(size.height))
+            XCTAssertNotNil(image, recipe.id)
+            XCTAssertEqual(image?.cgImage?.width, Int(size.width), recipe.id)
+            XCTAssertEqual(image?.cgImage?.height, Int(size.height), recipe.id)
+        }
+    }
+
+    func testRecipeThumbnailCacheReusesImageAndSeparatesRenderKeys() throws {
+        let recipe = try XCTUnwrap(FilmRecipe.builtIns.first)
+        let size = CGSize(width: 96, height: 64)
+
+        let first = try XCTUnwrap(FilmRenderer.thumbnail(for: recipe, size: size))
+        let second = try XCTUnwrap(FilmRenderer.thumbnail(for: recipe, size: size))
+        XCTAssertTrue(first === second, "Identical recipe thumbnails should reuse the materialized image")
+
+        let resized = try XCTUnwrap(
+            FilmRenderer.thumbnail(for: recipe, size: CGSize(width: 120, height: 64))
+        )
+        XCTAssertFalse(first === resized, "Thumbnail dimensions must remain part of the cache key")
+        XCTAssertEqual(resized.cgImage?.width, 120)
+        XCTAssertEqual(resized.cgImage?.height, 64)
+
+        var tuned = recipe
+        tuned.exposure += 0.1
+        let tunedImage = try XCTUnwrap(FilmRenderer.thumbnail(for: tuned, size: size))
+        XCTAssertFalse(first === tunedImage, "Edited recipe values must render a distinct thumbnail")
     }
 
     func testRecipeContactSheetRendersEveryBuiltInLook() throws {
@@ -1522,6 +1670,10 @@ final class RendererOutputBoundsTests: XCTestCase {
         return max(red, max(green, blue)) - min(red, min(green, blue))
     }
 
+    private func rgbChroma(_ pixel: [Float]) -> Double {
+        Double(max(pixel[0], max(pixel[1], pixel[2])) - min(pixel[0], min(pixel[1], pixel[2])))
+    }
+
     private func meanAbsoluteRGBDifference(_ lhs: [Float], _ rhs: [Float]) -> Double {
         var total = 0.0
         var count = 0
@@ -1532,5 +1684,50 @@ final class RendererOutputBoundsTests: XCTestCase {
             }
         }
         return count == 0 ? 0 : total / Double(count)
+    }
+
+    private func meanLuminance(_ pixels: [Float]) -> Double {
+        guard !pixels.isEmpty else { return 0 }
+        var total = 0.0
+        var count = 0
+        for index in stride(from: 0, to: pixels.count, by: 4) {
+            total += 0.2126 * Double(pixels[index])
+                + 0.7152 * Double(pixels[index + 1])
+                + 0.0722 * Double(pixels[index + 2])
+            count += 1
+        }
+        return total / Double(count)
+    }
+
+    private func replacingFilmBase(
+        of recipe: FilmRecipe,
+        with filmBase: FilmRecipe.FilmBase
+    ) -> FilmRecipe {
+        FilmRecipe(
+            id: "\(recipe.id)-\(filmBase.rawValue)-control",
+            name: recipe.name,
+            subtitle: recipe.subtitle,
+            filmBase: filmBase,
+            exposure: recipe.exposure,
+            tone: recipe.tone,
+            saturation: recipe.saturation,
+            contrast: recipe.contrast,
+            dynamicRange: recipe.dynamicRange,
+            dRangePriority: recipe.dRangePriority,
+            whiteBalance: recipe.whiteBalance,
+            monochromaticColor: recipe.monochromaticColor,
+            colorChrome: recipe.colorChrome,
+            blueResponse: recipe.blueResponse,
+            fxBlue: recipe.fxBlue,
+            sharpness: recipe.sharpness,
+            noiseReduction: recipe.noiseReduction,
+            clarity: recipe.clarity,
+            grain: recipe.grain,
+            grainSize: recipe.grainSize,
+            vignette: recipe.vignette,
+            halation: recipe.halation,
+            palette: recipe.palette,
+            provenance: recipe.provenance
+        )
     }
 }
