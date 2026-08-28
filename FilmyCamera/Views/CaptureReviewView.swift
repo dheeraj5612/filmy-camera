@@ -85,7 +85,9 @@ struct CaptureReviewView: View {
                     .background(FilmyTheme.panelRaised, in: Circle())
             }
             .buttonStyle(.pressable)
+            .accessibilityIdentifier("review-back-to-camera")
             .accessibilityLabel(isImported ? "Discard imported photo" : "Discard frame")
+            .accessibilityHint("Returns to the camera without saving")
             .disabled(isSaving)
         }
     }

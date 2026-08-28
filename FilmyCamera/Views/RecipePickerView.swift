@@ -231,6 +231,11 @@ struct RecipeDetailView: View {
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 22) {
+                    BackToCameraButton(
+                        accessibilityIdentifier: "recipe-back-to-camera",
+                        action: { dismiss() }
+                    )
+
                     hero
                     identity
                     controlSummary

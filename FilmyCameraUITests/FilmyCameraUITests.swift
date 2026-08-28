@@ -403,6 +403,33 @@ final class FilmyCameraUITests: XCTestCase {
         attachScreenshot(named: "settings")
     }
 
+    func testEveryTopLevelPageCanReturnToCamera() throws {
+        let gallery = app.buttons["roll-tab"]
+        gallery.tap()
+
+        let galleryBack = app.buttons["roll-back-to-camera"]
+        assertMinimumHitTarget(galleryBack, named: "Roll back to camera")
+        galleryBack.tap()
+        XCTAssertTrue(app.staticTexts["FILMY CAMERA"].waitForExistence(timeout: 5))
+
+        let settings = app.buttons["settings-tab"]
+        settings.tap()
+
+        let settingsBack = app.buttons["settings-back-to-camera"]
+        assertMinimumHitTarget(settingsBack, named: "Settings back to camera")
+        settingsBack.tap()
+        XCTAssertTrue(app.staticTexts["FILMY CAMERA"].waitForExistence(timeout: 5))
+
+        let tune = app.buttons["Tune Muted Color"]
+        assertMinimumHitTarget(tune, named: "Open recipe detail")
+        tune.tap()
+
+        let recipeBack = app.buttons["recipe-back-to-camera"]
+        assertMinimumHitTarget(recipeBack, named: "Recipe detail back to camera")
+        recipeBack.tap()
+        XCTAssertTrue(app.staticTexts["FILMY CAMERA"].waitForExistence(timeout: 5))
+    }
+
     func testRecipeFirstOnboardingFlow() throws {
         let onboardingApp = MainActor.assumeIsolated {
             let onboardingApp = XCUIApplication()

@@ -133,9 +133,23 @@ struct ContentView: View {
                 onOpenGallery: { selectedTab = .gallery }
             )
         case .gallery:
-            GalleryScreen(photoLibrary: photoLibrary)
+            GalleryScreen(
+                photoLibrary: photoLibrary,
+                onBackToCamera: returnToCamera
+            )
         case .settings:
-            SettingsView(camera: camera, photoLibrary: photoLibrary)
+            SettingsView(
+                camera: camera,
+                photoLibrary: photoLibrary,
+                onBackToCamera: returnToCamera
+            )
+        }
+    }
+
+    private func returnToCamera() {
+        guard selectedTab != .camera else { return }
+        withAnimation(reduceMotion ? nil : .snappy(duration: 0.24)) {
+            selectedTab = .camera
         }
     }
 

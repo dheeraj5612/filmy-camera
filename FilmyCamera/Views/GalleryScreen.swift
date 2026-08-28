@@ -7,6 +7,7 @@ import UIKit
 /// the screen.
 struct GalleryScreen: View {
     @ObservedObject var photoLibrary: PhotoLibraryService
+    let onBackToCamera: () -> Void
 
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -28,6 +29,12 @@ struct GalleryScreen: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 16) {
+                        BackToCameraButton(
+                            accessibilityIdentifier: "roll-back-to-camera",
+                            action: onBackToCamera
+                        )
+                        .padding(.horizontal, FilmyTheme.pageMargin)
+
                         SectionHeading(
                             eyebrow: "LIBRARY",
                             title: "Roll",
@@ -72,7 +79,11 @@ struct GalleryScreen: View {
             clearSelectionIfUnavailable()
         }
         .sheet(item: $selectedAsset) { asset in
-            GalleryDetailView(asset: asset, photoLibrary: photoLibrary)
+            GalleryDetailView(
+                asset: asset,
+                photoLibrary: photoLibrary,
+                onBackToCamera: onBackToCamera
+            )
                 .presentationDetents([.large])
                 .presentationBackground(FilmyTheme.background)
                 .presentationCornerRadius(30)
@@ -436,6 +447,7 @@ private struct RollEmptyState: View {
 private struct GalleryDetailView: View {
     let asset: PhotoLibraryGalleryAsset
     @ObservedObject var photoLibrary: PhotoLibraryService
+    let onBackToCamera: () -> Void
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -630,6 +642,11 @@ private struct GalleryDetailView: View {
         HStack(spacing: 10) {
             FilmyIconButton(systemName: "xmark", accessibilityLabel: "Close frame") {
                 dismiss()
+            }
+
+            BackToCameraButton(accessibilityIdentifier: "frame-back-to-camera") {
+                dismiss()
+                onBackToCamera()
             }
 
             Spacer()

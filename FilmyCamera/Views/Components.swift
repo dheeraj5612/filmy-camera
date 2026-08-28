@@ -161,6 +161,33 @@ enum FilmyLayout {
     static let regularHorizontalMargin: CGFloat = 28
 }
 
+struct BackToCameraButton: View {
+    let accessibilityIdentifier: String
+    let action: () -> Void
+
+    var body: some View {
+        Button {
+            HapticFeedback.play(.selection)
+            action()
+        } label: {
+            Label("Camera", systemImage: "chevron.left")
+                .font(.system(.subheadline, design: .rounded).weight(.bold))
+                .foregroundStyle(FilmyTheme.primary)
+                .padding(.horizontal, 12)
+                .frame(minHeight: FilmyTheme.minimumHitTarget)
+                .background(FilmyTheme.panel.opacity(0.94), in: Capsule())
+                .overlay {
+                    Capsule().stroke(FilmyTheme.lineStrong, lineWidth: 1)
+                }
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Back to camera")
+        .accessibilityHint("Returns to the main camera")
+        .accessibilityIdentifier(accessibilityIdentifier)
+    }
+}
+
 struct FilmyPageBackground: View {
     var body: some View {
         ZStack(alignment: .top) {

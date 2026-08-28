@@ -6,6 +6,7 @@ import UIKit
 struct SettingsView: View {
     @ObservedObject var camera: CameraService
     @ObservedObject var photoLibrary: PhotoLibraryService
+    let onBackToCamera: () -> Void
 
     @Environment(\.scenePhase) private var scenePhase
 
@@ -46,8 +47,15 @@ struct SettingsView: View {
     }
 
     private var settingsHeader: some View {
-        SectionHeading(eyebrow: "FILMY CAMERA \(appVersion)", title: "Settings")
-            .accessibilityLabel("Filmy Camera settings, version \(appVersion)")
+        VStack(alignment: .leading, spacing: 14) {
+            BackToCameraButton(
+                accessibilityIdentifier: "settings-back-to-camera",
+                action: onBackToCamera
+            )
+
+            SectionHeading(eyebrow: "FILMY CAMERA \(appVersion)", title: "Settings")
+                .accessibilityLabel("Filmy Camera settings, version \(appVersion)")
+        }
     }
 
     // MARK: - Sections
