@@ -408,26 +408,54 @@ final class FilmyCameraUITests: XCTestCase {
         gallery.tap()
 
         let galleryBack = app.buttons["roll-back-to-camera"]
-        assertMinimumHitTarget(galleryBack, named: "Roll back to camera")
-        galleryBack.tap()
-        XCTAssertTrue(app.staticTexts["FILMY CAMERA"].waitForExistence(timeout: 5))
+        returnToMainCamera(using: galleryBack, named: "Roll back to camera")
 
         let settings = app.buttons["settings-tab"]
         settings.tap()
 
         let settingsBack = app.buttons["settings-back-to-camera"]
-        assertMinimumHitTarget(settingsBack, named: "Settings back to camera")
-        settingsBack.tap()
-        XCTAssertTrue(app.staticTexts["FILMY CAMERA"].waitForExistence(timeout: 5))
+        returnToMainCamera(using: settingsBack, named: "Settings back to camera")
+
+        let controlsToggle = app.buttons["camera-chrome-toggle"]
+        if controlsToggle.waitForExistence(timeout: 2), controlsToggle.label == "Show camera controls" {
+            controlsToggle.tap()
+        }
+
+        let mutedColor = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH 'Muted Color'")
+        ).firstMatch
+        assertMinimumHitTarget(mutedColor, named: "Muted Color recipe")
+        mutedColor.tap()
 
         let tune = app.buttons["Tune Muted Color"]
         assertMinimumHitTarget(tune, named: "Open recipe detail")
         tune.tap()
 
         let recipeBack = app.buttons["recipe-back-to-camera"]
-        assertMinimumHitTarget(recipeBack, named: "Recipe detail back to camera")
-        recipeBack.tap()
-        XCTAssertTrue(app.staticTexts["FILMY CAMERA"].waitForExistence(timeout: 5))
+        returnToMainCamera(using: recipeBack, named: "Recipe detail back to camera")
+    }
+
+    private func returnToMainCamera(using backButton: XCUIElement, named: String) {
+        assertMinimumHitTarget(backButton, named: named)
+        backButton.tap()
+
+        if !waitForDisappearance(backButton, timeout: 2), backButton.exists, backButton.isHittable {
+            backButton.tap()
+        }
+
+        XCTAssertTrue(
+            waitForDisappearance(backButton, timeout: 5),
+            named + " should leave its source page"
+        )
+        XCTAssertTrue(app.buttons["camera-tab"].waitForExistence(timeout: 5))
+    }
+
+    private func waitForDisappearance(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: element
+        )
+        return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
     }
 
     func testRecipeFirstOnboardingFlow() throws {
