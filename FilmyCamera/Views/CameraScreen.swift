@@ -384,7 +384,7 @@ struct CameraScreen: View {
             if !isCompactChrome {
                 Text(viewModel.selectedRecipe.descriptor)
                     .font(.system(.caption, design: .rounded).weight(.medium))
-                    .foregroundStyle(.white.opacity(0.62))
+                    .foregroundStyle(.white.opacity(0.74))
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
             }
@@ -427,7 +427,7 @@ struct CameraScreen: View {
     private var captureNotice: some View {
         Label("Capture is available on a physical iPhone", systemImage: "iphone")
             .font(.system(size: 11, weight: .semibold, design: .rounded))
-            .foregroundStyle(.white.opacity(0.66))
+            .foregroundStyle(.white.opacity(0.8))
             .multilineTextAlignment(.center)
             .lineLimit(2)
             .minimumScaleFactor(0.78)

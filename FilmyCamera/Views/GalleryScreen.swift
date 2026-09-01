@@ -606,7 +606,7 @@ private struct GalleryDetailView: View {
                     .lineLimit(1)
                 Text(metadata.capturedAt, format: .dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
                     .font(.system(.caption, design: .rounded).weight(.medium))
-                    .foregroundStyle(.white.opacity(0.66))
+                    .foregroundStyle(.white.opacity(0.76))
             }
 
             Spacer(minLength: 8)
@@ -614,7 +614,7 @@ private struct GalleryDetailView: View {
             Text(zoomScale > 1 ? "\(Int(zoomScale * 100))%" : "FIT")
                 .font(.system(size: 10, weight: .bold, design: .rounded))
                 .tracking(0.6)
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(.white.opacity(0.72))
                 .monospacedDigit()
         }
         .padding(.horizontal, 12)

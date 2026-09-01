@@ -18,7 +18,8 @@ enum FilmyTheme {
     // Ink
     static let primary = Color(red: 0.97, green: 0.955, blue: 0.93)
     static let secondary = Color(red: 0.97, green: 0.955, blue: 0.93).opacity(0.64)
-    static let tertiary = Color(red: 0.97, green: 0.955, blue: 0.93).opacity(0.42)
+    // 0.56 keeps 10-11pt supporting text above 4.5:1 on both background and panel.
+    static let tertiary = Color(red: 0.97, green: 0.955, blue: 0.93).opacity(0.56)
 
     // Signal colors
     static let accent = Color(red: 0.96, green: 0.73, blue: 0.30)
@@ -562,7 +563,7 @@ struct ExposureControl: View {
                 Text("EV")
                     .font(.system(size: 8, weight: .black, design: .rounded))
                     .tracking(0.8)
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(.white.opacity(0.72))
                 Text(valueText)
                     .font(.system(size: 13, weight: .bold, design: .rounded))
                     .monospacedDigit()

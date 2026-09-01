@@ -17,22 +17,34 @@ struct CaptureReviewView: View {
         ZStack {
             FilmyTheme.background.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                header
-                    .padding(.horizontal, 20)
-                    .padding(.top, 16)
-                    .padding(.bottom, 12)
+            // The frame is sized from the available area so it normally fits
+            // without scrolling, but the page still scrolls on short or
+            // landscape displays and at accessibility text sizes so the save
+            // error and its recovery action can never be pushed offscreen.
+            GeometryReader { proxy in
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 0) {
+                        header
+                            .padding(.horizontal, 20)
+                            .padding(.top, 16)
+                            .padding(.bottom, 12)
 
-                framePreview
-                    .padding(.horizontal, 16)
+                        framePreview(
+                            maxWidth: max(proxy.size.width - 32, 1),
+                            maxHeight: max(proxy.size.height * 0.64, 160)
+                        )
+                        .padding(.horizontal, 16)
 
-                if let saveErrorMessage {
-                    saveError(saveErrorMessage)
-                        .padding(.horizontal, 20)
-                        .padding(.top, 14)
+                        if let saveErrorMessage {
+                            saveError(saveErrorMessage)
+                                .padding(.horizontal, 20)
+                                .padding(.top, 14)
+                        }
+                    }
+                    .padding(.bottom, 16)
+                    .frame(maxWidth: .infinity)
                 }
             }
-            .padding(.bottom, 12)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             actionBar
@@ -73,25 +85,44 @@ struct CaptureReviewView: View {
         }
     }
 
-    private var framePreview: some View {
-        GeometryReader { proxy in
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFit()
-                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .strokeBorder(FilmyTheme.lineStrong, lineWidth: 1)
-                }
-                .overlay(alignment: .bottomLeading) {
-                    recipeChip
-                        .padding(14)
-                }
-                .shadow(color: .black.opacity(0.4), radius: 22, y: 10)
-                .frame(width: proxy.size.width, height: proxy.size.height)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Captured frame with \(recipe.name)")
+    private func framePreview(maxWidth: CGFloat, maxHeight: CGFloat) -> some View {
+        let fitted = Self.fittedSize(
+            for: image.size,
+            within: CGSize(width: maxWidth, height: maxHeight)
+        )
+
+        return Image(uiImage: image)
+            .resizable()
+            .scaledToFit()
+            .frame(width: fitted.width, height: fitted.height)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .strokeBorder(FilmyTheme.lineStrong, lineWidth: 1)
+            }
+            .overlay(alignment: .bottomLeading) {
+                recipeChip
+                    .padding(14)
+            }
+            .shadow(color: .black.opacity(0.4), radius: 22, y: 10)
+            .frame(maxWidth: .infinity)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Captured frame with \(recipe.name)")
+    }
+
+    /// Largest size with the image's aspect ratio that fits inside `bounds`.
+    static func fittedSize(for imageSize: CGSize, within bounds: CGSize) -> CGSize {
+        let safeBounds = CGSize(width: max(bounds.width, 1), height: max(bounds.height, 1))
+        guard imageSize.width > 0, imageSize.height > 0 else { return safeBounds }
+
+        let scale = min(
+            safeBounds.width / imageSize.width,
+            safeBounds.height / imageSize.height
+        )
+        return CGSize(
+            width: (imageSize.width * scale).rounded(.down),
+            height: (imageSize.height * scale).rounded(.down)
+        )
     }
 
     private var recipeChip: some View {
@@ -107,7 +138,7 @@ struct CaptureReviewView: View {
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
                 Text("Full resolution")
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.72))
+                    .foregroundStyle(.white.opacity(0.78))
             }
             .fixedSize(horizontal: false, vertical: true)
         }
