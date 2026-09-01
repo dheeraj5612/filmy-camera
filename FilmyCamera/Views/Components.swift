@@ -939,18 +939,22 @@ struct SettingRow<Accessory: View>: View {
     }
 
     var body: some View {
-        HStack(spacing: 13) {
+        HStack(alignment: .top, spacing: 13) {
             SettingIcon(systemName: systemName)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.system(.subheadline, design: .default).weight(.semibold))
                     .foregroundStyle(FilmyTheme.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                // Permission guidance can run several lines at accessibility
+                // sizes; the screen scrolls, so let the detail wrap fully.
                 Text(detail)
                     .font(.system(.caption, design: .default).weight(.medium))
                     .foregroundStyle(FilmyTheme.secondary)
-                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            .layoutPriority(1)
 
             Spacer(minLength: 10)
             accessory
@@ -1041,8 +1045,25 @@ struct PreviewPlaceholder: View {
                 .viewfinderChrome(RoundedRectangle(cornerRadius: 24, style: .continuous))
                 .padding(.horizontal, 24)
                 .padding(.top, max(proxy.safeAreaInsets.top + 76, 100))
+                // Reserve room below the card so, on short or landscape
+                // displays and at accessibility text sizes, the recovery
+                // action can be scrolled clear of the bottom camera chrome.
+                .padding(.bottom, max(proxy.size.height * 0.5, 280))
+                .frame(maxWidth: .infinity)
+                .scrollableWhenTaller()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private extension View {
+    /// Wraps the view in a vertical scroll view that only scrolls (and only
+    /// bounces) once the content is taller than the space it is given.
+    func scrollableWhenTaller() -> some View {
+        ScrollView(showsIndicators: false) {
+            self
+        }
+        .scrollBounceBehavior(.basedOnSize)
     }
 }
