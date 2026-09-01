@@ -115,12 +115,12 @@ extension View {
 /// Frosted circle or capsule used behind icon-only viewfinder buttons.
 struct ChromeShapeBackground<S: InsettableShape>: View {
     let shape: S
-    var fill: Color = FilmyTheme.chromeFill
+    var fillColor: Color = FilmyTheme.chromeFill
 
     var body: some View {
         shape
             .fill(.ultraThinMaterial)
-            .overlay { shape.fill(fill) }
+            .overlay { shape.fill(fillColor) }
             .overlay { shape.strokeBorder(FilmyTheme.chromeStroke, lineWidth: 1) }
     }
 }
