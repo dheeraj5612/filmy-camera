@@ -18,9 +18,9 @@ final class FilmyCameraUITests: XCTestCase {
     func testCameraShellAndRecipeDetails() throws {
         let cameraTab = app.buttons["camera-tab"]
         assertMinimumHitTarget(cameraTab, named: "Camera tab")
-        XCTAssertTrue(app.staticTexts["FILMY CAMERA"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["Open roll"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["RECIPE"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Natural Standard"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["BROWSE LOOKS"].waitForExistence(timeout: 5))
 
         let recipePicker = app.descendants(matching: .any)["recipe-picker"]
         XCTAssertTrue(recipePicker.waitForExistence(timeout: 5))
@@ -100,7 +100,7 @@ final class FilmyCameraUITests: XCTestCase {
         }
         defer { accessibilityApp.terminate() }
 
-        XCTAssertTrue(accessibilityApp.staticTexts["FILM STOCK"].waitForExistence(timeout: 8))
+        XCTAssertTrue(accessibilityApp.staticTexts["RECIPE"].waitForExistence(timeout: 8))
 
         let roll = accessibilityApp.buttons["Open roll"]
         assertMinimumHitTarget(roll, named: "Accessibility-size Roll")
@@ -155,7 +155,7 @@ final class FilmyCameraUITests: XCTestCase {
         }
         defer { previewApp.terminate() }
 
-        XCTAssertTrue(previewApp.staticTexts["CURRENT LOOK"].waitForExistence(timeout: 8))
+        XCTAssertTrue(previewApp.staticTexts["RECIPE"].waitForExistence(timeout: 8))
 
         let roll = previewApp.buttons["Open roll"]
         assertMinimumHitTarget(roll, named: "Viewfinder preview Roll")
@@ -241,7 +241,7 @@ final class FilmyCameraUITests: XCTestCase {
         assertMinimumHitTarget(openCamera, named: "Onboarding open camera")
         openCamera.tap()
 
-        XCTAssertTrue(onboardingApp.staticTexts["FILMY CAMERA"].waitForExistence(timeout: 8))
+        XCTAssertTrue(onboardingApp.buttons["Open roll"].waitForExistence(timeout: 8))
     }
 
     private func assertMinimumHitTarget(_ element: XCUIElement, named: String) {

@@ -25,6 +25,9 @@ enum CameraActivityPolicy {
     }
 }
 
+/// The viewfinder. Chrome is anchored to the edges and never boxed into
+/// panels: a slim status bar on top, an optional tools strip, the film-strip
+/// recipe rail, and a capture row with the Roll thumbnail, shutter, and Tune.
 struct CameraScreen: View {
     @ObservedObject var camera: CameraService
     @ObservedObject var viewModel: CameraViewModel
@@ -38,12 +41,34 @@ struct CameraScreen: View {
     @AppStorage("showGrid") private var showGrid = true
     @AppStorage("hapticsEnabled") private var hapticsEnabled = true
     @State private var recipeForDetail: FilmRecipe?
-    @State private var isShowingCameraControls = false
-    @State private var isShowingFullCameraChrome = false
+    @State private var isShowingTools: Bool
     @State private var focusPoint: CGPoint?
     @State private var focusNormalizedPoint: CGPoint?
     @State private var pinchStartZoom: CGFloat = 1
     @State private var isPinching = false
+
+    init(
+        camera: CameraService,
+        viewModel: CameraViewModel,
+        photoLibrary: PhotoLibraryService,
+        isCameraTabActive: Bool,
+        onOpenGallery: @escaping () -> Void
+    ) {
+        _camera = ObservedObject(wrappedValue: camera)
+        _viewModel = ObservedObject(wrappedValue: viewModel)
+        _photoLibrary = ObservedObject(wrappedValue: photoLibrary)
+        self.isCameraTabActive = isCameraTabActive
+        self.onOpenGallery = onOpenGallery
+
+        // The tools strip stays hidden until asked for so the viewfinder
+        // opens quiet. UI tests that exercise exposure and zoom launch with
+        // it open; the viewfinder-chrome preview launches with it closed so
+        // the toggle itself can be verified.
+        let arguments = ProcessInfo.processInfo.arguments
+        let isUITesting = arguments.contains("-ui-testing")
+        let isViewfinderPreview = arguments.contains("-ui-testing-viewfinder-chrome")
+        _isShowingTools = State(initialValue: isUITesting && !isViewfinderPreview)
+    }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -106,31 +131,17 @@ struct CameraScreen: View {
                     .ignoresSafeArea()
             }
 
-            LinearGradient(
-                gradient: Gradient(stops: [
-                    .init(color: Color.black.opacity(0.76), location: 0),
-                    .init(color: Color.black.opacity(0.08), location: 0.23),
-                    .init(color: Color.black.opacity(0.18), location: 0.58),
-                    .init(color: Color.black.opacity(0.9), location: 1)
-                ]),
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
-            .allowsHitTesting(false)
+            viewfinderScrim
 
-            if showGrid {
+            if showGrid && camera.isRunning {
                 RuleOfThirdsGrid()
                     .ignoresSafeArea()
             }
 
-            ViewfinderFrame()
-                .ignoresSafeArea()
-
             if let focusPoint {
                 FocusReticle()
                     .position(focusPoint)
-                    .transition(reduceMotion ? .opacity : .scale(scale: 0.86).combined(with: .opacity))
+                    .transition(reduceMotion ? .opacity : .scale(scale: 1.15).combined(with: .opacity))
                     .task(id: focusPoint) {
                         try? await Task.sleep(for: .seconds(1.2))
                         guard !Task.isCancelled else { return }
@@ -141,13 +152,13 @@ struct CameraScreen: View {
             }
 
             GeometryReader { proxy in
-                cameraChrome(for: proxy.size)
+                chrome(for: proxy.size)
                     .disabled(viewModel.isCapturing)
             }
 
             if let toastMessage = viewModel.toastMessage {
                 ToastView(message: toastMessage, style: viewModel.toastStyle)
-                    .padding(.top, 88)
+                    .padding(.top, 64)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
@@ -169,6 +180,8 @@ struct CameraScreen: View {
             )
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
+            .presentationBackground(FilmyTheme.background)
+            .presentationCornerRadius(30)
         }
         .sheet(isPresented: reviewPresentation) {
             if let image = viewModel.reviewImage, let recipe = viewModel.reviewRecipe {
@@ -183,15 +196,16 @@ struct CameraScreen: View {
                 )
                 .presentationDetents([.large])
                 .presentationDragIndicator(.hidden)
+                .presentationBackground(FilmyTheme.background)
                 .interactiveDismissDisabled(viewModel.reviewImage != nil || viewModel.isSaving)
             }
         }
-        .sheet(isPresented: $isShowingCameraControls) {
-            cameraControlsSheet
-                .presentationDetents([.medium])
-                .presentationDragIndicator(.visible)
+        .onAppear {
+            updateCameraActivity()
+            // Keeps the Roll thumbnail in the capture row current without
+            // prompting: refresh only reads when access was already granted.
+            photoLibrary.refresh()
         }
-        .onAppear { updateCameraActivity() }
         .onDisappear { camera.stop() }
         .onChange(of: scenePhase) { _, _ in updateCameraActivity() }
         .onChange(of: isCameraTabActive) { _, _ in updateCameraActivity() }
@@ -212,257 +226,237 @@ struct CameraScreen: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    @ViewBuilder
-    private func cameraChrome(for size: CGSize) -> some View {
-        if shouldUseViewfinderFirstChrome {
-            viewfinderFirstCameraChrome(for: size)
-        } else if size.width > size.height {
-            if dynamicTypeSize.isAccessibilitySize {
-                compactLandscapeCameraChrome
-            } else {
-                landscapeCameraChrome
-            }
-        } else if dynamicTypeSize.isAccessibilitySize {
-            compactPortraitCameraChrome
-        } else {
-            portraitCameraChrome
-        }
+    // MARK: - Layout
+
+    private var isCompactChrome: Bool {
+        dynamicTypeSize.isAccessibilitySize
     }
 
-    @ViewBuilder
-    private func viewfinderFirstCameraChrome(for size: CGSize) -> some View {
-        if size.width > size.height {
-            HStack(alignment: .bottom, spacing: 12) {
-                compactHeader
-                    .frame(maxWidth: 300)
+    private func chrome(for size: CGSize) -> some View {
+        let isLandscape = size.width > size.height
 
-                Spacer(minLength: 0)
+        return VStack(spacing: 0) {
+            topBar
 
-                viewfinderFirstActionPlate
-                    .frame(maxWidth: 430)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-        } else {
-            VStack(spacing: 0) {
-                compactHeader
+            Spacer(minLength: 8)
 
-                Spacer(minLength: 0)
-
-                viewfinderFirstActionPlate
-            }
-            .padding(.horizontal, 14)
-            .padding(.top, 12)
-            .padding(.bottom, 10)
-        }
-    }
-
-    private var compactPortraitCameraChrome: some View {
-        VStack(spacing: 9) {
-            compactHeader
-
-            if !shouldShowCameraEmptyState || isUITesting {
-                cameraUtilityRail
-            }
-
-            Spacer(minLength: 0)
-            compactActionPlate
-        }
-        .padding(.horizontal, 12)
-        .padding(.top, 10)
-        .padding(.bottom, 8)
-        .dynamicTypeSize(.large ... .accessibility1)
-    }
-
-    private var compactLandscapeCameraChrome: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            compactHeader
-                .frame(maxWidth: 260)
-
-            if !shouldShowCameraEmptyState || isUITesting {
-                cameraUtilityRail
-                    .frame(maxWidth: 260)
-            }
-
-            Spacer(minLength: 0)
-            compactActionPlate
-                .frame(maxWidth: 360)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .dynamicTypeSize(.large ... .accessibility1)
-    }
-
-    private var portraitCameraChrome: some View {
-        VStack(spacing: 0) {
-            header
-
-            if !shouldShowCameraEmptyState || isUITesting {
-                cameraUtilityRail
-            }
-
-            Spacer(minLength: 12)
-
-            if shouldShowCameraEmptyState {
-                offlineControls
-            } else {
-                controls
-            }
+            bottomStack(isLandscape: isLandscape, width: size.width)
         }
         .padding(.horizontal, 16)
-        .padding(.top, 12)
-        .padding(.bottom, 10)
-    }
-
-    private var landscapeCameraChrome: some View {
-        VStack(spacing: 8) {
-            header
-
-            if !shouldShowCameraEmptyState || isUITesting {
-                landscapeUtilityRail
-            }
-
-            Spacer(minLength: 4)
-            landscapeBottomControls
-        }
-        .padding(.horizontal, 12)
         .padding(.top, 8)
-        .padding(.bottom, 8)
+        .padding(.bottom, 6)
+        // The chrome is a constrained overlay rather than a scrolling document.
+        // Cap its visual scale one step below the largest Dynamic Type sizes
+        // so every capture, Roll, and Tune action remains reachable.
+        .dynamicTypeSize(.xSmall ... .accessibility1)
     }
 
-    private var header: some View {
-        HStack(alignment: .center, spacing: 12) {
+    private var viewfinderScrim: some View {
+        VStack(spacing: 0) {
+            LinearGradient(
+                colors: [Color.black.opacity(0.55), .clear],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(maxHeight: 150)
+
+            Spacer(minLength: 0)
+
+            LinearGradient(
+                gradient: Gradient(stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: Color.black.opacity(0.42), location: 0.42),
+                    .init(color: Color.black.opacity(0.9), location: 1)
+                ]),
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(maxHeight: 360)
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private var topBar: some View {
+        ZStack {
             HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 7) {
-                        Text("FILMY CAMERA")
-                            .font(.system(size: 15, weight: .bold))
-                            .tracking(0.4)
+                if camera.isRunning && camera.flashAvailability != .unsupported {
+                    FlashControl(
+                        mode: camera.flashMode,
+                        availability: camera.flashAvailability,
+                        action: camera.cycleFlashMode
+                    )
+                }
 
-                        Text(sessionLabel)
-                            .font(.system(size: 10, weight: .bold))
-                            .tracking(0.5)
-                            .foregroundStyle(camera.isRunning ? FilmyTheme.mint : FilmyTheme.accent)
-                    }
-                        .foregroundStyle(.white)
+                Spacer(minLength: 0)
 
-                    Text(viewModel.selectedRecipe.name + "  ·  " + viewModel.selectedRecipe.descriptor)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.62))
-                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                        .minimumScaleFactor(0.7)
-                        .fixedSize(horizontal: false, vertical: true)
+                if camera.isRunning || isViewfinderChromePreview {
+                    toolsToggle
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .background(Color.black.opacity(0.38), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+
+            CameraStatusPill(
+                isRunning: camera.isRunning,
+                availability: camera.availability,
+                message: camera.statusMessage
+            )
+        }
+    }
+
+    private var toolsToggle: some View {
+        Button {
+            withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.82)) {
+                isShowingTools.toggle()
+            }
+        } label: {
+            Image(systemName: isShowingTools ? "chevron.down" : "slider.horizontal.3")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(isShowingTools ? FilmyTheme.accent : .white)
+                .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+                .background { ChromeShapeBackground(shape: Circle()) }
+                .contentShape(Circle())
+        }
+        .buttonStyle(.pressable)
+        .accessibilityIdentifier("camera-chrome-toggle")
+        .accessibilityLabel(isShowingTools ? "Hide camera controls" : "Show camera controls")
+        .accessibilityHint(
+            isShowingTools
+                ? "Return to the viewfinder-first camera layout"
+                : "Reveal exposure, zoom, and camera controls"
+        )
+    }
+
+    @ViewBuilder
+    private func bottomStack(isLandscape: Bool, width: CGFloat) -> some View {
+        if isLandscape {
+            VStack(spacing: 10) {
+                if isShowingTools {
+                    toolStrip(minWidth: width - 32)
+                }
+
+                HStack(alignment: .center, spacing: 14) {
+                    recipeMenu
+                        .frame(maxWidth: 320)
+
+                    Spacer(minLength: 8)
+
+                    captureRow
+                }
+            }
+        } else {
+            VStack(spacing: 10) {
+                if isShowingTools {
+                    toolStrip(minWidth: width - 32)
+                }
+
+                recipeHeader
+
+                RecipePickerView(
+                    recipes: FilmRecipe.builtIns,
+                    selectedRecipeID: $viewModel.selectedRecipeID,
+                    onOpenDetail: { recipeForDetail = viewModel.recipe(for: $0.id) },
+                    compact: isCompactChrome
+                )
+
+                captureRow
+                    .padding(.top, 2)
+            }
+        }
+    }
+
+    private var recipeHeader: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Eyebrow(text: "RECIPE", color: FilmyTheme.accent)
+
+            Text(viewModel.selectedRecipe.name)
+                .font(.system(.subheadline, design: .rounded).weight(.bold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+
+            if viewModel.isCustomized(viewModel.selectedRecipe) {
+                FilmyTag(text: "EDITED", filled: false)
             }
 
             Spacer(minLength: 8)
 
-            HStack(spacing: 7) {
-                if camera.isRunning || isViewfinderChromePreview {
-                    chromeVisibilityButton
-                }
-
-                CameraStatusPill(
-                    isRunning: camera.isRunning,
-                    availability: camera.availability,
-                    message: camera.statusMessage
-                )
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-            "Filmy Camera. \(viewModel.selectedRecipe.name). \(camera.statusMessage)"
-        )
-    }
-
-    private var compactHeader: some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 6) {
-                    Text("FILMY CAMERA")
-                        .font(.system(size: 14, weight: .bold))
-                        .tracking(0.3)
-                        .foregroundStyle(.white)
-
-                    Text(sessionLabel)
-                        .font(.system(size: 9, weight: .bold))
-                        .tracking(0.4)
-                        .foregroundStyle(camera.isRunning ? FilmyTheme.mint : FilmyTheme.accent)
-                }
-
-                Text(viewModel.selectedRecipe.name)
-                    .font(.system(size: 11, weight: .medium))
+            if !isCompactChrome {
+                Text(viewModel.selectedRecipe.descriptor)
+                    .font(.system(.caption, design: .rounded).weight(.medium))
                     .foregroundStyle(.white.opacity(0.62))
                     .lineLimit(1)
-            }
-            .layoutPriority(1)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 7)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-            .background(Color.black.opacity(0.38), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
-            }
-
-            Spacer(minLength: 4)
-            HStack(spacing: 5) {
-                if camera.isRunning || isViewfinderChromePreview {
-                    chromeVisibilityButton
-                }
-
-                compactStatusPill
+                    .minimumScaleFactor(0.75)
             }
         }
-        // Keep the compact header's individual stock and product labels
-        // discoverable at large Dynamic Type sizes. The parent still exposes
-        // the combined status below, while VoiceOver can reach the selected
-        // look without depending on a specific wrapping shape.
+        .padding(.horizontal, 4)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(
-            "Filmy Camera. \(viewModel.selectedRecipe.name). \(camera.statusMessage)"
-        )
     }
 
-    private var compactStatusPill: some View {
-        HStack(spacing: 5) {
-            Circle()
-                .fill(camera.isRunning ? FilmyTheme.mint : FilmyTheme.accent)
-                .frame(width: 6, height: 6)
+    private var captureRow: some View {
+        HStack(alignment: .center, spacing: 12) {
+            rollButton
 
-            Text(camera.availability == .simulator ? "Preview" : sessionLabel.capitalized)
-                .font(.system(size: 10, weight: .bold, design: .rounded))
-                .foregroundStyle(FilmyTheme.primary)
-                .lineLimit(1)
+            Spacer(minLength: 0)
+
+            captureControl
+
+            Spacer(minLength: 0)
+
+            CameraActionButton(
+                systemName: "slider.horizontal.3",
+                title: "Tune",
+                accessibilityLabel: "Tune \(viewModel.selectedRecipe.name)",
+                action: { recipeForDetail = viewModel.selectedRecipe }
+            )
         }
-        .padding(.horizontal, 9)
-        .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
-        .background(Color.black.opacity(0.42), in: Capsule())
-        .overlay { Capsule().stroke(Color.white.opacity(0.14), lineWidth: 1) }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Camera status")
-        .accessibilityValue(camera.statusMessage)
+        .padding(.horizontal, 6)
     }
 
-    private var cameraUtilityRail: some View {
-        cameraControlRail
+    @ViewBuilder
+    private var captureControl: some View {
+        if isViewfinderChromePreview {
+            CaptureButton(isCapturing: viewModel.isCapturing, isEnabled: false) {}
+        } else if shouldShowCameraEmptyState {
+            captureNotice
+        } else {
+            CaptureButton(isCapturing: viewModel.isCapturing, action: capture)
+        }
     }
 
-    private var landscapeUtilityRail: some View {
-        cameraControlRail
+    private var captureNotice: some View {
+        Label("Capture is available on a physical iPhone", systemImage: "iphone")
+            .font(.system(size: 11, weight: .semibold, design: .rounded))
+            .foregroundStyle(.white.opacity(0.66))
+            .multilineTextAlignment(.center)
+            .lineLimit(2)
+            .minimumScaleFactor(0.78)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, minHeight: FilmyTheme.minimumHitTarget)
+            .accessibilityElement(children: .combine)
     }
 
-    private var cameraControlRail: some View {
+    private var rollButton: some View {
+        Button(action: onOpenGallery) {
+            VStack(spacing: 6) {
+                RollThumbnail(asset: photoLibrary.galleryAssets.first, photoLibrary: photoLibrary)
+                    .frame(width: 54, height: 54)
+
+                Text("Roll")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.88))
+            }
+            .frame(minWidth: 64)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.pressable)
+        .accessibilityLabel("Open roll")
+        .accessibilityHint("Shows the frames you have kept")
+    }
+
+    private func toolStrip(minWidth: CGFloat) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 7) {
+            HStack(spacing: 8) {
                 ZoomControl(
                     value: camera.zoomFactor,
                     onAdjust: { direction in
@@ -483,102 +477,87 @@ struct CameraScreen: View {
                     }
                 }
 
-                if camera.flashAvailability != .unsupported || hasHardwareSelection {
+                if hasHardwareSelection {
                     Rectangle()
-                        .fill(Color.white.opacity(0.16))
+                        .fill(Color.white.opacity(0.18))
                         .frame(width: 1, height: 22)
                         .accessibilityHidden(true)
-                }
 
-                if camera.flashAvailability != .unsupported || hasHardwareSelection {
-                    Button {
-                        isShowingFullCameraChrome = true
-                        isShowingCameraControls = true
-                    } label: {
-                        Label("More", systemImage: "ellipsis")
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
-                            .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
-                            .background(Color.black.opacity(0.46), in: Capsule())
-                            .overlay { Capsule().stroke(Color.white.opacity(0.16), lineWidth: 1) }
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("more-camera-controls")
-                    .accessibilityLabel("More camera controls")
-                    .accessibilityHint("Opens flash, camera, and lens controls")
+                    CameraHardwareControls(camera: camera)
                 }
             }
-            .padding(.horizontal, 7)
-            .padding(.vertical, 5)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 4)
+            .frame(minWidth: max(minWidth, 0))
         }
-        .frame(maxWidth: .infinity)
-        .scrollIndicators(.hidden)
-        .background(Color.black.opacity(0.24), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.white.opacity(0.12), lineWidth: 1)
-        }
+        .scrollClipDisabled()
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("camera-utility-rail")
         .accessibilityHint("Swipe horizontally for additional camera controls")
+        .transition(.move(edge: .bottom).combined(with: .opacity))
     }
+
+    private var recipeMenu: some View {
+        Menu {
+            Section("Recipe") {
+                ForEach(FilmRecipe.builtIns) { recipe in
+                    Button {
+                        viewModel.select(recipe: recipe)
+                    } label: {
+                        if recipe.id == viewModel.selectedRecipeID {
+                            Label(recipe.name, systemImage: "checkmark")
+                        } else {
+                            Text(recipe.name)
+                        }
+                    }
+                }
+            }
+
+            Divider()
+
+            Button("Tune \(viewModel.selectedRecipe.name)") {
+                recipeForDetail = viewModel.selectedRecipe
+            }
+        } label: {
+            HStack(spacing: 10) {
+                RecipeSwatch(
+                    recipe: viewModel.selectedRecipe,
+                    isSelected: true,
+                    compact: true,
+                    showsLabel: false
+                )
+                .frame(width: 46, height: 32)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Eyebrow(text: "RECIPE", color: FilmyTheme.accent)
+
+                    Text(viewModel.selectedRecipe.name)
+                        .font(.system(.subheadline, design: .rounded).weight(.bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
+
+                Spacer(minLength: 4)
+
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+            .viewfinderChrome(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("recipe-menu")
+        .accessibilityLabel("Choose film recipe")
+        .accessibilityValue(viewModel.selectedRecipe.name)
+    }
+
+    // MARK: - State
 
     private var shouldShowCameraEmptyState: Bool {
         !camera.isRunning
-    }
-
-    private var shouldUseViewfinderFirstChrome: Bool {
-        (camera.isRunning || isViewfinderChromePreview)
-            && !dynamicTypeSize.isAccessibilitySize
-            && !isShowingFullCameraChrome
-    }
-
-    private var chromeVisibilityButton: some View {
-        Button {
-            withAnimation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.82)) {
-                isShowingFullCameraChrome.toggle()
-            }
-        } label: {
-            Image(systemName: isShowingFullCameraChrome ? "viewfinder" : "slider.horizontal.3")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
-                .background(Color.black.opacity(0.42), in: Circle())
-                .overlay { Circle().stroke(Color.white.opacity(0.14), lineWidth: 1) }
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("camera-chrome-toggle")
-        .accessibilityLabel(
-            isShowingFullCameraChrome ? "Hide camera controls" : "Show camera controls"
-        )
-        .accessibilityHint(
-            isShowingFullCameraChrome
-                ? "Return to the viewfinder-first camera layout"
-                : "Reveal recipe, exposure, zoom, and camera controls"
-        )
-    }
-
-    private var sessionLabel: String {
-        switch camera.availability {
-        case .running:
-            return "LIVE"
-        case .simulator:
-            return "PREVIEW"
-        case .permissionDenied:
-            return "ACCESS OFF"
-        case .requestingPermission:
-            return "ACCESS NEEDED"
-        case .paused:
-            return "PAUSED"
-        case .interrupted, .needsRecovery, .unavailable, .idle, .starting:
-            return "STARTING"
-        }
-    }
-
-    private var isUITesting: Bool {
-        ProcessInfo.processInfo.arguments.contains("-ui-testing")
     }
 
     private var isViewfinderChromePreview: Bool {
@@ -587,89 +566,6 @@ struct CameraScreen: View {
 
     private var hasHardwareSelection: Bool {
         camera.availableCameraPositions.count > 1 || camera.availableLenses.count > 1
-    }
-
-    @ViewBuilder
-    private var hardwareSelectionControls: some View {
-        VStack(spacing: 6) {
-            if camera.availableCameraPositions.count > 1 {
-                HStack(spacing: 2) {
-                    ForEach(camera.availableCameraPositions, id: \.self) { position in
-                        Button {
-                            camera.setCameraPosition(position)
-                        } label: {
-                            Label(position.title, systemImage: position.systemImageName)
-                                .font(.system(size: 11, weight: .bold, design: .rounded))
-                                .foregroundStyle(
-                                    camera.cameraPosition == position
-                                        ? FilmyTheme.background
-                                        : FilmyTheme.primary
-                                )
-                                .frame(minWidth: 64, minHeight: FilmyTheme.minimumHitTarget)
-                                .background(
-                                    camera.cameraPosition == position
-                                        ? FilmyTheme.accent
-                                        : Color.black.opacity(0.46),
-                                    in: Capsule()
-                                )
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("camera-position-\(position.rawValue)")
-                        .accessibilityLabel("Use \(position.title.lowercased()) camera")
-                        .accessibilityValue(camera.cameraPosition == position ? "Selected" : "")
-                        .accessibilityHint("Switches the active camera without changing your film recipe")
-                    }
-                }
-                .padding(2)
-                .background(Color.black.opacity(0.34), in: Capsule())
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("camera-position-picker")
-            }
-
-            if camera.availableLenses.count > 1 {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(camera.availableLenses) { lens in
-                            Button {
-                                camera.setLens(id: lens.id)
-                            } label: {
-                                VStack(spacing: 2) {
-                                    Text(lens.title)
-                                        .font(.system(size: 12, weight: .bold, design: .rounded))
-                                    Text(lens.detail)
-                                        .font(.system(size: 9, weight: .medium, design: .rounded))
-                                        .lineLimit(1)
-                                }
-                                .foregroundStyle(
-                                    camera.selectedLensID == lens.id
-                                        ? FilmyTheme.background
-                                        : FilmyTheme.primary
-                                )
-                                .frame(minWidth: 62, minHeight: FilmyTheme.minimumHitTarget)
-                                .background(
-                                    camera.selectedLensID == lens.id
-                                        ? FilmyTheme.accent
-                                        : Color.black.opacity(0.46),
-                                    in: Capsule()
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("camera-lens-\(lens.id)")
-                            .accessibilityLabel("Use \(lens.title) lens")
-                            .accessibilityValue(
-                                camera.selectedLensID == lens.id
-                                    ? "Selected, \(lens.detail)"
-                                    : lens.detail
-                            )
-                            .accessibilityHint("Selects the hardware lens and updates zoom")
-                        }
-                    }
-                    .padding(.horizontal, 2)
-                }
-                .frame(maxWidth: 220)
-                .accessibilityIdentifier("camera-lens-picker")
-            }
-        }
     }
 
     private var reviewPresentation: Binding<Bool> {
@@ -682,79 +578,6 @@ struct CameraScreen: View {
                 }
             }
         )
-    }
-
-    private var cameraControlsSheet: some View {
-        NavigationStack {
-            ZStack {
-                FilmyTheme.background.ignoresSafeArea()
-
-                ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 18) {
-                        SectionHeading(
-                            eyebrow: "Camera controls",
-                            title: "More ways to frame",
-                            trailing: camera.cameraPosition.title
-                        )
-
-                        Text("Keep the viewfinder quiet. The controls you reach for less often live here.")
-                            .font(FilmyTheme.bodyFont)
-                            .foregroundStyle(FilmyTheme.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        GlassCard(padding: 15) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("LIGHT")
-                                    .font(.system(.caption2, design: .rounded).weight(.black))
-                                    .tracking(1.2)
-                                    .foregroundStyle(FilmyTheme.tertiary)
-
-                                if camera.flashAvailability != .unsupported {
-                                    FlashControl(
-                                        mode: camera.flashMode,
-                                        availability: camera.flashAvailability,
-                                        action: camera.cycleFlashMode
-                                    )
-                                } else {
-                                    Text("Flash is not available on this camera")
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(FilmyTheme.secondary)
-                                        .frame(minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
-                                }
-                            }
-                        }
-
-                        if hasHardwareSelection {
-                            GlassCard(padding: 15) {
-                                VStack(alignment: .leading, spacing: 12) {
-                                    Text("HARDWARE")
-                                        .font(.system(.caption2, design: .rounded).weight(.black))
-                                        .tracking(1.2)
-                                        .foregroundStyle(FilmyTheme.tertiary)
-
-                                    hardwareSelectionControls
-                                }
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 18)
-                    .padding(.top, 18)
-                    .padding(.bottom, 26)
-                }
-            }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        isShowingCameraControls = false
-                    }
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(FilmyTheme.accent)
-                }
-            }
-            .toolbarBackground(FilmyTheme.background, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-        }
-        .preferredColorScheme(.dark)
     }
 
     @ViewBuilder
@@ -803,6 +626,15 @@ struct CameraScreen: View {
                 message: "Starting the camera…"
             )
         }
+    }
+
+    // MARK: - Actions
+
+    private func capture() {
+        if hapticsEnabled {
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        }
+        viewModel.capture(camera: camera)
     }
 
     private func updateCameraActivity() {
@@ -873,540 +705,63 @@ struct CameraScreen: View {
         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
         UIApplication.shared.open(url)
     }
-
-    private var controls: some View {
-        VStack(spacing: 14) {
-            recipeHeader
-
-            RecipePickerView(
-                recipes: FilmRecipe.builtIns,
-                selectedRecipeID: $viewModel.selectedRecipeID,
-                onOpenDetail: { recipeForDetail = viewModel.recipe(for: $0.id) }
-            )
-            // The rail cards are 86pt tall with 5pt vertical scroll padding;
-            // reserve the full footprint so labels stay clear of the action plate.
-            .frame(minHeight: 96)
-
-            HStack(alignment: .center, spacing: 16) {
-                CameraActionButton(
-                    systemName: "square.grid.2x2",
-                    title: "Roll",
-                    accessibilityLabel: "Open roll",
-                    action: onOpenGallery
-                )
-
-                Spacer(minLength: 0)
-
-                CaptureButton(isCapturing: viewModel.isCapturing) {
-                    if hapticsEnabled {
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                    }
-                    viewModel.capture(camera: camera)
-                }
-
-                Spacer(minLength: 0)
-
-                CameraActionButton(
-                    systemName: "slider.horizontal.3",
-                    title: "Tune",
-                    accessibilityLabel: "Tune \(viewModel.selectedRecipe.name)",
-                    action: { recipeForDetail = viewModel.selectedRecipe }
-                )
-            }
-            .padding(.horizontal, 2)
-        }
-        .padding(.horizontal, 14)
-        .padding(.top, 15)
-        .padding(.bottom, 12)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: FilmyTheme.actionPlateRadius, style: .continuous))
-        .background(FilmyTheme.plateGradient, in: RoundedRectangle(cornerRadius: FilmyTheme.actionPlateRadius, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: FilmyTheme.actionPlateRadius, style: .continuous)
-                .stroke(Color.white.opacity(0.12), lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.28), radius: 12, y: 5)
-    }
-
-    private var landscapeBottomControls: some View {
-        Group {
-            if shouldShowCameraEmptyState {
-                HStack(spacing: 10) {
-                    CameraActionButton(
-                        systemName: "square.grid.2x2",
-                        title: "Roll",
-                        accessibilityLabel: "Open roll",
-                        action: onOpenGallery
-                    )
-
-                    landscapeRecipeMenu
-
-                    CameraActionButton(
-                        systemName: "slider.horizontal.3",
-                        title: "Tune",
-                        accessibilityLabel: "Tune " + viewModel.selectedRecipe.name,
-                        action: { recipeForDetail = viewModel.selectedRecipe }
-                    )
-                }
-            } else {
-                HStack(spacing: 10) {
-                    CameraActionButton(
-                        systemName: "square.grid.2x2",
-                        title: "Roll",
-                        accessibilityLabel: "Open roll",
-                        action: onOpenGallery
-                    )
-
-                    landscapeRecipeMenu
-
-                    CaptureButton(isCapturing: viewModel.isCapturing) {
-                        if hapticsEnabled {
-                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                        }
-                        viewModel.capture(camera: camera)
-                    }
-
-                    CameraActionButton(
-                        systemName: "slider.horizontal.3",
-                        title: "Tune",
-                        accessibilityLabel: "Tune " + viewModel.selectedRecipe.name,
-                        action: { recipeForDetail = viewModel.selectedRecipe }
-                    )
-                }
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .background(FilmyTheme.plateGradient, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.white.opacity(0.12), lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.24), radius: 10, y: 4)
-    }
-
-    private var landscapeRecipeMenu: some View {
-        Menu {
-            ForEach(FilmRecipe.builtIns) { recipe in
-                Button {
-                    viewModel.select(recipe: recipe)
-                } label: {
-                    if recipe.id == viewModel.selectedRecipeID {
-                        Label(recipe.name, systemImage: "checkmark")
-                    } else {
-                        Text(recipe.name)
-                    }
-                }
-            }
-        } label: {
-            HStack(spacing: 7) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("LOOK")
-                        .font(.system(size: 9, weight: .black, design: .rounded))
-                        .tracking(1.1)
-                        .foregroundStyle(FilmyTheme.accent)
-                    Text(viewModel.selectedRecipe.name)
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.72)
-                }
-
-                Spacer(minLength: 4)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.white.opacity(0.7))
-            }
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .padding(.horizontal, 12)
-            .background(Color.black.opacity(0.38), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.white.opacity(0.14), lineWidth: 1)
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("landscape-recipe-picker")
-        .accessibilityLabel("Choose film recipe")
-        .accessibilityValue(viewModel.selectedRecipe.name)
-        .layoutPriority(1)
-    }
-
-    private var recipeHeader: some View {
-        HStack(alignment: dynamicTypeSize.isAccessibilitySize ? .top : .center, spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(FilmyTheme.accent.opacity(0.13))
-                Circle()
-                    .stroke(FilmyTheme.accent.opacity(0.38), lineWidth: 1)
-                    .padding(4)
-                Image(systemName: "film.stack")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(FilmyTheme.accent)
-            }
-            .frame(width: 34, height: 34)
-
-            VStack(alignment: .leading, spacing: dynamicTypeSize.isAccessibilitySize ? 7 : 3) {
-                Text("FILM STOCK")
-                    .font(.system(size: 10, weight: .black, design: .rounded))
-                    .tracking(1.5)
-                    .foregroundStyle(FilmyTheme.accent)
-
-                HStack(alignment: .firstTextBaseline, spacing: 7) {
-                    Text(viewModel.selectedRecipe.name)
-                        .font(.system(.title3, design: .rounded).weight(.bold))
-                        .foregroundStyle(.white)
-                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .layoutPriority(1)
-
-                    if viewModel.isCustomized(viewModel.selectedRecipe) {
-                        Text("CUSTOM")
-                            .font(.system(size: 8, weight: .black, design: .rounded))
-                            .tracking(0.7)
-                            .foregroundStyle(FilmyTheme.background)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 4)
-                        .background(FilmyTheme.accent, in: Capsule())
-                    }
-                }
-                if dynamicTypeSize.isAccessibilitySize {
-                    Text(viewModel.selectedRecipe.base.uppercased())
-                        .font(.system(.caption, design: .rounded).weight(.bold))
-                        .tracking(1)
-                        .foregroundStyle(.white.opacity(0.58))
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Text(viewModel.selectedRecipe.descriptor.uppercased())
-                        .font(.system(.caption2, design: .rounded).weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.46))
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .layoutPriority(1)
-
-            if !dynamicTypeSize.isAccessibilitySize {
-                Spacer(minLength: 8)
-
-                VStack(alignment: .trailing, spacing: 3) {
-                    Text(viewModel.selectedRecipe.base.uppercased())
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
-                        .tracking(1)
-                        .foregroundStyle(.white.opacity(0.54))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-
-                    Text(viewModel.selectedRecipe.descriptor.uppercased())
-                        .font(.system(size: 9, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.42))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.68)
-                }
-            }
-        }
-    }
-
-    private var offlineControls: some View {
-        VStack(spacing: 12) {
-            recipeHeader
-
-            RecipePickerView(
-                recipes: FilmRecipe.builtIns,
-                selectedRecipeID: $viewModel.selectedRecipeID,
-                onOpenDetail: { recipeForDetail = viewModel.recipe(for: $0.id) }
-            )
-
-            if dynamicTypeSize.isAccessibilitySize {
-                VStack(spacing: 10) {
-                    HStack(spacing: 10) {
-                        CameraActionButton(
-                            systemName: "square.grid.2x2",
-                            title: "Roll",
-                            accessibilityLabel: "Open roll",
-                            action: onOpenGallery
-                        )
-                        .frame(maxWidth: .infinity)
-
-                        CameraActionButton(
-                            systemName: "slider.horizontal.3",
-                            title: "Tune",
-                            accessibilityLabel: "Tune \(viewModel.selectedRecipe.name)",
-                            action: { recipeForDetail = viewModel.selectedRecipe }
-                        )
-                        .frame(maxWidth: .infinity)
-                    }
-
-                    Label("Capture is available on a physical iPhone", systemImage: "iphone")
-                        .font(.system(.caption, design: .rounded).weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.62))
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity)
-                        .accessibilityElement(children: .combine)
-                }
-            } else {
-                HStack(alignment: .center, spacing: 12) {
-                    CameraActionButton(
-                        systemName: "square.grid.2x2",
-                        title: "Roll",
-                        accessibilityLabel: "Open roll",
-                        action: onOpenGallery
-                    )
-                    .fixedSize(horizontal: true, vertical: false)
-
-                    HStack(spacing: 8) {
-                        Image(systemName: "iphone")
-                            .font(.system(size: 15, weight: .semibold))
-                            .accessibilityHidden(true)
-
-                        Text("Capture on iPhone")
-                            .font(.system(.caption, design: .rounded).weight(.semibold))
-                            .foregroundStyle(.white.opacity(0.58))
-                            .lineLimit(2)
-                            .minimumScaleFactor(0.72)
-                            .allowsTightening(true)
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .frame(maxWidth: .infinity, minHeight: FilmyTheme.minimumHitTarget)
-                    .layoutPriority(1)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Capture is available on a physical iPhone")
-
-                    CameraActionButton(
-                        systemName: "slider.horizontal.3",
-                        title: "Tune",
-                        accessibilityLabel: "Tune \(viewModel.selectedRecipe.name)",
-                        action: { recipeForDetail = viewModel.selectedRecipe }
-                    )
-                    .fixedSize(horizontal: true, vertical: false)
-                }
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.top, 14)
-        .padding(.bottom, 12)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.white.opacity(0.12), lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.22), radius: 10, y: 4)
-        // The camera chrome is a constrained overlay rather than a scrolling
-        // document. Cap its visual scale one step below the largest Dynamic
-        // Type sizes so every capture, Roll, and Tune action remains reachable.
-        .dynamicTypeSize(.large ... .accessibility1)
-    }
-
-    private var compactActionPlate: some View {
-        VStack(spacing: 9) {
-            HStack(spacing: 8) {
-                Text("FILM STOCK")
-                    .font(.system(size: 10, weight: .black, design: .rounded))
-                    .tracking(1.3)
-                    .foregroundStyle(FilmyTheme.accent)
-
-                Text(viewModel.selectedRecipe.name)
-                    .font(.system(size: 17, weight: .bold, design: .rounded))
-                    .foregroundStyle(FilmyTheme.primary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.76)
-
-                Spacer(minLength: 4)
-            }
-
-            RecipePickerView(
-                recipes: FilmRecipe.builtIns,
-                selectedRecipeID: $viewModel.selectedRecipeID,
-                onOpenDetail: { recipeForDetail = viewModel.recipe(for: $0.id) },
-                compact: true
-            )
-
-            if shouldShowCameraEmptyState {
-                HStack(spacing: 10) {
-                    CameraActionButton(
-                        systemName: "square.grid.2x2",
-                        title: "Roll",
-                        accessibilityLabel: "Open roll",
-                        action: onOpenGallery
-                    )
-
-                    compactCaptureNotice
-                        .frame(maxWidth: .infinity)
-
-                    CameraActionButton(
-                        systemName: "slider.horizontal.3",
-                        title: "Tune",
-                        accessibilityLabel: "Tune \(viewModel.selectedRecipe.name)",
-                        action: { recipeForDetail = viewModel.selectedRecipe }
-                    )
-                }
-            } else {
-                HStack(spacing: 10) {
-                    CameraActionButton(
-                        systemName: "square.grid.2x2",
-                        title: "Roll",
-                        accessibilityLabel: "Open roll",
-                        action: onOpenGallery
-                    )
-
-                    Spacer(minLength: 0)
-
-                    CaptureButton(isCapturing: viewModel.isCapturing) {
-                        if hapticsEnabled {
-                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                        }
-                        viewModel.capture(camera: camera)
-                    }
-
-                    Spacer(minLength: 0)
-
-                    CameraActionButton(
-                        systemName: "slider.horizontal.3",
-                        title: "Tune",
-                        accessibilityLabel: "Tune \(viewModel.selectedRecipe.name)",
-                        action: { recipeForDetail = viewModel.selectedRecipe }
-                    )
-                }
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.top, 11)
-        .padding(.bottom, 10)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .background(FilmyTheme.plateGradient, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.white.opacity(0.12), lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.24), radius: 10, y: 4)
-    }
-
-    private var viewfinderFirstActionPlate: some View {
-        HStack(spacing: 8) {
-            CameraActionButton(
-                systemName: "square.grid.2x2",
-                title: "Roll",
-                accessibilityLabel: "Open roll",
-                action: onOpenGallery
-            )
-
-            CaptureButton(
-                isCapturing: viewModel.isCapturing,
-                isEnabled: !isViewfinderChromePreview
-            ) {
-                if hapticsEnabled {
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                }
-                viewModel.capture(camera: camera)
-            }
-
-            minimalRecipeMenu
-                .frame(minWidth: 0, maxWidth: .infinity)
-        }
-        .padding(.horizontal, 4)
-        .padding(.vertical, 4)
-    }
-
-    private var minimalRecipeMenu: some View {
-        Menu {
-            Section("Film stock") {
-                ForEach(FilmRecipe.builtIns) { recipe in
-                    Button {
-                        viewModel.select(recipe: recipe)
-                    } label: {
-                        if recipe.id == viewModel.selectedRecipeID {
-                            Label(recipe.name, systemImage: "checkmark")
-                        } else {
-                            Text(recipe.name)
-                        }
-                    }
-                }
-            }
-
-            Divider()
-
-            Button("Tune \\(viewModel.selectedRecipe.name)") {
-                recipeForDetail = viewModel.selectedRecipe
-            }
-        } label: {
-            HStack(spacing: 6) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("CURRENT LOOK")
-                        .font(.system(size: 9, weight: .bold))
-                        .tracking(0.8)
-                        .foregroundStyle(FilmyTheme.accent)
-
-                    Text(viewModel.selectedRecipe.name)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.72)
-                }
-
-                Spacer(minLength: 2)
-
-                Image(systemName: "chevron.up")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.68))
-            }
-            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
-            .padding(.horizontal, 10)
-            .background(Color.black.opacity(0.56), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.white.opacity(0.12), lineWidth: 1)
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("minimal-recipe-picker")
-        .accessibilityLabel("Choose film recipe")
-        .accessibilityValue(viewModel.selectedRecipe.name)
-    }
-
-    private var compactCaptureNotice: some View {
-        Label("Capture is available on a physical iPhone", systemImage: "iphone")
-            .font(.system(size: 11, weight: .semibold, design: .rounded))
-            .foregroundStyle(.white.opacity(0.62))
-            .multilineTextAlignment(.center)
-            .lineLimit(2)
-            .minimumScaleFactor(0.78)
-            .fixedSize(horizontal: false, vertical: true)
-            .accessibilityElement(children: .combine)
-    }
 }
 
-private struct ViewfinderFrame: View {
+/// The most recent kept frame, shown inside the Roll button the way a camera
+/// shows its last exposure. Falls back to a grid glyph until a frame exists
+/// or while Photos access is unavailable.
+private struct RollThumbnail: View {
+    let asset: PhotoLibraryGalleryAsset?
+    @ObservedObject var photoLibrary: PhotoLibraryService
+
+    @State private var image: UIImage?
+
+    private var requestKey: PhotoLibraryImageRequestKey? {
+        guard let asset else { return nil }
+        return PhotoLibraryGalleryImagePolicy.requestKey(
+            assetIdentifier: asset.assetIdentifier,
+            isPhotosAsset: asset.isPhotosAsset,
+            authorizationStatus: photoLibrary.authorizationStatus
+        )
+    }
+
     var body: some View {
-        GeometryReader { proxy in
-            let inset: CGFloat = 22
-            let length: CGFloat = 22
-            let width = proxy.size.width
-            let height = proxy.size.height
+        ZStack {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                ChromeShapeBackground(shape: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
-            Path { path in
-                path.move(to: CGPoint(x: inset, y: inset + length))
-                path.addLine(to: CGPoint(x: inset, y: inset))
-                path.addLine(to: CGPoint(x: inset + length, y: inset))
-
-                path.move(to: CGPoint(x: width - inset - length, y: inset))
-                path.addLine(to: CGPoint(x: width - inset, y: inset))
-                path.addLine(to: CGPoint(x: width - inset, y: inset + length))
-
-                path.move(to: CGPoint(x: inset, y: height - inset - length))
-                path.addLine(to: CGPoint(x: inset, y: height - inset))
-                path.addLine(to: CGPoint(x: inset + length, y: height - inset))
-
-                path.move(to: CGPoint(x: width - inset - length, y: height - inset))
-                path.addLine(to: CGPoint(x: width - inset, y: height - inset))
-                path.addLine(to: CGPoint(x: width - inset, y: height - inset - length))
+                Image(systemName: "square.grid.3x3")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
             }
-            .stroke(Color.white.opacity(0.22), style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round))
         }
-        .allowsHitTesting(false)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.white.opacity(image == nil ? 0 : 0.55), lineWidth: 1.5)
+        }
         .accessibilityHidden(true)
+        .task(id: requestKey) {
+            image = nil
+            guard let asset,
+                  PhotoLibraryGalleryImagePolicy.canLoad(
+                      isPhotosAsset: asset.isPhotosAsset,
+                      authorizationStatus: photoLibrary.authorizationStatus
+                  ) else {
+                return
+            }
+
+            let loadedImage = await photoLibrary.image(
+                for: asset,
+                targetSize: CGSize(width: 180, height: 180)
+            )
+            guard !Task.isCancelled else { return }
+            image = loadedImage
+        }
     }
 }
 
@@ -1428,15 +783,14 @@ private struct CameraHardwareControls: View {
                     Button {
                         camera.toggleCameraPosition()
                     } label: {
-                        Label(camera.cameraPosition.title, systemImage: camera.cameraPosition.systemImageName)
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                        Label(camera.cameraPosition.title, systemImage: "arrow.triangle.2.circlepath.camera")
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
-                            .padding(.horizontal, 10)
+                            .padding(.horizontal, 12)
                             .frame(minHeight: FilmyTheme.minimumHitTarget)
-                            .background(Color.black.opacity(0.46), in: Capsule())
-                            .overlay { Capsule().stroke(Color.white.opacity(0.16), lineWidth: 1) }
+                            .viewfinderCapsule()
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pressable)
                     .accessibilityIdentifier("camera-switch-control")
                     .accessibilityLabel("Switch camera")
                     .accessibilityValue(camera.cameraPosition.title)
@@ -1458,12 +812,11 @@ private struct CameraHardwareControls: View {
                         }
                     } label: {
                         Label(selectedLensTitle, systemImage: "camera.aperture")
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
-                            .padding(.horizontal, 10)
+                            .padding(.horizontal, 12)
                             .frame(minHeight: FilmyTheme.minimumHitTarget)
-                            .background(Color.black.opacity(0.46), in: Capsule())
-                            .overlay { Capsule().stroke(Color.white.opacity(0.16), lineWidth: 1) }
+                            .viewfinderCapsule()
                     }
                     .accessibilityIdentifier("lens-menu-control")
                     .accessibilityLabel("Choose lens")

@@ -1,6 +1,8 @@
 import Foundation
 import SwiftUI
 
+/// The film-strip rail. Each tile is a renderer-backed swatch with the recipe
+/// name beneath it, so choosing a recipe reads like choosing a film stock.
 struct RecipePickerView: View {
     let recipes: [FilmRecipe]
     @Binding var selectedRecipeID: String
@@ -21,199 +23,106 @@ struct RecipePickerView: View {
         self.compact = compact
     }
 
-    private var recipeTileSize: CGSize {
-        if compact {
-            return CGSize(width: 120, height: 76)
-        }
-
-        return dynamicTypeSize.isAccessibilitySize
-            ? CGSize(width: 160, height: 120)
-            : CGSize(width: 142, height: 86)
+    private var swatchSize: CGSize {
+        compact ? CGSize(width: 108, height: 64) : CGSize(width: 98, height: 64)
     }
 
     private var tileSpacing: CGFloat {
         compact ? 10 : 12
     }
 
+    /// Compact tiles keep the name inside the swatch; standard tiles add a
+    /// caption beneath. Both stay well under the camera chrome's budget.
     private var railHeight: CGFloat {
-        recipeTileSize.height + 10
-    }
-
-    private var selectedRecipe: FilmRecipe? {
-        recipes.first { $0.id == selectedRecipeID }
+        compact ? swatchSize.height + 12 : swatchSize.height + 36
     }
 
     var body: some View {
         ScrollViewReader { proxy in
-            VStack(alignment: .leading, spacing: compact ? 0 : 8) {
-                if !compact {
-                    pickerHeader
-                }
-
-                ZStack {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        LazyHStack(spacing: tileSpacing) {
-                            ForEach(recipes) { recipe in
-                                Button {
-                                    withAnimation(reduceMotion ? nil : .snappy(duration: 0.22)) {
-                                        selectedRecipeID = recipe.id
-                                    }
-                                } label: {
-                                    recipeTile(recipe)
-                                }
-                                .id(recipe.id)
-                                .buttonStyle(.plain)
-                                .accessibilityLabel("\(recipe.name), \(recipe.descriptor)")
-                                .accessibilityValue(selectedRecipeID == recipe.id ? "Selected" : "Not selected")
-                                .accessibilityHint("Double tap to select this look. Use the View recipe details action for more information.")
-                                .accessibilityAction(named: "View recipe details") {
-                                    onOpenDetail(recipe)
-                                }
-                                .accessibilityAddTraits(selectedRecipeID == recipe.id ? .isSelected : [])
-                                .contextMenu {
-                                    Button {
-                                        onOpenDetail(recipe)
-                                    } label: {
-                                        Label("View recipe details", systemImage: "info.circle")
-                                    }
-                                }
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: tileSpacing) {
+                    ForEach(recipes) { recipe in
+                        Button {
+                            withAnimation(reduceMotion ? nil : .snappy(duration: 0.22)) {
+                                selectedRecipeID = recipe.id
                             }
+                        } label: {
+                            recipeTile(recipe)
                         }
-                        .scrollTargetLayout()
-                        .padding(.horizontal, 3)
-                        .padding(.vertical, 5)
-                    }
-                    .scrollClipDisabled()
-                    .scrollTargetBehavior(.viewAligned)
-                    .contentMargins(.horizontal, 3, for: .scrollContent)
-                    .onAppear {
-                        proxy.scrollTo(selectedRecipeID, anchor: .center)
-                    }
-                    .onChange(of: selectedRecipeID) { _, newValue in
-                        if reduceMotion {
-                            proxy.scrollTo(newValue, anchor: .center)
-                        } else {
-                            withAnimation(.snappy(duration: 0.24)) {
-                                proxy.scrollTo(newValue, anchor: .center)
+                        .id(recipe.id)
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("\(recipe.name), \(recipe.descriptor)")
+                        .accessibilityValue(selectedRecipeID == recipe.id ? "Selected" : "Not selected")
+                        .accessibilityHint("Double tap to select this look. Use the View recipe details action for more information.")
+                        .accessibilityAction(named: "View recipe details") {
+                            onOpenDetail(recipe)
+                        }
+                        .accessibilityAddTraits(selectedRecipeID == recipe.id ? .isSelected : [])
+                        .contextMenu {
+                            Button {
+                                onOpenDetail(recipe)
+                            } label: {
+                                Label("View recipe details", systemImage: "info.circle")
                             }
                         }
                     }
-
-                    HStack {
-                        LinearGradient(
-                            colors: [FilmyTheme.background, .clear],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                        .frame(width: 12)
-
-                        Spacer()
-
-                        LinearGradient(
-                            colors: [.clear, FilmyTheme.background],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                        .frame(width: compact ? 18 : 26)
-                    }
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
                 }
-                .frame(height: railHeight)
-                .accessibilityIdentifier("recipe-rail")
+                .scrollTargetLayout()
+                .padding(.horizontal, 4)
+                .padding(.vertical, 6)
             }
-            .fixedSize(horizontal: false, vertical: true)
+            .scrollClipDisabled()
+            .scrollTargetBehavior(.viewAligned)
+            .contentMargins(.horizontal, 4, for: .scrollContent)
+            .frame(height: railHeight)
+            .onAppear {
+                proxy.scrollTo(selectedRecipeID, anchor: .center)
+            }
+            .onChange(of: selectedRecipeID) { _, newValue in
+                if reduceMotion {
+                    proxy.scrollTo(newValue, anchor: .center)
+                } else {
+                    withAnimation(.snappy(duration: 0.24)) {
+                        proxy.scrollTo(newValue, anchor: .center)
+                    }
+                }
+            }
+            .accessibilityIdentifier("recipe-rail")
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("recipe-picker")
         .accessibilityLabel("Film recipe picker. Swipe left or right to browse looks.")
     }
 
-    private var pickerHeader: some View {
-        Group {
-            if dynamicTypeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("BROWSE LOOKS")
-                        .font(.system(.caption2, design: .monospaced).weight(.bold))
-                        .tracking(1.2)
-                        .foregroundStyle(FilmyTheme.tertiary)
-
-                    if let selectedRecipe {
-                        Text(selectedRecipe.name)
-                            .font(.system(.caption, design: .rounded).weight(.semibold))
-                            .foregroundStyle(FilmyTheme.primary)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            } else {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text("BROWSE LOOKS")
-                        .font(.system(.caption2, design: .monospaced).weight(.bold))
-                        .tracking(1.2)
-                        .foregroundStyle(FilmyTheme.tertiary)
-
-                    if let selectedRecipe {
-                        Text(selectedRecipe.name)
-                            .font(.system(.caption, design: .rounded).weight(.semibold))
-                            .foregroundStyle(FilmyTheme.primary)
-                            .lineLimit(1)
-                    }
-
-                    Spacer(minLength: 8)
-
-                    if recipes.count > 1 {
-                        Label("Swipe", systemImage: "arrow.left.and.right")
-                            .font(.system(.caption2, design: .rounded).weight(.semibold))
-                            .foregroundStyle(FilmyTheme.tertiary)
-                            .accessibilityHidden(true)
-                    }
-                }
-            }
-        }
-        .padding(.horizontal, 3)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Browse looks")
-        .accessibilityValue(selectedRecipe?.name ?? "None selected")
-    }
-
-    @ViewBuilder
     private func recipeTile(_ recipe: FilmRecipe) -> some View {
         let isSelected = selectedRecipeID == recipe.id
-        let cornerRadius: CGFloat = compact ? 16 : 20
 
-        ZStack(alignment: .topTrailing) {
-            RecipeSwatch(recipe: recipe, isSelected: isSelected, compact: compact)
-                .frame(width: recipeTileSize.width, height: recipeTileSize.height)
+        return VStack(spacing: 7) {
+            RecipeSwatch(
+                recipe: recipe,
+                isSelected: isSelected,
+                compact: compact,
+                showsLabel: compact
+            )
+            .frame(width: swatchSize.width, height: swatchSize.height)
+            .shadow(
+                color: isSelected ? FilmyTheme.accent.opacity(0.38) : Color.black.opacity(0.35),
+                radius: isSelected ? 10 : 6,
+                y: 3
+            )
 
-            if isSelected {
-                HStack(spacing: 4) {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 9, weight: .black))
-                    Text("LIVE")
-                        .font(.system(size: 10, weight: .black, design: .rounded))
-                }
-                .foregroundStyle(FilmyTheme.background)
-                .padding(.horizontal, 8)
-                .frame(minHeight: 26)
-                .background(FilmyTheme.accent, in: Capsule())
-                .padding(7)
-                .transition(.scale.combined(with: .opacity))
-                .accessibilityHidden(true)
+            if !compact {
+                Text(recipe.name)
+                    .font(.system(size: 12, weight: isSelected ? .bold : .semibold, design: .rounded))
+                    .foregroundStyle(isSelected ? FilmyTheme.accent : Color.white.opacity(0.8))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+                    .frame(width: swatchSize.width + 6)
             }
         }
-        .background(
-            isSelected ? FilmyTheme.accent.opacity(0.14) : Color.white.opacity(0.035),
-            in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .stroke(
-                    isSelected ? FilmyTheme.accent.opacity(0.72) : Color.white.opacity(0.1),
-                    lineWidth: isSelected ? 1.5 : 1
-                )
-        }
-        .scaleEffect(isSelected ? 1 : 0.965)
+        .opacity(isSelected ? 1 : 0.84)
+        .scaleEffect(isSelected ? 1 : 0.94)
+        .contentShape(Rectangle())
         .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: isSelected)
     }
 }
@@ -307,7 +216,7 @@ struct RecipeDetailView: View {
             FilmyTheme.background.ignoresSafeArea()
 
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 22) {
                     hero
                     identity
                     controlSummary
@@ -319,31 +228,6 @@ struct RecipeDetailView: View {
                     if publicReferenceEntry != nil {
                         publicReferenceCard
                     }
-
-                    Button {
-                        commitDraft()
-                        onSelect()
-                        dismiss()
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: primaryActionIcon)
-                            Text(primaryActionTitle)
-                                .lineLimit(2)
-                                .minimumScaleFactor(0.8)
-                                .multilineTextAlignment(.center)
-                        }
-                        .font(.system(.headline, design: .rounded).weight(.bold))
-                        .foregroundStyle(FilmyTheme.background)
-                        .frame(maxWidth: .infinity, minHeight: 56)
-                        .background(FilmyTheme.accent, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(primaryActionAccessibilityLabel)
-                    .accessibilityHint(
-                        hasPendingChanges
-                            ? "Applies pending changes and returns to the camera"
-                            : "Returns to the camera"
-                    )
 
                     HStack(alignment: .top, spacing: 9) {
                         Image(systemName: "camera.aperture")
@@ -359,11 +243,47 @@ struct RecipeDetailView: View {
                     .accessibilityElement(children: .combine)
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 16)
-                .padding(.bottom, 30)
+                .padding(.top, 14)
+                .padding(.bottom, 24)
             }
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            primaryAction
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+                .padding(.bottom, 10)
+                .background(.ultraThinMaterial)
+                .background(FilmyTheme.background.opacity(0.75))
+                .overlay(alignment: .top) {
+                    Rectangle()
+                        .fill(FilmyTheme.line)
+                        .frame(height: 1)
+                }
+        }
         .accessibilityElement(children: .contain)
+    }
+
+    private var primaryAction: some View {
+        Button {
+            commitDraft()
+            onSelect()
+            dismiss()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: primaryActionIcon)
+                Text(primaryActionTitle)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .buttonStyle(.filmyPrimary)
+        .accessibilityLabel(primaryActionAccessibilityLabel)
+        .accessibilityHint(
+            hasPendingChanges
+                ? "Applies pending changes and returns to the camera"
+                : "Returns to the camera"
+        )
     }
 
     private var hasPendingChanges: Bool {
@@ -404,112 +324,103 @@ struct RecipeDetailView: View {
     }
 
     private var hero: some View {
-        ZStack(alignment: .bottomLeading) {
-            RecipeSwatch(recipe: draft, compact: false, showsLabel: false)
-                .frame(maxWidth: .infinity)
-                .frame(height: 232)
-
-            LinearGradient(
-                colors: [.clear, Color.black.opacity(0.56)],
-                startPoint: .center,
-                endPoint: .bottom
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-
-            HStack(alignment: .bottom) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("REFERENCE / \(recipe.filmBase.officialName)")
-                        .font(.system(.caption2, design: .monospaced).weight(.bold))
-                        .tracking(1.1)
-                        .foregroundStyle(.white.opacity(0.78))
-
-                    Text("\(draft.controlSummary.count) controls ready")
-                        .font(.system(.caption, design: .rounded).weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.9))
-                }
-
-                Spacer(minLength: 12)
-
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "camera.aperture")
-                    .font(.system(.title2, weight: .semibold))
-                    .foregroundStyle(isSelected ? FilmyTheme.accent : .white)
-                    .accessibilityHidden(true)
+        RecipeSwatch(recipe: draft, compact: false, showsLabel: false)
+            .frame(maxWidth: .infinity)
+            .frame(height: 236)
+            .overlay {
+                LinearGradient(
+                    colors: [.clear, Color.black.opacity(0.74)],
+                    startPoint: .center,
+                    endPoint: .bottom
+                )
             }
-            .padding(18)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(isSelected ? FilmyTheme.accent.opacity(0.7) : FilmyTheme.line, lineWidth: isSelected ? 1.5 : 1)
-        }
-        .shadow(color: isSelected ? FilmyTheme.accent.opacity(0.18) : .clear, radius: 22, y: 10)
-        .accessibilityHidden(true)
+            .overlay(alignment: .bottomLeading) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Eyebrow(text: recipe.filmBase.officialName.uppercased(), color: FilmyTheme.accent)
+
+                        if isSelected {
+                            FilmyTag(text: "ACTIVE")
+                        }
+
+                        if draft != originalRecipe {
+                            FilmyTag(text: "EDITED", filled: false)
+                        }
+                    }
+
+                    Text(recipe.name)
+                        .font(.system(.largeTitle, design: .rounded).weight(.bold))
+                        .foregroundStyle(.white)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(recipe.descriptor)
+                        .font(.system(.subheadline, design: .rounded).weight(.medium))
+                        .foregroundStyle(.white.opacity(0.82))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(18)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .strokeBorder(
+                        isSelected ? FilmyTheme.accent.opacity(0.6) : FilmyTheme.lineStrong,
+                        lineWidth: 1
+                    )
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(recipe.name). \(recipe.descriptor). Reference \(recipe.filmBase.officialName)")
     }
 
     private var identity: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(spacing: 8) {
-                Text(recipe.base.uppercased())
-                    .font(.system(.caption2, design: .rounded).weight(.black))
-                    .tracking(1.5)
-                    .foregroundStyle(FilmyTheme.accent)
-
-                if isSelected {
-                    Text("ACTIVE")
-                        .font(.system(.caption2, design: .rounded).weight(.black))
-                        .tracking(0.8)
-                        .foregroundStyle(FilmyTheme.background)
-                        .padding(.horizontal, 8)
-                        .frame(minHeight: 24)
-                        .background(FilmyTheme.accent, in: Capsule())
-                }
-            }
-
-            Text(recipe.name)
-                .font(.system(.largeTitle, design: .rounded).weight(.bold))
-                .foregroundStyle(FilmyTheme.primary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Text("Camera reference · \(recipe.filmBase.officialName)")
-                .font(.system(.caption, design: .monospaced).weight(.bold))
-                .tracking(0.7)
-                .foregroundStyle(FilmyTheme.accent)
-                .textCase(.uppercase)
-                .fixedSize(horizontal: false, vertical: true)
-
+        VStack(alignment: .leading, spacing: 10) {
             Text(draft.detail)
                 .font(FilmyTheme.bodyFont)
                 .foregroundStyle(FilmyTheme.secondary)
                 .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 6) {
+                Image(systemName: "camera.aperture")
+                    .font(.system(size: 11, weight: .bold))
+                    .accessibilityHidden(true)
+                Text("Camera reference · \(recipe.filmBase.officialName)")
+                    .font(.system(.caption, design: .rounded).weight(.bold))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(FilmyTheme.accent)
         }
     }
 
+    private var summaryColumns: [GridItem] {
+        if dynamicTypeSize.isAccessibilitySize {
+            return [GridItem(.flexible())]
+        }
+        return Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
+    }
+
     private var controlSummary: some View {
-        LazyVGrid(columns: detailGridColumns, spacing: 1) {
+        LazyVGrid(columns: summaryColumns, spacing: 8) {
             ForEach(draft.controlSummary, id: \.0) { control in
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(control.0.uppercased())
-                        .font(.system(.caption2, design: .rounded).weight(.bold))
-                        .tracking(0.8)
-                        .foregroundStyle(FilmyTheme.tertiary)
+                    Eyebrow(text: control.0.uppercased())
 
                     Text(control.1)
                         .font(.system(.subheadline, design: .rounded).weight(.bold))
                         .foregroundStyle(FilmyTheme.primary)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.75)
+                        .minimumScaleFactor(0.72)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .frame(minHeight: 58, alignment: .leading)
-                .padding(.horizontal, 14)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 11)
+                .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(FilmyTheme.line, lineWidth: 1)
+                }
+                .accessibilityElement(children: .combine)
             }
-        }
-        .padding(.vertical, 8)
-        .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 19, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 19, style: .continuous)
-                .stroke(FilmyTheme.line, lineWidth: 1)
         }
     }
 
@@ -548,10 +459,7 @@ struct RecipeDetailView: View {
         VStack(alignment: .leading, spacing: 13) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("PUBLIC REFERENCE")
-                        .font(.system(.caption2, design: .rounded).weight(.black))
-                        .tracking(1.2)
-                        .foregroundStyle(FilmyTheme.accent)
+                    Eyebrow(text: "PUBLIC REFERENCE", color: FilmyTheme.accent)
 
                     Text("\(publicReferenceEntry?.canonicalPublicName ?? recipe.filmBase.officialName) controls")
                         .font(.system(.subheadline, design: .rounded).weight(.bold))
@@ -596,10 +504,10 @@ struct RecipeDetailView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(16)
-        .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 21, style: .continuous))
+        .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 21, style: .continuous)
-                .stroke(FilmyTheme.line, lineWidth: 1)
+            RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous)
+                .strokeBorder(FilmyTheme.line, lineWidth: 1)
         }
         .accessibilityIdentifier("public-reference-settings")
     }
@@ -615,11 +523,8 @@ struct RecipeDetailView: View {
     private var editor: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("MAKE IT YOURS")
-                        .font(.system(.caption2, design: .rounded).weight(.black))
-                        .tracking(1.3)
-                        .foregroundStyle(FilmyTheme.accent)
+                VStack(alignment: .leading, spacing: 4) {
+                    Eyebrow(text: "ADJUST", color: FilmyTheme.accent)
 
                     Text("Recipe controls")
                         .font(.system(.title3, design: .rounded).weight(.bold))
@@ -707,10 +612,10 @@ struct RecipeDetailView: View {
             }
         }
         .padding(16)
-        .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 21, style: .continuous))
+        .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 21, style: .continuous)
-                .stroke(FilmyTheme.line, lineWidth: 1)
+            RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous)
+                .strokeBorder(FilmyTheme.line, lineWidth: 1)
         }
     }
 

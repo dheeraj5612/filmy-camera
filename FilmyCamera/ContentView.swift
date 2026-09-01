@@ -18,12 +18,12 @@ struct ContentView: View {
         selectedTabContent
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 tabBar
-                    .padding(.horizontal, 18)
-                    .padding(.top, 7)
-                    .padding(.bottom, 6)
+                    .padding(.top, 6)
+                    .padding(.bottom, 4)
+                    .frame(maxWidth: .infinity)
             }
             .tint(FilmyTheme.accent)
-            .background(FilmyPageBackground())
+            .background { FilmyPageBackground() }
             .preferredColorScheme(.dark)
     }
 
@@ -45,24 +45,27 @@ struct ContentView: View {
         }
     }
 
+    /// A compact floating pill. The active destination expands to show its
+    /// name; the others stay icon-only so the camera keeps the screen.
     private var tabBar: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 2) {
             tabButton(.camera, title: "Camera", systemImage: "camera.fill")
-            tabButton(.gallery, title: "Roll", systemImage: "square.grid.2x2.fill")
-            tabButton(.settings, title: "Settings", systemImage: "slider.horizontal.3")
+            tabButton(.gallery, title: "Roll", systemImage: "square.grid.3x3.fill")
+            tabButton(.settings, title: "Settings", systemImage: "gearshape.fill")
         }
-        .padding(5)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .background(FilmyTheme.navBarGradient, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(4)
+        .background(.ultraThinMaterial, in: Capsule())
+        .background(FilmyTheme.panel.opacity(0.88), in: Capsule())
         .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(FilmyTheme.lineStrong, lineWidth: 1)
+            Capsule().strokeBorder(FilmyTheme.lineStrong, lineWidth: 1)
         }
-        .shadow(color: .black.opacity(0.3), radius: 12, y: 6)
+        .shadow(color: .black.opacity(0.38), radius: 16, y: 8)
     }
 
     private func tabButton(_ tab: Tab, title: String, systemImage: String) -> some View {
-        Button {
+        let isSelected = selectedTab == tab
+
+        return Button {
             withAnimation(reduceMotion ? nil : .snappy(duration: 0.24)) {
                 selectedTab = tab
             }
@@ -71,29 +74,23 @@ struct ContentView: View {
                 Image(systemName: systemImage)
                     .font(.system(size: 15, weight: .bold))
 
-                Text(title)
-                    .font(.system(size: 12, weight: .semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
-            .foregroundStyle(selectedTab == tab ? .white : FilmyTheme.secondary)
-            .frame(maxWidth: .infinity, minHeight: 46)
-            .background(
-                selectedTab == tab ? FilmyTheme.accent.opacity(0.22) : Color.clear,
-                in: RoundedRectangle(cornerRadius: 13, style: .continuous)
-            )
-            .overlay {
-                if selectedTab == tab {
-                    RoundedRectangle(cornerRadius: 13, style: .continuous)
-                        .stroke(FilmyTheme.accent.opacity(0.38), lineWidth: 1)
+                if isSelected {
+                    Text(title)
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .lineLimit(1)
+                        .fixedSize()
                 }
             }
-            .contentShape(Rectangle())
+            .foregroundStyle(isSelected ? FilmyTheme.background : FilmyTheme.secondary)
+            .padding(.horizontal, isSelected ? 18 : 15)
+            .frame(minWidth: 54, minHeight: 46)
+            .background(isSelected ? FilmyTheme.accent : Color.clear, in: Capsule())
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
         .accessibilityIdentifier(tab.accessibilityIdentifier)
-        .accessibilityAddTraits(selectedTab == tab ? [.isButton, .isSelected] : [.isButton])
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : [.isButton])
     }
 }
 

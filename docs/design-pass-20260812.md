@@ -54,6 +54,37 @@ The analog character comes from tone, color, grain, and halation. The interface 
 
 The revamp was built and reviewed on the iPhone 17 Pro simulator. The camera screenshot is intentionally a simulator fallback state; it proves the shell and unavailable-camera hierarchy, not physical-device camera output.
 
+## UI revamp — 2026-09-01
+
+A second, larger visual pass. The goal was to make the viewfinder feel like a camera again: chrome lives at the edges, nothing is boxed into stacked panels, and choosing a recipe reads like choosing a film stock.
+
+### Visual system
+
+- Replaced the cool blue palette with a warm film system: near-black surfaces with a faint warm cast, soft warm-white ink, one amber accent for state, mint for live, and a coral halation color reserved for warmth cues. All tokens still live in `FilmyTheme`.
+- Added shared chrome primitives (`viewfinderChrome`, `ChromeShapeBackground`), button styles (`filmyPrimary`, `filmySecondary`, `pressable`), and small typographic helpers (`Eyebrow`, `FilmyTag`, `MetricLabel`, `SettingIcon`) so every screen composes the same parts.
+- Standardized product vocabulary on **Recipe**. The camera no longer shows three different labels (film stock, current look, browse looks) for the same object.
+
+### Camera
+
+- One adaptive layout replaces the five previous chrome variants. A slim top bar holds flash, the live/preview status pill, and a tools toggle. The bottom stack holds an optional tools strip, the recipe header, the film-strip rail, and the capture row.
+- The recipe rail now shows renderer-backed swatches with the recipe name beneath them and an accent ring on the selection; compact tiles keep the name inside the swatch at accessibility sizes.
+- The capture row shows the last kept frame inside the Roll button, a larger tactile shutter, and Tune. The old header pill, action plate, "More" sheet, and decorative viewfinder corner brackets are gone.
+- Zoom, exposure, focus lock, camera switch, and lens selection live in a horizontally scrolling tools strip that is hidden until requested, so the viewfinder opens quiet. Landscape swaps the rail for a compact recipe menu.
+- The rule-of-thirds grid is drawn only while the camera is live so it never sits over the offline placeholder.
+
+### Recipe detail, review, Roll, Settings, onboarding
+
+- Recipe detail: a hero swatch carries the reference name, recipe name, and active/edited tags; control summary is a compact four-up strip; the primary action is a sticky bottom bar.
+- Capture review: the frame is the page, with a recipe chip on the image and a Retake / Keep Frame bar beneath.
+- Roll: a three-column square contact sheet that runs nearly edge to edge; the empty state previews real recipe renders instead of abstract shapes.
+- Settings: grouped iOS-style rows with eyebrow section titles and footers. The introduction card was removed; every permission action, identifier, and copy path that the release checks depend on is unchanged.
+- Onboarding: each page has a concrete visual built from real recipe renders (a fan of recipes, a miniature viewfinder, a kept frame settling into the Roll).
+
+### Verification notes
+
+- UI test copy expectations were updated for the renamed chrome (`RECIPE` header, Roll button) while every geometry and hit-target assertion was kept.
+- The App Store screenshots under `docs/app-store/screenshots` predate this pass and should be recaptured on a device before the next submission.
+
 ## Deliberately deferred
 
 - Bundled photographic recipe thumbnails: the current implementation still has no licensed neutral stills or capture sample set. The rail now uses original synthetic reference scenes rendered by the production pipeline; a photographic asset pass should add only original/licensed images and run them through the same renderer.

@@ -21,16 +21,15 @@ struct SettingsView: View {
                 FilmyPageBackground()
 
                 ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 25) {
+                    VStack(alignment: .leading, spacing: 26) {
                         settingsHeader
 
-                        introCard
                         captureSettings
                         permissions
                         localCache
                         about
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, FilmyTheme.pageMargin)
                     .padding(.top, 18)
                     .padding(.bottom, 40)
                 }
@@ -45,91 +44,18 @@ struct SettingsView: View {
     }
 
     private var settingsHeader: some View {
-        SectionHeading(eyebrow: "Filmy \(appVersion)", title: "Settings")
+        SectionHeading(eyebrow: "FILMY CAMERA \(appVersion)", title: "Settings")
             .accessibilityLabel("Filmy Camera settings, version \(appVersion)")
     }
 
-    private var introCard: some View {
-        GlassCard(padding: 0) {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .top, spacing: 14) {
-                    Image(systemName: "camera.aperture")
-                        .font(.system(size: 21, weight: .semibold))
-                        .foregroundStyle(FilmyTheme.accent)
-                        .frame(width: 44, height: 44)
-                        .background(FilmyTheme.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-                        .accessibilityHidden(true)
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text("A slower way to see")
-                                .font(.title3.weight(.bold))
-                                .foregroundStyle(FilmyTheme.primary)
-
-                            Spacer(minLength: 4)
-
-                            Circle()
-                                .fill(FilmyTheme.mint)
-                                .frame(width: 7, height: 7)
-                                .accessibilityHidden(true)
-                        }
-
-                        Text("Tune the camera, keep the mood, and let every frame land exactly where you left it.")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(FilmyTheme.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .padding(18)
-
-                Divider()
-                    .overlay(FilmyTheme.line)
-
-                HStack(spacing: 8) {
-                    settingsBadge(systemName: "slider.horizontal.3", title: "Capture")
-                    settingsBadge(systemName: "lock.fill", title: "Private")
-                    settingsBadge(systemName: "sparkles", title: "Recipes")
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 14)
-                .background(Color.black.opacity(0.14))
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Capture, private, and film-inspired controls")
-            }
-        }
-    }
-
-    private func settingsBadge(systemName: String, title: String) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: systemName)
-                .font(.caption2.weight(.bold))
-                .accessibilityHidden(true)
-            Text(title)
-                .font(.caption2.weight(.bold))
-                .tracking(0.7)
-        }
-        .foregroundStyle(FilmyTheme.tertiary)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 7)
-        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-        }
-    }
+    // MARK: - Sections
 
     private var captureSettings: some View {
-        settingsSection(
-            eyebrow: "Camera feel",
-            title: "Capture",
-            systemName: "slider.horizontal.3",
-            detail: "Small choices that stay out of your way while you shoot."
-        ) {
-            ControlRoomRow(
-                systemName: "square.grid.3x3",
+        settingsSection(title: "CAPTURE") {
+            SettingRow(
+                systemName: "grid",
                 title: "Framing grid",
-                detail: "Keep a quiet rule-of-thirds guide over the preview."
+                detail: "A quiet rule-of-thirds guide over the preview."
             ) {
                 Toggle("Framing grid", isOn: $showGrid)
                     .labelsHidden()
@@ -138,10 +64,10 @@ struct SettingsView: View {
 
             settingsDivider
 
-            ControlRoomRow(
-                systemName: "waveform.path.ecg",
+            SettingRow(
+                systemName: "hand.tap",
                 title: "Shutter feedback",
-                detail: "Use a subtle haptic when a frame is captured."
+                detail: "A subtle haptic when a frame is captured."
             ) {
                 Toggle("Shutter feedback", isOn: $hapticsEnabled)
                     .labelsHidden()
@@ -152,12 +78,10 @@ struct SettingsView: View {
 
     private var permissions: some View {
         settingsSection(
-            eyebrow: "Permissions",
-            title: "Access",
-            systemName: "checkmark.shield",
-            detail: "Filmy Camera only asks for the access needed to make and keep a frame."
+            title: "ACCESS",
+            footer: "Filmy Camera only asks for the access needed to make and keep a frame."
         ) {
-            ControlRoomRow(
+            SettingRow(
                 systemName: "camera.fill",
                 title: "Camera",
                 detail: cameraStatusDetail
@@ -193,7 +117,7 @@ struct SettingsView: View {
 
             settingsDivider
 
-            ControlRoomRow(
+            SettingRow(
                 systemName: "photo.on.rectangle",
                 title: "Photos",
                 detail: photoStatusDetail
@@ -252,179 +176,129 @@ struct SettingsView: View {
 
     private var localCache: some View {
         settingsSection(
-            eyebrow: "On-device roll",
-            title: "Offline cache",
-            systemName: "externaldrive.fill",
-            detail: "A private fallback keeps your finished frames close when Photos access is limited."
+            title: "STORAGE",
+            footer: "A private fallback keeps finished frames close when Photos access is limited. It is excluded from backup and removable at any time."
         ) {
-            VStack(alignment: .leading, spacing: 15) {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "externaldrive.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(FilmyTheme.accent)
-                        .accessibilityHidden(true)
-                        .frame(width: 34, height: 34)
-                        .background(FilmyTheme.accent.opacity(0.11), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            SettingRow(
+                systemName: "externaldrive.fill",
+                title: "Frame cache",
+                detail: photoLibrary.hasLocalCache ? "Temporary frames are stored on this iPhone." : "No temporary frames right now."
+            ) {
+                Text("250 MB")
+                    .font(.system(.caption, design: .rounded).weight(.bold))
+                    .foregroundStyle(FilmyTheme.tertiary)
+            }
 
-                    VStack(alignment: .leading, spacing: 5) {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text("Temporary frame cache")
-                                .font(.headline.weight(.bold))
-                                .foregroundStyle(FilmyTheme.primary)
-                            Spacer(minLength: 4)
-                            Text("250 MB max")
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(FilmyTheme.tertiary)
-                        }
+            settingsDivider
 
-                        Text("Private, excluded from backup, and removable at any time.")
-                            .font(.subheadline.weight(.medium))
+            Button {
+                guard photoLibrary.hasLocalCache else { return }
+                photoLibrary.clearLocalRollCache()
+            } label: {
+                HStack(spacing: 13) {
+                    SettingIcon(
+                        systemName: "trash",
+                        tint: photoLibrary.hasLocalCache ? FilmyTheme.danger : FilmyTheme.tertiary
+                    )
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Clear local cache")
+                            .font(.system(.subheadline, design: .default).weight(.semibold))
+                        Text(photoLibrary.hasLocalCache ? "Remove temporary frames" : "Nothing to remove")
+                            .font(.system(.caption, design: .default).weight(.medium))
                             .foregroundStyle(FilmyTheme.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
                     }
-                }
 
-                settingsDivider
+                    Spacer(minLength: 8)
 
-                Button {
-                    guard photoLibrary.hasLocalCache else { return }
-                    photoLibrary.clearLocalRollCache()
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "trash")
-                            .font(.subheadline.weight(.bold))
-                            .frame(width: 34, height: 34)
-                            .background(FilmyTheme.accent.opacity(0.11), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Clear local cache")
-                                .font(.subheadline.weight(.bold))
-                            Text(photoLibrary.hasLocalCache ? "Remove temporary frames" : "Nothing to remove")
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(FilmyTheme.secondary)
-                        }
-
-                        Spacer(minLength: 8)
-
-                        Text(photoLibrary.hasLocalCache ? "Available" : "Empty")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(FilmyTheme.secondary)
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 6)
-                            .background(Color.white.opacity(0.055), in: Capsule())
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                    Text(photoLibrary.hasLocalCache ? "Available" : "Empty")
+                        .font(.system(.caption2, design: .rounded).weight(.bold))
+                        .foregroundStyle(FilmyTheme.tertiary)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 6)
+                        .background(Color.white.opacity(0.05), in: Capsule())
                 }
                 .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-                .foregroundStyle(photoLibrary.hasLocalCache ? FilmyTheme.accent : FilmyTheme.tertiary)
-                .buttonStyle(.plain)
-                .disabled(!photoLibrary.hasLocalCache)
                 .contentShape(Rectangle())
-                .accessibilityIdentifier("clear-local-cache")
-                .accessibilityValue(photoLibrary.hasLocalCache ? "Available" : "Empty")
-                .accessibilityHint(photoLibrary.hasLocalCache ? "Removes temporary camera frames" : "There are no temporary camera frames to clear")
             }
+            .foregroundStyle(photoLibrary.hasLocalCache ? FilmyTheme.primary : FilmyTheme.tertiary)
+            .buttonStyle(.plain)
+            .disabled(!photoLibrary.hasLocalCache)
+            .accessibilityIdentifier("clear-local-cache")
+            .accessibilityValue(photoLibrary.hasLocalCache ? "Available" : "Empty")
+            .accessibilityHint(photoLibrary.hasLocalCache ? "Removes temporary camera frames" : "There are no temporary camera frames to clear")
         }
     }
 
     private var about: some View {
-        settingsSection(
-            eyebrow: "The fine print",
-            title: "About",
-            systemName: "info.circle",
-            detail: "A little context about the camera and your frames."
-        ) {
-            VStack(alignment: .leading, spacing: 15) {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text("Filmy Camera")
-                        .font(.title3.weight(.bold))
-                        .foregroundStyle(FilmyTheme.primary)
-                    Spacer(minLength: 8)
-                    Text("VERSION \(appVersion)")
-                        .font(.caption2.weight(.bold))
-                        .tracking(0.9)
-                        .foregroundStyle(FilmyTheme.accent)
-                }
+        settingsSection(title: "ABOUT") {
+            HStack(alignment: .center, spacing: 13) {
+                SettingIcon(systemName: "camera.aperture")
 
-                Text("Recipe names are original, camera-inspired descriptions. Filmy Camera is an independent experience; it does not include camera firmware, proprietary LUTs, or calibration data.")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(FilmyTheme.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "lock.fill")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(FilmyTheme.mint)
-                    Text("Your frames save to Photos; local copies are temporary and removable.")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(FilmyTheme.mint)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(11)
-                .background(FilmyTheme.mint.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-                settingsDivider
-
-                VStack(spacing: 8) {
-                    settingsLink(
-                        title: "Privacy Policy",
-                        systemName: "hand.raised.fill",
-                        destination: privacyPolicyURL,
-                        identifier: "privacy-policy-link"
-                    )
-                    settingsLink(
-                        title: "Contact Support",
-                        systemName: "questionmark.circle.fill",
-                        destination: supportURL,
-                        identifier: "support-link"
-                    )
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func settingsSection<Content: View>(
-        eyebrow: String,
-        title: String,
-        systemName: String,
-        detail: String,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 11) {
-            HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(eyebrow.uppercased())
-                        .font(.caption2.weight(.bold))
-                        .tracking(1.2)
-                        .foregroundStyle(FilmyTheme.tertiary)
-                    Text(title)
-                        .font(.headline.weight(.bold))
+                    Text("Filmy Camera")
+                        .font(.system(.subheadline, design: .default).weight(.semibold))
                         .foregroundStyle(FilmyTheme.primary)
-                        .accessibilityAddTraits(.isHeader)
-                    Text(detail)
-                        .font(.caption.weight(.medium))
+                    Text("Version \(appVersion)")
+                        .font(.system(.caption, design: .rounded).weight(.medium))
                         .foregroundStyle(FilmyTheme.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Spacer(minLength: 8)
-
-                Image(systemName: systemName)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(FilmyTheme.accent)
-                    .frame(width: 34, height: 34)
-                    .background(FilmyTheme.accent.opacity(0.11), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 11, style: .continuous)
-                            .stroke(FilmyTheme.accent.opacity(0.17), lineWidth: 1)
-                    }
-                    .accessibilityHidden(true)
             }
-            .padding(.horizontal, 3)
+            .accessibilityElement(children: .combine)
 
-            GlassCard(padding: 16) {
+            settingsDivider
+
+            Text("Recipe names are original, camera-inspired descriptions. Filmy Camera is an independent experience; it does not include camera firmware, proprietary LUTs, or calibration data. Your frames save to Photos; local copies are temporary and removable.")
+                .font(.system(.footnote, design: .default).weight(.medium))
+                .foregroundStyle(FilmyTheme.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            settingsDivider
+
+            settingsLink(
+                title: "Privacy Policy",
+                systemName: "hand.raised.fill",
+                destination: privacyPolicyURL,
+                identifier: "privacy-policy-link"
+            )
+
+            settingsDivider
+
+            settingsLink(
+                title: "Contact Support",
+                systemName: "questionmark.circle.fill",
+                destination: supportURL,
+                identifier: "support-link"
+            )
+        }
+    }
+
+    // MARK: - Building blocks
+
+    @ViewBuilder
+    private func settingsSection<Content: View>(
+        title: String,
+        footer: String? = nil,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Eyebrow(text: title)
+                .padding(.horizontal, 6)
+                .accessibilityAddTraits(.isHeader)
+
+            GlassCard(padding: 14) {
                 VStack(spacing: 0, content: content)
+            }
+
+            if let footer {
+                Text(footer)
+                    .font(.system(.caption, design: .default).weight(.medium))
+                    .foregroundStyle(FilmyTheme.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 6)
             }
         }
     }
@@ -432,6 +306,7 @@ struct SettingsView: View {
     private var settingsDivider: some View {
         Divider()
             .overlay(FilmyTheme.line)
+            .padding(.leading, 49)
             .padding(.vertical, 10)
     }
 
@@ -444,39 +319,30 @@ struct SettingsView: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: systemName)
-                    .font(.subheadline.weight(.semibold))
-                    .frame(width: 34, height: 34)
-                    .background(FilmyTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .accessibilityHidden(true)
+            HStack(spacing: 13) {
+                SettingIcon(systemName: systemName)
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(title)
-                        .font(.subheadline.weight(.bold))
+                        .font(.system(.subheadline, design: .default).weight(.semibold))
+                        .foregroundStyle(FilmyTheme.accent)
                         .multilineTextAlignment(.leading)
                     Text(subtitle ?? "Show the system permission prompt")
-                        .font(.caption.weight(.medium))
+                        .font(.system(.caption, design: .default).weight(.medium))
                         .foregroundStyle(FilmyTheme.secondary)
                 }
 
                 Spacer(minLength: 8)
 
                 Image(systemName: "chevron.right")
-                    .font(.caption.weight(.bold))
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(FilmyTheme.tertiary)
                     .accessibilityHidden(true)
             }
-            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-            .padding(.horizontal, 12)
-            .background(FilmyTheme.accent.opacity(0.055), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(FilmyTheme.accent.opacity(0.14), lineWidth: 1)
-            }
+            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+            .contentShape(Rectangle())
         }
-        .foregroundStyle(FilmyTheme.accent)
         .buttonStyle(.plain)
-        .contentShape(Rectangle())
         .accessibilityIdentifier(identifier)
         .accessibilityHint(hint)
     }
@@ -488,36 +354,29 @@ struct SettingsView: View {
         identifier: String
     ) -> some View {
         Link(destination: destination) {
-            HStack(spacing: 12) {
-                Image(systemName: systemName)
-                    .font(.subheadline.weight(.semibold))
-                    .frame(width: 34, height: 34)
-                    .background(FilmyTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .accessibilityHidden(true)
+            HStack(spacing: 13) {
+                SettingIcon(systemName: systemName)
 
                 Text(title)
-                    .font(.subheadline.weight(.bold))
+                    .font(.system(.subheadline, design: .default).weight(.semibold))
+                    .foregroundStyle(FilmyTheme.primary)
                     .multilineTextAlignment(.leading)
 
                 Spacer(minLength: 8)
 
                 Image(systemName: "arrow.up.right")
-                    .font(.caption.weight(.bold))
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(FilmyTheme.tertiary)
                     .accessibilityHidden(true)
             }
-            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-            .padding(.horizontal, 12)
-            .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(FilmyTheme.line.opacity(0.8), lineWidth: 1)
-            }
+            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+            .contentShape(Rectangle())
         }
-        .foregroundStyle(FilmyTheme.accent)
         .accessibilityIdentifier(identifier)
-        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
+
+    // MARK: - Status copy
 
     private var photoStatusTitle: String {
         let canRead = PhotoLibraryAuthorizationPolicy.canRead(photoLibrary.authorizationStatus)
@@ -605,6 +464,8 @@ struct SettingsView: View {
         return "\(version) (\(build))"
     }
 
+    // MARK: - Actions
+
     private func refreshPermissionState() {
         photoLibrary.refresh()
     }
@@ -638,57 +499,5 @@ struct SettingsView: View {
     private func openSystemSettings() {
         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
         UIApplication.shared.open(url)
-    }
-}
-
-private struct ControlRoomRow<Accessory: View>: View {
-    let systemName: String
-    let title: String
-    let detail: String
-    @ViewBuilder let accessory: Accessory
-
-    init(
-        systemName: String,
-        title: String,
-        detail: String,
-        @ViewBuilder accessory: () -> Accessory
-    ) {
-        self.systemName = systemName
-        self.title = title
-        self.detail = detail
-        self.accessory = accessory()
-    }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: systemName)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(FilmyTheme.accent)
-                .frame(width: 34, height: 34)
-                .background(FilmyTheme.accent.opacity(0.11), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(FilmyTheme.accent.opacity(0.16), lineWidth: 1)
-                }
-                .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(FilmyTheme.primary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(detail)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(FilmyTheme.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .layoutPriority(1)
-
-            Spacer(minLength: 8)
-            accessory
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 3)
-        .accessibilityElement(children: .contain)
     }
 }

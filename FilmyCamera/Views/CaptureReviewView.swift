@@ -17,140 +17,129 @@ struct CaptureReviewView: View {
         ZStack {
             FilmyTheme.background.ignoresSafeArea()
 
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 18) {
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Review")
-                                .font(.system(.caption, design: .default).weight(.semibold))
-                                .foregroundStyle(FilmyTheme.accent)
-                            Text(recipe.name)
-                                .font(.system(.title2, design: .default).weight(.bold))
-                                .foregroundStyle(FilmyTheme.primary)
-                                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 2)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+            VStack(spacing: 0) {
+                header
+                    .padding(.horizontal, 20)
+                    .padding(.top, 16)
+                    .padding(.bottom, 12)
 
-                        Spacer()
+                framePreview
+                    .padding(.horizontal, 16)
 
-                        Button {
-                            onRetake()
-                            dismiss()
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundStyle(FilmyTheme.primary)
-                                .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
-                                .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Discard frame")
-                        .disabled(isSaving)
-                    }
-
-                    ZStack(alignment: .bottomLeading) {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxWidth: .infinity)
-                            .frame(maxHeight: 500)
-                            .background(Color.black.opacity(0.3))
-
-                        LinearGradient(
-                            colors: [.clear, Color.black.opacity(0.74)],
-                            startPoint: .center,
-                            endPoint: .bottom
-                        )
-
-                        HStack(spacing: 8) {
-                            Image(systemName: "camera.aperture")
-                                .accessibilityHidden(true)
-
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(recipe.name)
-                                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                Text(recipe.descriptor)
-                                    .font((dynamicTypeSize.isAccessibilitySize ? Font.caption : Font.caption2).weight(.medium))
-                                    .foregroundStyle(.white.opacity(0.74))
-                                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-                        .font(.system(.caption, design: .rounded).weight(.bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(Color.white.opacity(0.16), lineWidth: 1)
-                        }
-                        .padding(14)
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel("Recipe \(recipe.name)")
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(Color.white.opacity(0.14), lineWidth: 1)
-                    }
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel("Captured frame with \(recipe.name)")
-
-                    HStack(spacing: 8) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(FilmyTheme.mint)
-                        Text("Ready to keep")
-                            .font(.subheadline.weight(.bold))
-                        Spacer(minLength: 6)
-                        Text("Full resolution")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(FilmyTheme.secondary)
-                    }
-                    .foregroundStyle(FilmyTheme.primary)
-                    .padding(.horizontal, 14)
-                    .frame(minHeight: 48)
-                    .background(FilmyTheme.panel.opacity(0.8), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 15, style: .continuous)
-                            .stroke(FilmyTheme.line, lineWidth: 1)
-                    }
-                    .accessibilityElement(children: .combine)
-
-                    if let saveErrorMessage {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Label(saveErrorMessage, systemImage: "exclamationmark.triangle.fill")
-                                .font(.system(.footnote, design: .rounded).weight(.medium))
-                                .foregroundStyle(FilmyTheme.accent)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .accessibilityAddTraits(.isStaticText)
-
-                            Button("Open Photos Settings", action: onOpenSettings)
-                                .font(.system(.footnote, design: .rounded).weight(.bold))
-                                .foregroundStyle(FilmyTheme.accent)
-                                .frame(minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
-                                .accessibilityHint("Opens Filmy Camera Photos permissions")
-                        }
-                    }
+                if let saveErrorMessage {
+                    saveError(saveErrorMessage)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 14)
                 }
-                .padding(.horizontal, 18)
-                .padding(.top, 14)
-                .padding(.bottom, 24)
             }
+            .padding(.bottom, 12)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             actionBar
-                .padding(.horizontal, 18)
-                .padding(.vertical, 12)
-                .background(.ultraThinMaterial)
-                .overlay(alignment: .top) {
-                    Rectangle()
-                        .fill(FilmyTheme.line)
-                        .frame(height: 1)
-                }
-            }
+                .padding(.horizontal, 20)
+                .padding(.top, 14)
+                .padding(.bottom, 8)
+                .background(FilmyTheme.background)
+        }
         .interactiveDismissDisabled(isSaving)
+    }
+
+    private var header: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Eyebrow(text: "REVIEW", color: FilmyTheme.accent)
+                Text(recipe.name)
+                    .font(.system(.title2, design: .rounded).weight(.bold))
+                    .foregroundStyle(FilmyTheme.primary)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 8)
+
+            Button {
+                onRetake()
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(FilmyTheme.primary)
+                    .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+                    .background(FilmyTheme.panelRaised, in: Circle())
+            }
+            .buttonStyle(.pressable)
+            .accessibilityLabel("Discard frame")
+            .disabled(isSaving)
+        }
+    }
+
+    private var framePreview: some View {
+        GeometryReader { proxy in
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .strokeBorder(FilmyTheme.lineStrong, lineWidth: 1)
+                }
+                .overlay(alignment: .bottomLeading) {
+                    recipeChip
+                        .padding(14)
+                }
+                .shadow(color: .black.opacity(0.4), radius: 22, y: 10)
+                .frame(width: proxy.size.width, height: proxy.size.height)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Captured frame with \(recipe.name)")
+    }
+
+    private var recipeChip: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "camera.aperture")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(FilmyTheme.accent)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(recipe.name)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                Text("Full resolution")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.72))
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .viewfinderCapsule()
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Recipe \(recipe.name), full resolution")
+    }
+
+    private func saveError(_ message: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(message, systemImage: "exclamationmark.triangle.fill")
+                .font(.system(.footnote, design: .rounded).weight(.semibold))
+                .foregroundStyle(FilmyTheme.danger)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isStaticText)
+
+            Button("Open Photos Settings", action: onOpenSettings)
+                .font(.system(.footnote, design: .rounded).weight(.bold))
+                .foregroundStyle(FilmyTheme.accent)
+                .frame(minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
+                .accessibilityHint("Opens Filmy Camera Photos permissions")
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(FilmyTheme.danger.opacity(0.1), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(FilmyTheme.danger.opacity(0.3), lineWidth: 1)
+        }
     }
 
     private var actionBar: some View {
@@ -175,12 +164,8 @@ struct CaptureReviewView: View {
             dismiss()
         } label: {
             Label("Retake", systemImage: "arrow.counterclockwise")
-                .font(.system(.body, design: .default).weight(.semibold))
-                .foregroundStyle(FilmyTheme.primary)
-                .frame(maxWidth: .infinity, minHeight: 52)
-                .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.filmySecondary)
         .disabled(isSaving)
     }
 
@@ -196,12 +181,8 @@ struct CaptureReviewView: View {
                     Label("Keep Frame", systemImage: "checkmark")
                 }
             }
-            .font(.system(.body, design: .default).weight(.semibold))
-            .foregroundStyle(FilmyTheme.background)
-            .frame(maxWidth: .infinity, minHeight: 52)
-            .background(FilmyTheme.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.filmyPrimary)
         .disabled(isSaving)
         .accessibilityLabel(isSaving ? "Saving frame" : "Keep frame")
         .accessibilityHint("Saves the finished frame to your Photos library")
