@@ -787,7 +787,7 @@ private struct CameraHardwareControls: View {
                             .font(.system(size: 12, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 12)
-                            .frame(minHeight: FilmyTheme.minimumHitTarget)
+                            .frame(minHeight: FilmyTheme.toolControlHeight)
                             .viewfinderCapsule()
                     }
                     .buttonStyle(.pressable)
@@ -815,7 +815,7 @@ private struct CameraHardwareControls: View {
                             .font(.system(size: 12, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 12)
-                            .frame(minHeight: FilmyTheme.minimumHitTarget)
+                            .frame(minHeight: FilmyTheme.toolControlHeight)
                             .viewfinderCapsule()
                     }
                     .accessibilityIdentifier("lens-menu-control")

@@ -35,6 +35,10 @@ enum FilmyTheme {
     static let controlRadius: CGFloat = 14
     static let actionPlateRadius: CGFloat = 24
     static let minimumHitTarget: CGFloat = 44
+    /// Tool-strip controls sit behind a presented sheet at times, where iOS
+    /// scales the presenting view to about 92%. 48pt keeps their measured
+    /// frame at or above the 44pt minimum in that state.
+    static let toolControlHeight: CGFloat = 48
     static let pageMargin: CGFloat = 20
 
     static let titleFont = Font.system(.title2, design: .default).weight(.bold)
@@ -518,7 +522,7 @@ struct ZoomControl: View {
                 .font(.system(size: 13, weight: .bold, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(FilmyTheme.accent)
-                .frame(width: FilmyTheme.minimumHitTarget + 4, height: FilmyTheme.minimumHitTarget)
+                .frame(width: FilmyTheme.minimumHitTarget + 4, height: FilmyTheme.toolControlHeight)
                 .viewfinderCapsule()
         }
         .accessibilityElement()
@@ -594,7 +598,7 @@ struct ExposureControl: View {
             Image(systemName: systemName)
                 .font(.system(size: 11, weight: .black))
                 .foregroundStyle(.white.opacity(0.9))
-                .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+                .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.toolControlHeight)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -615,7 +619,7 @@ struct FocusLockControl: View {
             .font(.system(size: 12, weight: .bold, design: .rounded))
             .foregroundStyle(isLocked ? FilmyTheme.background : .white)
             .padding(.horizontal, 12)
-            .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
+            .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.toolControlHeight)
             .background {
                 if isLocked {
                     Capsule().fill(FilmyTheme.accent)
