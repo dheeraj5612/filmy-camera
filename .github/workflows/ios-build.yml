@@ -256,7 +256,6 @@ jobs:
             -enableCodeCoverage NO \
             -resultBundlePath "${RUNNER_TEMP}/FilmyCameraUI.xcresult" \
             -only-testing:FilmyCameraUITests \
-            -quiet \
             test 2>&1 | tee "${RUNNER_TEMP}/filmycamera-ui-test.log"
 
       - name: Record test artifact provenance
