@@ -546,6 +546,33 @@ final class CameraViewModel: ObservableObject {
         )
     }
 
+    /// Library imports can be panoramas or scans far larger than any capture.
+    /// Full-resolution materialization of such images (RGBA buffer, filter
+    /// intermediates, color-space copy, JPEG) can exhaust memory, so cap the
+    /// pixel count before rendering. Everyday phone photos stay untouched.
+    nonisolated static let importPixelBudget: CGFloat = 40_000_000
+
+    nonisolated static func boundedImportInput(_ image: CIImage) -> CIImage {
+        let extent = image.extent
+        let area = extent.width * extent.height
+        guard area > importPixelBudget, area.isFinite, area > 0,
+              let lanczos = CIFilter(name: "CILanczosScaleTransform") else {
+            return image
+        }
+
+        let scale = (importPixelBudget / area).squareRoot()
+        lanczos.setValue(image, forKey: kCIInputImageKey)
+        lanczos.setValue(scale, forKey: kCIInputScaleKey)
+        lanczos.setValue(1.0, forKey: kCIInputAspectRatioKey)
+        let boundedExtent = CGRect(
+            x: 0,
+            y: 0,
+            width: max((extent.width * scale).rounded(.down), 1),
+            height: max((extent.height * scale).rounded(.down), 1)
+        )
+        return lanczos.outputImage?.cropped(to: boundedExtent) ?? image
+    }
+
     private nonisolated static func renderImported(
         sourceData: Data,
         recipe: FilmRecipe,
@@ -563,10 +590,12 @@ final class CameraViewModel: ObservableObject {
 
         // Library photos keep their original framing. Rebase to a zero origin
         // so spatial effects such as grain are independent of EXIF transforms.
-        let framedInput = input.transformed(by: CGAffineTransform(
-            translationX: -extent.minX,
-            y: -extent.minY
-        ))
+        let framedInput = Self.boundedImportInput(
+            input.transformed(by: CGAffineTransform(
+                translationX: -extent.minX,
+                y: -extent.minY
+            ))
+        )
         let filtered = FilmRenderer.render(
             framedInput,
             recipe: recipe,

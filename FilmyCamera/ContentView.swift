@@ -30,9 +30,18 @@ struct ContentView: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                HStack(spacing: 10) {
-                    tabBar
-                    importPhotoButton
+                // Narrow iPad Split View panes (about 320pt) cannot fit the
+                // labelled Import button beside the tab pill; fall back to an
+                // icon-only Import there.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) {
+                        tabBar
+                        importPhotoButton(showsLabel: true)
+                    }
+                    HStack(spacing: 8) {
+                        tabBar
+                        importPhotoButton(showsLabel: false)
+                    }
                 }
                 .padding(.horizontal, FilmyLayout.compactHorizontalMargin)
                 .padding(.top, 6)
@@ -96,19 +105,21 @@ struct ContentView: View {
     /// Opens the system photo picker; the chosen image is rendered with the
     /// current recipe at full resolution and lands in the same review flow as
     /// a capture.
-    private var importPhotoButton: some View {
+    private func importPhotoButton(showsLabel: Bool) -> some View {
         PhotosPicker(selection: $importedPhotoItem, matching: .images) {
             HStack(spacing: 7) {
                 Image(systemName: "photo.badge.plus")
                     .font(.system(size: 15, weight: .bold))
 
-                Text("Import")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .lineLimit(1)
-                    .fixedSize()
+                if showsLabel {
+                    Text("Import")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .lineLimit(1)
+                        .fixedSize()
+                }
             }
             .foregroundStyle(FilmyTheme.background)
-            .padding(.horizontal, 16)
+            .padding(.horizontal, showsLabel ? 16 : 0)
             .frame(minWidth: 54, minHeight: 54)
             .background(FilmyTheme.accent, in: Capsule())
             .contentShape(Capsule())

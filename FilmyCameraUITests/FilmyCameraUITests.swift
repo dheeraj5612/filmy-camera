@@ -322,13 +322,17 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertTrue(shutter.waitForExistence(timeout: 20))
         XCTAssertTrue(compactApp.staticTexts["CAMERA PROFILE"].waitForExistence(timeout: 5))
 
+        // The app only offers the control when the active camera has a flash,
+        // so its absence means this hardware cannot exercise the flash path.
         let flash = compactApp.buttons["flash-control"]
-        if flash.waitForExistence(timeout: 5), flash.isEnabled {
-            for _ in 0..<3 where (flash.value as? String) != "On" {
-                flash.tap()
-            }
-            XCTAssertEqual(flash.value as? String, "On", "Flash should cycle to On")
+        guard flash.waitForExistence(timeout: 5) else {
+            throw XCTSkip("The active camera exposes no flash control on this device")
         }
+        XCTAssertTrue(flash.isEnabled, "The flash control should be enabled on flash hardware")
+        for _ in 0..<3 where (flash.value as? String) != "On" {
+            flash.tap()
+        }
+        XCTAssertEqual(flash.value as? String, "On", "Flash must be On before the flash-aware capture")
         attachScreenshot(named: "device-g7x-flash-viewfinder")
 
         shutter.tap()

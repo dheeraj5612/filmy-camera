@@ -710,10 +710,23 @@ public final class FilmRenderer {
             arguments: [image, mask]
         )?.cropped(to: image.extent) ?? mask
 
-        blend.setValue(subject, forKey: kCIInputImageKey)
+        // Separate subject from ambient with the full feathered region first,
+        // so bright skin, highlights, and white clothing inside the region are
+        // preserved rather than darkened as background. The luminance gate
+        // then limits only the additional lift to the subject's mid and low
+        // tones, which is what keeps bright walls from turning into a halo.
+        blend.setValue(image, forKey: kCIInputImageKey)
         blend.setValue(background, forKey: kCIInputBackgroundImageKey)
-        blend.setValue(gatedMask, forKey: "inputMaskImage")
-        return blend.outputImage?.cropped(to: image.extent) ?? image
+        blend.setValue(mask, forKey: "inputMaskImage")
+        guard let separated = blend.outputImage?.cropped(to: image.extent),
+              let lift = CIFilter(name: "CIBlendWithMask") else {
+            return image
+        }
+
+        lift.setValue(subject, forKey: kCIInputImageKey)
+        lift.setValue(separated, forKey: kCIInputBackgroundImageKey)
+        lift.setValue(gatedMask, forKey: "inputMaskImage")
+        return lift.outputImage?.cropped(to: image.extent) ?? separated
     }
 
     private static func applyCompactDigitalSkinSmoothing(
