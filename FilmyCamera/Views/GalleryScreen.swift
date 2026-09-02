@@ -782,7 +782,13 @@ private struct ShareSheet: UIViewControllerRepresentable {
     let items: [Any]
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: items, applicationActivities: nil)
+        let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        // On iPad an activity controller can be routed through a popover
+        // presentation, which raises an exception without an anchor. Anchor it
+        // to its own view so the share sheet is safe in every presentation
+        // context. This is a no-op when it is presented as a sheet.
+        controller.popoverPresentationController?.sourceView = controller.view
+        return controller
     }
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
