@@ -123,12 +123,19 @@ struct GalleryScreen: View {
         }
     }
 
+    /// Keeps the open detail sheet pointed at the entry the Roll currently
+    /// lists for that frame. An authorization change can swap a Photos asset
+    /// for its cached fallback (or back); the sheet must follow that swap
+    /// rather than keep loading a source that is no longer available.
     private func clearSelectionIfUnavailable() {
-        guard let selectedAsset,
-              !photoLibrary.galleryAssets.contains(where: { $0.id == selectedAsset.id }) else {
+        guard let selectedAsset else { return }
+        guard let current = photoLibrary.galleryAssets.first(where: { $0.id == selectedAsset.id }) else {
+            self.selectedAsset = nil
             return
         }
-        self.selectedAsset = nil
+        if current.isPhotosAsset != selectedAsset.isPhotosAsset {
+            self.selectedAsset = current
+        }
     }
 
     @ViewBuilder

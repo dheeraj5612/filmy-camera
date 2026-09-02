@@ -548,4 +548,8 @@ interruption reasons, launch recipe selection, and the activity policy's
 grace behavior. New UI lifecycle tests: background/foreground round trips,
 tab round trips with a live-again deadline, rapid recipe switching followed
 by a capture, three Retake cycles with a warm-session deadline, and the
-launch benchmark. Device-only tests skip cleanly on Simulator.
+launch benchmark. Device-only tests skip cleanly on Simulator. Tests that
+write to the real Photos library (keep-to-Photos, import-and-save) and the
+recipe contact sheet are opt-in (`FILMY_RUN_PHOTOS_WRITE=1`,
+`FILMY_RUN_CAPTURE_SHEET=1`), as are the benchmarks (`FILMY_RUN_PERF=1`), so a
+default device run leaves the library untouched and finishes in minutes.

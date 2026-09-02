@@ -213,7 +213,10 @@ final class FilmyCameraUITests: XCTestCase {
     }
 
     #if !targetEnvironment(simulator)
+    /// Writes a filtered copy into the device's real Photos library, so it
+    /// runs only against an explicitly provisioned library.
     func testPhysicalImportAppliesCurrentRecipeAndSaves() throws {
+        try skipUnlessPhotosWritesAreAllowed()
         let importPhoto = app.buttons["import-photo"]
         assertMinimumHitTarget(importPhoto, named: "Import photo")
         importPhoto.tap()
@@ -221,10 +224,10 @@ final class FilmyCameraUITests: XCTestCase {
         let firstPhoto = app.images.matching(
             NSPredicate(format: "identifier == 'PXGGridLayout-Info'")
         ).firstMatch
-        XCTAssertTrue(
-            firstPhoto.waitForExistence(timeout: 10),
-            "The system photo picker should expose at least one image"
-        )
+        guard firstPhoto.waitForExistence(timeout: 10) else {
+            app.buttons["Cancel"].firstMatch.tap()
+            throw XCTSkip("The Photos library on this device has no image to import")
+        }
         let photoFrame = firstPhoto.frame
         let appFrame = app.frame
         app.coordinate(
@@ -238,7 +241,12 @@ final class FilmyCameraUITests: XCTestCase {
             app.staticTexts["IMPORTED PHOTO"].waitForExistence(timeout: 30),
             "The imported image should reach filtered review"
         )
-        XCTAssertTrue(app.staticTexts["Filter applied · Full resolution"].exists)
+        // Whichever library photo the picker lists first, the caption must
+        // say what happened: full resolution, or resized past the budget.
+        XCTAssertTrue(
+            app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Filter applied'")).firstMatch.exists,
+            "The import review must state the applied resolution"
+        )
         XCTAssertTrue(app.buttons["Cancel"].exists, "An import review offers Cancel instead of Retake")
         attachScreenshot(named: "imported-photo-review")
 
@@ -257,9 +265,23 @@ final class FilmyCameraUITests: XCTestCase {
         attachScreenshot(named: "imported-photo-saved")
     }
 
+    /// Every default device run must leave the Photos library untouched. The
+    /// save paths run only when a provisioned test library is declared, e.g.
+    /// TEST_RUNNER_FILMY_RUN_PHOTOS_WRITE=1 xcodebuild ... ; the app cannot
+    /// delete what it saved under `-ui-testing`, which forces Photos read
+    /// access to denied.
+    private func skipUnlessPhotosWritesAreAllowed() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["FILMY_RUN_PHOTOS_WRITE"] == "1",
+            "Set FILMY_RUN_PHOTOS_WRITE=1 to run tests that write to the device's Photos library"
+        )
+    }
+
     /// Presses the real shutter, reaches review, and keeps the frame to
-    /// Photos. Only meaningful on hardware with a camera.
+    /// Photos. Only meaningful on hardware with a camera, and only against a
+    /// provisioned Photos library because the frame is committed for real.
     func testPhysicalCaptureKeepsFrameToPhotos() throws {
+        try skipUnlessPhotosWritesAreAllowed()
         let shutter = app.buttons["Capture photo"]
         XCTAssertTrue(
             shutter.waitForExistence(timeout: 20),
