@@ -29,7 +29,7 @@ extension FilmRecipe {
         case "classic-negative": return "Warm highlights, restrained greens, and a textured negative feel for street scenes and quiet rooms."
         case "nostalgic-negative": return "Amber light, softened blues, and gentle contrast for a memory-like everyday palette."
         case "reala-ace": return "Natural color, open shadows, and a clean negative finish that lets the scene stay itself."
-        case "g7x-compact": return "A dedicated G7 X-inspired compact-JPEG profile with clean neutrals, warm portrait midtones, selective red and blue punch, restrained foliage, a protected highlight shoulder, and crisp detail. Device optics, flash behavior, and depth of field remain unchanged."
+        case "g7x-compact": return "The default social compact-camera profile: bright warm portraits, peach/pink skin, crisp reds and blues, a protected highlight shoulder, and gentle subject-aware smoothing. Real flash captures deepen the ambient background while device optics and depth of field remain unchanged."
         default: return subtitle
         }
     }
@@ -86,9 +86,9 @@ extension FilmRecipe {
     var controlSummary: [(String, String)] {
         if filmBase == .compactDigital {
             return [
-                ("Tone", "Soft shoulder"),
-                ("Color", "Clean vivid"),
-                ("Detail", "Crisp"),
+                ("Tone", "Social pop"),
+                ("Color", "Peach vivid"),
+                ("Detail", "Soft skin"),
                 ("Grain", grainEffectLevel.displayName)
             ]
         }
@@ -104,9 +104,15 @@ extension FilmRecipe {
 
 @MainActor
 final class CameraViewModel: ObservableObject {
+    nonisolated static let defaultRecipeID = "g7x-compact"
+
     private static let builtInRecipesByID = Dictionary(
         uniqueKeysWithValues: FilmRecipe.builtIns.map { ($0.id, $0) }
     )
+
+    private static var defaultRecipe: FilmRecipe {
+        builtInRecipesByID[defaultRecipeID] ?? FilmRecipe.builtIns[0]
+    }
 
     enum ReviewSource: Equatable {
         case camera
@@ -136,7 +142,8 @@ final class CameraViewModel: ObservableObject {
     static let selectedRecipeIDKey = "selectedRecipeID"
     static let recipeOverridesKey = "recipeOverrides"
 
-    private static let fallbackRecipeID = FilmRecipe.builtIns[0].id
+    /// New installs and unknown persisted selections land on the G7 X profile.
+    private static let fallbackRecipeID = CameraViewModel.defaultRecipeID
     private static let validRecipeIDs = Set(FilmRecipe.builtIns.map(\.id))
 
     private let defaults: UserDefaults
@@ -249,7 +256,7 @@ final class CameraViewModel: ObservableObject {
     func recipe(for id: String) -> FilmRecipe {
         recipeOverrides[id]
             ?? Self.builtInRecipesByID[id]
-            ?? FilmRecipe.builtIns[0]
+            ?? Self.defaultRecipe
     }
 
     func select(recipe: FilmRecipe) {
@@ -258,7 +265,7 @@ final class CameraViewModel: ObservableObject {
     }
 
     func originalRecipe(for id: String) -> FilmRecipe {
-        Self.builtInRecipesByID[id] ?? FilmRecipe.builtIns[0]
+        Self.builtInRecipesByID[id] ?? Self.defaultRecipe
     }
 
     func update(recipe: FilmRecipe) {
@@ -328,6 +335,7 @@ final class CameraViewModel: ObservableObject {
                             viewportSize: viewportSize,
                             previewDrawableSize: previewDrawableSize,
                             capturedAt: capturedPhoto.capturedAt,
+                            flashFired: capturedPhoto.flashFired,
                             grainSeed: camera.previewGrainSeed
                         )
                     }
@@ -460,6 +468,7 @@ final class CameraViewModel: ObservableObject {
         viewportSize: CGSize,
         previewDrawableSize: CGSize,
         capturedAt: Date,
+        flashFired: Bool,
         grainSeed: UInt32
     ) -> RenderedPhoto? {
         // Resolve the source image's EXIF orientation before applying the
@@ -500,10 +509,21 @@ final class CameraViewModel: ObservableObject {
             stillSize: framedInput.extent.size
         )
 
+        let renderContext: FilmRenderer.CaptureContext
+        if recipe.filmBase == .compactDigital {
+            renderContext = FilmRenderer.CaptureContext(
+                flashFired: flashFired,
+                subjectRegions: FilmRenderer.portraitSubjectRegions(in: framedInput)
+            )
+        } else {
+            renderContext = .standard
+        }
+
         let filtered = FilmRenderer.render(
             framedInput,
             recipe: recipe,
             quality: .photo,
+            captureContext: renderContext,
             grainSeed: grainSeed,
             grainPhase: grainPhase
         )

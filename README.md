@@ -1,6 +1,6 @@
 # Filmy Camera
 
-Filmy Camera is a native iPhone camera built around the feeling of choosing a film recipe before you shoot. It combines a low-friction SwiftUI camera UI with a Core Image/Metal-ready rendering pipeline for live preview and full-resolution exports.
+Filmy Camera is a native iPhone and iPad camera built around the feeling of choosing a film recipe before you shoot. It combines a low-friction SwiftUI camera UI with a Core Image/Metal-ready rendering pipeline for live preview and full-resolution exports.
 
 ## Current product slice
 
@@ -16,6 +16,8 @@ Filmy Camera is a native iPhone camera built around the feeling of choosing a fi
 - iPhone hardware controls for front/back switching and available-lens selection, with simulator-safe preview behavior.
 - sRGB output normalization plus embedded recipe provenance metadata on saved JPEGs.
 - Simulator-safe empty state: the full interface runs without camera hardware and clearly asks for a physical iPhone or iPad for capture.
+- iPad support: readable-width pages, an adaptive Roll contact sheet, and the same viewfinder chrome verified on an iPad Pro and on iPhone-size layouts.
+- Photo import from the system picker, rendered at full resolution with the current recipe and reviewed before saving.
 
 ## Build
 

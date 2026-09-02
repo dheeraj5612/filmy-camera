@@ -509,11 +509,15 @@ final class PhotoLibraryService: ObservableObject {
             return
         }
 
-        PHPhotoLibrary.shared().presentLimitedLibraryPicker(from: presenter) { [weak self] _ in
+        let pickerCompletion: @Sendable ([String]) -> Void = { [weak self] _ in
             Task { @MainActor in
                 self?.refresh()
             }
         }
+        PHPhotoLibrary.shared().presentLimitedLibraryPicker(
+            from: presenter,
+            completionHandler: pickerCompletion
+        )
     }
 
     private func refreshAuthorizationStatuses() {
@@ -636,9 +640,18 @@ final class PhotoLibraryService: ObservableObject {
             completion(.success(()))
         }
 
-        PHPhotoLibrary.shared().performChanges({
-            PHAssetChangeRequest.deleteAssets([asset] as NSArray)
-        }, completionHandler: photoDeleteCompletion)
+        // PhotoKit runs change blocks on its own queue. A closure literal formed
+        // here would inherit main-actor isolation and trap at runtime, so build an
+        // explicitly non-isolated block that only captures Sendable values.
+        let photoDeleteChanges: @Sendable () -> Void = {
+            let assets = PHAsset.fetchAssets(withLocalIdentifiers: [assetIdentifier], options: nil)
+            guard assets.count > 0 else { return }
+            PHAssetChangeRequest.deleteAssets(assets)
+        }
+        PHPhotoLibrary.shared().performChanges(
+            photoDeleteChanges,
+            completionHandler: photoDeleteCompletion
+        )
     }
 
     func delete(
@@ -1065,7 +1078,7 @@ final class PhotoLibraryService: ObservableObject {
                 options.isNetworkAccessAllowed = true
                 let manager = PHAssetResourceManager.default()
                 return await withCheckedContinuation { continuation in
-                    manager.writeData(for: resource, toFile: destinationURL, options: options) { [weak self] error in
+                    let writeCompletion: @Sendable (Error?) -> Void = { [weak self] error in
                         Task { @MainActor in
                             guard error == nil else {
                                 try? FileManager.default.removeItem(at: destinationURL)
@@ -1076,6 +1089,12 @@ final class PhotoLibraryService: ObservableObject {
                             continuation.resume(returning: destinationURL)
                         }
                     }
+                    manager.writeData(
+                        for: resource,
+                        toFile: destinationURL,
+                        options: options,
+                        completionHandler: writeCompletion
+                    )
                 }
             } catch {
                 return nil
@@ -1130,10 +1149,14 @@ final class PhotoLibraryService: ObservableObject {
                 self.addAsset(assetIdentifier, to: createdAlbum, completion: completion)
             }
 
-            PHPhotoLibrary.shared().performChanges({
+            let albumCreationChanges: @Sendable () -> Void = {
                 let request = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: albumTitle)
                 albumIdentifierBox.set(request.placeholderForCreatedAssetCollection.localIdentifier)
-            }, completionHandler: albumCreationCompletion)
+            }
+            PHPhotoLibrary.shared().performChanges(
+                albumCreationChanges,
+                completionHandler: albumCreationCompletion
+            )
             return
         }
 
@@ -1145,18 +1168,33 @@ final class PhotoLibraryService: ObservableObject {
         to album: PHAssetCollection,
         completion: @escaping @MainActor (Bool) -> Void
     ) {
-        guard let asset = PHAsset.fetchAssets(
+        guard PHAsset.fetchAssets(
             withLocalIdentifiers: [assetIdentifier],
             options: nil
-        ).firstObject else {
+        ).firstObject != nil else {
             completion(false)
             return
         }
 
+        let albumIdentifier = album.localIdentifier
         let albumAddCompletion = PhotoLibraryCompletionBridge.mainActor(completion)
-        PHPhotoLibrary.shared().performChanges({
-            PHAssetCollectionChangeRequest(for: album)?.addAssets([asset] as NSArray)
-        }, completionHandler: albumAddCompletion)
+        // Re-fetch inside the change block so the block captures only
+        // identifiers and stays free of main-actor isolation.
+        let albumAddChanges: @Sendable () -> Void = {
+            guard let album = PHAssetCollection.fetchAssetCollections(
+                      withLocalIdentifiers: [albumIdentifier],
+                      options: nil
+                  ).firstObject else {
+                return
+            }
+            let assets = PHAsset.fetchAssets(withLocalIdentifiers: [assetIdentifier], options: nil)
+            guard assets.count > 0 else { return }
+            PHAssetCollectionChangeRequest(for: album)?.addAssets(assets)
+        }
+        PHPhotoLibrary.shared().performChanges(
+            albumAddChanges,
+            completionHandler: albumAddCompletion
+        )
     }
 
     func image(
@@ -1273,9 +1311,12 @@ final class PhotoLibraryService: ObservableObject {
 
     private func requestAuthorization(for accessLevel: PHAccessLevel) async -> PHAuthorizationStatus {
         await withCheckedContinuation { continuation in
-            PHPhotoLibrary.requestAuthorization(for: accessLevel) { status in
+            // The handler arrives on an arbitrary PhotoKit queue; keep it
+            // explicitly non-isolated so it never trips the main-actor check.
+            let handler: @Sendable (PHAuthorizationStatus) -> Void = { status in
                 continuation.resume(returning: status)
             }
+            PHPhotoLibrary.requestAuthorization(for: accessLevel, handler: handler)
         }
     }
 }

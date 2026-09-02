@@ -7,23 +7,34 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		142F01509C3F0818F7EDCC99 /* fixture-09-apple-normal.jpg in Resources */ = {isa = PBXBuildFile; fileRef = 842705845D5496269337CD59 /* fixture-09-apple-normal.jpg */; };
 		1768F2BE69F5DF79C97A1832 /* AppIconSource.svg in Resources */ = {isa = PBXBuildFile; fileRef = B9D2815FF289A04B992AC100 /* AppIconSource.svg */; };
 		1FA4D1311CC59621E8A662B9 /* FilmyCameraApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D59729E8AC667A9120C460CB /* FilmyCameraApp.swift */; };
 		2700E6F80817004C1415242D /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 432F02B03418EEADA550733F /* PrivacyInfo.xcprivacy */; };
 		28C6A5B2352ED08BD1E21114 /* CameraViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A9AFC52D1FB5ECED33CB2DA /* CameraViewModel.swift */; };
 		2959F22572BAEE1007915415 /* CameraFrameLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D82A69BBE148C6317A2FA41 /* CameraFrameLayout.swift */; };
+		375A2523DEC639400464742E /* fixture-07-13-women-party.jpg in Resources */ = {isa = PBXBuildFile; fileRef = 40C2E359BAEFE7B23186DD2E /* fixture-07-13-women-party.jpg */; };
 		3D00E159DAA3E3944EACD36E /* CaptureReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53925B09E478B6CD4AF36BE1 /* CaptureReviewView.swift */; };
 		3E434087A6331965A83F900D /* RecipeReferenceCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 348CFAEC84B4CF9E4F843E66 /* RecipeReferenceCatalogTests.swift */; };
 		3F104912E7B0F794D16EC5E3 /* GalleryScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10A0F8269AA5365633E9A3C0 /* GalleryScreen.swift */; };
+		44A40C0E61C4CA8809887C9C /* fixture-10-apple-camera-flash-on.jpg in Resources */ = {isa = PBXBuildFile; fileRef = 754B1DA2F9B232FA4BC492A8 /* fixture-10-apple-camera-flash-on.jpg */; };
 		47FDBDD59FA6A75558E422B8 /* FilmRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F56BE8EB7D6BDB867CFD8C3A /* FilmRenderer.swift */; };
 		589A5A125A91DA3228E84E06 /* RendererOutputBoundsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2F0913587D09FEB4D0E8E14 /* RendererOutputBoundsTests.swift */; };
 		58D2691A3560CD81FC291D7D /* FilmRecipeReferenceCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6940256A8100B915539E21CB /* FilmRecipeReferenceCatalog.swift */; };
 		59F0B3BA74FBD1876642993A /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31718B2CA6575E585EA91B06 /* OnboardingView.swift */; };
+		5E489D4CE06907D59F790896 /* RecipeRenderGalleryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99D74C27D238C00120CAABB3 /* RecipeRenderGalleryTests.swift */; };
 		6106750DF50A29C7163FD992 /* CameraService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC1520CC0C54A1860FEB034D /* CameraService.swift */; };
 		6601697F81C16F997D68E4EF /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3940D2834957A9E44F66872 /* SettingsView.swift */; };
+		6AD3204A4232428DCCFEC6A4 /* fixture-03-04-group-party.jpg in Resources */ = {isa = PBXBuildFile; fileRef = 173A49EB539C1CAD2D8FB66E /* fixture-03-04-group-party.jpg */; };
+		718629614986B03E5ABBEE89 /* fixture-02-02-warm-low-light.jpg in Resources */ = {isa = PBXBuildFile; fileRef = 3A8B8F1DC26D736568DB1B4A /* fixture-02-02-warm-low-light.jpg */; };
+		737BB6218D7E5AB69A15BE96 /* fixture-06-11-white-dress-mirror.jpg in Resources */ = {isa = PBXBuildFile; fileRef = 70A84A5B602B2FBB0E521D07 /* fixture-06-11-white-dress-mirror.jpg */; };
+		78EC0F1E69D338C351B31DD0 /* fixture-08-10-colorful-party.jpg in Resources */ = {isa = PBXBuildFile; fileRef = FBB568E1B1190D6FCD70892C /* fixture-08-10-colorful-party.jpg */; };
 		7DCDAA29B2717548B36D8992 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8F580BECA95D881DF1EB3789 /* Assets.xcassets */; };
 		801054D3CB7F421A0300E64B /* FilteredCameraPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E3E5451BF5130228EAD7B57 /* FilteredCameraPreview.swift */; };
 		8C7CB45FC3BFE9E2C786ACCF /* PhotoOutputEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AD7C3AEFA8B673A5F790009 /* PhotoOutputEncoderTests.swift */; };
+		931BEA343C31E688570FC7DB /* fixture-01-01-neon-nightclub.jpg in Resources */ = {isa = PBXBuildFile; fileRef = CDDA39ADDDBEF1974F1CBCD1 /* fixture-01-01-neon-nightclub.jpg */; };
+		A014548BCC3C9CBFBB034520 /* fixture-04-05-soft-room.jpg in Resources */ = {isa = PBXBuildFile; fileRef = AEE4A74BD1EA35044F8931CC /* fixture-04-05-soft-room.jpg */; };
+		A5ADC24CE2A8E63667D560B6 /* fixture-05-06-cozy-mirror.jpg in Resources */ = {isa = PBXBuildFile; fileRef = D4B670207487E6E65EB2C4C0 /* fixture-05-06-cozy-mirror.jpg */; };
 		AF1962852DF723AD8B04E986 /* CameraScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57D96867146ACDDA4F134F19 /* CameraScreen.swift */; };
 		B0CAE865F8D5D837818DF498 /* RecipePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E85F3412BBC965E4A33B9EB /* RecipePickerView.swift */; };
 		B22522279FEB9D04C091754C /* CameraViewModelRenderingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5373778E34C64A9AC521C02 /* CameraViewModelRenderingTests.swift */; };
@@ -61,6 +72,7 @@
 /* Begin PBXFileReference section */
 		09CCB0FEDDDA669EB40BAF2B /* RecipeDetailCommitPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeDetailCommitPolicyTests.swift; sourceTree = "<group>"; };
 		10A0F8269AA5365633E9A3C0 /* GalleryScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalleryScreen.swift; sourceTree = "<group>"; };
+		173A49EB539C1CAD2D8FB66E /* fixture-03-04-group-party.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = "fixture-03-04-group-party.jpg"; sourceTree = "<group>"; };
 		1E3E5451BF5130228EAD7B57 /* FilteredCameraPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilteredCameraPreview.swift; sourceTree = "<group>"; };
 		2742A27161237B210E4D8A3C /* FilmRecipe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmRecipe.swift; sourceTree = "<group>"; };
 		2AD7C3AEFA8B673A5F790009 /* PhotoOutputEncoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoOutputEncoderTests.swift; sourceTree = "<group>"; };
@@ -68,8 +80,10 @@
 		33F33B6C5BE2B0CAE0ECA261 /* RecipeInvariantsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeInvariantsTests.swift; sourceTree = "<group>"; };
 		34105C69677310EA27B9F6C4 /* CameraServiceAvailabilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraServiceAvailabilityTests.swift; sourceTree = "<group>"; };
 		348CFAEC84B4CF9E4F843E66 /* RecipeReferenceCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeReferenceCatalogTests.swift; sourceTree = "<group>"; };
+		3A8B8F1DC26D736568DB1B4A /* fixture-02-02-warm-low-light.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = "fixture-02-02-warm-low-light.jpg"; sourceTree = "<group>"; };
 		3E54A0716052C16B09DBEF38 /* PhotoOutputEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoOutputEncoder.swift; sourceTree = "<group>"; };
 		3E85F3412BBC965E4A33B9EB /* RecipePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipePickerView.swift; sourceTree = "<group>"; };
+		40C2E359BAEFE7B23186DD2E /* fixture-07-13-women-party.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = "fixture-07-13-women-party.jpg"; sourceTree = "<group>"; };
 		432F02B03418EEADA550733F /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		535194C6145CBC3D755665B3 /* ColorSpaceBoundaryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorSpaceBoundaryTests.swift; sourceTree = "<group>"; };
 		53925B09E478B6CD4AF36BE1 /* CaptureReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureReviewView.swift; sourceTree = "<group>"; };
@@ -77,14 +91,21 @@
 		61617C6B4DB09D291F5DEA10 /* FilmyCameraUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmyCameraUITests.swift; sourceTree = "<group>"; };
 		6940256A8100B915539E21CB /* FilmRecipeReferenceCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmRecipeReferenceCatalog.swift; sourceTree = "<group>"; };
 		6A9AFC52D1FB5ECED33CB2DA /* CameraViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraViewModel.swift; sourceTree = "<group>"; };
+		70A84A5B602B2FBB0E521D07 /* fixture-06-11-white-dress-mirror.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = "fixture-06-11-white-dress-mirror.jpg"; sourceTree = "<group>"; };
+		754B1DA2F9B232FA4BC492A8 /* fixture-10-apple-camera-flash-on.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = "fixture-10-apple-camera-flash-on.jpg"; sourceTree = "<group>"; };
+		842705845D5496269337CD59 /* fixture-09-apple-normal.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = "fixture-09-apple-normal.jpg"; sourceTree = "<group>"; };
 		8433ABA6CF2F34E7F51023B6 /* PhotoLibraryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibraryService.swift; sourceTree = "<group>"; };
 		8D82A69BBE148C6317A2FA41 /* CameraFrameLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraFrameLayout.swift; sourceTree = "<group>"; };
 		8F580BECA95D881DF1EB3789 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		99D74C27D238C00120CAABB3 /* RecipeRenderGalleryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeRenderGalleryTests.swift; sourceTree = "<group>"; };
 		A3940D2834957A9E44F66872 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A657E128117A2C10BAD8B761 /* FilmyCamera.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = FilmyCamera.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AEE4A74BD1EA35044F8931CC /* fixture-04-05-soft-room.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = "fixture-04-05-soft-room.jpg"; sourceTree = "<group>"; };
 		B9D2815FF289A04B992AC100 /* AppIconSource.svg */ = {isa = PBXFileReference; path = AppIconSource.svg; sourceTree = "<group>"; };
 		C2F0913587D09FEB4D0E8E14 /* RendererOutputBoundsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RendererOutputBoundsTests.swift; sourceTree = "<group>"; };
 		C34BB7CBA412A194086446CD /* FilmyCameraTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = FilmyCameraTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		CDDA39ADDDBEF1974F1CBCD1 /* fixture-01-01-neon-nightclub.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = "fixture-01-01-neon-nightclub.jpg"; sourceTree = "<group>"; };
+		D4B670207487E6E65EB2C4C0 /* fixture-05-06-cozy-mirror.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = "fixture-05-06-cozy-mirror.jpg"; sourceTree = "<group>"; };
 		D5373778E34C64A9AC521C02 /* CameraViewModelRenderingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraViewModelRenderingTests.swift; sourceTree = "<group>"; };
 		D59729E8AC667A9120C460CB /* FilmyCameraApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmyCameraApp.swift; sourceTree = "<group>"; };
 		DC1520CC0C54A1860FEB034D /* CameraService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraService.swift; sourceTree = "<group>"; };
@@ -95,6 +116,7 @@
 		F56BE8EB7D6BDB867CFD8C3A /* FilmRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmRenderer.swift; sourceTree = "<group>"; };
 		F595081C082AD030B6FE6A2F /* CameraViewModelPersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraViewModelPersistenceTests.swift; sourceTree = "<group>"; };
 		F84BD1235DF873E06F8C6282 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		FBB568E1B1190D6FCD70892C /* fixture-08-10-colorful-party.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = "fixture-08-10-colorful-party.jpg"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -111,6 +133,7 @@
 		2B5AB398864BBC150E221C4B /* FilmyCameraTests */ = {
 			isa = PBXGroup;
 			children = (
+				A00E87F5BC01143807415AA5 /* Fixtures */,
 				34105C69677310EA27B9F6C4 /* CameraServiceAvailabilityTests.swift */,
 				F595081C082AD030B6FE6A2F /* CameraViewModelPersistenceTests.swift */,
 				D5373778E34C64A9AC521C02 /* CameraViewModelRenderingTests.swift */,
@@ -120,6 +143,7 @@
 				09CCB0FEDDDA669EB40BAF2B /* RecipeDetailCommitPolicyTests.swift */,
 				33F33B6C5BE2B0CAE0ECA261 /* RecipeInvariantsTests.swift */,
 				348CFAEC84B4CF9E4F843E66 /* RecipeReferenceCatalogTests.swift */,
+				99D74C27D238C00120CAABB3 /* RecipeRenderGalleryTests.swift */,
 				C2F0913587D09FEB4D0E8E14 /* RendererOutputBoundsTests.swift */,
 			);
 			path = FilmyCameraTests;
@@ -194,6 +218,23 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		A00E87F5BC01143807415AA5 /* Fixtures */ = {
+			isa = PBXGroup;
+			children = (
+				CDDA39ADDDBEF1974F1CBCD1 /* fixture-01-01-neon-nightclub.jpg */,
+				3A8B8F1DC26D736568DB1B4A /* fixture-02-02-warm-low-light.jpg */,
+				173A49EB539C1CAD2D8FB66E /* fixture-03-04-group-party.jpg */,
+				AEE4A74BD1EA35044F8931CC /* fixture-04-05-soft-room.jpg */,
+				D4B670207487E6E65EB2C4C0 /* fixture-05-06-cozy-mirror.jpg */,
+				70A84A5B602B2FBB0E521D07 /* fixture-06-11-white-dress-mirror.jpg */,
+				40C2E359BAEFE7B23186DD2E /* fixture-07-13-women-party.jpg */,
+				FBB568E1B1190D6FCD70892C /* fixture-08-10-colorful-party.jpg */,
+				842705845D5496269337CD59 /* fixture-09-apple-normal.jpg */,
+				754B1DA2F9B232FA4BC492A8 /* fixture-10-apple-camera-flash-on.jpg */,
+			);
+			path = Fixtures;
+			sourceTree = "<group>";
+		};
 		A1BC3FAE028DD404AB38DF50 /* ViewModels */ = {
 			isa = PBXGroup;
 			children = (
@@ -238,6 +279,7 @@
 			buildConfigurationList = E85358515908ABD5FB552A0D /* Build configuration list for PBXNativeTarget "FilmyCameraTests" */;
 			buildPhases = (
 				1351B15A91B0887375B8F106 /* Sources */,
+				5D84423F5A9EE0CE35994F82 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -315,6 +357,23 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		5D84423F5A9EE0CE35994F82 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				931BEA343C31E688570FC7DB /* fixture-01-01-neon-nightclub.jpg in Resources */,
+				718629614986B03E5ABBEE89 /* fixture-02-02-warm-low-light.jpg in Resources */,
+				6AD3204A4232428DCCFEC6A4 /* fixture-03-04-group-party.jpg in Resources */,
+				A014548BCC3C9CBFBB034520 /* fixture-04-05-soft-room.jpg in Resources */,
+				A5ADC24CE2A8E63667D560B6 /* fixture-05-06-cozy-mirror.jpg in Resources */,
+				737BB6218D7E5AB69A15BE96 /* fixture-06-11-white-dress-mirror.jpg in Resources */,
+				375A2523DEC639400464742E /* fixture-07-13-women-party.jpg in Resources */,
+				78EC0F1E69D338C351B31DD0 /* fixture-08-10-colorful-party.jpg in Resources */,
+				142F01509C3F0818F7EDCC99 /* fixture-09-apple-normal.jpg in Resources */,
+				44A40C0E61C4CA8809887C9C /* fixture-10-apple-camera-flash-on.jpg in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		CBB62714FF6E67A37AD53406 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -341,6 +400,7 @@
 				DE50626271FEA74A974F0056 /* RecipeDetailCommitPolicyTests.swift in Sources */,
 				EC2F24E354BEA00F79F85586 /* RecipeInvariantsTests.swift in Sources */,
 				3E434087A6331965A83F900D /* RecipeReferenceCatalogTests.swift in Sources */,
+				5E489D4CE06907D59F790896 /* RecipeRenderGalleryTests.swift in Sources */,
 				589A5A125A91DA3228E84E06 /* RendererOutputBoundsTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -33,8 +33,8 @@ final class RecipeInvariantsTests: XCTestCase {
     private var hadRecipeOverridesValue = false
     private var previousRecipeOverrides: Data?
 
-    func testRendererVersionTracksTheHalationBeforeGrainPipeline() {
-        XCTAssertEqual(FilmRecipe.rendererVersion, "core-image-parametric-v5")
+    func testRendererVersionTracksCurrentParametricPipeline() {
+        XCTAssertEqual(FilmRecipe.rendererVersion, "core-image-parametric-v9")
     }
 
     override func setUp() {
@@ -309,10 +309,16 @@ final class RecipeInvariantsTests: XCTestCase {
         XCTAssertEqual(recipe.filmBase, .compactDigital)
         XCTAssertEqual(recipe.grainEffectLevel, .off)
         XCTAssertEqual(recipe.dynamicRange, .auto)
+        XCTAssertEqual(recipe.dRangePriority, .weak)
         XCTAssertEqual(recipe.whiteBalance.mode, .ambiencePriority)
+        XCTAssertEqual(recipe.exposure, 0.12, accuracy: 0.000_001)
+        XCTAssertEqual(recipe.whiteBalance.temperature, 0.012, accuracy: 0.000_001)
+        XCTAssertEqual(recipe.whiteBalance.tint, 0.012, accuracy: 0.000_001)
+        XCTAssertEqual(recipe.saturation, 1.10, accuracy: 0.000_001)
+        XCTAssertEqual(recipe.contrast, 1.08, accuracy: 0.000_001)
         XCTAssertGreaterThan(recipe.sharpness, 0)
-        XCTAssertEqual(recipe.noiseReduction, 0)
-        XCTAssertLessThanOrEqual(recipe.clarity, 0.08)
+        XCTAssertEqual(recipe.noiseReduction, 0.20, accuracy: 0.000_001)
+        XCTAssertEqual(recipe.clarity, -0.08, accuracy: 0.000_001)
         XCTAssertEqual(recipe.halation, 0)
         XCTAssertEqual(recipe.provenance, FilmRecipe.g7XProvenance)
         XCTAssertTrue(recipe.provenance.disclaimer.contains("one-inch sensor"))
@@ -417,7 +423,7 @@ final class RecipeInvariantsTests: XCTestCase {
         )
         XCTAssertEqual(decoded.dRangePriority, .off)
         XCTAssertEqual(decoded.whiteBalance.mode, .auto)
-        XCTAssertEqual(decoded.whiteBalance.kelvin, 6500)
+        XCTAssertEqual(decoded.whiteBalance.kelvin, FilmRecipe.asShotKelvin)
         XCTAssertEqual(decoded.monochromaticColor, .init())
     }
 
@@ -537,18 +543,27 @@ final class RecipeInvariantsTests: XCTestCase {
         XCTAssertFalse(isCustomizedAfterReset)
     }
 
-    func testUnknownPersistedSelectionFallsBackToFirstBuiltInRecipe() async {
+    func testG7XCompactIsTheDefaultRecipeForNewInstalls() async {
+        let model = await CameraViewModel()
+
+        let selectedID = await model.selectedRecipeID
+        let selectedRecipe = await model.selectedRecipe
+
+        XCTAssertEqual(selectedID, CameraViewModel.defaultRecipeID)
+        XCTAssertEqual(selectedRecipe.id, "g7x-compact")
+    }
+
+    func testUnknownPersistedSelectionFallsBackToDefaultRecipe() async {
         UserDefaults.standard.set("recipe-that-no-longer-exists", forKey: selectedRecipeKey)
 
         let model = await CameraViewModel()
-        let fallbackID = FilmRecipe.builtIns[0].id
         let selectedID = await model.selectedRecipeID
         let resolvedRecipe = await model.selectedRecipe
         let rewrittenID = UserDefaults.standard.string(forKey: selectedRecipeKey)
 
-        XCTAssertEqual(selectedID, fallbackID)
-        XCTAssertEqual(resolvedRecipe, FilmRecipe.builtIns[0])
-        XCTAssertEqual(rewrittenID, fallbackID)
+        XCTAssertEqual(selectedID, CameraViewModel.defaultRecipeID)
+        XCTAssertEqual(resolvedRecipe.id, CameraViewModel.defaultRecipeID)
+        XCTAssertEqual(rewrittenID, CameraViewModel.defaultRecipeID)
     }
 
     func testCaptureFailureReturnsToIdleWithoutLeavingAReviewFrame() async {

@@ -424,6 +424,37 @@ final class RendererOutputBoundsTests: XCTestCase {
         XCTAssertLessThan(compactLevels.last ?? 1, 0.995, "Highlights should retain a shoulder before clipping")
     }
 
+    func testG7XFlashContextSeparatesCenteredSubjectFromAmbientBackground() throws {
+        let extent = CGRect(x: 0, y: 0, width: 64, height: 64)
+        let input = CIImage(
+            color: CIColor(red: 0.42, green: 0.35, blue: 0.30, alpha: 1)
+        ).cropped(to: extent)
+        let recipe = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == "g7x-compact" })
+        let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+        let captureContext = FilmRenderer.CaptureContext(
+            flashFired: true,
+            subjectRegions: [CGRect(x: 24, y: 24, width: 16, height: 16)]
+        )
+        let pixels = renderFloatPixels(
+            FilmRenderer.render(
+                input,
+                recipe: recipe,
+                quality: .photo,
+                captureContext: captureContext
+            ),
+            extent: extent,
+            context: context
+        )
+
+        let subject = pixel(pixels, width: 64, x: 32, y: 32)
+        let ambient = pixel(pixels, width: 64, x: 2, y: 2)
+        XCTAssertGreaterThan(
+            luma(subject),
+            luma(ambient) + 0.04,
+            "Resolved flash captures should lift the subject while holding back ambient background"
+        )
+    }
+
     func testG7XCompactColorEmphasizesWarmSubjectsAndSkyWhileRestrainingFoliage() throws {
         let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
         let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
@@ -447,6 +478,11 @@ final class RendererOutputBoundsTests: XCTestCase {
         XCTAssertGreaterThan(
             Double(skin[0] - skin[2]),
             Double(neutralSkin[0] - neutralSkin[2])
+        )
+        XCTAssertGreaterThan(
+            luma(skin),
+            luma(neutralSkin) + 0.005,
+            "Warm portrait midtones should receive a restrained flash-like lift"
         )
 
         let red = rendered(CIColor(red: 0.72, green: 0.16, blue: 0.12, alpha: 1), recipe: compact)

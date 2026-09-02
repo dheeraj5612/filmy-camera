@@ -13,7 +13,12 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     /// adds the canonical camera mode controls introduced by the fidelity pass;
     /// version 5 adds persisted Kelvin white-balance control.
     public static let currentSchemaVersion = 5
-    public static let rendererVersion = "core-image-parametric-v5"
+    public static let rendererVersion = "core-image-parametric-v9"
+
+    /// The Kelvin value that renders as "as shot". Phone frames are already
+    /// balanced for their scene, so a Color Temperature setting equal to this
+    /// daylight reference leaves color unchanged; higher renders warmer.
+    public static let asShotKelvin: Double = 5600
 
     /// The product-level disclosure that accompanies every current recipe.
     /// It intentionally rules out an exact-output or hardware-calibration
@@ -960,7 +965,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             temperature: Double = 0,
             tint: Double = 0,
             mode: WhiteBalanceMode = .auto,
-            kelvin: Double = 6500
+            kelvin: Double = FilmRecipe.asShotKelvin
         ) {
             self.mode = mode
             self.kelvin = kelvin
@@ -980,7 +985,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             mode = try container.decodeIfPresent(WhiteBalanceMode.self, forKey: .mode) ?? .auto
             // Pre-v5 records did not persist a Kelvin value. 6500 K is the
             // neutral bridge used by the previous normalized-only model.
-            kelvin = try container.decodeIfPresent(Double.self, forKey: .kelvin) ?? 6500
+            kelvin = try container.decodeIfPresent(Double.self, forKey: .kelvin) ?? FilmRecipe.asShotKelvin
             temperature = try container.decodeIfPresent(Double.self, forKey: .temperature) ?? 0
             tint = try container.decodeIfPresent(Double.self, forKey: .tint) ?? 0
         }
@@ -1355,7 +1360,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         dynamicRange: DynamicRange,
         dRangePriority: DRangePriority = .off,
         whiteBalanceMode: WhiteBalanceMode,
-        kelvin: Double = 6500,
+        kelvin: Double = FilmRecipe.asShotKelvin,
         redShift: Double = 0,
         blueShift: Double = 0,
         colorChrome: ColorChromeLevel,
@@ -1883,28 +1888,32 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         FilmRecipe(
             id: "g7x-compact",
             name: "G7 X Compact",
-            subtitle: "Clean skin / vivid compact JPEG",
+            subtitle: "Bright portraits / social pop",
             filmBase: .compactDigital,
-            exposure: 0,
-            tone: Tone(highlight: 0.03, shadow: -0.08),
-            saturation: 1.0,
-            contrast: 1.0,
+            exposure: 0.12,
+            // The dedicated compact stage still carries the measured Canon-
+            // style response. These social-reference defaults intentionally
+            // lean harder into bright subjects, rich darks, rosy skin, and
+            // compact-camera color without copying a sample image.
+            tone: Tone(highlight: 0.12, shadow: 0.16),
+            saturation: 1.10,
+            contrast: 1.08,
             dynamicRange: .auto,
-            dRangePriority: .off,
+            dRangePriority: .weak,
             whiteBalance: WhiteBalanceShift(
                 // Ambience Priority already contributes a small warm bias.
-                // Counter most of that fixed offset so daylight neutrals stay
-                // clean; scene warmth is retained rather than painted on.
-                temperature: -0.035,
-                tint: 0,
+                // Keep the global shift small so neutral walls and fabric stay
+                // neutral; the peach/pink feel comes from the skin-local stage.
+                temperature: 0.012,
+                tint: 0.012,
                 mode: .ambiencePriority
             ),
             colorChrome: 0,
             blueResponse: 0,
             fxBlue: 0,
-            sharpness: 0.16,
-            noiseReduction: 0,
-            clarity: 0.025,
+            sharpness: 0.10,
+            noiseReduction: 0.20,
+            clarity: -0.08,
             grain: 0,
             grainSize: 0.75,
             vignette: 0,
@@ -1923,7 +1932,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             name: "Nostalgic Summer",
             subtitle: "Soft warmth / seaside color",
             filmBase: .nostalgicNegative,
-            exposure: 0.67,
+            exposure: 0.45,
             highlight: -1.5,
             shadow: -1,
             color: 3,

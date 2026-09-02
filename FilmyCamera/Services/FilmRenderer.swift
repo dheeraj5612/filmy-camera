@@ -28,6 +28,21 @@ public final class FilmRenderer {
         }
     }
 
+    /// Capture facts that cannot be represented by an editable color recipe.
+    /// The default keeps previews, imports, and existing callers deterministic;
+    /// still captures supply the resolved flash result and detected subjects.
+    public struct CaptureContext: @unchecked Sendable {
+        public let flashFired: Bool
+        public let subjectRegions: [CGRect]
+
+        public init(flashFired: Bool = false, subjectRegions: [CGRect] = []) {
+            self.flashFired = flashFired
+            self.subjectRegions = subjectRegions
+        }
+
+        public static let standard = CaptureContext()
+    }
+
     // Xcode 16.4's SDK annotations do not model these immutable handles as
     // Sendable. They are initialized once and never mutated after creation.
     // Keep the explicit opt-out until the minimum hosted toolchain catches up.
@@ -171,6 +186,8 @@ public final class FilmRenderer {
     private final class ImmutableResources: @unchecked Sendable {
         let grainTexture: CIImage?
         let grainKernel: CIColorKernel?
+        let skinSmoothingKernel: CIColorKernel?
+        let subjectGateKernel: CIColorKernel?
         let clearImage: CIImage
         let zeroComponents: CIVector
         let oneComponents: CIVector
@@ -185,6 +202,39 @@ public final class FilmRenderer {
                     float luminanceMask = clamp(4.0 * luminance * (1.0 - luminance), 0.0, 1.0);
                     float delta = (noise.r - 0.5) * amplitude * luminanceMask;
                     return vec4(clamp(image.rgb + vec3(delta), 0.0, 1.0), image.a);
+                }
+                """)
+            skinSmoothingKernel = CIColorKernel(source: """
+                kernel vec4 filmySkinSmooth(
+                    __sample image,
+                    __sample blurred,
+                    __sample subjectMask,
+                    float amount
+                ) {
+                    float maximum = max(image.r, max(image.g, image.b));
+                    float minimum = min(image.r, min(image.g, image.b));
+                    float chroma = maximum - minimum;
+                    float luminance = dot(image.rgb, vec3(0.2126, 0.7152, 0.0722));
+                    float redWarmth = smoothstep(0.012, 0.16, image.r - image.g);
+                    float blueBalance = 1.0 - smoothstep(0.20, 0.42, image.b - image.g);
+                    float usefulChroma = smoothstep(0.025, 0.14, chroma)
+                        * (1.0 - smoothstep(0.46, 0.72, chroma));
+                    float usefulLuma = smoothstep(0.10, 0.28, luminance)
+                        * (1.0 - smoothstep(0.86, 0.99, luminance));
+                    float skin = redWarmth * blueBalance * usefulChroma * usefulLuma;
+                    float mask = clamp(skin * subjectMask.r * amount, 0.0, 1.0);
+                    return vec4(mix(image.rgb, blurred.rgb, mask), image.a);
+                }
+                """)
+            // Gate the feathered subject region by luminance so a bright wall
+            // behind a head is never lifted into a halo; only the subject's own
+            // mid and low tones receive the flash-style lift.
+            subjectGateKernel = CIColorKernel(source: """
+                kernel vec4 filmySubjectGate(__sample image, __sample mask) {
+                    float luminance = dot(image.rgb, vec3(0.2126, 0.7152, 0.0722));
+                    float gate = 1.0 - smoothstep(0.58, 0.88, luminance);
+                    float value = clamp(mask.r * gate, 0.0, 1.0);
+                    return vec4(value, value, value, 1.0);
                 }
                 """)
             clearImage = CIImage(color: .clear)
@@ -318,6 +368,7 @@ public final class FilmRenderer {
         _ image: CIImage,
         recipe: FilmRecipe,
         quality: Quality = .preview,
+        captureContext: CaptureContext = .standard,
         grainSeed: UInt32 = canonicalGrainSeed,
         grainPhase: CGPoint? = nil
     ) -> CIImage {
@@ -333,14 +384,28 @@ public final class FilmRenderer {
 
         output = applyDynamicRange(to: output, recipe: safeRecipe)
         output = applyExposureAndTone(to: output, recipe: safeRecipe)
-        output = applyCompactDigitalTone(to: output, recipe: safeRecipe)
+        output = applyCompactDigitalTone(
+            to: output,
+            recipe: safeRecipe,
+            captureContext: captureContext
+        )
         output = applyWhiteBalance(to: output, recipe: safeRecipe)
         output = applyMonochromeFilter(to: output, recipe: safeRecipe)
         output = applyColorControls(to: output, recipe: safeRecipe)
         output = applyColorCube(to: output, recipe: safeRecipe, quality: quality)
         output = applyMonochromaticColorAxes(to: output, recipe: safeRecipe)
+        output = applyCompactDigitalSubjectTreatment(
+            to: output,
+            recipe: safeRecipe,
+            captureContext: captureContext
+        )
         output = applyDetailControls(to: output, recipe: safeRecipe)
         output = applyClarity(to: output, recipe: safeRecipe)
+        output = applyCompactDigitalSkinSmoothing(
+            to: output,
+            recipe: safeRecipe,
+            captureContext: captureContext
+        )
         // Halation is light scattered inside the film stack, so derive its
         // highlight mask before adding the final grain texture. Otherwise the
         // synthetic grain itself can create or modulate red highlight bloom.
@@ -359,6 +424,44 @@ public final class FilmRenderer {
         // Some finishing filters can expand their extent. Camera and export
         // callers expect the same bounds as the source image.
         return output.cropped(to: sourceExtent)
+    }
+
+    /// Detects portrait subjects once on the full-resolution still path. Live
+    /// preview rendering intentionally does not run a face detector per frame.
+    public static func portraitSubjectRegions(in image: CIImage) -> [CGRect] {
+        let extent = image.extent
+        guard !extent.isEmpty,
+              extent.width.isFinite,
+              extent.height.isFinite,
+              let detector = CIDetector(
+                ofType: CIDetectorTypeFace,
+                context: nil,
+                options: [
+                    CIDetectorAccuracy: CIDetectorAccuracyHigh,
+                    CIDetectorMinFeatureSize: 0.05
+                ]
+              ) else {
+            return []
+        }
+
+        let maximumDimension = max(extent.width, extent.height)
+        let detectionScale = min(CGFloat(1), 960 / max(maximumDimension, 1))
+        let detectionImage = image.transformed(by: CGAffineTransform(
+            scaleX: detectionScale,
+            y: detectionScale
+        ))
+
+        return detector.features(in: detectionImage).compactMap { feature in
+            guard feature.type == CIFeatureTypeFace else { return nil }
+            let scaledBounds = feature.bounds
+            let bounds = CGRect(
+                x: scaledBounds.minX / detectionScale,
+                y: scaledBounds.minY / detectionScale,
+                width: scaledBounds.width / detectionScale,
+                height: scaledBounds.height / detectionScale
+            ).intersection(extent)
+            return bounds.isEmpty ? nil : bounds
+        }
     }
 
     /// The renderer is also used for decoded drafts and future import paths.
@@ -385,7 +488,7 @@ public final class FilmRenderer {
             temperature: value(recipe.whiteBalance.temperature, .temperature, neutral: 0),
             tint: value(recipe.whiteBalance.tint, .tint, neutral: 0),
             mode: recipe.whiteBalance.mode,
-            kelvin: value(recipe.whiteBalance.kelvin, .colorTemperature, neutral: 6500)
+            kelvin: value(recipe.whiteBalance.kelvin, .colorTemperature, neutral: FilmRecipe.asShotKelvin)
         )
         safe.monochromaticColor = FilmRecipe.MonochromaticColor(
             warmCool: value(recipe.monochromaticColor.warmCool, .monochromaticWarmCool, neutral: 0),
@@ -535,25 +638,34 @@ public final class FilmRenderer {
 
     private static func applyCompactDigitalTone(
         to image: CIImage,
-        recipe: FilmRecipe
+        recipe: FilmRecipe,
+        captureContext: CaptureContext
     ) -> CIImage {
         guard recipe.filmBase == .compactDigital,
               let toneCurve = CIFilter(name: "CIToneCurve") else {
             return image
         }
 
-        // A dedicated compact-JPEG curve complements the editable recipe
-        // controls. It keeps black anchored, opens useful shadow/midtone
-        // detail, and eases into a gentle highlight shoulder. The points are
-        // an original approximation of the public Standard Picture Style and
-        // automatic-lighting intent, not Canon calibration data.
-        let points: [(CGFloat, CGFloat)] = [
-            (0.00, 0.006),
-            (0.18, 0.205),
-            (0.50, 0.545),
-            (0.80, 0.825),
-            (1.00, 0.995)
-        ]
+        // The default deliberately favors the social compact-camera outcome:
+        // richer ambient shadows, present portrait midtones, and a protected
+        // highlight shoulder. When flash actually fired, the stronger curve
+        // reinforces that bright-subject/dark-room separation without
+        // pretending flash lighting exists on a non-flash capture.
+        let points: [(CGFloat, CGFloat)] = captureContext.flashFired
+            ? [
+                (0.00, 0.002),
+                (0.18, 0.155),
+                (0.50, 0.575),
+                (0.80, 0.846),
+                (1.00, 0.964)
+            ]
+            : [
+                (0.00, 0.004),
+                (0.18, 0.185),
+                (0.50, 0.560),
+                (0.80, 0.828),
+                (1.00, 0.972)
+            ]
 
         toneCurve.setValue(image, forKey: kCIInputImageKey)
         for (index, point) in points.enumerated() {
@@ -565,14 +677,164 @@ public final class FilmRenderer {
         return toneCurve.outputImage?.cropped(to: image.extent) ?? image
     }
 
+    private static func applyCompactDigitalSubjectTreatment(
+        to image: CIImage,
+        recipe: FilmRecipe,
+        captureContext: CaptureContext
+    ) -> CIImage {
+        guard recipe.filmBase == .compactDigital,
+              let mask = compactDigitalSubjectMask(
+                for: captureContext,
+                extent: image.extent
+              ),
+              let blend = CIFilter(name: "CIBlendWithMask") else {
+            return image
+        }
+
+        let backgroundEV = captureContext.flashFired ? -0.34 : -0.07
+        let subjectEV = captureContext.flashFired ? 0.18 : 0.11
+        let background = image.applyingFilter("CIExposureAdjust", parameters: [
+            kCIInputEVKey: backgroundEV
+        ])
+        let subject = image
+            .applyingFilter("CIExposureAdjust", parameters: [
+                kCIInputEVKey: subjectEV
+            ])
+            .applyingFilter("CIHighlightShadowAdjust", parameters: [
+                "inputHighlightAmount": captureContext.flashFired ? 0.66 : 0.76,
+                "inputShadowAmount": 0
+            ])
+
+        let gatedMask = immutableResources.subjectGateKernel?.apply(
+            extent: image.extent,
+            arguments: [image, mask]
+        )?.cropped(to: image.extent) ?? mask
+
+        blend.setValue(subject, forKey: kCIInputImageKey)
+        blend.setValue(background, forKey: kCIInputBackgroundImageKey)
+        blend.setValue(gatedMask, forKey: "inputMaskImage")
+        return blend.outputImage?.cropped(to: image.extent) ?? image
+    }
+
+    private static func applyCompactDigitalSkinSmoothing(
+        to image: CIImage,
+        recipe: FilmRecipe,
+        captureContext: CaptureContext
+    ) -> CIImage {
+        let smoothingControl = clamp(recipe.noiseReduction, lower: 0, upper: 1)
+        guard recipe.filmBase == .compactDigital,
+              smoothingControl > 0.0001,
+              max(image.extent.width, image.extent.height) >= 16,
+              let kernel = immutableResources.skinSmoothingKernel,
+              let blur = CIFilter(name: "CIGaussianBlur") else {
+            return image
+        }
+
+        let extent = image.extent
+        blur.setValue(image.clampedToExtent(), forKey: kCIInputImageKey)
+        blur.setValue(
+            spatialRadius(1.15 + smoothingControl * 2.4, for: extent),
+            forKey: kCIInputRadiusKey
+        )
+        guard let blurred = blur.outputImage?.cropped(to: extent) else {
+            return image
+        }
+
+        let subjectMask = compactDigitalSubjectMask(
+            for: captureContext,
+            extent: extent
+        ) ?? CIImage(color: .white).cropped(to: extent)
+        let amount = clamp(
+            smoothingControl * 1.35 + (captureContext.flashFired ? 0.05 : 0),
+            lower: 0,
+            upper: 0.45
+        )
+        return kernel.apply(
+            extent: extent,
+            arguments: [image, blurred, subjectMask, amount]
+        )?.cropped(to: extent) ?? image
+    }
+
+    private static func compactDigitalSubjectMask(
+        for captureContext: CaptureContext,
+        extent: CGRect
+    ) -> CIImage? {
+        guard !extent.isEmpty else { return nil }
+
+        var regions = captureContext.subjectRegions.compactMap { face -> CGRect? in
+            guard !face.isEmpty, face.width.isFinite, face.height.isFinite else {
+                return nil
+            }
+            // Expand a detected face into a softly feathered upper-body area.
+            // Core Image coordinates increase upward, so shift the center down
+            // to include shoulders and clothing rather than brightening only a
+            // small oval over the face.
+            let region = CGRect(
+                x: face.midX - face.width * 1.35,
+                y: face.midY - face.height * 2.15,
+                width: face.width * 2.70,
+                height: face.height * 3.50
+            )
+            return region.intersects(extent) ? region : nil
+        }
+
+        if regions.isEmpty, captureContext.flashFired {
+            // Direct-flash portraits are normally center composed. This safe
+            // fallback keeps flash-on captures distinctive if a face is
+            // briefly occluded or the detector misses a profile.
+            regions = [CGRect(
+                x: extent.midX - extent.width * 0.31,
+                y: extent.midY - extent.height * 0.37,
+                width: extent.width * 0.62,
+                height: extent.height * 0.74
+            )]
+        }
+
+        guard !regions.isEmpty else { return nil }
+
+        let masks = regions.compactMap { region -> CIImage? in
+            guard let radial = CIFilter(name: "CIRadialGradient") else {
+                return nil
+            }
+            radial.setValue(CIVector(x: 0, y: 0), forKey: "inputCenter")
+            radial.setValue(0.34, forKey: "inputRadius0")
+            radial.setValue(1.0, forKey: "inputRadius1")
+            radial.setValue(CIColor.white, forKey: "inputColor0")
+            radial.setValue(CIColor.black, forKey: "inputColor1")
+            return radial.outputImage?
+                .transformed(by: CGAffineTransform(
+                    scaleX: region.width / 2,
+                    y: region.height / 2
+                ))
+                .transformed(by: CGAffineTransform(
+                    translationX: region.midX,
+                    y: region.midY
+                ))
+                .cropped(to: extent)
+        }
+
+        guard var combined = masks.first else { return nil }
+        for mask in masks.dropFirst() {
+            combined = mask.applyingFilter("CIMaximumCompositing", parameters: [
+                kCIInputBackgroundImageKey: combined
+            ]).cropped(to: extent)
+        }
+        return combined
+    }
+
     private static func applyWhiteBalance(
         to image: CIImage,
         recipe: FilmRecipe
     ) -> CIImage {
         let temperatureShift = recipe.temperatureShift + recipe.whiteBalance.mode.temperatureBias
         let tintShift = recipe.tintShift + recipe.whiteBalance.mode.tintBias
+        // Camera semantics: the Kelvin value is the illuminant the camera is
+        // told to neutralize. Phone frames arrive already balanced for the
+        // scene (about daylight), so a setting above the as-shot reference
+        // renders warmer and one below renders cooler, exactly as it would on
+        // the camera body and in desktop RAW editors.
         let baseKelvin = recipe.whiteBalance.mode == .colorTemperature
-            ? clamp(recipe.whiteBalance.kelvin, lower: 2500, upper: 10000)
+            ? 6500 - (clamp(recipe.whiteBalance.kelvin, lower: 2500, upper: 10000) - FilmRecipe.asShotKelvin)
             : 6500
         let targetKelvin = clamp(
             baseKelvin - clamp(temperatureShift, lower: -1, upper: 1) * 1800,
@@ -712,9 +974,29 @@ public final class FilmRenderer {
             ? clamp(recipe.saturation, lower: 0, upper: 2)
             : 1
         controls.setValue(saturation, forKey: kCIInputSaturationKey)
-        controls.setValue(clamp(recipe.contrast, lower: 0.5, upper: 1.7), forKey: kCIInputContrastKey)
+        controls.setValue(1, forKey: kCIInputContrastKey)
         controls.setValue(0, forKey: kCIInputBrightnessKey)
-        return controls.outputImage ?? image
+        var output = controls.outputImage ?? image
+
+        // Core Image evaluates CIColorControls in the linear working space,
+        // where its contrast pivot (0.5 linear, about 0.73 sRGB) crushes every
+        // dark tone toward black even at modest settings. Apply contrast in
+        // gamma-encoded space instead so it behaves like a camera's contrast
+        // control: a pivot at perceptual middle gray with shadows preserved.
+        let contrast = clamp(recipe.contrast, lower: 0.5, upper: 1.7)
+        if abs(contrast - 1) > 0.0001,
+           let toGamma = CIFilter(name: "CILinearToSRGBToneCurve"),
+           let contrastControls = CIFilter(name: "CIColorControls"),
+           let toLinear = CIFilter(name: "CISRGBToneCurveToLinear") {
+            toGamma.setValue(output, forKey: kCIInputImageKey)
+            contrastControls.setValue(toGamma.outputImage, forKey: kCIInputImageKey)
+            contrastControls.setValue(1, forKey: kCIInputSaturationKey)
+            contrastControls.setValue(contrast, forKey: kCIInputContrastKey)
+            contrastControls.setValue(0, forKey: kCIInputBrightnessKey)
+            toLinear.setValue(contrastControls.outputImage, forKey: kCIInputImageKey)
+            output = toLinear.outputImage ?? output
+        }
+        return output
     }
 
     private static func applyColorCube(
@@ -1143,8 +1425,11 @@ public final class FilmRenderer {
             mappedRed -= 0.010 * magentaWeight
             mappedBlue -= 0.006 * magentaWeight
             mappedRed += 0.008 * highlightWeight + 0.005 * skinWeight
-            mappedBlue += 0.020 * shadowWeight + 0.010 * coolShadowWeight
-            mappedGreen += 0.007 * shadowWeight + 0.003 * coolShadowWeight
+            // Shadows keep their cool separation now that contrast no longer
+            // compresses them in linear light; bias blue up and red down there.
+            mappedRed -= 0.012 * shadowWeight
+            mappedBlue += 0.040 * shadowWeight + 0.030 * coolShadowWeight
+            mappedGreen += 0.008 * shadowWeight + 0.004 * coolShadowWeight
         case .velvia:
             saturate(1.08 + 0.06 * smoothstep(0.18, 0.92, luma))
             mappedRed += 0.010 * highlightWeight
@@ -1204,12 +1489,14 @@ public final class FilmRenderer {
             )
             let midtoneWeight = smoothstep(0.12, 0.42, luma)
                 * (1 - smoothstep(0.78, 0.98, luma))
+            // Near-neutral warm grays (fabric, walls under tungsten) must not be
+            // treated as skin, or they drift brown. Require real chroma first.
             let skinWeight = hueSectorWeight(hue, center: 0.075, halfWidth: 0.095)
-                * smoothstep(0.035, 0.32, chroma)
+                * smoothstep(0.075, 0.30, chroma)
                 * (1 - smoothstep(0.38, 0.62, chroma))
                 * midtoneWeight
             let redWeight = hueSectorWeight(hue, center: 0.99, halfWidth: 0.075)
-                * smoothstep(0.055, 0.38, chroma)
+                * smoothstep(0.085, 0.38, chroma)
                 * midtoneWeight
             let greenWeight = hueSectorWeight(hue, center: 0.32, halfWidth: 0.14)
                 * smoothstep(0.04, 0.34, chroma)
@@ -1224,25 +1511,32 @@ public final class FilmRenderer {
             // response concentrates color in reds, warm subjects, and blues
             // instead of applying blanket saturation.
             saturate(1 - 0.065 * deepShadowWeight - 0.045 * brightHighlightWeight)
-            mappedRed += 0.014 * redWeight
-            mappedGreen -= 0.004 * redWeight
-            mappedBlue -= 0.006 * redWeight
-            mappedRed += 0.016 * skinWeight + 0.003 * highlightWeight
-            mappedGreen += 0.005 * skinWeight + 0.003 * greenWeight
-            mappedBlue -= 0.007 * skinWeight
+            // Social G7 X references consistently emphasize peach/pink skin,
+            // vivid red accents, and a clean flash-lit subject. Keep the lift
+            // hue- and midtone-local so landscapes and neutral objects do not
+            // inherit a face-filter cast. This is an original exaggeration of
+            // the public visual intent, not a sampled transform.
+            mappedRed += 0.046 * redWeight
+            mappedGreen -= 0.014 * redWeight
+            mappedBlue -= 0.012 * redWeight
+            // Peach/pink rather than orange: push red, hold green, and let a
+            // little blue back in so skin reads rosy instead of tanned.
+            mappedRed += 0.050 * skinWeight + 0.004 * highlightWeight
+            mappedGreen -= 0.004 * skinWeight + 0.003 * greenWeight
+            mappedBlue += 0.016 * skinWeight
 
             // Across the same-scene reference pairs, foliage was usually a
             // little quieter than the independent RAW development. Pull only
             // that hue sector toward luminance so greens retain separation
             // without the fluorescent cast of a global saturation boost.
-            let greenRestraint = 0.065 * greenWeight
+            let greenRestraint = 0.16 * greenWeight
             mappedRed = mix(mappedRed, luma, greenRestraint)
             mappedGreen = mix(mappedGreen, luma, greenRestraint)
             mappedBlue = mix(mappedBlue, luma, greenRestraint)
 
-            mappedBlue += 0.013 * blueWeight
-            mappedGreen += 0.003 * blueWeight
-            mappedRed -= 0.003 * blueWeight
+            mappedBlue += 0.021 * blueWeight
+            mappedGreen += 0.004 * blueWeight
+            mappedRed -= 0.005 * blueWeight
         }
 
         return (mappedRed, mappedGreen, mappedBlue)

@@ -287,3 +287,93 @@ selected camera profile beside the shutter, retains 44-point touch targets and
 VoiceOver state, and continues to scale across iPhone and iPad. Film recipes,
 photo import, provenance, and the existing detailed controls remain distinct
 Filmy Camera workflows.
+
+## flag7x visual-reference pass — 2026-08-30
+
+The installed `flag7x` 3.3.1 app was launched on a connected iPad and captured
+through Xcode's device screenshot path. Its current public product page and
+[G7X-inspired guide](https://www.flag7xapp.com/guides/canon-g7x-look-iphone)
+were reviewed alongside the live UI. The public target is a polished compact-
+camera default with warm natural color, saturated but controlled subjects,
+friendly contrast, and an optional portrait-smoothing setting. Flash is a
+capture choice that creates bright-subject/dark-background separation; it is
+not treated as a color-filter curve.
+
+Filmy Camera keeps its existing same-scene Canon JPEG/RAW-derived compact core
+but now uses the stronger social-camera treatment as its initial default:
+brighter warm portrait midtones, peach/pink skin, richer ambient shadows,
+controlled saturation, and gentle skin-selective smoothing. Synthetic grain,
+vignette, and halation remain off. No flag7x code, assets, LUTs, private app data, or sample pixels
+are copied or shipped, and the result remains an independently implemented
+approximation rather than a pixel-identical claim.
+
+The global warmth initially reduced saturated-red separation by moving those
+pixels near the existing hue-sector boundary. A regression fixture caught it;
+the final renderer makes only a small red/orange-local correction and advances
+saved-photo provenance to `core-image-parametric-v6`.
+
+## G7 X social-portrait reference pass — 2026-08-30
+
+Public G7 X Mark II/III night-out portraits, group photos, selfies, and direct-
+flash examples were reviewed to identify the outcome people seek rather than
+to reproduce an individual image. Across the references, the recurring visual
+language was a bright, clean subject against a darker ambient background;
+peach/pink warmth in skin; crisp red and gold accents; controlled highlights;
+and slightly softened microcontrast instead of aggressive phone-style HDR.
+
+The G7 X Compact default now intentionally exaggerates that feel. It is also
+the initially selected recipe on a new install. A one-time face-detection pass
+on captured stills supplies softly feathered subject regions; when AVFoundation
+confirms that flash actually fired, the renderer brightens and protects those
+subjects while darkening ambient background. The same default adds a firmer
+social-photo curve, stronger bounded color, warmer ambience-priority balance,
+peach/pink-local portrait color, and gentle skin-selective smoothing. Flash
+remains a real capture control; a non-flash image never receives the stronger
+direct-flash separation.
+No reference pixels, LUTs, private app data, or images are included. Saved-photo
+provenance advances to `core-image-parametric-v8`.
+
+## iPad hardware verification and renderer corrections — 2026-09-01
+
+The branch was rebased onto the merged viewfinder redesign (#77) and the
+whole test suite was run on a paired iPad Pro 11-inch (2nd generation) on
+iOS 26.6.1, plus the iPad Pro and iPhone 17 Pro simulators. Two classes of
+crash logs found on the device pointed at the same defect: in Swift 6
+language mode, closure literals passed to PhotoKit change blocks and
+completion handlers from the `@MainActor` photo-library service inherit
+main-actor isolation, and PhotoKit invokes them on its own serial queue, so
+the runtime isolation check trapped while saving to the app album, deleting,
+or requesting authorization. Every PhotoKit callback is now an explicitly
+`@Sendable` closure that captures only identifiers and re-fetches inside the
+change block.
+
+Rendering real fixture photographs through the pipeline on the device exposed
+two renderer-wide issues:
+
+- Contrast was applied by `CIColorControls` in Core Image's linear working
+  space, whose pivot (0.5 linear, roughly 0.73 sRGB) drives every dark tone
+  toward black even at modest settings; recipes at 1.18 clipped everything
+  below about 0.3 sRGB. Contrast now runs in gamma-encoded space around
+  perceptual middle gray, which is how a camera's contrast control behaves.
+- The Color Temperature control used Core Image's target-neutral direction,
+  where a lower Kelvin renders warmer. Cameras and RAW editors use the
+  opposite convention: the value is the illuminant being neutralized, so a
+  higher setting renders warmer. Phone frames arrive already balanced for the
+  scene, so 5600 K is now the as-shot reference (`FilmRecipe.asShotKelvin`)
+  and public creator recipes with Kelvin values render in their intended
+  direction. Nostalgic Summer's exposure was also eased from +0.67 to +0.45.
+
+The G7 X Compact default was re-tuned against the same fixtures. Near-neutral
+warm grays were being treated as skin and drifted brown, so the skin and red
+hue sectors now require real chroma before they receive color; skin moves
+toward peach/pink (red up, green held, a little blue back) instead of tan;
+the global white-balance shift is reduced so walls and fabric stay neutral;
+and the face-driven subject lift is gated by luminance so a bright wall behind
+a head never becomes a halo. Exposure, tone, saturation, contrast, and
+skin smoothing were raised for a clearly compact-camera result that remains
+bounded. Saved-photo provenance advances to `core-image-parametric-v9`.
+
+A local-only render gallery test (`RecipeRenderGalleryTests`) attaches
+labelled before/after composites for any `FilmyCameraTests/Fixtures/fixture-*.jpg`
+photographs present at build time; the fixtures are intentionally not
+committed and the test skips without them.

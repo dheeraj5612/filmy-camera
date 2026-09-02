@@ -196,7 +196,7 @@ final class FilmyCameraUITests: XCTestCase {
             controlsToggle.tap()
         }
 
-        let recipeMenu = app.descendants(matching: .any)["landscape-recipe-picker"]
+        let recipeMenu = app.descendants(matching: .any)["recipe-menu"]
         XCTAssertTrue(recipeMenu.waitForExistence(timeout: 8), "Landscape recipe menu should exist")
         assertMinimumAccessibilityFrame(recipeMenu, named: "Landscape recipe menu")
 
@@ -249,6 +249,121 @@ final class FilmyCameraUITests: XCTestCase {
         )
         attachScreenshot(named: "imported-photo-saved")
     }
+
+    /// Presses the real shutter, keeps the frame, and confirms it lands in
+    /// the Roll. Only meaningful on hardware with a camera.
+    func testPhysicalCaptureKeepsFrameAndUpdatesRoll() throws {
+        let shutter = app.buttons["Capture photo"]
+        XCTAssertTrue(
+            shutter.waitForExistence(timeout: 20),
+            "The live camera should expose an enabled shutter on hardware"
+        )
+        assertMinimumHitTarget(shutter, named: "Shutter")
+        attachScreenshot(named: "device-live-viewfinder")
+        shutter.tap()
+
+        let keepFrame = app.buttons["Keep frame"]
+        XCTAssertTrue(
+            keepFrame.waitForExistence(timeout: 30),
+            "A capture should reach the review sheet"
+        )
+        XCTAssertTrue(app.buttons["Retake"].exists)
+        attachScreenshot(named: "device-capture-review")
+
+        assertMinimumHitTarget(keepFrame, named: "Keep frame")
+        keepFrame.tap()
+        app.tap()
+
+        let savedToast = app.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH 'Saved with '")
+        ).firstMatch
+        XCTAssertTrue(
+            savedToast.waitForExistence(timeout: 20),
+            "The kept frame should be committed to Photos"
+        )
+        XCTAssertTrue(
+            waitForDisappearance(keepFrame, timeout: 5),
+            "Keeping a frame should dismiss the review sheet"
+        )
+
+        let roll = app.buttons["roll-tab"]
+        assertMinimumHitTarget(roll, named: "Roll tab")
+        roll.tap()
+
+        let frame = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH 'Photo in your gallery'")
+        ).firstMatch
+        XCTAssertTrue(
+            frame.waitForExistence(timeout: 15),
+            "The Roll should list the frame that was just kept"
+        )
+        attachScreenshot(named: "device-roll-after-capture")
+
+        frame.tap()
+        let closeFrame = app.buttons["Close frame"]
+        XCTAssertTrue(closeFrame.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Share frame"].waitForExistence(timeout: 5))
+        attachScreenshot(named: "device-frame-detail")
+
+        let backToCamera = app.buttons["frame-back-to-camera"]
+        assertMinimumHitTarget(backToCamera, named: "Frame back to camera")
+        backToCamera.tap()
+        XCTAssertTrue(
+            app.buttons["Capture photo"].waitForExistence(timeout: 10),
+            "Back to camera from a frame should land on the live viewfinder"
+        )
+    }
+
+    /// The G7 X profile renders flash captures differently. Turn the flash
+    /// on, capture, and make sure the still reaches review, then discard it.
+    func testPhysicalG7XFlashCaptureReachesReview() throws {
+        app.terminate()
+
+        let compactApp = XCUIApplication()
+        compactApp.launchArguments = [
+            "-ui-testing",
+            "-selectedRecipeID",
+            "g7x-compact"
+        ]
+        compactApp.launch()
+        defer { compactApp.terminate() }
+        compactApp.tap()
+
+        let shutter = compactApp.buttons["Capture photo"]
+        XCTAssertTrue(shutter.waitForExistence(timeout: 20))
+        XCTAssertTrue(compactApp.staticTexts["CAMERA PROFILE"].waitForExistence(timeout: 5))
+
+        let flash = compactApp.buttons["flash-control"]
+        if flash.waitForExistence(timeout: 5), flash.isEnabled {
+            for _ in 0..<3 where (flash.value as? String) != "On" {
+                flash.tap()
+            }
+            XCTAssertEqual(flash.value as? String, "On", "Flash should cycle to On")
+        }
+        attachScreenshot(named: "device-g7x-flash-viewfinder")
+
+        shutter.tap()
+        let keepFrame = compactApp.buttons["Keep frame"]
+        XCTAssertTrue(
+            keepFrame.waitForExistence(timeout: 40),
+            "A G7 X flash capture should reach the review sheet"
+        )
+        attachScreenshot(named: "device-g7x-flash-review")
+
+        let retake = compactApp.buttons["Retake"]
+        assertMinimumHitTarget(retake, named: "Retake")
+        retake.tap()
+        XCTAssertTrue(
+            compactApp.buttons["Capture photo"].waitForExistence(timeout: 10),
+            "Retake should return to the live viewfinder"
+        )
+
+        if flash.exists, flash.isEnabled {
+            for _ in 0..<3 where (flash.value as? String) != "Off" {
+                flash.tap()
+            }
+        }
+    }
     #endif
 
     #if targetEnvironment(simulator)
@@ -270,6 +385,8 @@ final class FilmyCameraUITests: XCTestCase {
             let accessibilityApp = XCUIApplication()
             accessibilityApp.launchArguments = [
                 "-ui-testing",
+                "-selectedRecipeID",
+                "classic-chrome",
                 "-UIPreferredContentSizeCategoryName",
                 "UICTContentSizeCategoryAccessibilityXXXL"
             ]

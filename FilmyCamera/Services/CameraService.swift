@@ -242,15 +242,21 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         public let fileData: Data
         public let capturedAt: Date
         public let dimensions: CMVideoDimensions
+        /// The resolved hardware result, not merely the requested flash mode.
+        /// Auto flash and thermal fallback make that distinction important to
+        /// downstream rendering.
+        public let flashFired: Bool
 
         public init(
             fileData: Data,
             capturedAt: Date,
-            dimensions: CMVideoDimensions
+            dimensions: CMVideoDimensions,
+            flashFired: Bool = false
         ) {
             self.fileData = fileData
             self.capturedAt = capturedAt
             self.dimensions = dimensions
+            self.flashFired = flashFired
         }
     }
 
@@ -2389,6 +2395,7 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
             data = nil
         }
         let dimensions = photo.resolvedSettings.photoDimensions
+        let flashFired = photo.resolvedSettings.isFlashEnabled
         let uniqueID = photo.resolvedSettings.uniqueID
 
         // Photo delegate callbacks are not required to arrive on our session
@@ -2399,7 +2406,8 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
                 CapturedPhoto(
                     fileData: fileData,
                     capturedAt: self.pendingPhotoCapturedAt ?? Date(),
-                    dimensions: dimensions
+                    dimensions: dimensions,
+                    flashFired: flashFired
                 )
             }
             self.finishPhotoOnQueue(capturedPhoto, uniqueID: uniqueID)
