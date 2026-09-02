@@ -58,10 +58,39 @@ struct SettingsView: View {
         }
     }
 
+    private var flashModeBinding: Binding<CameraService.FlashMode> {
+        Binding(
+            get: { camera.flashMode },
+            set: { mode in
+                HapticFeedback.play(.controlStep)
+                camera.setFlashMode(mode)
+            }
+        )
+    }
+
     // MARK: - Sections
 
     private var captureSettings: some View {
         settingsSection(title: "CAPTURE") {
+            SettingRow(
+                systemName: "bolt.fill",
+                title: "Flash",
+                detail: camera.flashAvailability == .unsupported
+                    ? "The active camera has no flash. The choice is remembered for cameras that do."
+                    : "Remembered between launches. The G7 X profile renders flash frames differently."
+            ) {
+                Picker("Flash", selection: flashModeBinding) {
+                    ForEach(CameraService.FlashMode.allCases, id: \.self) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 200)
+                .accessibilityIdentifier("flash-setting")
+            }
+
+            settingsDivider
+
             SettingRow(
                 systemName: "grid",
                 title: "Framing grid",
@@ -192,7 +221,7 @@ struct SettingsView: View {
             SettingRow(
                 systemName: "externaldrive.fill",
                 title: "Frame cache",
-                detail: photoLibrary.hasLocalCache ? "Temporary frames are stored on this iPhone." : "No temporary frames right now."
+                detail: photoLibrary.hasLocalCache ? "Temporary frames are stored on this device." : "No temporary frames right now."
             ) {
                 Text("250 MB")
                     .font(.system(.caption, design: .rounded).weight(.bold))

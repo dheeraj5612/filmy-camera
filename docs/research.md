@@ -348,13 +348,22 @@ or requesting authorization. Every PhotoKit callback is now an explicitly
 change block.
 
 Rendering real fixture photographs through the pipeline on the device exposed
-two renderer-wide issues:
+renderer-wide issues, and one testing blind spot that had hidden them:
 
-- Contrast was applied by `CIColorControls` in Core Image's linear working
-  space, whose pivot (0.5 linear, roughly 0.73 sRGB) drives every dark tone
-  toward black even at modest settings; recipes at 1.18 clipped everything
-  below about 0.3 sRGB. Contrast now runs in gamma-encoded space around
-  perceptual middle gray, which is how a camera's contrast control behaves.
+- The app's Core Image contexts run with an sRGB (gamma-encoded) working
+  color space, but the renderer unit tests built their own contexts with Core
+  Image's default linear working space, so they measured a different pipeline
+  from the one users see. Tests now use `FilmRenderer.testContextOptions`,
+  which reproduces the app's contexts exactly. (An interim attempt to move
+  contrast into gamma space was based on the test path and has been reverted;
+  the app's contrast already pivots at perceptual middle gray.)
+- The procedural grain texture was tagged linear. Under the sRGB working
+  space Core Image re-encoded it, recentering the "zero-mean" noise near 0.73,
+  so every grainy recipe brightened by a few percent. The texture is now
+  handed to the kernel unmanaged, so the noise is zero-mean in any context.
+- Vignette darkening read stronger in gamma space than the linear-space tests
+  assumed; its intensity mapping was eased so a mid-slider vignette keeps the
+  corners above 60% of center.
 - The Color Temperature control used Core Image's target-neutral direction,
   where a lower Kelvin renders warmer. Cameras and RAW editors use the
   opposite convention: the value is the illuminant being neutralized, so a
@@ -377,3 +386,29 @@ A local-only render gallery test (`RecipeRenderGalleryTests`) attaches
 labelled before/after composites for any `FilmyCameraTests/Fixtures/fixture-*.jpg`
 photographs present at build time; the fixtures are intentionally not
 committed and the test skips without them.
+
+## Live preview performance — 2026-09-02
+
+An on-device benchmark (`RendererPerformanceTests`, Apple A12Z in the iPad
+Pro 11-inch 2nd generation, Debug build) timed one preview frame through the
+full pipeline into a Metal texture:
+
+| Output size | G7 X Compact | Muted Color | Natural Standard |
+| --- | --- | --- | --- |
+| 1668×2224 (full 2x iPad drawable, 3.7 MP) | 40.7 ms | 40.1 ms | 36.8 ms |
+| 1206×1610 (iPhone 3x-class, 1.9 MP) | 22.7 ms | 21.8 ms | 20.5 ms |
+| 834×1112 (1x iPad, 0.9 MP) | 12.3 ms | 12.4 ms | 12.9 ms |
+
+Cost is proportional to output pixels, and the spatial stages (noise
+reduction, clarity, sharpening) accounted for about three quarters of it at
+full size. The viewfinder therefore now renders into a bounded drawable
+(`FilteredCameraPreviewView.previewPixelBudget`, 1.3 MP) that the display
+scales up, instead of the full Retina drawable: roughly 14 ms per G7 X frame
+on the A12Z, comfortably inside a 30 fps budget with headroom for the
+SwiftUI chrome, versus ~41 ms before. The still and export paths are
+untouched, and the preview keeps every stage so the pixel-identical
+preview/photo/export contract enforced by the renderer tests still holds.
+
+Recipe swatches are pure functions of recipe, renderer version, and size, so
+their PNGs are now persisted under Caches (`RecipeThumbnails`) instead of
+being re-rendered on every launch while the camera is starting.

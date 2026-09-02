@@ -1978,11 +1978,38 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             return
         }
 
-        if !supportedModes.contains(selectedFlashMode.rawValue) {
+        // Flash is a first-class capture choice: restore the last explicit
+        // selection whenever a camera that supports it becomes active.
+        let remembered = Self.rememberedFlashMode()
+        if supportedModes.contains(remembered.rawValue) {
+            selectedFlashMode = remembered
+        } else if !supportedModes.contains(selectedFlashMode.rawValue) {
             selectedFlashMode = .off
-            publishFlashMode(.off)
         }
+        publishFlashMode(selectedFlashMode)
         configureFlashSceneMonitoringOnQueue(supportedModes: supportedModes)
+    }
+
+    static let flashModeDefaultsKey = "flashMode"
+
+    /// UI tests must start from a known flash state, so persistence is
+    /// ignored under `-ui-testing` even though the control still works.
+    private static var persistsFlashMode: Bool {
+        !ProcessInfo.processInfo.arguments.contains("-ui-testing")
+    }
+
+    static func rememberedFlashMode(defaults: UserDefaults = .standard) -> FlashMode {
+        guard persistsFlashMode,
+              let raw = defaults.object(forKey: flashModeDefaultsKey) as? Int,
+              let mode = FlashMode(rawValue: raw) else {
+            return .off
+        }
+        return mode
+    }
+
+    private static func rememberFlashMode(_ mode: FlashMode, defaults: UserDefaults = .standard) {
+        guard persistsFlashMode else { return }
+        defaults.set(mode.rawValue, forKey: flashModeDefaultsKey)
     }
 
     private func supportedFlashModeRawValuesOnQueue() -> Set<Int> {
@@ -2056,6 +2083,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
 
         selectedFlashMode = mode
+        Self.rememberFlashMode(mode)
         publishFlashMode(mode)
         if isConfigured {
             configureFlashSceneMonitoringOnQueue(supportedModes: supportedModes)

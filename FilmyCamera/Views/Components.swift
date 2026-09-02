@@ -522,7 +522,7 @@ struct FlashControl: View {
                 .font(.system(size: 12, weight: .bold, design: .rounded))
                 .foregroundStyle(mode == .off ? .white : FilmyTheme.accent)
                 .padding(.horizontal, 12)
-                .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
+                .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.toolControlHeight)
                 .viewfinderCapsule()
         }
         .buttonStyle(.pressable)

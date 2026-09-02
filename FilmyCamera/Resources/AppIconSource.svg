@@ -1,86 +1,57 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Filmy Camera app icon: a six-blade iris letting warm light through, inside an amber lens barrel, framed by viewfinder brackets. Render with: qlmanage -t -s 1024 -o out AppIconSource.svg -->
   <defs>
-    <linearGradient id="background" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0" stop-color="#050504"/>
-      <stop offset="0.55" stop-color="#0d0a08"/>
-      <stop offset="1" stop-color="#15100c"/>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1d140d"/>
+      <stop offset="0.55" stop-color="#0b0807"/>
+      <stop offset="1" stop-color="#040303"/>
     </linearGradient>
-    <radialGradient id="ambient" cx="50%" cy="45%" r="62%">
-      <stop offset="0" stop-color="#ef9e42" stop-opacity="0.14"/>
-      <stop offset="0.58" stop-color="#9c421e" stop-opacity="0.05"/>
+    <radialGradient id="glowGrad" cx="50%" cy="48%" r="58%">
+      <stop offset="0" stop-color="#f7a63f" stop-opacity="0.30"/>
+      <stop offset="0.5" stop-color="#c9541f" stop-opacity="0.10"/>
       <stop offset="1" stop-color="#000" stop-opacity="0"/>
     </radialGradient>
-    <linearGradient id="body" x1="12%" y1="12%" x2="90%" y2="88%">
-      <stop offset="0" stop-color="#f4bb59"/>
-      <stop offset="0.46" stop-color="#ef9739"/>
-      <stop offset="1" stop-color="#c94d25"/>
+    <linearGradient id="ringGrad" x1="0.15" y1="0" x2="0.85" y2="1">
+      <stop offset="0" stop-color="#ffd58a"/>
+      <stop offset="0.45" stop-color="#f4a03d"/>
+      <stop offset="1" stop-color="#c2421c"/>
     </linearGradient>
-    <linearGradient id="bodyEdge" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0" stop-color="#fff0bf" stop-opacity="0.55"/>
-      <stop offset="0.45" stop-color="#ef9e42" stop-opacity="0.08"/>
-      <stop offset="1" stop-color="#6f2414" stop-opacity="0.45"/>
-    </linearGradient>
-    <radialGradient id="aperture" cx="38%" cy="32%" r="76%">
-      <stop offset="0" stop-color="#ffc35a"/>
-      <stop offset="0.48" stop-color="#ef8b2f"/>
-      <stop offset="1" stop-color="#b83b20"/>
+    <radialGradient id="sunGrad" cx="44%" cy="38%" r="70%">
+      <stop offset="0" stop-color="#fff3cc"/>
+      <stop offset="0.3" stop-color="#ffc766"/>
+      <stop offset="0.65" stop-color="#ee7d33"/>
+      <stop offset="1" stop-color="#9a3016"/>
     </radialGradient>
-    <filter id="cameraShadow" x="-20%" y="-20%" width="140%" height="150%">
-      <feDropShadow dx="0" dy="24" stdDeviation="24" flood-color="#000" flood-opacity="0.48"/>
-    </filter>
-    <filter id="dotGlow" x="-100%" y="-100%" width="300%" height="300%">
-      <feGaussianBlur stdDeviation="10" result="blur"/>
-      <feMerge>
-        <feMergeNode in="blur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
+    <linearGradient id="bladeGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2b1a11"/>
+      <stop offset="1" stop-color="#0e0907"/>
+    </linearGradient>
+    <radialGradient id="sheenGrad" cx="32%" cy="26%" r="48%">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.42"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.07"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
   </defs>
-
-  <!-- Opaque square master. iOS supplies the platform corner mask. -->
-  <rect width="1024" height="1024" fill="url(#background)"/>
-  <rect width="1024" height="1024" fill="url(#ambient)"/>
-
-  <!-- A compact-camera silhouette built as one film-frame-like shape. -->
-  <path
-    d="M166 357 Q166 309 214 309 H349 L402 226 Q417 202 447 202 H650 Q680 202 695 226 L748 309 H810 Q858 309 858 357 V733 Q858 781 810 781 H214 Q166 781 166 733 Z"
-    fill="#000"
-    opacity="0.58"
-    filter="url(#cameraShadow)"
-  />
-  <path
-    d="M146 341 Q146 293 194 293 H345 L398 210 Q413 186 443 186 H646 Q676 186 691 210 L744 293 H830 Q878 293 878 341 V717 Q878 765 830 765 H194 Q146 765 146 717 Z"
-    fill="url(#body)"
-  />
-  <path
-    d="M194 306 H345 L398 223 Q413 199 443 199 H646 Q676 199 691 223 L744 306 H830"
-    fill="none"
-    stroke="url(#bodyEdge)"
-    stroke-width="14"
-    stroke-linecap="round"
-  />
-
-  <!-- Two bold negative windows make the camera body read as a film frame. -->
-  <rect x="186" y="393" width="54" height="106" rx="18" fill="#1a100a" opacity="0.9"/>
-  <rect x="186" y="525" width="54" height="106" rx="18" fill="#1a100a" opacity="0.9"/>
-
-  <!-- Oversized lens/aperture stays legible at small app-icon sizes. -->
-  <circle cx="512" cy="524" r="245" fill="#080807"/>
-  <circle cx="512" cy="524" r="224" fill="#15110e" stroke="#f2b55f" stroke-opacity="0.42" stroke-width="10"/>
-  <circle cx="512" cy="524" r="178" fill="url(#aperture)"/>
-
-  <g fill="none" stroke="#39150d" stroke-width="20" stroke-linecap="round">
-    <path d="M512 347 C512 405 529 459 556 499"/>
-    <path d="M512 347 C512 405 529 459 556 499" transform="rotate(60 512 524)"/>
-    <path d="M512 347 C512 405 529 459 556 499" transform="rotate(120 512 524)"/>
-    <path d="M512 347 C512 405 529 459 556 499" transform="rotate(180 512 524)"/>
-    <path d="M512 347 C512 405 529 459 556 499" transform="rotate(240 512 524)"/>
-    <path d="M512 347 C512 405 529 459 556 499" transform="rotate(300 512 524)"/>
+  <rect width="1024" height="1024" fill="url(#bgGrad)"/>
+  <rect width="1024" height="1024" fill="url(#glowGrad)"/>
+  <g fill="none" stroke="#ffffff" stroke-opacity="0.15" stroke-width="18" stroke-linecap="round">
+    <path d="M 128 232 L 128 128 L 232 128"/>
+    <path d="M 792 128 L 896 128 L 896 232"/>
+    <path d="M 896 792 L 896 896 L 792 896"/>
+    <path d="M 232 896 L 128 896 L 128 792"/>
   </g>
-  <circle cx="512" cy="524" r="51" fill="#080807"/>
-  <circle cx="512" cy="524" r="178" fill="none" stroke="#080807" stroke-width="12"/>
-
-  <!-- The mint light mirrors the app's enabled-state accent. -->
-  <circle cx="802" cy="365" r="30" fill="#10100e" opacity="0.62"/>
-  <circle cx="802" cy="365" r="20" fill="#75d6a5" filter="url(#dotGlow)"/>
+  <circle cx="512" cy="512" r="338" fill="url(#ringGrad)"/>
+  <circle cx="512" cy="512" r="338" fill="none" stroke="#ffffff" stroke-opacity="0.28" stroke-width="5"/>
+  <circle cx="512" cy="512" r="300" fill="#100a08"/>
+  <circle cx="512" cy="512" r="300" fill="none" stroke="#000000" stroke-opacity="0.5" stroke-width="12"/>
+  <circle cx="512" cy="512" r="268" fill="url(#sunGrad)"/>
+  <g fill="url(#bladeGrad)">
+    <path d="M 301.6 678.0 A 268 268 0 0 0 722.4 678.0 Z"/><path d="M 263.0 412.8 A 268 268 0 0 0 473.4 777.2 Z"/><path d="M 473.4 246.8 A 268 268 0 0 0 263.0 611.2 Z"/><path d="M 722.4 346.0 A 268 268 0 0 0 301.6 346.0 Z"/><path d="M 761.0 611.2 A 268 268 0 0 0 550.6 246.8 Z"/><path d="M 550.6 777.2 A 268 268 0 0 0 761.0 412.8 Z"/>
+  </g>
+  <g stroke="#f7a63f" stroke-opacity="0.28" stroke-width="6" stroke-linecap="round">
+    <line x1="416.2" y1="678.0" x2="301.6" y2="678.0"/><line x1="320.3" y1="512.1" x2="263.0" y2="412.8"/><line x1="416.1" y1="346.1" x2="473.4" y2="246.8"/><line x1="607.8" y1="346.0" x2="722.4" y2="346.0"/><line x1="703.7" y1="511.9" x2="761.0" y2="611.2"/><line x1="607.9" y1="677.9" x2="550.6" y2="777.2"/>
+  </g>
+  <circle cx="512" cy="512" r="268" fill="url(#sheenGrad)"/>
+  <circle cx="770" cy="254" r="34" fill="#fff0c4"/>
+  <circle cx="770" cy="254" r="60" fill="#ffd58a" fill-opacity="0.22"/>
 </svg>

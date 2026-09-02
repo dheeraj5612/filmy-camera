@@ -1,5 +1,6 @@
 import CoreGraphics
 import CoreImage
+import CryptoKit
 import Foundation
 import Metal
 import MetalKit
@@ -256,6 +257,12 @@ public final class FilmRenderer {
     /// preview and captured still use the same grain arrangement.
     public static let canonicalGrainSeed: UInt32 = 0
 
+    /// Context options for any caller that must reproduce the app's rendering
+    /// exactly (tests, tools). The working color space is part of the look.
+    public static var testContextOptions: [CIContextOption: Any] {
+        contextOptions.merging([.useSoftwareRenderer: true]) { _, new in new }
+    }
+
     private static var contextOptions: [CIContextOption: Any] {
         var options: [CIContextOption: Any] = [
             .cacheIntermediates: false
@@ -286,6 +293,9 @@ public final class FilmRenderer {
         )
         if let cached = thumbnailCache.image(for: cacheKey) {
             return cached
+        }
+        if let persisted = ThumbnailDiskCache.image(for: cacheKey) {
+            return thumbnailCache.insert(persisted, for: cacheKey)
         }
         let extent = CGRect(x: 0, y: 0, width: width, height: height)
         var reference = CIImage(
@@ -342,7 +352,53 @@ public final class FilmRenderer {
         guard let image = outputCGImage(rendered, from: extent) else {
             return nil
         }
-        return thumbnailCache.insert(UIImage(cgImage: image), for: cacheKey)
+        let thumbnail = UIImage(cgImage: image)
+        ThumbnailDiskCache.store(thumbnail, for: cacheKey)
+        return thumbnailCache.insert(thumbnail, for: cacheKey)
+    }
+
+    /// Recipe swatches are pure functions of (recipe, renderer version, size),
+    /// so their PNGs are kept in Caches across launches. Thirty tiles cost a
+    /// few hundred milliseconds of GPU on every launch otherwise, competing
+    /// with the live viewfinder while the rail first appears.
+    private enum ThumbnailDiskCache {
+        private static let directoryURL: URL? = {
+            guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+                return nil
+            }
+            let url = caches.appendingPathComponent("RecipeThumbnails", isDirectory: true)
+            try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            return url
+        }()
+
+        private static func fileURL(for key: ThumbnailCacheKey) -> URL? {
+            guard let directoryURL,
+                  let recipeData = try? JSONEncoder().encode(key.recipe) else {
+                return nil
+            }
+            var hasher = SHA256()
+            hasher.update(data: Data(FilmRecipe.rendererVersion.utf8))
+            hasher.update(data: Data("\(key.width)x\(key.height)".utf8))
+            hasher.update(data: recipeData)
+            let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
+            return directoryURL.appendingPathComponent("\(digest).png", isDirectory: false)
+        }
+
+        static func image(for key: ThumbnailCacheKey) -> UIImage? {
+            guard let url = fileURL(for: key),
+                  let data = try? Data(contentsOf: url) else {
+                return nil
+            }
+            return UIImage(data: data)
+        }
+
+        static func store(_ image: UIImage, for key: ThumbnailCacheKey) {
+            guard let url = fileURL(for: key),
+                  let data = image.pngData() else {
+                return
+            }
+            try? data.write(to: url, options: .atomic)
+        }
     }
 
     /// Materializes a display-referred still at the app's explicit output
@@ -987,29 +1043,13 @@ public final class FilmRenderer {
             ? clamp(recipe.saturation, lower: 0, upper: 2)
             : 1
         controls.setValue(saturation, forKey: kCIInputSaturationKey)
-        controls.setValue(1, forKey: kCIInputContrastKey)
+        // The app's contexts run with an sRGB (gamma-encoded) working space,
+        // so this contrast pivots at perceptual middle gray like a camera's
+        // contrast control. Test contexts must use the same working space or
+        // they measure a different, shadow-crushing pipeline.
+        controls.setValue(clamp(recipe.contrast, lower: 0.5, upper: 1.7), forKey: kCIInputContrastKey)
         controls.setValue(0, forKey: kCIInputBrightnessKey)
-        var output = controls.outputImage ?? image
-
-        // Core Image evaluates CIColorControls in the linear working space,
-        // where its contrast pivot (0.5 linear, about 0.73 sRGB) crushes every
-        // dark tone toward black even at modest settings. Apply contrast in
-        // gamma-encoded space instead so it behaves like a camera's contrast
-        // control: a pivot at perceptual middle gray with shadows preserved.
-        let contrast = clamp(recipe.contrast, lower: 0.5, upper: 1.7)
-        if abs(contrast - 1) > 0.0001,
-           let toGamma = CIFilter(name: "CILinearToSRGBToneCurve"),
-           let contrastControls = CIFilter(name: "CIColorControls"),
-           let toLinear = CIFilter(name: "CISRGBToneCurveToLinear") {
-            toGamma.setValue(output, forKey: kCIInputImageKey)
-            contrastControls.setValue(toGamma.outputImage, forKey: kCIInputImageKey)
-            contrastControls.setValue(1, forKey: kCIInputSaturationKey)
-            contrastControls.setValue(contrast, forKey: kCIInputContrastKey)
-            contrastControls.setValue(0, forKey: kCIInputBrightnessKey)
-            toLinear.setValue(contrastControls.outputImage, forKey: kCIInputImageKey)
-            output = toLinear.outputImage ?? output
-        }
-        return output
+        return controls.outputImage ?? image
     }
 
     private static func applyColorCube(
@@ -1198,8 +1238,11 @@ public final class FilmRenderer {
         // CIVignette's radius is a normalized 0...2 value, not a pixel
         // distance. Keep the radius in that contract so a 4K still does not
         // silently clamp to the same result as every smaller preview frame.
+        // The working space is gamma-encoded, so CIVignette's darkening reads
+        // stronger than in linear light; a 1:1 intensity keeps a mid-slider
+        // vignette from swallowing the corners.
         vignette.setValue(
-            clamp(intensity * 1.35, lower: 0, upper: 1),
+            clamp(intensity * 0.92, lower: 0, upper: 1),
             forKey: kCIInputIntensityKey
         )
         vignette.setValue(
@@ -1547,9 +1590,9 @@ public final class FilmRenderer {
             mappedGreen = mix(mappedGreen, luma, greenRestraint)
             mappedBlue = mix(mappedBlue, luma, greenRestraint)
 
-            mappedBlue += 0.021 * blueWeight
+            mappedBlue += 0.042 * blueWeight
             mappedGreen += 0.004 * blueWeight
-            mappedRed -= 0.005 * blueWeight
+            mappedRed -= 0.016 * blueWeight
         }
 
         return (mappedRed, mappedGreen, mappedBlue)
@@ -1603,9 +1646,10 @@ public final class FilmRenderer {
 
     private static func makeDeterministicGrainTexture() -> CIImage? {
         let size = 512
-        // The grain kernel operates in Core Image's linear working domain.
-        // Label the procedural bytes as linear so mid-gray remains the exact
-        // zero point instead of being gamma-decoded below 0.5.
+        // The bytes are raw working-space samples centered on 0.5. They must
+        // not be color-managed on the way into the kernel: a linear tag under
+        // the app's sRGB working space recenters the noise near 0.73 and the
+        // "zero-mean" grain then brightens every frame by a few percent.
         guard let colorSpace = CGColorSpace(name: CGColorSpace.linearSRGB) else { return nil }
         var bytes = deterministicGaussianGrainBytes(size: size)
 
@@ -1624,7 +1668,7 @@ public final class FilmRenderer {
             return nil
         }
 
-        return CIImage(cgImage: image)
+        return CIImage(cgImage: image, options: [.colorSpace: NSNull()])
     }
 
     /// Produces a stable, monochrome Gaussian field for the shared grain

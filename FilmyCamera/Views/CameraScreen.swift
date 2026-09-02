@@ -311,14 +311,6 @@ struct CameraScreen: View {
     private var topBar: some View {
         ZStack {
             HStack(spacing: 10) {
-                if camera.isRunning && camera.flashAvailability != .unsupported {
-                    FlashControl(
-                        mode: camera.flashMode,
-                        availability: camera.flashAvailability,
-                        action: camera.cycleFlashMode
-                    )
-                }
-
                 Spacer(minLength: 0)
 
                 if camera.isRunning || isViewfinderChromePreview {
@@ -494,6 +486,8 @@ struct CameraScreen: View {
     private func toolStrip(minWidth: CGFloat) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
+                flashControl
+
                 ZoomControl(
                     value: camera.zoomFactor,
                     onAdjust: { direction in
@@ -540,6 +534,8 @@ struct CameraScreen: View {
     private var compactDigitalQuickRail: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
+                flashControl
+
                 ZoomControl(
                     value: camera.zoomFactor,
                     onAdjust: { direction in
@@ -588,6 +584,20 @@ struct CameraScreen: View {
         .accessibilityIdentifier("g7x-capture-controls")
         .accessibilityLabel("G7 X quick capture controls")
         .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    /// Flash sits beside zoom in every control strip: it is a capture
+    /// decision the G7 X flash treatment depends on, so it stays one tap away
+    /// rather than hidden in a corner.
+    @ViewBuilder
+    private var flashControl: some View {
+        if camera.flashAvailability != .unsupported {
+            FlashControl(
+                mode: camera.flashMode,
+                availability: camera.flashAvailability,
+                action: camera.cycleFlashMode
+            )
+        }
     }
 
     private var recipeMenu: some View {
