@@ -366,7 +366,8 @@ final class PhotoLibraryService: ObservableObject {
     private let albumTitle = "Filmy Camera"
     private let savedAssetIdentifiersKey = "filmyCamera.savedAssetIdentifiers"
     private let savedFrameMetadataKey = "filmyCamera.savedFrameMetadata"
-    private let savedFrameResourcesKey = "filmyCamera.savedFrameResources"
+    private nonisolated static let savedFrameResourcesKey = "filmyCamera.savedFrameResources"
+    private var savedFrameResourcesKey: String { Self.savedFrameResourcesKey }
     private let localFramesDirectoryName = "FilmyCameraFrames"
     private let shareDirectoryName = "FilmyCameraShare"
     private let localCacheMaxBytes = 250 * 1024 * 1024
@@ -442,7 +443,7 @@ final class PhotoLibraryService: ObservableObject {
     private nonisolated static func runCacheMaintenance(_ input: CacheMaintenanceInput) -> CacheMaintenanceResult {
         if input.includingLaunchPasses {
             migrateLocalFrameCache(from: input.legacyDirectoryURL, to: input.directoryURL)
-            reconcileLocalCache(in: input.directoryURL, resources: input.resources)
+            reconcileLocalCache(in: input.directoryURL)
         }
         let removed = trimLocalCache(
             in: input.directoryURL,
@@ -755,14 +756,20 @@ final class PhotoLibraryService: ObservableObject {
         }
     }
 
-    private var savedFrameResources: [String: SavedFrameResource] {
-        get {
-            guard let data = UserDefaults.standard.data(forKey: savedFrameResourcesKey),
-                  let resources = try? JSONDecoder().decode([String: SavedFrameResource].self, from: data) else {
-                return [:]
-            }
-            return resources
+    /// The persisted local-copy index. Readable from any thread so background
+    /// maintenance can consult the current index rather than a snapshot.
+    private nonisolated static func loadSavedFrameResources(
+        defaults: UserDefaults = .standard
+    ) -> [String: SavedFrameResource] {
+        guard let data = defaults.data(forKey: savedFrameResourcesKey),
+              let resources = try? JSONDecoder().decode([String: SavedFrameResource].self, from: data) else {
+            return [:]
         }
+        return resources
+    }
+
+    private var savedFrameResources: [String: SavedFrameResource] {
+        get { Self.loadSavedFrameResources() }
         set {
             guard let data = try? JSONEncoder().encode(newValue) else { return }
             UserDefaults.standard.set(data, forKey: savedFrameResourcesKey)
@@ -957,23 +964,32 @@ final class PhotoLibraryService: ObservableObject {
         return PhotoLibraryCachePath.fileURL(filename: filename, in: directoryURL)
     }
 
-    private nonisolated static func reconcileLocalCache(
-        in directoryURL: URL?,
-        resources: [String: SavedFrameResource]
-    ) {
-        guard let directoryURL else { return }
+    /// Files younger than this are never treated as orphans: a save that is
+    /// writing its JPEG right now has not indexed it yet.
+    private nonisolated static let reconcileMinimumFileAge: TimeInterval = 120
+
+    private nonisolated static func reconcileLocalCache(in directoryURL: URL?) {
+        guard let directoryURL,
+              let regularFiles = PhotoLibraryCachePath.regularFileURLs(in: directoryURL) else {
+            return
+        }
+        // Consult the index as it is now, not the snapshot taken when the
+        // pass was scheduled, so a frame saved since launch is preserved.
         let indexedFilenames = Set(
-            resources.values.compactMap {
+            loadSavedFrameResources().values.compactMap {
                 PhotoLibraryCachePath.fileURL(filename: $0.filename, in: directoryURL)?.lastPathComponent
             }
         )
-        // Reconcile every regular file in the cache directory, including files
-        // left behind before their resource index was persisted. Photos remains
-        // the source of truth; indexed local copies are retained for offline use.
-        _ = PhotoLibraryCachePath.removeRegularFiles(
-            in: directoryURL,
-            preservingFilenames: indexedFilenames
-        )
+        let cutoff = Date().addingTimeInterval(-reconcileMinimumFileAge)
+        // Remove only files that are both unindexed and old enough that no
+        // in-progress save can own them. Photos remains the source of truth;
+        // indexed local copies are retained for offline use.
+        for fileURL in regularFiles where !indexedFilenames.contains(fileURL.lastPathComponent) {
+            let modified = (try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? .distantPast
+            guard modified < cutoff else { continue }
+            try? FileManager.default.removeItem(at: fileURL)
+        }
     }
 
     private nonisolated static func migrateLocalFrameCache(from legacyURL: URL?, to currentURL: URL?) {
