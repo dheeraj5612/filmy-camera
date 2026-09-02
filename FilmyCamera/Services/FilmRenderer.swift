@@ -1546,70 +1546,90 @@ public final class FilmRenderer {
             mappedBlue = luma + (mappedBlue - luma) * amount
         }
 
-        let shadowWeight = 1 - smoothstep(0.08, 0.62, luma)
+        // Shadow tints belong to shadow detail, not to true blacks: a blue or
+        // amber cast on near-black noise reads as a fault, not a film look.
+        let shadowWeight = (1 - smoothstep(0.08, 0.62, luma)) * smoothstep(0.015, 0.09, luma)
         let highlightWeight = smoothstep(0.48, 0.98, luma)
+        let midtoneWeight = smoothstep(0.10, 0.40, luma) * (1 - smoothstep(0.70, 0.96, luma))
+
+        // Shared hue sectors. Every film base below is an original parametric
+        // reading of Fujifilm's public descriptions of its simulations (hard or
+        // soft tonality, color in highlights versus shadows, which hues move),
+        // not calibration data. Sector deltas are in sRGB units.
+        let baseChroma = max(mappedRed, max(mappedGreen, mappedBlue))
+            - min(mappedRed, min(mappedGreen, mappedBlue))
+        let baseHue = rgbHue(red: mappedRed, green: mappedGreen, blue: mappedBlue, chroma: baseChroma)
+        let colorful = smoothstep(0.035, 0.30, baseChroma)
+        let redSector = hueSectorWeight(baseHue, center: 0.99, halfWidth: 0.07) * colorful
+        let skinSector = hueSectorWeight(baseHue, center: 0.075, halfWidth: 0.075) * colorful
+        let yellowSector = hueSectorWeight(baseHue, center: 0.16, halfWidth: 0.06) * colorful
+        let greenSector = hueSectorWeight(baseHue, center: 0.32, halfWidth: 0.13) * colorful
+        let blueSector = hueSectorWeight(baseHue, center: 0.62, halfWidth: 0.12) * colorful
+        let magentaSector = hueSectorWeight(baseHue, center: 0.86, halfWidth: 0.10) * colorful
+
+        func nudge(_ red: Float, _ green: Float, _ blue: Float, by weight: Float) {
+            mappedRed += red * weight
+            mappedGreen += green * weight
+            mappedBlue += blue * weight
+        }
 
         switch recipe.filmBase {
-        case .standard, .provia:
+        case .standard:
             break
+        case .provia:
+            // Even, slightly punchy standard: a touch more saturation than
+            // neutral, greens leaning yellow-green.
+            saturate(1.04)
+            nudge(0.006, 0.010, -0.006, by: greenSector)
         case .classicChrome:
-            // Fujifilm publicly characterizes Classic Chrome as subdued,
-            // magenta-suppressing color with cool shadows. Use feathered hue
-            // masks so that behavior is selective rather than a global cast.
-            let chroma = max(mappedRed, max(mappedGreen, mappedBlue))
-                - min(mappedRed, min(mappedGreen, mappedBlue))
-            let hue = rgbHue(
-                red: mappedRed,
-                green: mappedGreen,
-                blue: mappedBlue,
-                chroma: chroma
-            )
-            let magentaWeight = hueSectorWeight(
-                hue,
-                center: 0.88,
-                halfWidth: 0.13
-            ) * smoothstep(0.025, 0.34, chroma)
-            let coolShadowWeight = max(
-                hueSectorWeight(hue, center: 0.56, halfWidth: 0.16),
-                hueSectorWeight(hue, center: 0.65, halfWidth: 0.15)
-            ) * shadowWeight
-            let skinWeight = hueSectorWeight(
-                hue,
-                center: 0.075,
-                halfWidth: 0.10
-            ) * smoothstep(0.025, 0.30, chroma)
-
-            saturate(0.92)
-            mappedGreen += 0.030 * magentaWeight
-            mappedRed -= 0.010 * magentaWeight
-            mappedBlue -= 0.006 * magentaWeight
-            mappedRed += 0.008 * highlightWeight + 0.005 * skinWeight
-            // Shadows keep their cool separation now that contrast no longer
-            // compresses them in linear light; bias blue up and red down there.
-            mappedRed -= 0.012 * shadowWeight
-            mappedBlue += 0.040 * shadowWeight + 0.030 * coolShadowWeight
-            mappedGreen += 0.008 * shadowWeight + 0.004 * coolShadowWeight
+            // Documentary chrome: muted midtones, reds held back, blues
+            // leaning teal, browns turning pink instead of yellow, cool
+            // shadows, magenta suppressed.
+            saturate(0.84)
+            nudge(-0.030, 0.006, 0.004, by: redSector)
+            nudge(-0.010, 0.036, -0.012, by: blueSector)
+            nudge(0.006, -0.014, 0.020, by: skinSector)
+            nudge(-0.012, 0.028, -0.008, by: magentaSector)
+            nudge(-0.032, 0.012, 0.080, by: shadowWeight)
+            nudge(0.008, 0.002, -0.004, by: highlightWeight)
         case .velvia:
-            saturate(1.08 + 0.06 * smoothstep(0.18, 0.92, luma))
-            mappedRed += 0.010 * highlightWeight
-            mappedGreen += 0.010 * (1 - shadowWeight)
-            mappedBlue += 0.014 * highlightWeight
+            // Everything turned up: high saturation and contrast, cobalt
+            // blues, rich cool greens, intense reds and warm yellows.
+            saturate(1.20 + 0.06 * midtoneWeight)
+            nudge(-0.024, -0.004, 0.050, by: blueSector)
+            nudge(-0.030, 0.040, 0.006, by: greenSector)
+            nudge(0.030, -0.012, -0.006, by: redSector)
+            nudge(0.024, 0.008, -0.020, by: yellowSector)
         case .astia:
-            saturate(0.98)
-            mappedRed += 0.012 * highlightWeight
-            mappedBlue -= 0.006 * highlightWeight
-        case .proNegative, .proNegStandard:
-            saturate(0.97)
-            mappedRed += 0.005 * highlightWeight
+            // Soft portrait slide: gentle contrast, "blue-blue" skies,
+            // characterful yellows, rosy rather than yellow skin.
+            saturate(1.04)
+            nudge(-0.006, -0.010, 0.032, by: blueSector)
+            nudge(0.030, 0.006, -0.020, by: yellowSector)
+            nudge(0.012, -0.002, 0.008, by: skinSector)
+            nudge(0.010, 0.002, -0.006, by: highlightWeight)
+        case .proNegative:
+            // Portrait negative, high-contrast variant: a little muted,
+            // slightly warm, yellows and greens kept alive.
+            saturate(0.94)
+            nudge(0.014, 0.006, -0.006, by: midtoneWeight)
+            nudge(0.004, 0.012, -0.004, by: greenSector)
+            nudge(0.010, 0.004, -0.006, by: yellowSector)
+        case .proNegStandard:
+            saturate(0.88)
+            nudge(0.010, 0.004, -0.004, by: midtoneWeight)
+            nudge(0.004, 0.008, -0.002, by: greenSector)
         case .eterna:
-            saturate(0.90)
-            mappedRed += 0.009 * shadowWeight
-            mappedBlue += 0.012 * shadowWeight
-            mappedGreen += 0.006 * shadowWeight
-        case .eternaBleachBypass:
+            // Cinema: flat, neutral, twice as muted as Classic Chrome, with a
+            // faint cool-green cast in the shadows and no warm bias.
             saturate(0.72)
-            mappedRed += 0.006 * highlightWeight
-            mappedBlue += 0.008 * shadowWeight
+            nudge(-0.006, 0.012, 0.014, by: shadowWeight)
+            nudge(0.004, 0.000, -0.002, by: highlightWeight)
+        case .eternaBleachBypass:
+            // Black and white with a little color left, high contrast.
+            saturate(0.48)
+            nudge(0.010, 0.002, -0.004, by: highlightWeight)
+            nudge(-0.004, 0.004, 0.012, by: shadowWeight)
         case .sepia:
             // Original warm-monochrome approximation for the public Sepia
             // vocabulary; this is not Fujifilm calibration data.
@@ -1621,18 +1641,35 @@ public final class FilmRenderer {
             mappedGreen = luma
             mappedBlue = luma
         case .classicNegative:
-            saturate(0.98)
-            mappedRed += 0.018 * highlightWeight
-            mappedBlue += 0.020 * shadowWeight
-            mappedGreen -= 0.006 * shadowWeight
+            // Hard tonality with its own palette: greens go "green-green"
+            // (less yellow), reds deeper and less bright, browns less
+            // yellow, cool cyan shadows against warm highlights.
+            saturate(0.94)
+            nudge(-0.050, 0.004, 0.022, by: greenSector)
+            nudge(-0.030, -0.004, 0.016, by: redSector)
+            nudge(-0.004, -0.022, 0.010, by: skinSector)
+            nudge(0.000, -0.020, -0.004, by: yellowSector)
+            nudge(-0.022, 0.030, 0.052, by: shadowWeight)
+            nudge(0.030, 0.012, -0.022, by: highlightWeight)
         case .nostalgicNegative:
-            saturate(1.01)
-            mappedRed += 0.022 * highlightWeight
-            mappedBlue += 0.018 * shadowWeight
-            mappedGreen -= 0.004 * highlightWeight
+            // American New Color, per Fujifilm: rich colors in the shadows
+            // with a soft tonality through midtones and highlights. Amber
+            // highlights, warm midtones, yellow-brown browns, quieter blues,
+            // and shadow color kept rich rather than washed.
+            saturate(1.02 + 0.10 * shadowWeight)
+            nudge(0.050, 0.030, -0.046, by: highlightWeight)
+            nudge(0.022, 0.010, -0.010, by: midtoneWeight)
+            nudge(0.010, 0.022, -0.012, by: skinSector)
+            nudge(0.012, 0.006, -0.028, by: blueSector)
+            nudge(0.014, 0.004, 0.000, by: shadowWeight)
         case .realaAce:
-            saturate(0.99)
-            mappedBlue += 0.006 * shadowWeight
+            // Faithful color with hard tonality: between PRO Neg. Std and Hi
+            // in saturation, blues rendered slightly deeper, brighter
+            // midtones, a whisper of warmth in skin.
+            saturate(0.98)
+            nudge(0.010, 0.002, -0.004, by: skinSector)
+            nudge(-0.010, -0.010, 0.012, by: blueSector)
+            nudge(0.004, 0.004, 0.004, by: midtoneWeight)
         case .compactDigital:
             // Original compact-camera response inspired by the G7 X Mark III
             // product envelope: clean Standard-style color, warm portrait

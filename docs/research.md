@@ -434,3 +434,40 @@ layered hills, warm ground, a skin-toned subject with a red accent, and a
 neutral card, so onboarding, the Roll's empty state, and the simulator show
 recipes on something that looks like a photograph. No third-party assets or
 screenshots are used; only the interaction pattern is borrowed.
+
+## Film simulation fidelity pass — 2026-09-02
+
+Each color film base was re-read against public, same-scene with/without
+comparisons (RAW versus in-camera JPEG for PROVIA, Velvia, ASTIA, CLASSIC
+CHROME, PRO Neg. Hi/Std and ACROS) and Fujifilm's own descriptions of the
+newer simulations (NOSTALGIC Neg.: rich color in the shadows with soft
+midtones and highlights; REALA ACE: faithful color with hard tonality, sitting
+between PRO Neg. Std and Hi with slightly deeper blues). The per-base mapping
+in the renderer was rewritten around shared hue sectors (red, skin, yellow,
+green, blue, magenta) so each base moves specific hues the way the reference
+does, at a "slightly exaggerated" magnitude that still reads on a phone
+screen:
+
+- PROVIA: a touch more saturation than neutral, yellow-green greens.
+- Velvia: high saturation and contrast, cobalt blues, rich cool greens,
+  intense reds, warm yellows; skin goes ruddy, as it does on the camera.
+- ASTIA: soft contrast, "blue-blue" skies, characterful yellows, rosy skin.
+- CLASSIC CHROME: muted midtones, reds held back, blues leaning teal, browns
+  pinkish, cool shadows, magenta suppressed.
+- CLASSIC Neg.: hard tonality, "green-green" (less yellow) greens, deeper
+  reds, browns less yellow, cool cyan shadows against warm highlights.
+- NOSTALGIC Neg.: amber highlights, warm midtones, yellow-brown browns,
+  quieter blues, shadow color kept rich rather than lifted.
+- PRO Neg. Hi/Std: slightly muted and warm; Hi with more contrast.
+- ETERNA: flat and neutral (its tone values had the wrong polarity and were
+  hardening the curve; they now soften it), faint cool-green shadows.
+- ETERNA BLEACH BYPASS: near-monochrome with high contrast.
+- ACROS: deep blacks and hard shadows (its shadow tone was also inverted).
+- REALA ACE: faithful, hard tonality, brighter midtones, slightly deeper blues.
+- G7 X: the same profile with saturation and contrast nudged up.
+
+Verification is visual: the fixture render galleries on the iPad and an
+on-device capture sheet (`testPhysicalRecipeCaptureSheet`) that captures the
+same scene through every recipe with flash off and on and attaches each
+review. No Fujifilm or Canon data is used; every rule is an original
+parametric reading of public descriptions and comparisons.

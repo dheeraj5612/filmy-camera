@@ -292,7 +292,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 self.lock.unlock()
 
                 if let nextImage {
-                    self.owner?.onFrame?(nextImage)
+                    self.owner?.deliverFrame(nextImage)
                 }
             }
         }
@@ -330,7 +330,9 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// Receives unfiltered live frames on the main queue.
     public var onFrame: FrameHandler?
 
-    private var frameHandlerID: UUID?
+    private var frameHandlers: [UUID: FrameHandler] = [:]
+
+    private let frameHandlersLock = NSLock()
 
     private let sessionQueue = DispatchQueue(
         label: "com.dheeraj.filmycamera.camera-session",
@@ -543,21 +545,42 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
     }
 
-    /// Installs a preview callback and returns an ownership token. A stale
-    /// SwiftUI representable can only remove its own callback, so tearing down
-    /// an older preview cannot freeze a newer one using the same service.
+    /// Installs a preview callback and returns an ownership token. Several
+    /// consumers share the stream (the Metal viewfinder and the live recipe
+    /// swatches), so handlers fan out rather than replace one another, and a
+    /// stale SwiftUI representable can only remove its own callback.
     @discardableResult
     public func installFrameHandler(_ handler: @escaping FrameHandler) -> UUID {
         let id = UUID()
-        frameHandlerID = id
-        onFrame = handler
+        frameHandlersLock.lock()
+        frameHandlers[id] = handler
+        frameHandlersLock.unlock()
         return id
     }
 
     public func removeFrameHandler(_ id: UUID) {
-        guard frameHandlerID == id else { return }
-        frameHandlerID = nil
-        onFrame = nil
+        frameHandlersLock.lock()
+        frameHandlers[id] = nil
+        frameHandlersLock.unlock()
+    }
+
+    /// True while any tokenized preview consumer is installed.
+    public var hasFrameHandlers: Bool {
+        frameHandlersLock.lock()
+        defer { frameHandlersLock.unlock() }
+        return !frameHandlers.isEmpty
+    }
+
+    /// Delivered on the main queue by the frame gate. The legacy `onFrame`
+    /// property and every installed handler receive the same image.
+    fileprivate func deliverFrame(_ image: CIImage) {
+        onFrame?(image)
+        frameHandlersLock.lock()
+        let handlers = Array(frameHandlers.values)
+        frameHandlersLock.unlock()
+        for handler in handlers {
+            handler(image)
+        }
     }
 
     /// Registers the CALayer used by the custom Metal preview. Ownership is

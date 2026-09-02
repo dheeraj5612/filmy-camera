@@ -303,6 +303,60 @@ final class FilmyCameraUITests: XCTestCase {
         attachScreenshot(named: "device-after-keep")
     }
 
+    /// Captures the same scene through every color recipe, flash off and
+    /// flash on, and attaches each review so the rendered stills can be
+    /// compared against reference looks. Frames are discarded, not saved.
+    func testPhysicalRecipeCaptureSheet() throws {
+        app.terminate()
+        let recipeIDs = [
+            "provia-standard", "classic-chrome", "velvia-vivid", "astia-soft",
+            "pro-neg-high", "pro-neg-standard", "eterna-cinema", "eterna-bleach-bypass",
+            "classic-negative", "nostalgic-negative", "reala-ace", "acros-monochrome",
+            "g7x-compact"
+        ]
+
+        for recipeID in recipeIDs {
+            let recipeApp = XCUIApplication()
+            recipeApp.launchArguments = ["-ui-testing", "-selectedRecipeID", recipeID]
+            recipeApp.launch()
+            recipeApp.tap()
+
+            let shutter = recipeApp.buttons["Capture photo"]
+            XCTAssertTrue(shutter.waitForExistence(timeout: 20), "\(recipeID): shutter")
+            let flash = recipeApp.buttons["flash-control"]
+            let hasFlash = flash.waitForExistence(timeout: 3)
+
+            for wantsFlash in [false, true] {
+                if hasFlash {
+                    let target = wantsFlash ? "On" : "Off"
+                    for _ in 0..<3 where (flash.value as? String) != target {
+                        flash.tap()
+                    }
+                } else if wantsFlash {
+                    continue
+                }
+                // Let exposure settle after a flash-mode change.
+                _ = shutter.waitForExistence(timeout: 1)
+                shutter.tap()
+                let keepFrame = recipeApp.buttons["Keep frame"]
+                XCTAssertTrue(keepFrame.waitForExistence(timeout: 40), "\(recipeID) flash=\(wantsFlash): review")
+                let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                shot.name = "capture-\(recipeID)-flash-\(wantsFlash ? "on" : "off")"
+                shot.lifetime = .keepAlways
+                add(shot)
+                recipeApp.buttons["Retake"].tap()
+                XCTAssertTrue(shutter.waitForExistence(timeout: 15), "\(recipeID): back to viewfinder")
+            }
+
+            if hasFlash {
+                for _ in 0..<3 where (flash.value as? String) != "Off" {
+                    flash.tap()
+                }
+            }
+            recipeApp.terminate()
+        }
+    }
+
     /// The G7 X profile renders flash captures differently. Turn the flash
     /// on, capture, and make sure the still reaches review, then discard it.
     func testPhysicalG7XFlashCaptureReachesReview() throws {

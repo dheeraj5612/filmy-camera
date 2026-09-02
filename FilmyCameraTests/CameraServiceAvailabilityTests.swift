@@ -152,10 +152,10 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         let newerHandler = camera.installFrameHandler { _ in }
 
         camera.removeFrameHandler(olderHandler)
-        XCTAssertNotNil(camera.onFrame)
+        XCTAssertTrue(camera.hasFrameHandlers, "Removing a stale token must not detach the newer handler")
 
         camera.removeFrameHandler(newerHandler)
-        XCTAssertNil(camera.onFrame)
+        XCTAssertFalse(camera.hasFrameHandlers)
     }
 
     func testFlashDefaultsToSafeOffAndUnsupportedBeforeCameraConfiguration() {
