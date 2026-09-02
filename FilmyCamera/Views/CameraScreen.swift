@@ -16,6 +16,12 @@ enum CameraActivityPolicy {
     /// How long the session stays warm while the viewfinder is covered.
     static let gracePeriod: TimeInterval = 45
 
+    /// Unit tests run inside this app as their host. They must own the camera
+    /// themselves (hardware tests start their own session), so the host UI
+    /// leaves the device alone. UI tests launch the app as a separate
+    /// process without this variable and are unaffected.
+    static let isUnitTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+
     static func action(
         hasReview: Bool,
         sceneIsActive: Bool,
@@ -777,6 +783,7 @@ struct CameraScreen: View {
     }
 
     private func updateCameraActivity() {
+        guard !CameraActivityPolicy.isUnitTestHost else { return }
         let action = CameraActivityPolicy.action(
             hasReview: viewModel.reviewImage != nil,
             sceneIsActive: scenePhase == .active,

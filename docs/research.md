@@ -531,7 +531,15 @@ reconciliation, trimming, and share-file pruning moved out of
 evicted identifiers returns to the main actor, applied as removals so a save
 that lands meanwhile is never overwritten.
 `testPhysicalLaunchPerformance` records `XCTApplicationLaunchMetric` on
-hardware.
+hardware: on the 2020 iPad Pro (A12Z) a cold launch averages 0.48 s over five
+runs (0.47 to 0.50 s).
+
+Verified on the iPad after the fixes: `FlashHardwareDeviceTests` fired the
+flash in the photo-only, photo-plus-video, and app-graph sessions and through
+`CameraService` (`flashFired == true`, "Photo captured"); the G7 X flash UI
+test found the "Flash fired" caption; all lifecycle tests passed, including
+three Retake cycles and both tab round trips returning a live viewfinder
+within the warm-session deadline.
 
 ### Test suite
 
