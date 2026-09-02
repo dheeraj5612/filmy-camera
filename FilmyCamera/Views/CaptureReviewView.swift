@@ -174,7 +174,7 @@ struct CaptureReviewView: View {
         .padding(.vertical, 9)
         .viewfinderCapsule()
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Recipe \(recipe.name), full resolution")
+        .accessibilityLabel("Recipe \(recipe.name), \(resolutionCaption)")
     }
 
     private func saveError(_ message: String) -> some View {

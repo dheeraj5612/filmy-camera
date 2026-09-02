@@ -307,6 +307,13 @@ final class FilmyCameraUITests: XCTestCase {
     /// flash on, and attaches each review so the rendered stills can be
     /// compared against reference looks. Frames are discarded, not saved.
     func testPhysicalRecipeCaptureSheet() throws {
+        // Thirteen launches and twenty-six captures for a manually inspected
+        // contact sheet: opt in explicitly, e.g.
+        // TEST_RUNNER_FILMY_RUN_CAPTURE_SHEET=1 xcodebuild ... -only-testing:FilmyCameraUITests/FilmyCameraUITests/testPhysicalRecipeCaptureSheet
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["FILMY_RUN_CAPTURE_SHEET"] == "1",
+            "Set FILMY_RUN_CAPTURE_SHEET=1 to capture the on-device recipe contact sheet"
+        )
         app.terminate()
         let recipeIDs = [
             "provia-standard", "classic-chrome", "velvia-vivid", "astia-soft",
@@ -704,7 +711,9 @@ final class FilmyCameraUITests: XCTestCase {
     }
 
     private func waitForCameraShell(in target: XCUIApplication, timeout: TimeInterval = 15) -> Bool {
-        target.buttons["recipe-menu"].waitForExistence(timeout: timeout)
+        // The Roll thumbnail sits in the capture row of every camera layout,
+        // on hardware and in Simulator preview mode alike.
+        target.buttons["Open roll"].waitForExistence(timeout: timeout)
     }
 
     func testBackgroundingAndForegroundingRestoresTheViewfinder() throws {
@@ -804,6 +813,15 @@ final class FilmyCameraUITests: XCTestCase {
     /// Cold-launch benchmark on hardware. The number lands in the result
     /// bundle; the assertion only guards against a launch that never settles.
     func testPhysicalLaunchPerformance() throws {
+        #if targetEnvironment(simulator)
+        throw XCTSkip("Launch timing is only meaningful on camera hardware")
+        #else
+        // Five cold launches: opt in explicitly, e.g.
+        // TEST_RUNNER_FILMY_RUN_PERF=1 xcodebuild ... -only-testing:FilmyCameraUITests/FilmyCameraUITests/testPhysicalLaunchPerformance
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["FILMY_RUN_PERF"] == "1",
+            "Set FILMY_RUN_PERF=1 to run the on-device launch benchmark"
+        )
         guard waitForLiveShutter(in: app, timeout: 20) else {
             throw XCTSkip("Launch timing is only meaningful on camera hardware")
         }
@@ -814,9 +832,10 @@ final class FilmyCameraUITests: XCTestCase {
             let launched = XCUIApplication()
             launched.launchArguments = ["-ui-testing", "-selectedRecipeID", "classic-chrome"]
             launched.launch()
-            XCTAssertTrue(launched.buttons["recipe-menu"].waitForExistence(timeout: 15))
+            XCTAssertTrue(launched.buttons["Open roll"].waitForExistence(timeout: 15))
             launched.terminate()
         }
+        #endif
     }
 
     private func attachScreenshot(named name: String) {

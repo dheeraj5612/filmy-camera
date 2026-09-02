@@ -383,22 +383,77 @@ final class PhotoLibraryService: ObservableObject {
         } else {
             authorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
             addOnlyAuthorizationStatus = PHPhotoLibrary.authorizationStatus(for: .addOnly)
-            // Disk maintenance is not needed for the first frame. Run it after
-            // the launch turn so the viewfinder appears before the cache is
-            // walked; the Roll thumbnail refreshes when it finishes.
-            Task(priority: .utility) { [weak self] in
-                await Task.yield()
-                self?.performLaunchMaintenance()
-            }
+            // Disk maintenance is not needed for the first frame and must not
+            // block the main actor: it runs detached and only the outcome is
+            // applied here, after which the Roll thumbnail refreshes.
+            scheduleCacheMaintenance(includingLaunchPasses: true)
         }
     }
 
-    private func performLaunchMaintenance() {
-        migrateLocalFrameCacheIfNeeded()
-        reconcileLocalCache()
-        trimLocalCacheToBudget()
-        pruneTemporaryShareFiles()
-        refreshCachedFrames(excluding: Set(assets.map(\.localIdentifier)))
+    private struct CacheMaintenanceInput: Sendable {
+        let legacyDirectoryURL: URL?
+        let directoryURL: URL?
+        let shareDirectoryURL: URL?
+        let savedAssetIdentifiers: [String]
+        let resources: [String: SavedFrameResource]
+        let maxBytes: Int
+        let includingLaunchPasses: Bool
+    }
+
+    private struct CacheMaintenanceResult: Sendable {
+        /// Identifiers whose local copy was evicted or found missing. Applied
+        /// as removals so a save that landed meanwhile is never overwritten.
+        let removedIdentifiers: Set<String>
+    }
+
+    private var cacheMaintenanceTask: Task<Void, Never>?
+
+    /// Runs migration, reconciliation, budget trimming, and share-file pruning
+    /// on a background executor, then applies the result on the main actor.
+    private func scheduleCacheMaintenance(includingLaunchPasses: Bool) {
+        let input = CacheMaintenanceInput(
+            legacyDirectoryURL: legacyLocalFramesDirectoryURL,
+            directoryURL: localFramesDirectoryURL,
+            shareDirectoryURL: temporaryShareDirectoryURL,
+            savedAssetIdentifiers: savedAssetIdentifiers,
+            resources: savedFrameResources,
+            maxBytes: localCacheMaxBytes,
+            includingLaunchPasses: includingLaunchPasses
+        )
+        let previous = cacheMaintenanceTask
+        cacheMaintenanceTask = Task(priority: .utility) { [weak self] in
+            // Passes touch the same directory; keep them strictly sequential.
+            await previous?.value
+            let result = await Task.detached(priority: .utility) {
+                Self.runCacheMaintenance(input)
+            }.value
+            guard let self else { return }
+            if !result.removedIdentifiers.isEmpty {
+                var resources = self.savedFrameResources
+                for identifier in result.removedIdentifiers {
+                    resources.removeValue(forKey: identifier)
+                }
+                self.savedFrameResources = resources
+            }
+            self.refreshCachedFrames(excluding: Set(self.assets.map(\.localIdentifier)))
+        }
+    }
+
+    private nonisolated static func runCacheMaintenance(_ input: CacheMaintenanceInput) -> CacheMaintenanceResult {
+        if input.includingLaunchPasses {
+            migrateLocalFrameCache(from: input.legacyDirectoryURL, to: input.directoryURL)
+            reconcileLocalCache(in: input.directoryURL, resources: input.resources)
+        }
+        let removed = trimLocalCache(
+            in: input.directoryURL,
+            savedAssetIdentifiers: input.savedAssetIdentifiers,
+            resources: input.resources,
+            maxBytes: input.maxBytes
+        )
+        if input.includingLaunchPasses {
+            pruneTemporaryShareFiles(in: input.shareDirectoryURL)
+        }
+        return CacheMaintenanceResult(removedIdentifiers: removed)
     }
 
     var canSaveToPhotos: Bool {
@@ -870,7 +925,7 @@ final class PhotoLibraryService: ObservableObject {
                 pixelHeight: pixelHeight
             )
             savedFrameResources = resources
-            trimLocalCacheToBudget()
+            scheduleCacheMaintenance(includingLaunchPasses: false)
         } catch {
             // The Photos write remains the source-of-truth save operation. A
             // cache failure must not make the user retry and create a duplicate.
@@ -902,10 +957,15 @@ final class PhotoLibraryService: ObservableObject {
         return PhotoLibraryCachePath.fileURL(filename: filename, in: directoryURL)
     }
 
-    private func reconcileLocalCache() {
-        guard let directoryURL = localFramesDirectoryURL else { return }
+    private nonisolated static func reconcileLocalCache(
+        in directoryURL: URL?,
+        resources: [String: SavedFrameResource]
+    ) {
+        guard let directoryURL else { return }
         let indexedFilenames = Set(
-            savedFrameResources.values.compactMap { localFrameURL(for: $0.filename)?.lastPathComponent }
+            resources.values.compactMap {
+                PhotoLibraryCachePath.fileURL(filename: $0.filename, in: directoryURL)?.lastPathComponent
+            }
         )
         // Reconcile every regular file in the cache directory, including files
         // left behind before their resource index was persisted. Photos remains
@@ -916,9 +976,9 @@ final class PhotoLibraryService: ObservableObject {
         )
     }
 
-    private func migrateLocalFrameCacheIfNeeded() {
-        guard let legacyURL = legacyLocalFramesDirectoryURL,
-              let currentURL = localFramesDirectoryURL,
+    private nonisolated static func migrateLocalFrameCache(from legacyURL: URL?, to currentURL: URL?) {
+        guard let legacyURL,
+              let currentURL,
               legacyURL != currentURL,
               FileManager.default.fileExists(atPath: legacyURL.path) else {
             return
@@ -950,6 +1010,10 @@ final class PhotoLibraryService: ObservableObject {
     }
 
     private func protectLocalResource(at url: URL) {
+        Self.protectLocalResource(at: url)
+    }
+
+    private nonisolated static func protectLocalResource(at url: URL) {
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         var mutableURL = url
@@ -960,12 +1024,18 @@ final class PhotoLibraryService: ObservableObject {
         )
     }
 
-    private func trimLocalCacheToBudget() {
-        var resources = savedFrameResources
+    /// Evicts the oldest local copies beyond the byte budget and reports the
+    /// identifiers whose local copy is gone (evicted, missing, or empty).
+    private nonisolated static func trimLocalCache(
+        in directoryURL: URL?,
+        savedAssetIdentifiers: [String],
+        resources: [String: SavedFrameResource],
+        maxBytes: Int
+    ) -> Set<String> {
         var totalBytes = 0
-        var didRemoveResource = false
+        var removed = Set<String>()
 
-        if let directoryURL = localFramesDirectoryURL,
+        if let directoryURL,
            FileManager.default.fileExists(atPath: directoryURL.path) {
             protectLocalResource(at: directoryURL)
         }
@@ -974,26 +1044,24 @@ final class PhotoLibraryService: ObservableObject {
         // copies first while retaining the Photos originals.
         for identifier in savedAssetIdentifiers {
             guard let resource = resources[identifier] else { continue }
-            guard let url = localFrameURL(for: resource.filename) else {
-                resources.removeValue(forKey: identifier)
-                didRemoveResource = true
+            guard let directoryURL,
+                  let url = PhotoLibraryCachePath.fileURL(filename: resource.filename, in: directoryURL) else {
+                removed.insert(identifier)
                 continue
             }
             let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
             let byteCount = (attributes?[.size] as? NSNumber)?.intValue ?? 0
             guard byteCount > 0 else {
-                resources.removeValue(forKey: identifier)
-                didRemoveResource = true
+                removed.insert(identifier)
                 continue
             }
 
-            if totalBytes + byteCount > localCacheMaxBytes {
+            if totalBytes + byteCount > maxBytes {
                 do {
                     try FileManager.default.removeItem(at: url)
-                    resources.removeValue(forKey: identifier)
-                    didRemoveResource = true
+                    removed.insert(identifier)
                 } catch {
-                    // Keep the mapping so startup can retry a failed eviction.
+                    // Keep the mapping so a later pass can retry the eviction.
                     totalBytes += byteCount
                 }
             } else {
@@ -1001,11 +1069,7 @@ final class PhotoLibraryService: ObservableObject {
                 totalBytes += byteCount
             }
         }
-
-        if didRemoveResource {
-            savedFrameResources = resources
-        }
-        refreshCachedFrames(excluding: Set(assets.map(\.localIdentifier)))
+        return removed
     }
 
     /// Removes only Filmy Camera's on-device cached copies, including orphaned
@@ -1112,9 +1176,13 @@ final class PhotoLibraryService: ObservableObject {
         }
     }
 
-    private func pruneTemporaryShareFiles() {
-        guard let directoryURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
-            .appendingPathComponent(shareDirectoryName, isDirectory: true),
+    private var temporaryShareDirectoryURL: URL? {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent(shareDirectoryName, isDirectory: true)
+    }
+
+    private nonisolated static func pruneTemporaryShareFiles(in directoryURL: URL?) {
+        guard let directoryURL,
               let files = try? FileManager.default.contentsOfDirectory(
                   at: directoryURL,
                   includingPropertiesForKeys: nil,

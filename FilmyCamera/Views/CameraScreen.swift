@@ -200,7 +200,10 @@ struct CameraScreen: View {
             if isRunning {
                 livePreviews.attach(to: camera)
             } else {
+                // A stopped or unavailable camera must not leave the rail
+                // showing an old scene; swatches fall back to the sample.
                 livePreviews.detach()
+                livePreviews.clear()
             }
         }
         .sheet(item: $recipeForDetail) { recipe in
@@ -252,7 +255,13 @@ struct CameraScreen: View {
         // Leaving the tab keeps the session warm briefly so coming back is
         // instant; the scene phase handler still stops it when the app leaves
         // the foreground.
-        .onDisappear { camera.stop(after: CameraActivityPolicy.gracePeriod) }
+        .onDisappear {
+            // The session may stay warm, but nothing here consumes frames any
+            // more: unregister the swatch handler before this view is released.
+            livePreviews.detach()
+            livePreviews.clear()
+            camera.stop(after: CameraActivityPolicy.gracePeriod)
+        }
         .onChange(of: scenePhase) { _, _ in updateCameraActivity() }
         .onChange(of: isCameraTabActive) { _, _ in updateCameraActivity() }
         .onChange(of: viewModel.reviewImage != nil) { _, hasReview in

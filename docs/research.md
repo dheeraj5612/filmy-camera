@@ -527,7 +527,9 @@ capture settings, the G7 X flash UI test asserts it, and
 on a background task from `FilmyCameraApp.init`, so the first live frame no
 longer pays for shader compilation on the main thread. Photo cache migration,
 reconciliation, trimming, and share-file pruning moved out of
-`PhotoLibraryService.init` into a utility task after the launch turn.
+`PhotoLibraryService.init` onto a detached background task; only the set of
+evicted identifiers returns to the main actor, applied as removals so a save
+that lands meanwhile is never overwritten.
 `testPhysicalLaunchPerformance` records `XCTApplicationLaunchMetric` on
 hardware.
 
@@ -539,4 +541,3 @@ grace behavior. New UI lifecycle tests: background/foreground round trips,
 tab round trips with a live-again deadline, rapid recipe switching followed
 by a capture, three Retake cycles with a warm-session deadline, and the
 launch benchmark. Device-only tests skip cleanly on Simulator.
-

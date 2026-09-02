@@ -13,6 +13,7 @@ struct ContentView: View {
     @ObservedObject var photoLibrary: PhotoLibraryService
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab: Tab = .camera
     @State private var importedPhotoItem: PhotosPickerItem?
     @State private var importTask: Task<Void, Never>?
@@ -24,6 +25,14 @@ struct ContentView: View {
 
     var body: some View {
         selectedTabContent
+            // The camera screen keeps the session warm across tab switches.
+            // Leaving the foreground must still release it at once, even when
+            // the Roll or Settings is showing and the camera screen is gone.
+            .onChange(of: scenePhase) { _, phase in
+                if phase != .active {
+                    camera.stop()
+                }
+            }
             .overlay {
                 if isImportInProgress {
                     importProgressOverlay
