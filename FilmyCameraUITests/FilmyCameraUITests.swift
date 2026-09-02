@@ -6,22 +6,27 @@ final class FilmyCameraUITests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
+        // The monitor handler is not actor-isolated in the Xcode 16 SDK, but
+        // XCTest invokes it on the main thread; hop explicitly so XCUIElement
+        // calls compile under Swift 6 on every supported toolchain.
         addUIInterruptionMonitor(withDescription: "Filmy Camera permissions") { alert in
-            let allowedButtons = [
-                "Allow",
-                "Allow Full Access",
-                "Allow Access to All Photos",
-                "OK"
-            ]
+            MainActor.assumeIsolated {
+                let allowedButtons = [
+                    "Allow",
+                    "Allow Full Access",
+                    "Allow Access to All Photos",
+                    "OK"
+                ]
 
-            for title in allowedButtons {
-                let button = alert.buttons[title]
-                if button.exists {
-                    button.tap()
-                    return true
+                for title in allowedButtons {
+                    let button = alert.buttons[title]
+                    if button.exists {
+                        button.tap()
+                        return true
+                    }
                 }
+                return false
             }
-            return false
         }
         let launchedApp = MainActor.assumeIsolated {
             XCUIDevice.shared.orientation = .portrait
@@ -37,7 +42,9 @@ final class FilmyCameraUITests: XCTestCase {
         app = launchedApp
         // A no-op tap gives XCTest an interaction with which to invoke the
         // interruption monitor when a first-launch permission alert is present.
-        app.tap()
+        MainActor.assumeIsolated {
+            launchedApp.tap()
+        }
     }
 
     func testCameraShellAndRecipeDetails() throws {
