@@ -55,6 +55,9 @@ public struct FilteredCameraPreview: UIViewRepresentable {
         )
         coordinator.installFrameHandlerIfNeeded()
         view.accessibilityLabel = "Live camera preview"
+        view.onDrawableSizeChange = { [weak cameraService] size in
+            cameraService?.updatePreviewDrawableSize(size)
+        }
         return view
     }
 
@@ -237,6 +240,10 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
         autoResizeDrawable = false
     }
 
+    /// Reports the drawable size the view really renders into, so captures
+    /// can phase their grain against the same pixel grid as the preview.
+    var onDrawableSizeChange: ((CGSize) -> Void)?
+
     public override func layoutSubviews() {
         super.layoutSubviews()
         let screenScale = window?.screen.scale ?? traitCollection.displayScale
@@ -247,6 +254,7 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
         )
         if target != drawableSize, target.width > 0, target.height > 0 {
             drawableSize = target
+            onDrawableSizeChange?(target)
         }
     }
 

@@ -132,8 +132,8 @@ struct CaptureReviewView: View {
             .accessibilityElement(children: .combine)
             .accessibilityLabel(
                 isImported
-                    ? "Imported photo with \(recipe.name)"
-                    : "Captured frame with \(recipe.name)"
+                    ? "Imported photo with \(recipe.name), \(resolutionCaption)"
+                    : "Captured frame with \(recipe.name), \(resolutionCaption)"
             )
     }
 

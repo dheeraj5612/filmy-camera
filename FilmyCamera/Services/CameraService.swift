@@ -324,6 +324,11 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     @Published public private(set) var isFocusExposureLocked = false
     @Published public private(set) var previewFrameSize: CGSize = .zero
     @Published public private(set) var previewViewportSize: CGSize = .zero
+    /// The pixel size of the drawable the viewfinder actually renders into,
+    /// reported by the preview view after layout. Its scale comes from the
+    /// window's screen, which can differ from the main screen on an external
+    /// display; captures use it so grain lands where the preview showed it.
+    @Published public private(set) var previewDrawableSize: CGSize = .zero
     @Published public private(set) var previewRotationAngle: CGFloat = 90
     @Published public private(set) var previewMirrored = false
 
@@ -2486,6 +2491,13 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private func publishPreviewViewportSize(_ size: CGSize) {
         publishOnMain { [weak self] in
             self?.previewViewportSize = size
+        }
+    }
+
+    public func updatePreviewDrawableSize(_ size: CGSize) {
+        guard size.width > 0, size.height > 0 else { return }
+        publishOnMain { [weak self] in
+            self?.previewDrawableSize = size
         }
     }
 

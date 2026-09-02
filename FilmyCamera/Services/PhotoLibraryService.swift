@@ -1201,15 +1201,22 @@ final class PhotoLibraryService: ObservableObject {
         guard let directoryURL,
               let files = try? FileManager.default.contentsOfDirectory(
                   at: directoryURL,
-                  includingPropertiesForKeys: nil,
+                  includingPropertiesForKeys: [.contentModificationDateKey],
                   options: [.skipsHiddenFiles]
               ) else {
             return
         }
+        // A share prepared since launch may be writing into this directory
+        // right now; only files that predate this pass by a safe margin are
+        // leftovers from an earlier session.
+        let cutoff = Date().addingTimeInterval(-reconcileMinimumFileAge)
 
         protectLocalResource(at: directoryURL)
 
         for fileURL in files {
+            let modified = (try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? .distantPast
+            guard modified < cutoff else { continue }
             try? FileManager.default.removeItem(at: fileURL)
         }
     }

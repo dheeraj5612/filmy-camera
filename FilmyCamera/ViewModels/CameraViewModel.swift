@@ -317,17 +317,24 @@ final class CameraViewModel: ObservableObject {
         saveErrorMessage = nil
         let recipe = selectedRecipe
         let viewportSize = camera.previewViewportSize
-        // The viewfinder renders into a bounded drawable, so use its actual
-        // scale (not the raw screen scale) or grain lands in a different
-        // place on the still than it did in the preview.
-        let previewScale = FilteredCameraPreviewView.drawableScale(
-            for: viewportSize,
-            screenScale: UIScreen.main.scale
-        )
-        let previewDrawableSize = CGSize(
-            width: viewportSize.width * previewScale,
-            height: viewportSize.height * previewScale
-        )
+        // Use the drawable the viewfinder really rendered into: its scale
+        // comes from the window's screen (which can differ from the main
+        // screen on an external display) and it is bounded by the pixel
+        // budget. Only before the first layout is it derived here.
+        let publishedDrawableSize = camera.previewDrawableSize
+        let previewDrawableSize: CGSize
+        if publishedDrawableSize.width > 0, publishedDrawableSize.height > 0 {
+            previewDrawableSize = publishedDrawableSize
+        } else {
+            let previewScale = FilteredCameraPreviewView.drawableScale(
+                for: viewportSize,
+                screenScale: UIScreen.main.scale
+            )
+            previewDrawableSize = CGSize(
+                width: viewportSize.width * previewScale,
+                height: viewportSize.height * previewScale
+            )
+        }
 
         camera.capturePhoto { [weak self] capturedPhoto in
             Task { @MainActor [weak self] in
