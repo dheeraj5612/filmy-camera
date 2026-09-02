@@ -55,6 +55,9 @@ public struct FilteredCameraPreview: UIViewRepresentable {
         )
         coordinator.installFrameHandlerIfNeeded()
         view.accessibilityLabel = "Live camera preview"
+        view.onDrawableSizeChange = { [weak cameraService] size in
+            cameraService?.updatePreviewDrawableSize(size)
+        }
         return view
     }
 
@@ -209,6 +212,19 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
         return (context, device.makeCommandQueue())
     }
 
+    /// The viewfinder is rendered at a bounded pixel count and scaled up by
+    /// the display. Every filter pass costs in proportion to output pixels,
+    /// and a full Retina drawable (3.7 MP on an 11-inch iPad) put a G7 X frame
+    /// at ~40 ms on an A12Z; at 1.3 MP the same frame renders in ~14 ms.
+    static let previewPixelBudget: CGFloat = 1_300_000
+
+    static func drawableScale(for bounds: CGSize, screenScale: CGFloat) -> CGFloat {
+        let points = bounds.width * bounds.height
+        guard points > 0, screenScale > 0 else { return max(screenScale, 1) }
+        let budgetScale = (previewPixelBudget / points).squareRoot()
+        return min(max(screenScale, 1), max(budgetScale, 1))
+    }
+
     private func configureView() {
         delegate = self
         device = device ?? FilmRenderer.metalDevice ?? MTLCreateSystemDefaultDevice()
@@ -221,6 +237,25 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
         isOpaque = true
         backgroundColor = .black
         contentMode = .scaleAspectFill
+        autoResizeDrawable = false
+    }
+
+    /// Reports the drawable size the view really renders into, so captures
+    /// can phase their grain against the same pixel grid as the preview.
+    var onDrawableSizeChange: ((CGSize) -> Void)?
+
+    public override func layoutSubviews() {
+        super.layoutSubviews()
+        let screenScale = window?.screen.scale ?? traitCollection.displayScale
+        let scale = Self.drawableScale(for: bounds.size, screenScale: screenScale)
+        let target = CGSize(
+            width: (bounds.width * scale).rounded(),
+            height: (bounds.height * scale).rounded()
+        )
+        if target != drawableSize, target.width > 0, target.height > 0 {
+            drawableSize = target
+            onDrawableSizeChange?(target)
+        }
     }
 
     func update(

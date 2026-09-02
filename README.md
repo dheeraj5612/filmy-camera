@@ -1,6 +1,6 @@
 # Filmy Camera
 
-Filmy Camera is a native iPhone camera built around the feeling of choosing a film recipe before you shoot. It combines a low-friction SwiftUI camera UI with a Core Image/Metal-ready rendering pipeline for live preview and full-resolution exports.
+Filmy Camera is a native iPhone and iPad camera built around the feeling of choosing a film recipe before you shoot. It combines a low-friction SwiftUI camera UI with a Core Image/Metal-ready rendering pipeline for live preview and full-resolution exports.
 
 ## Current product slice
 
@@ -9,11 +9,20 @@ Filmy Camera is a native iPhone camera built around the feeling of choosing a fi
 - Native bi-planar YUV preview buffers when available, with a BGRA fallback, and a session-scoped grain phase shared by preview and capture for a more faithful WYSIWYG frame.
 - Sixteen editable recipe starting points based on public Fujifilm-style controls: film base, tone curve, color, white-balance shift, dynamic range, Color Chrome, FX Blue, sharpness, noise reduction, clarity, grain, grain size, halation, and vignette.
 - Full-resolution capture review with retake or explicit Save to Photos, so a frame is never committed silently.
+- System photo picker import that applies the selected recipe at full resolution while preserving the original framing.
 - First-run recipe-first onboarding with a direct handoff into the camera.
+- Recipe swatches render the live viewfinder scene through each recipe (a photographic sample scene stands in when no camera is running), so choosing a look means seeing this scene in that look.
 - Warm, camera-first SwiftUI UI: edge-anchored viewfinder chrome, a film-strip recipe rail with renderer-backed swatches, a last-frame Roll thumbnail beside the shutter, persistent tuning, a recipe detail sheet, capture review, and a three-column contact-sheet Roll with zoom gestures.
-- iPhone hardware controls for front/back switching and available-lens selection, with simulator-safe preview behavior.
+- Optional semantic haptics for shutter, recipe and camera selections, focus, editor commits, discards, saves, and failures.
+- Flash sits beside zoom in the on-screen controls and in Settings, and the last explicit choice is remembered; the G7 X profile renders flash frames with subject/ambient separation.
+- The camera stays available: failed starts and runtime errors reconnect on their own with backoff, interruptions say why (background, another app, multitasking, heat), the session keeps running in iPad Split View, and it stays warm under the review sheet and across quick tab switches so Retake and returning to the viewfinder are instant.
+- Fast startup: the film pipeline compiles off the main thread while the session configures, and photo cache maintenance runs after the first frame.
+- iPhone and iPad hardware controls for front/back switching and available-lens selection, with simulator-safe preview behavior.
+- The live preview renders into a bounded drawable (about 1.3 MP) for a steady 30 fps on older iPads while stills and exports stay full resolution.
 - sRGB output normalization plus embedded recipe provenance metadata on saved JPEGs.
-- Simulator-safe empty state: the full interface runs without camera hardware and clearly asks for a physical iPhone for capture.
+- Simulator-safe empty state: the full interface runs without camera hardware and clearly asks for a physical iPhone or iPad for capture.
+- iPad support: readable-width pages, an adaptive Roll contact sheet, and the same viewfinder chrome verified on an iPad Pro and on iPhone-size layouts.
+- Photo import from the system picker, rendered at full resolution with the current recipe and reviewed before saving.
 
 ## Build
 

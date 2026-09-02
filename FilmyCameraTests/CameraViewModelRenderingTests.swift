@@ -1,8 +1,41 @@
 import CoreGraphics
+import UIKit
 import XCTest
 @testable import FilmyCamera
 
 final class CameraViewModelRenderingTests: XCTestCase {
+    @MainActor
+    func testImportedPhotoKeepsItsFramingAndSelectedRecipe() async throws {
+        let sourceSize = CGSize(width: 80, height: 40)
+        let image = UIGraphicsImageRenderer(size: sourceSize).image { context in
+            UIColor(red: 0.72, green: 0.28, blue: 0.16, alpha: 1).setFill()
+            context.cgContext.fill(CGRect(origin: .zero, size: sourceSize))
+        }
+        let sourceData = try XCTUnwrap(image.jpegData(compressionQuality: 0.9))
+        let viewModel = CameraViewModel()
+        let recipe = try XCTUnwrap(FilmRecipe.builtIns.first(where: { $0.id == "classic-chrome" }))
+        viewModel.select(recipe: recipe)
+
+        await viewModel.importPhoto(data: sourceData)
+
+        let reviewImage = try XCTUnwrap(viewModel.reviewImage)
+        XCTAssertEqual(reviewImage.size.width / reviewImage.size.height, 2, accuracy: 0.01)
+        XCTAssertEqual(viewModel.reviewRecipe?.id, recipe.id)
+        XCTAssertEqual(viewModel.reviewSource, .photoLibrary)
+        XCTAssertFalse(viewModel.isImporting)
+    }
+
+    @MainActor
+    func testInvalidImportedPhotoDoesNotCreateAReview() async {
+        let viewModel = CameraViewModel()
+
+        await viewModel.importPhoto(data: Data("not an image".utf8))
+
+        XCTAssertNil(viewModel.reviewImage)
+        XCTAssertEqual(viewModel.toastStyle, .error)
+        XCTAssertFalse(viewModel.isImporting)
+    }
+
     func testScaledGrainPhasePreservesValuesBeyondSeedBitRange() {
         let seed = UInt32(0x1FF) | (UInt32(0x1FF) << 9)
         let phase = CameraViewModel.scaledGrainPhase(

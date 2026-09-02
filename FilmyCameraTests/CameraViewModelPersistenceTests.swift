@@ -13,7 +13,7 @@ final class CameraViewModelPersistenceTests: XCTestCase {
         )
 
         let viewModel = CameraViewModel(defaults: defaults)
-        let fallbackID = FilmRecipe.builtIns[0].id
+        let fallbackID = CameraViewModel.defaultRecipeID
 
         XCTAssertEqual(viewModel.selectedRecipeID, fallbackID)
         XCTAssertEqual(

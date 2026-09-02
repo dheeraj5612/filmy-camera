@@ -5,18 +5,34 @@ import UIKit
 enum CameraActivityAction: Equatable {
     case start
     case stop
+    /// Keep the session warm for a short grace period so a quick return
+    /// (Retake, back from the Roll or Settings) shows a live viewfinder at
+    /// once; the session is released if the user stays away.
+    case stopAfterGrace
     case hold
 }
 
 enum CameraActivityPolicy {
+    /// How long the session stays warm while the viewfinder is covered.
+    static let gracePeriod: TimeInterval = 45
+
+    /// Unit tests run inside this app as their host. They must own the camera
+    /// themselves (hardware tests start their own session), so the host UI
+    /// leaves the device alone. UI tests launch the app as a separate
+    /// process without this variable and are unaffected.
+    static let isUnitTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+
     static func action(
         hasReview: Bool,
         sceneIsActive: Bool,
         isCameraTabActive: Bool,
         availability: CameraService.Availability
     ) -> CameraActivityAction {
-        if hasReview || !sceneIsActive || !isCameraTabActive {
+        if !sceneIsActive {
             return .stop
+        }
+        if hasReview || !isCameraTabActive {
+            return .stopAfterGrace
         }
         if availability == .interrupted {
             return .hold
@@ -39,7 +55,7 @@ struct CameraScreen: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @AppStorage("showGrid") private var showGrid = true
-    @AppStorage("hapticsEnabled") private var hapticsEnabled = true
+    @StateObject private var livePreviews = LiveRecipePreviewStore()
     @State private var recipeForDetail: FilmRecipe?
     @State private var isShowingTools: Bool
     @State private var focusPoint: CGPoint?
@@ -81,6 +97,7 @@ struct CameraScreen: View {
                     .accessibilityValue(camera.isRunning ? "Showing the \(viewModel.selectedRecipe.name) look" : camera.statusMessage)
                     .accessibilityHint("Tap the preview to focus at that point. VoiceOver users can use the Focus and expose at center action.")
                     .accessibilityAction(named: "Focus and expose at center") {
+                        HapticFeedback.play(.focus)
                         let normalizedPoint = CGPoint(x: 0.5, y: 0.5)
                         camera.focus(at: normalizedPoint)
                         focusNormalizedPoint = normalizedPoint
@@ -94,6 +111,7 @@ struct CameraScreen: View {
                     .accessibilityHidden(shouldShowCameraEmptyState)
                     .gesture(
                         SpatialTapGesture().onEnded { value in
+                            HapticFeedback.play(.focus)
                             let normalizedPoint = normalizedFocusPoint(
                                 for: value.location,
                                 in: proxy.size
@@ -126,9 +144,17 @@ struct CameraScreen: View {
             }
             .ignoresSafeArea()
 
-            if shouldShowCameraEmptyState {
+            // The session is intentionally stopped while a frame is under
+            // review. On iPad the review is a centered sheet, so the paused
+            // viewfinder stays visible; keep it quiet instead of announcing
+            // "Camera unavailable" behind the user's own photo.
+            if shouldShowCameraEmptyState, !isReviewing {
                 cameraPlaceholder
                     .ignoresSafeArea()
+            } else if isReviewing {
+                Color.black.opacity(0.55)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
             }
 
             viewfinderScrim
@@ -139,9 +165,18 @@ struct CameraScreen: View {
             }
 
             if let focusPoint {
+                // The tap gesture reports locations in the full-screen
+                // preview space (the GeometryReader ignores safe areas).
+                // Expand the reticle into that same space so the ring lands
+                // exactly where the user touched on every device and
+                // orientation, and keep it hit-test transparent so a visible
+                // reticle cannot swallow the next focus tap.
                 FocusReticle()
                     .position(focusPoint)
                     .transition(reduceMotion ? .opacity : .scale(scale: 1.15).combined(with: .opacity))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
                     .task(id: focusPoint) {
                         try? await Task.sleep(for: .seconds(1.2))
                         guard !Task.isCancelled else { return }
@@ -153,7 +188,7 @@ struct CameraScreen: View {
 
             GeometryReader { proxy in
                 chrome(for: proxy.size)
-                    .disabled(viewModel.isCapturing)
+                    .disabled(viewModel.isCapturing || viewModel.isImporting)
             }
 
             if let toastMessage = viewModel.toastMessage {
@@ -163,6 +198,20 @@ struct CameraScreen: View {
             }
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: viewModel.toastMessage)
+        // Every swatch under the viewfinder (rail, menu, detail hero) renders
+        // its recipe over the live scene, the way a film simulation picker
+        // should: choosing a look means seeing this scene in that look.
+        .environment(\.recipePreviewScene, livePreviews.scene)
+        .onChange(of: camera.isRunning, initial: true) { _, isRunning in
+            if isRunning {
+                livePreviews.attach(to: camera)
+            } else {
+                // A stopped or unavailable camera must not leave the rail
+                // showing an old scene; swatches fall back to the sample.
+                livePreviews.detach()
+                livePreviews.clear()
+            }
+        }
         .sheet(item: $recipeForDetail) { recipe in
             RecipeDetailView(
                 recipe: recipe,
@@ -188,6 +237,9 @@ struct CameraScreen: View {
                 CaptureReviewView(
                     image: image,
                     recipe: recipe,
+                    source: viewModel.reviewSource,
+                    isFullResolution: viewModel.reviewIsFullResolution,
+                    flashFired: viewModel.reviewFlashFired,
                     isSaving: viewModel.isSaving,
                     saveErrorMessage: viewModel.saveErrorMessage,
                     onSave: { viewModel.saveReview(photoLibrary: photoLibrary) },
@@ -206,15 +258,23 @@ struct CameraScreen: View {
             // prompting: refresh only reads when access was already granted.
             photoLibrary.refresh()
         }
-        .onDisappear { camera.stop() }
+        // Leaving the tab keeps the session warm briefly so coming back is
+        // instant; the scene phase handler still stops it when the app leaves
+        // the foreground.
+        .onDisappear {
+            // The session may stay warm, but nothing here consumes frames any
+            // more: unregister the swatch handler before this view is released.
+            livePreviews.detach()
+            livePreviews.clear()
+            camera.stop(after: CameraActivityPolicy.gracePeriod)
+        }
         .onChange(of: scenePhase) { _, _ in updateCameraActivity() }
         .onChange(of: isCameraTabActive) { _, _ in updateCameraActivity() }
         .onChange(of: viewModel.reviewImage != nil) { _, hasReview in
             if hasReview {
-                camera.stop()
-            } else {
-                updateCameraActivity()
+                camera.setFrameDeliveryPaused(true)
             }
+            updateCameraActivity()
         }
         .onChange(of: viewModel.isCapturing) { _, isCapturing in
             guard !isCapturing, viewModel.reviewImage == nil else { return }
@@ -230,6 +290,17 @@ struct CameraScreen: View {
 
     private var isCompactChrome: Bool {
         dynamicTypeSize.isAccessibilitySize
+    }
+
+    /// The G7 X profile is a camera mode rather than a film stock: its
+    /// header reads "camera profile" and its capture controls stay one tap
+    /// away in the capture path instead of behind the tools toggle.
+    private var isCompactDigitalMode: Bool {
+        viewModel.selectedRecipe.filmBase == .compactDigital
+    }
+
+    private var recipeEyebrow: String {
+        isCompactDigitalMode ? "CAMERA PROFILE" : "RECIPE"
     }
 
     private func chrome(for size: CGSize) -> some View {
@@ -281,14 +352,6 @@ struct CameraScreen: View {
     private var topBar: some View {
         ZStack {
             HStack(spacing: 10) {
-                if camera.isRunning && camera.flashAvailability != .unsupported {
-                    FlashControl(
-                        mode: camera.flashMode,
-                        availability: camera.flashAvailability,
-                        action: camera.cycleFlashMode
-                    )
-                }
-
                 Spacer(minLength: 0)
 
                 if camera.isRunning || isViewfinderChromePreview {
@@ -333,6 +396,8 @@ struct CameraScreen: View {
             VStack(spacing: 10) {
                 if isShowingTools {
                     toolStrip(minWidth: width - 32)
+                } else if isCompactDigitalMode, !shouldShowCameraEmptyState {
+                    compactDigitalQuickRail
                 }
 
                 HStack(alignment: .center, spacing: 14) {
@@ -348,18 +413,21 @@ struct CameraScreen: View {
             VStack(spacing: 10) {
                 if isShowingTools {
                     toolStrip(minWidth: width - 32)
+                } else if isCompactDigitalMode, !shouldShowCameraEmptyState || isViewfinderChromePreview {
+                    compactDigitalQuickRail
                 }
 
                 recipeHeader
 
                 RecipePickerView(
-                    recipes: FilmRecipe.builtIns,
+                    recipes: viewModel.recipes,
                     selectedRecipeID: $viewModel.selectedRecipeID,
                     onOpenDetail: { recipeForDetail = viewModel.recipe(for: $0.id) },
                     compact: isCompactChrome
                 )
 
                 captureRow
+                    .frame(maxWidth: FilmyLayout.dockMaxWidth)
                     .padding(.top, 2)
             }
         }
@@ -367,7 +435,7 @@ struct CameraScreen: View {
 
     private var recipeHeader: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Eyebrow(text: "RECIPE", color: FilmyTheme.accent)
+            Eyebrow(text: recipeEyebrow, color: FilmyTheme.accent)
 
             Text(viewModel.selectedRecipe.name)
                 .font(.system(.subheadline, design: .rounded).weight(.bold))
@@ -417,6 +485,8 @@ struct CameraScreen: View {
     private var captureControl: some View {
         if isViewfinderChromePreview {
             CaptureButton(isCapturing: viewModel.isCapturing, isEnabled: false) {}
+        } else if isReviewing {
+            CaptureButton(isCapturing: false, isEnabled: false) {}
         } else if shouldShowCameraEmptyState {
             captureNotice
         } else {
@@ -425,7 +495,7 @@ struct CameraScreen: View {
     }
 
     private var captureNotice: some View {
-        Label("Capture is available on a physical iPhone", systemImage: "iphone")
+        Label("Capture is available on a physical device", systemImage: "iphone")
             .font(.system(size: 11, weight: .semibold, design: .rounded))
             .foregroundStyle(.white.opacity(0.8))
             .multilineTextAlignment(.center)
@@ -457,6 +527,8 @@ struct CameraScreen: View {
     private func toolStrip(minWidth: CGFloat) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
+                flashControl
+
                 ZoomControl(
                     value: camera.zoomFactor,
                     onAdjust: { direction in
@@ -497,10 +569,82 @@ struct CameraScreen: View {
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 
+    /// Compact-camera mode keeps its most useful controls in the capture
+    /// path. The viewfinder stays dominant while zoom, exposure, the grid,
+    /// and camera switching remain one tap away.
+    private var compactDigitalQuickRail: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                flashControl
+
+                ZoomControl(
+                    value: camera.zoomFactor,
+                    onAdjust: { direction in
+                        let delta: CGFloat = direction == .increment ? 0.5 : -0.5
+                        camera.setZoom(camera.zoomFactor + delta)
+                    },
+                    onSelect: camera.setZoom
+                )
+
+                ExposureControl(value: camera.exposureBias) { direction in
+                    let delta: Float = direction == .increment ? (1.0 / 3.0) : -(1.0 / 3.0)
+                    camera.setExposureBias(camera.exposureBias + delta)
+                }
+
+                Button {
+                    HapticFeedback.play(.selection)
+                    showGrid.toggle()
+                } label: {
+                    Image(systemName: showGrid ? "grid" : "grid.circle")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(showGrid ? FilmyTheme.background : .white)
+                        .frame(width: FilmyTheme.toolControlHeight, height: FilmyTheme.toolControlHeight)
+                        .background {
+                            if showGrid {
+                                Circle().fill(FilmyTheme.accent)
+                            } else {
+                                ChromeShapeBackground(shape: Circle())
+                            }
+                        }
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.pressable)
+                .accessibilityIdentifier("g7x-grid-control")
+                .accessibilityLabel(showGrid ? "Hide composition grid" : "Show composition grid")
+                .accessibilityValue(showGrid ? "On" : "Off")
+
+                if hasHardwareSelection {
+                    CameraHardwareControls(camera: camera)
+                }
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 4)
+        }
+        .scrollClipDisabled()
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("g7x-capture-controls")
+        .accessibilityLabel("G7 X quick capture controls")
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    /// Flash sits beside zoom in every control strip: it is a capture
+    /// decision the G7 X flash treatment depends on, so it stays one tap away
+    /// rather than hidden in a corner.
+    @ViewBuilder
+    private var flashControl: some View {
+        if camera.flashAvailability != .unsupported {
+            FlashControl(
+                mode: camera.flashMode,
+                availability: camera.flashAvailability,
+                action: camera.cycleFlashMode
+            )
+        }
+    }
+
     private var recipeMenu: some View {
         Menu {
-            Section("Recipe") {
-                ForEach(FilmRecipe.builtIns) { recipe in
+            Section(isCompactDigitalMode ? "Camera profile" : "Recipe") {
+                ForEach(viewModel.recipes) { recipe in
                     Button {
                         viewModel.select(recipe: recipe)
                     } label: {
@@ -529,7 +673,7 @@ struct CameraScreen: View {
                 .frame(width: 46, height: 32)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Eyebrow(text: "RECIPE", color: FilmyTheme.accent)
+                    Eyebrow(text: recipeEyebrow, color: FilmyTheme.accent)
 
                     Text(viewModel.selectedRecipe.name)
                         .font(.system(.subheadline, design: .rounded).weight(.bold))
@@ -558,6 +702,10 @@ struct CameraScreen: View {
 
     private var shouldShowCameraEmptyState: Bool {
         !camera.isRunning
+    }
+
+    private var isReviewing: Bool {
+        viewModel.reviewImage != nil
     }
 
     private var isViewfinderChromePreview: Bool {
@@ -595,7 +743,7 @@ struct CameraScreen: View {
             PreviewPlaceholder(
                 isSimulator: false,
                 recipe: viewModel.selectedRecipe,
-                message: "The camera needs to be reopened before it can capture.",
+                message: camera.statusMessage,
                 actionTitle: "Resume Camera",
                 action: camera.start
             )
@@ -631,13 +779,11 @@ struct CameraScreen: View {
     // MARK: - Actions
 
     private func capture() {
-        if hapticsEnabled {
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        }
         viewModel.capture(camera: camera)
     }
 
     private func updateCameraActivity() {
+        guard !CameraActivityPolicy.isUnitTestHost else { return }
         let action = CameraActivityPolicy.action(
             hasReview: viewModel.reviewImage != nil,
             sceneIsActive: scenePhase == .active,
@@ -647,9 +793,12 @@ struct CameraScreen: View {
 
         switch action {
         case .start:
+            camera.setFrameDeliveryPaused(false)
             camera.start()
         case .stop:
             camera.stop()
+        case .stopAfterGrace:
+            camera.stop(after: CameraActivityPolicy.gracePeriod)
         case .hold:
             break
         }
@@ -781,6 +930,7 @@ private struct CameraHardwareControls: View {
             HStack(spacing: 8) {
                 if showsCameraSwitch {
                     Button {
+                        HapticFeedback.play(.selection)
                         camera.toggleCameraPosition()
                     } label: {
                         Label(camera.cameraPosition.title, systemImage: "arrow.triangle.2.circlepath.camera")
@@ -801,6 +951,7 @@ private struct CameraHardwareControls: View {
                     Menu {
                         ForEach(camera.availableLenses) { lens in
                             Button {
+                                HapticFeedback.play(.selection)
                                 camera.setLens(id: lens.id)
                             } label: {
                                 if lens.id == camera.selectedLensID {

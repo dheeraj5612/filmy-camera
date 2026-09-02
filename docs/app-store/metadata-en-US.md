@@ -23,6 +23,7 @@ What you get:
 
 - A focused camera screen designed for one-handed shooting
 - A quick rail of curated film-style recipes
+- Import an existing photo and apply your selected recipe at full resolution
 - Adjustable tone, color, Kelvin white balance, fine-tuning, grain, clarity, and vignette controls
 - Live preview and full-resolution exports with the selected look applied
 - A review step to retake or explicitly save each finished frame
@@ -49,7 +50,7 @@ Meet Filmy Camera: a focused camera experience with curated film-style recipes, 
 
 ## App Review notes
 
-Filmy Camera is a camera-first photo app with an in-app Roll. Camera access is requested when the camera screen is used; Photos access is requested when saving a frame or when the user taps Allow Photos access in the in-app Roll, and the Roll only reads frames saved by Filmy Camera. The simulator cannot provide camera hardware, so review the capture flow on a physical iPhone. No account or login is required.
+Filmy Camera is a camera-first photo app with an in-app Roll. Camera access is requested when the camera screen is used. Existing-photo import uses Apple's system photo picker, which shares only the photo the user chooses. Photos access is requested when saving a finished photo or when the user taps Allow Photos access in the in-app Roll, and the Roll only reads frames saved by Filmy Camera. The simulator cannot provide camera hardware, so review the capture flow on a physical iPhone or iPad. No account or login is required.
 
 ## Screenshot plan
 

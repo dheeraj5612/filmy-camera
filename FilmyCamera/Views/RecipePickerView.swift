@@ -10,6 +10,7 @@ struct RecipePickerView: View {
     let compact: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     init(
         recipes: [FilmRecipe],
@@ -24,7 +25,13 @@ struct RecipePickerView: View {
     }
 
     private var swatchSize: CGSize {
-        compact ? CGSize(width: 108, height: 64) : CGSize(width: 98, height: 64)
+        if compact {
+            return CGSize(width: 108, height: 64)
+        }
+        // Regular widths (iPad) have room for a slightly larger swatch.
+        return horizontalSizeClass == .regular
+            ? CGSize(width: 122, height: 78)
+            : CGSize(width: 98, height: 64)
     }
 
     private var tileSpacing: CGFloat {
@@ -42,29 +49,8 @@ struct RecipePickerView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: tileSpacing) {
                     ForEach(recipes) { recipe in
-                        Button {
-                            withAnimation(reduceMotion ? nil : .snappy(duration: 0.22)) {
-                                selectedRecipeID = recipe.id
-                            }
-                        } label: {
-                            recipeTile(recipe)
-                        }
-                        .id(recipe.id)
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("\(recipe.name), \(recipe.descriptor)")
-                        .accessibilityValue(selectedRecipeID == recipe.id ? "Selected" : "Not selected")
-                        .accessibilityHint("Double tap to select this look. Use the View recipe details action for more information.")
-                        .accessibilityAction(named: "View recipe details") {
-                            onOpenDetail(recipe)
-                        }
-                        .accessibilityAddTraits(selectedRecipeID == recipe.id ? .isSelected : [])
-                        .contextMenu {
-                            Button {
-                                onOpenDetail(recipe)
-                            } label: {
-                                Label("View recipe details", systemImage: "info.circle")
-                            }
-                        }
+                        recipeButton(for: recipe)
+                            .id(recipe.id)
                     }
                 }
                 .scrollTargetLayout()
@@ -92,6 +78,34 @@ struct RecipePickerView: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("recipe-picker")
         .accessibilityLabel("Film recipe picker. Swipe left or right to browse looks.")
+    }
+
+    private func recipeButton(for recipe: FilmRecipe) -> some View {
+        let isSelected = selectedRecipeID == recipe.id
+
+        return Button {
+            withAnimation(reduceMotion ? nil : .snappy(duration: 0.22)) {
+                selectedRecipeID = recipe.id
+            }
+        } label: {
+            recipeTile(recipe)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("recipe-\(recipe.id)")
+        .accessibilityLabel("\(recipe.name), \(recipe.descriptor)")
+        .accessibilityValue(isSelected ? "Selected" : "Not selected")
+        .accessibilityHint("Double tap to select this look. Use the View recipe details action for more information.")
+        .accessibilityAction(named: "View recipe details") {
+            onOpenDetail(recipe)
+        }
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .contextMenu {
+            Button {
+                onOpenDetail(recipe)
+            } label: {
+                Label("View recipe details", systemImage: "info.circle")
+            }
+        }
     }
 
     private func recipeTile(_ recipe: FilmRecipe) -> some View {
@@ -217,9 +231,18 @@ struct RecipeDetailView: View {
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 22) {
+                    BackToCameraButton(
+                        accessibilityIdentifier: "recipe-back-to-camera",
+                        action: { dismiss() }
+                    )
+
                     hero
                     identity
                     controlSummary
+
+                    if recipe.filmBase == .compactDigital {
+                        compactDigitalProfileCard
+                    }
 
                     if onUpdate != nil {
                         editor
@@ -235,20 +258,25 @@ struct RecipeDetailView: View {
                             .foregroundStyle(FilmyTheme.accent)
                             .frame(width: 24, height: 24)
 
-                        Text("Original camera-inspired looks, interpreted for Filmy Camera. Results vary with light, exposure, and the iPhone sensor.")
+                        Text("Original camera-inspired looks, interpreted for Filmy Camera. Results vary with light, exposure, and the device camera.")
                             .font(.system(.caption, design: .rounded).weight(.medium))
                             .foregroundStyle(FilmyTheme.tertiary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .accessibilityElement(children: .combine)
                 }
+                .frame(maxWidth: FilmyLayout.readableMaxWidth)
+                .frame(maxWidth: .infinity)
                 .padding(.horizontal, 20)
                 .padding(.top, 14)
                 .padding(.bottom, 24)
             }
+            .accessibilityIdentifier("recipe-detail-scroll")
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             primaryAction
+                .frame(maxWidth: FilmyLayout.readableMaxWidth)
+                .frame(maxWidth: .infinity)
                 .padding(.horizontal, 20)
                 .padding(.top, 12)
                 .padding(.bottom, 10)
@@ -266,6 +294,7 @@ struct RecipeDetailView: View {
     private var primaryAction: some View {
         Button {
             commitDraft()
+            HapticFeedback.play(.success)
             onSelect()
             dismiss()
         } label: {
@@ -337,7 +366,12 @@ struct RecipeDetailView: View {
             .overlay(alignment: .bottomLeading) {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
-                        Eyebrow(text: recipe.filmBase.officialName.uppercased(), color: FilmyTheme.accent)
+                        Eyebrow(
+                            text: recipe.filmBase == .compactDigital
+                                ? "COMPACT PROFILE · \(recipe.filmBase.officialName.uppercased())"
+                                : recipe.filmBase.officialName.uppercased(),
+                            color: FilmyTheme.accent
+                        )
 
                         if isSelected {
                             FilmyTag(text: "ACTIVE")
@@ -384,12 +418,103 @@ struct RecipeDetailView: View {
                 Image(systemName: "camera.aperture")
                     .font(.system(size: 11, weight: .bold))
                     .accessibilityHidden(true)
-                Text("Camera reference · \(recipe.filmBase.officialName)")
+                Text(
+                    recipe.filmBase == .compactDigital
+                        ? "Camera profile · \(recipe.filmBase.officialName)"
+                        : "Camera reference · \(recipe.filmBase.officialName)"
+                )
                     .font(.system(.caption, design: .rounded).weight(.bold))
                     .fixedSize(horizontal: false, vertical: true)
             }
             .foregroundStyle(FilmyTheme.accent)
         }
+    }
+
+    private var compactDigitalProfileCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 11) {
+                Image(systemName: "camera.fill")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(FilmyTheme.background)
+                    .frame(width: 36, height: 36)
+                    .background(FilmyTheme.accent, in: Circle())
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Eyebrow(text: "G7 X PROFILE", color: FilmyTheme.accent)
+                    Text("Dedicated compact-digital pipeline")
+                        .font(.system(.headline, design: .rounded).weight(.bold))
+                        .foregroundStyle(FilmyTheme.primary)
+                }
+            }
+
+            LazyVGrid(
+                columns: detailGridColumns,
+                alignment: .leading,
+                spacing: 10
+            ) {
+                compactProfileMetric("Picture style", "Standard")
+                compactProfileMetric("White balance", "Ambience")
+                compactProfileMetric("Tone", "Soft shoulder")
+                compactProfileMetric("Texture", "Clean detail")
+            }
+
+            Text("Built as an original approximation from Canon’s public G7 X Mark III specifications, guide, and same-scene JPEG/RAW observations: clean neutrals, warm portrait midtones, selective red and blue punch, quieter foliage, protected highlights, and compact-JPEG detail.")
+                .font(.system(.caption, design: .rounded).weight(.medium))
+                .foregroundStyle(FilmyTheme.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(FilmRecipe.g7XPublicReferences, id: \.self) { reference in
+                    if let url = URL(string: reference.url) {
+                        Link(destination: url) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "arrow.up.right.square")
+                                    .font(.system(.caption, weight: .bold))
+                                Text(reference.title)
+                                    .font(.system(.caption, design: .rounded).weight(.semibold))
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.leading)
+                                Spacer(minLength: 0)
+                            }
+                            .foregroundStyle(FilmyTheme.accent)
+                            .frame(maxWidth: .infinity, minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            Text("This profile does not reproduce Canon sensor calibration, DIGIC processing, lens rendering, flash behavior, or depth of field.")
+                .font(.system(.caption2, design: .rounded).weight(.medium))
+                .foregroundStyle(FilmyTheme.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous)
+                .strokeBorder(FilmyTheme.accent.opacity(0.28), lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("g7x-profile-details")
+    }
+
+    private func compactProfileMetric(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Eyebrow(text: title.uppercased())
+            Text(value)
+                .font(.system(.subheadline, design: .rounded).weight(.bold))
+                .foregroundStyle(FilmyTheme.primary)
+                .lineLimit(2)
+                .minimumScaleFactor(0.76)
+        }
+        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+        .padding(.horizontal, 11)
+        .background(FilmyTheme.background.opacity(0.42), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title): \(value)")
     }
 
     private var summaryColumns: [GridItem] {
@@ -498,7 +623,7 @@ struct RecipeDetailView: View {
                 }
             }
 
-            Text("Reference values preserve the public camera-style recipe. Filmy Camera translates them to an original iPhone rendering; they are not a pixel-identical hardware calibration.")
+            Text("Reference values preserve the public camera-style recipe. Filmy Camera translates them to an original Apple-device rendering; they are not a pixel-identical hardware calibration.")
                 .font(.system(.caption, design: .rounded).weight(.medium))
                 .foregroundStyle(FilmyTheme.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -536,6 +661,7 @@ struct RecipeDetailView: View {
                 if onUpdate != nil {
                     Button(hasPendingChanges ? "Apply" : "Done") {
                         commitDraft()
+                        HapticFeedback.play(.success)
                         dismiss()
                     }
                     .font(.system(.subheadline, design: .rounded).weight(.bold))
@@ -562,6 +688,7 @@ struct RecipeDetailView: View {
 
                 Button("Reset") {
                     draft = originalRecipe
+                    HapticFeedback.play(.warning)
                 }
                 .font(.system(.subheadline, design: .rounded).weight(.bold))
                 .foregroundStyle(FilmyTheme.accent)
@@ -577,6 +704,7 @@ struct RecipeDetailView: View {
                         isExpanded: Binding(
                             get: { expandedSections.contains(section) },
                             set: { isExpanded in
+                                HapticFeedback.play(.selection)
                                 if isExpanded {
                                     expandedSections.insert(section)
                                 } else {
@@ -839,6 +967,10 @@ private struct RecipeChoiceRow<Selection: Hashable, Content: View>: View {
             .accessibilityIdentifier(
                 title == "FX Blue" ? "fx-blue-control" : "recipe-choice-\(title)"
             )
+            .onChange(of: selection) { oldValue, newValue in
+                guard oldValue != newValue else { return }
+                HapticFeedback.play(.controlStep)
+            }
     }
 }
 
@@ -870,12 +1002,20 @@ private struct RecipeSliderRow: View {
             valueHeader
 
             if let step {
-                Slider(value: $value, in: range, step: step)
+                Slider(value: $value, in: range, step: step, onEditingChanged: { isEditing in
+                    if !isEditing {
+                        HapticFeedback.play(.controlStep)
+                    }
+                })
                     .tint(FilmyTheme.accent)
                     .accessibilityLabel(title)
                     .accessibilityValue(String(format: format, value))
             } else {
-                Slider(value: $value, in: range)
+                Slider(value: $value, in: range, onEditingChanged: { isEditing in
+                    if !isEditing {
+                        HapticFeedback.play(.controlStep)
+                    }
+                })
                     .tint(FilmyTheme.accent)
                     .accessibilityLabel(title)
                     .accessibilityValue(String(format: format, value))

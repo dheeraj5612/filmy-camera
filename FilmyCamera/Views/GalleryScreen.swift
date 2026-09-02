@@ -7,15 +7,20 @@ import UIKit
 /// the screen.
 struct GalleryScreen: View {
     @ObservedObject var photoLibrary: PhotoLibraryService
+    let onBackToCamera: () -> Void
 
     @Environment(\.scenePhase) private var scenePhase
-    @State private var isShowingPhoto = false
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var selectedAsset: PhotoLibraryGalleryAsset?
 
-    private let columns = Array(
-        repeating: GridItem(.flexible(), spacing: 3),
-        count: 3
-    )
+    /// Three columns on iPhone; iPad widths flow as many ~200pt squares as
+    /// fit so the contact sheet does not become three enormous tiles.
+    private var columns: [GridItem] {
+        if horizontalSizeClass == .regular {
+            return [GridItem(.adaptive(minimum: 168, maximum: 240), spacing: 3)]
+        }
+        return Array(repeating: GridItem(.flexible(), spacing: 3), count: 3)
+    }
 
     var body: some View {
         NavigationStack {
@@ -24,6 +29,12 @@ struct GalleryScreen: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 16) {
+                        BackToCameraButton(
+                            accessibilityIdentifier: "roll-back-to-camera",
+                            action: onBackToCamera
+                        )
+                        .padding(.horizontal, FilmyTheme.pageMargin)
+
                         SectionHeading(
                             eyebrow: "LIBRARY",
                             title: "Roll",
@@ -67,14 +78,16 @@ struct GalleryScreen: View {
         .onChange(of: photoLibrary.localSavedFrames.map(\.assetIdentifier)) { _, _ in
             clearSelectionIfUnavailable()
         }
-        .sheet(isPresented: $isShowingPhoto) {
-            if let selectedAsset {
-                GalleryDetailView(asset: selectedAsset, photoLibrary: photoLibrary)
-                    .presentationDetents([.large])
-                    .presentationBackground(FilmyTheme.background)
-                    .presentationCornerRadius(30)
-                    .presentationDragIndicator(.visible)
-            }
+        .sheet(item: $selectedAsset) { asset in
+            GalleryDetailView(
+                asset: asset,
+                photoLibrary: photoLibrary,
+                onBackToCamera: onBackToCamera
+            )
+                .presentationDetents([.large])
+                .presentationBackground(FilmyTheme.background)
+                .presentationCornerRadius(30)
+                .presentationDragIndicator(.visible)
         }
     }
 
@@ -110,13 +123,19 @@ struct GalleryScreen: View {
         }
     }
 
+    /// Keeps the open detail sheet pointed at the entry the Roll currently
+    /// lists for that frame. An authorization change can swap a Photos asset
+    /// for its cached fallback (or back); the sheet must follow that swap
+    /// rather than keep loading a source that is no longer available.
     private func clearSelectionIfUnavailable() {
-        guard let selectedAsset,
-              !photoLibrary.galleryAssets.contains(where: { $0.id == selectedAsset.id }) else {
+        guard let selectedAsset else { return }
+        guard let current = photoLibrary.galleryAssets.first(where: { $0.id == selectedAsset.id }) else {
+            self.selectedAsset = nil
             return
         }
-        self.selectedAsset = nil
-        isShowingPhoto = false
+        if current.isPhotosAsset != selectedAsset.isPhotosAsset {
+            self.selectedAsset = current
+        }
     }
 
     @ViewBuilder
@@ -227,7 +246,6 @@ struct GalleryScreen: View {
             ForEach(photoLibrary.galleryAssets) { asset in
                 Button {
                     selectedAsset = asset
-                    isShowingPhoto = true
                 } label: {
                     GalleryThumbnail(asset: asset, photoLibrary: photoLibrary)
                 }
@@ -436,10 +454,14 @@ private struct RollEmptyState: View {
 private struct GalleryDetailView: View {
     let asset: PhotoLibraryGalleryAsset
     @ObservedObject var photoLibrary: PhotoLibraryService
+    let onBackToCamera: () -> Void
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var image: UIImage?
+    @State private var isLoadingImage = false
+    @State private var imageLoadFailed = false
+    @State private var loadGeneration = 0
     @State private var shareURL: URL?
     @State private var isShowingShareSheet = false
     @State private var isShowingDeleteConfirmation = false
@@ -521,6 +543,20 @@ private struct GalleryDetailView: View {
                             }
                     )
                     .onTapGesture(count: 2, perform: resetImageTransform)
+            } else if imageLoadFailed {
+                VStack(spacing: 14) {
+                    Image(systemName: "photo.badge.exclamationmark")
+                        .font(.system(size: 28, weight: .medium))
+                        .foregroundStyle(FilmyTheme.secondary)
+                    Eyebrow(text: "FRAME COULDN’T LOAD")
+                    Button("Try Again") {
+                        Task { await loadImage() }
+                    }
+                    .buttonStyle(.filmyPrimary)
+                    .disabled(isLoadingImage)
+                    .accessibilityIdentifier("gallery-image-retry")
+                }
+                .padding(.horizontal, 32)
             } else {
                 VStack(spacing: 12) {
                     ProgressView()
@@ -530,20 +566,7 @@ private struct GalleryDetailView: View {
             }
         }
         .task(id: imageRequestKey) {
-            image = nil
-            guard PhotoLibraryGalleryImagePolicy.canLoad(
-                isPhotosAsset: asset.isPhotosAsset,
-                authorizationStatus: photoLibrary.authorizationStatus
-            ) else {
-                return
-            }
-
-            let loadedImage = await photoLibrary.image(
-                for: asset,
-                targetSize: CGSize(width: 1600, height: 2200)
-            )
-            guard !Task.isCancelled else { return }
-            image = loadedImage
+            await loadImage()
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             detailToolbar
@@ -629,6 +652,11 @@ private struct GalleryDetailView: View {
                 dismiss()
             }
 
+            BackToCameraButton(accessibilityIdentifier: "frame-back-to-camera") {
+                dismiss()
+                onBackToCamera()
+            }
+
             Spacer()
 
             Button {
@@ -697,6 +725,38 @@ private struct GalleryDetailView: View {
             shareURL = url
             isShowingShareSheet = true
         }
+    }
+
+    /// Each request is stamped with a generation so a replacement load (a
+    /// new request key while one is in flight) always supersedes the older
+    /// one instead of being rejected by it.
+    private func loadImage() async {
+        loadGeneration += 1
+        let generation = loadGeneration
+
+        image = nil
+        imageLoadFailed = false
+        isLoadingImage = true
+
+        guard PhotoLibraryGalleryImagePolicy.canLoad(
+            isPhotosAsset: asset.isPhotosAsset,
+            authorizationStatus: photoLibrary.authorizationStatus
+        ) else {
+            isLoadingImage = false
+            imageLoadFailed = true
+            return
+        }
+
+        let loadedImage = await photoLibrary.image(
+            for: asset,
+            targetSize: CGSize(width: 1600, height: 2200),
+            contentMode: .aspectFit
+        )
+        guard generation == loadGeneration, !Task.isCancelled else { return }
+
+        image = loadedImage
+        imageLoadFailed = loadedImage == nil
+        isLoadingImage = false
     }
 
     private func resetImageTransform() {

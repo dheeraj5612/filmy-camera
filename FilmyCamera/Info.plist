@@ -20,18 +20,31 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>Filmy Camera uses the camera to preview and capture photos with your selected film recipe.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Filmy Camera saves finished photos to your Photos library when you choose Save to Photos.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Filmy Camera reads frames saved by Filmy Camera so you can review them in the in-app Roll.</string>
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<false/>
+	<string>Filmy Camera lets you choose existing photos to apply film recipes and reads frames saved by Filmy Camera for the in-app Roll.</string>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>
 		<string>LaunchBackground</string>
 	</dict>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
 </dict>
 </plist>

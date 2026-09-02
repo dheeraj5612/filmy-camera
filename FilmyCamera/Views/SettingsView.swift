@@ -6,6 +6,7 @@ import UIKit
 struct SettingsView: View {
     @ObservedObject var camera: CameraService
     @ObservedObject var photoLibrary: PhotoLibraryService
+    let onBackToCamera: () -> Void
 
     @Environment(\.scenePhase) private var scenePhase
 
@@ -29,6 +30,8 @@ struct SettingsView: View {
                         localCache
                         about
                     }
+                    .frame(maxWidth: FilmyLayout.readableMaxWidth)
+                    .frame(maxWidth: .infinity)
                     .padding(.horizontal, FilmyTheme.pageMargin)
                     .padding(.top, 18)
                     .padding(.bottom, 40)
@@ -44,14 +47,60 @@ struct SettingsView: View {
     }
 
     private var settingsHeader: some View {
-        SectionHeading(eyebrow: "FILMY CAMERA \(appVersion)", title: "Settings")
-            .accessibilityLabel("Filmy Camera settings, version \(appVersion)")
+        VStack(alignment: .leading, spacing: 14) {
+            BackToCameraButton(
+                accessibilityIdentifier: "settings-back-to-camera",
+                action: onBackToCamera
+            )
+
+            SectionHeading(eyebrow: "FILMY CAMERA \(appVersion)", title: "Settings")
+                .accessibilityLabel("Filmy Camera settings, version \(appVersion)")
+        }
+    }
+
+    private var flashSettingDetail: String {
+        switch camera.flashAvailability {
+        case .unsupported:
+            return "The active camera has no flash. Switch to a camera with one to change this; the choice is remembered."
+        case .temporarilyUnavailable:
+            return "The flash is temporarily unavailable, usually while the device cools down."
+        case .available:
+            return "Remembered between launches. The G7 X profile renders flash frames differently."
+        }
+    }
+
+    private var flashModeBinding: Binding<CameraService.FlashMode> {
+        Binding(
+            get: { camera.flashMode },
+            set: { mode in
+                HapticFeedback.play(.controlStep)
+                camera.setFlashMode(mode)
+            }
+        )
     }
 
     // MARK: - Sections
 
     private var captureSettings: some View {
         settingsSection(title: "CAPTURE") {
+            SettingRow(
+                systemName: "bolt.fill",
+                title: "Flash",
+                detail: flashSettingDetail
+            ) {
+                Picker("Flash", selection: flashModeBinding) {
+                    ForEach(CameraService.FlashMode.allCases, id: \.self) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 200)
+                .disabled(camera.flashAvailability != .available)
+                .accessibilityIdentifier("flash-setting")
+            }
+
+            settingsDivider
+
             SettingRow(
                 systemName: "grid",
                 title: "Framing grid",
@@ -66,10 +115,10 @@ struct SettingsView: View {
 
             SettingRow(
                 systemName: "hand.tap",
-                title: "Shutter feedback",
-                detail: "A subtle haptic when a frame is captured."
+                title: "Haptic feedback",
+                detail: "Subtle feedback for capture, selections, controls, and outcomes."
             ) {
-                Toggle("Shutter feedback", isOn: $hapticsEnabled)
+                Toggle("Haptic feedback", isOn: $hapticsEnabled)
                     .labelsHidden()
                     .tint(FilmyTheme.accent)
             }
@@ -182,7 +231,7 @@ struct SettingsView: View {
             SettingRow(
                 systemName: "externaldrive.fill",
                 title: "Frame cache",
-                detail: photoLibrary.hasLocalCache ? "Temporary frames are stored on this iPhone." : "No temporary frames right now."
+                detail: photoLibrary.hasLocalCache ? "Temporary frames are stored on this device." : "No temporary frames right now."
             ) {
                 Text("250 MB")
                     .font(.system(.caption, design: .rounded).weight(.bold))
