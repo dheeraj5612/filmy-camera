@@ -471,3 +471,72 @@ on-device capture sheet (`testPhysicalRecipeCaptureSheet`) that captures the
 same scene through every recipe with flash off and on and attaches each
 review. No Fujifilm or Canon data is used; every rule is an original
 parametric reading of public descriptions and comparisons.
+
+## Startup, availability, and crash audit — 2026-09-02
+
+Goal: the viewfinder appears fast, the camera is never left waiting for a
+tap, and the app does not crash in the field.
+
+### Crash logs
+
+Every FilmyCamera crash on the iPad (five `.ips` reports, build 3) is the
+same family: a Swift 6 isolation trap on `com.apple.PHPhotoLibrary.changes`
+when a PhotoKit change or completion block inherited main-actor isolation and
+ran on the Photos queue. The explicit `@Sendable` closures in
+`PhotoLibraryService` fix all five; no other crash type has occurred. A static
+audit of the app target found no force unwraps, `try!`, `as!`, or
+`fatalError` beyond two constant URLs, and every `MainActor.assumeIsolated`
+sits on a path that is provably on the main thread (the rotation coordinator
+is created on main; the frame handlers check `Thread.isMainThread`).
+
+### Flash never fired under test
+
+The on-device flash captures were dark even with the flash requested. Cause:
+the capability refresh that runs before every capture restored the
+"remembered" flash mode, and under `-ui-testing` persistence is disabled, so
+the remembered mode was always Off. The refresh now only restores the
+remembered mode when a camera is activated; on the already-active camera it
+keeps the in-memory selection (`CameraService.resolvedFlashSelection`, unit
+tested). The review caption now states "Flash fired" from the resolved
+capture settings, the G7 X flash UI test asserts it, and
+`FlashHardwareDeviceTests` fires the flash through plain AVFoundation
+(photo-only, photo plus video output, and the app's exact graph) and through
+`CameraService` on hardware.
+
+### Camera always available
+
+- Failed starts and runtime errors schedule automatic recovery with backoff
+  (0.5, 1, 2, 4, 4, 4 s). A runtime error marks the graph for a rebuild so
+  the retry does not reuse a broken configuration. The "Resume Camera"
+  placeholder remains only after the attempts run out.
+- `start()` on an interrupted session reports `.interrupted` with the
+  interruption reason instead of claiming a live preview.
+- Interruptions carry their reason in the status text: background, another
+  app, multitasking (with the fix: make the app full screen), or heat.
+- `isMultitaskingCameraAccessEnabled` keeps the camera live in Split View and
+  Slide Over on iPad.
+- The session stays warm under the review sheet and across quick trips to the
+  Roll or Settings (`CameraActivityPolicy.gracePeriod`, 45 s); frames are
+  simply not delivered while nobody is looking, so Retake and tab returns
+  show a live viewfinder at once. Leaving the foreground still stops the
+  session immediately.
+
+### Startup
+
+`FilmRenderer.warmUp` builds the shared context, grain texture, and kernels
+on a background task from `FilmyCameraApp.init`, so the first live frame no
+longer pays for shader compilation on the main thread. Photo cache migration,
+reconciliation, trimming, and share-file pruning moved out of
+`PhotoLibraryService.init` into a utility task after the launch turn.
+`testPhysicalLaunchPerformance` records `XCTApplicationLaunchMetric` on
+hardware.
+
+### Test suite
+
+New unit coverage: flash selection resolution, recovery backoff bounds,
+interruption reasons, launch recipe selection, and the activity policy's
+grace behavior. New UI lifecycle tests: background/foreground round trips,
+tab round trips with a live-again deadline, rapid recipe switching followed
+by a capture, three Retake cycles with a warm-session deadline, and the
+launch benchmark. Device-only tests skip cleanly on Simulator.
+

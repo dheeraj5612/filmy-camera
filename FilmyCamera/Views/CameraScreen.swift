@@ -5,18 +5,28 @@ import UIKit
 enum CameraActivityAction: Equatable {
     case start
     case stop
+    /// Keep the session warm for a short grace period so a quick return
+    /// (Retake, back from the Roll or Settings) shows a live viewfinder at
+    /// once; the session is released if the user stays away.
+    case stopAfterGrace
     case hold
 }
 
 enum CameraActivityPolicy {
+    /// How long the session stays warm while the viewfinder is covered.
+    static let gracePeriod: TimeInterval = 45
+
     static func action(
         hasReview: Bool,
         sceneIsActive: Bool,
         isCameraTabActive: Bool,
         availability: CameraService.Availability
     ) -> CameraActivityAction {
-        if hasReview || !sceneIsActive || !isCameraTabActive {
+        if !sceneIsActive {
             return .stop
+        }
+        if hasReview || !isCameraTabActive {
+            return .stopAfterGrace
         }
         if availability == .interrupted {
             return .hold
@@ -220,6 +230,7 @@ struct CameraScreen: View {
                     recipe: recipe,
                     source: viewModel.reviewSource,
                     isFullResolution: viewModel.reviewIsFullResolution,
+                    flashFired: viewModel.reviewFlashFired,
                     isSaving: viewModel.isSaving,
                     saveErrorMessage: viewModel.saveErrorMessage,
                     onSave: { viewModel.saveReview(photoLibrary: photoLibrary) },
@@ -238,15 +249,17 @@ struct CameraScreen: View {
             // prompting: refresh only reads when access was already granted.
             photoLibrary.refresh()
         }
-        .onDisappear { camera.stop() }
+        // Leaving the tab keeps the session warm briefly so coming back is
+        // instant; the scene phase handler still stops it when the app leaves
+        // the foreground.
+        .onDisappear { camera.stop(after: CameraActivityPolicy.gracePeriod) }
         .onChange(of: scenePhase) { _, _ in updateCameraActivity() }
         .onChange(of: isCameraTabActive) { _, _ in updateCameraActivity() }
         .onChange(of: viewModel.reviewImage != nil) { _, hasReview in
             if hasReview {
-                camera.stop()
-            } else {
-                updateCameraActivity()
+                camera.setFrameDeliveryPaused(true)
             }
+            updateCameraActivity()
         }
         .onChange(of: viewModel.isCapturing) { _, isCapturing in
             guard !isCapturing, viewModel.reviewImage == nil else { return }
@@ -715,7 +728,7 @@ struct CameraScreen: View {
             PreviewPlaceholder(
                 isSimulator: false,
                 recipe: viewModel.selectedRecipe,
-                message: "The camera needs to be reopened before it can capture.",
+                message: camera.statusMessage,
                 actionTitle: "Resume Camera",
                 action: camera.start
             )
@@ -764,9 +777,12 @@ struct CameraScreen: View {
 
         switch action {
         case .start:
+            camera.setFrameDeliveryPaused(false)
             camera.start()
         case .stop:
             camera.stop()
+        case .stopAfterGrace:
+            camera.stop(after: CameraActivityPolicy.gracePeriod)
         case .hold:
             break
         }

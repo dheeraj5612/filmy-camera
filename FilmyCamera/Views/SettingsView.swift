@@ -58,6 +58,17 @@ struct SettingsView: View {
         }
     }
 
+    private var flashSettingDetail: String {
+        switch camera.flashAvailability {
+        case .unsupported:
+            return "The active camera has no flash. Switch to a camera with one to change this; the choice is remembered."
+        case .temporarilyUnavailable:
+            return "The flash is temporarily unavailable, usually while the device cools down."
+        case .available:
+            return "Remembered between launches. The G7 X profile renders flash frames differently."
+        }
+    }
+
     private var flashModeBinding: Binding<CameraService.FlashMode> {
         Binding(
             get: { camera.flashMode },
@@ -75,9 +86,7 @@ struct SettingsView: View {
             SettingRow(
                 systemName: "bolt.fill",
                 title: "Flash",
-                detail: camera.flashAvailability == .unsupported
-                    ? "The active camera has no flash. The choice is remembered for cameras that do."
-                    : "Remembered between launches. The G7 X profile renders flash frames differently."
+                detail: flashSettingDetail
             ) {
                 Picker("Flash", selection: flashModeBinding) {
                     ForEach(CameraService.FlashMode.allCases, id: \.self) { mode in
@@ -86,6 +95,7 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 200)
+                .disabled(camera.flashAvailability != .available)
                 .accessibilityIdentifier("flash-setting")
             }
 

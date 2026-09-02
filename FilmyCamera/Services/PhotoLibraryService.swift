@@ -383,12 +383,22 @@ final class PhotoLibraryService: ObservableObject {
         } else {
             authorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
             addOnlyAuthorizationStatus = PHPhotoLibrary.authorizationStatus(for: .addOnly)
-            migrateLocalFrameCacheIfNeeded()
-            reconcileLocalCache()
-            trimLocalCacheToBudget()
-            pruneTemporaryShareFiles()
-            refreshCachedFrames(excluding: [])
+            // Disk maintenance is not needed for the first frame. Run it after
+            // the launch turn so the viewfinder appears before the cache is
+            // walked; the Roll thumbnail refreshes when it finishes.
+            Task(priority: .utility) { [weak self] in
+                await Task.yield()
+                self?.performLaunchMaintenance()
+            }
         }
+    }
+
+    private func performLaunchMaintenance() {
+        migrateLocalFrameCacheIfNeeded()
+        reconcileLocalCache()
+        trimLocalCacheToBudget()
+        pruneTemporaryShareFiles()
+        refreshCachedFrames(excluding: Set(assets.map(\.localIdentifier)))
     }
 
     var canSaveToPhotos: Bool {

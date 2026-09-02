@@ -6,6 +6,7 @@ struct CaptureReviewView: View {
     let recipe: FilmRecipe
     let source: CameraViewModel.ReviewSource
     var isFullResolution = true
+    var flashFired = false
     let isSaving: Bool
     let saveErrorMessage: String?
     let onSave: () -> Void
@@ -103,7 +104,7 @@ struct CaptureReviewView: View {
         switch (isImported, isFullResolution) {
         case (true, true): return "Filter applied · Full resolution"
         case (true, false): return "Filter applied · Resized to fit \(Int(CameraViewModel.importPixelBudget / 1_000_000)) MP"
-        case (false, _): return "Full resolution"
+        case (false, _): return flashFired ? "Full resolution · Flash fired" : "Full resolution"
         }
     }
 

@@ -114,6 +114,16 @@ final class CameraViewModel: ObservableObject {
         builtInRecipesByID[defaultRecipeID] ?? FilmRecipe.builtIns[0]
     }
 
+    /// The built-in recipe the viewfinder will most likely render first: the
+    /// persisted selection when it is a built-in, else the default. Used to
+    /// warm the renderer before the view model exists.
+    nonisolated static func launchRecipe(defaults: UserDefaults = .standard) -> FilmRecipe {
+        let storedID = defaults.string(forKey: selectedRecipeIDKey) ?? defaultRecipeID
+        return FilmRecipe.builtIns.first { $0.id == storedID }
+            ?? FilmRecipe.builtIns.first { $0.id == defaultRecipeID }
+            ?? FilmRecipe.builtIns[0]
+    }
+
     enum ReviewSource: Equatable {
         case camera
         case photoLibrary
@@ -138,9 +148,10 @@ final class CameraViewModel: ObservableObject {
         let data: Data
         let capturedAt: Date
         var isFullResolution = true
+        var flashFired = false
     }
 
-    static let selectedRecipeIDKey = "selectedRecipeID"
+    nonisolated static let selectedRecipeIDKey = "selectedRecipeID"
     static let recipeOverridesKey = "recipeOverrides"
 
     /// New installs and unknown persisted selections land on the G7 X profile.
@@ -173,6 +184,7 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var reviewSource: ReviewSource = .camera
     /// False when a library import was bounded to `importPixelBudget`.
     @Published private(set) var reviewIsFullResolution = true
+    @Published private(set) var reviewFlashFired = false
     @Published private var recipeOverrides: [String: FilmRecipe] = [:]
 
     private var toastTask: Task<Void, Never>?
@@ -332,9 +344,10 @@ final class CameraViewModel: ObservableObject {
                 }
 
                 // The review sheet is a deliberate pause in the camera flow.
-                // Stop the capture session as soon as the still is safely in
-                // memory; it will be restarted after save or retake.
-                camera.stop()
+                // Keep the session warm so Retake returns to a live viewfinder
+                // instantly, but stop feeding preview frames while the still
+                // renders; CameraScreen decides when the session itself stops.
+                camera.setFrameDeliveryPaused(true)
 
                 DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                     let renderedPhoto = autoreleasepool {
@@ -365,6 +378,7 @@ final class CameraViewModel: ObservableObject {
                         self.reviewRecipe = recipe
                         self.reviewSource = .camera
                         self.reviewIsFullResolution = true
+                        self.reviewFlashFired = renderedPhoto.flashFired
                         self.isCapturing = false
                     }
                 }
@@ -403,6 +417,7 @@ final class CameraViewModel: ObservableObject {
         reviewRecipe = recipe
         reviewSource = .photoLibrary
         reviewIsFullResolution = renderedPhoto.isFullResolution
+        reviewFlashFired = false
         HapticFeedback.play(.success)
     }
 
@@ -555,7 +570,8 @@ final class CameraViewModel: ObservableObject {
         return RenderedPhoto(
             image: reviewImage,
             data: data,
-            capturedAt: capturedAt
+            capturedAt: capturedAt,
+            flashFired: flashFired
         )
     }
 

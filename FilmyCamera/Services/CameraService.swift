@@ -328,9 +328,12 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     @Published public private(set) var previewMirrored = false
 
     /// Receives unfiltered live frames on the main queue.
-    public var onFrame: FrameHandler?
+    public var onFrame: FrameHandler? {
+        didSet { updateFrameConsumersOnMain(hasOnFrame: onFrame != nil) }
+    }
 
     private var frameHandlers: [UUID: FrameHandler] = [:]
+    private var hasOnFrameConsumer = false
 
     private let frameHandlersLock = NSLock()
 
@@ -352,6 +355,12 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private var isConfigured = false
     private var wantsToRun = false
     private var authorizationRequestInFlight = false
+    private var recoveryAttempt = 0
+    private var recoveryScheduled = false
+    private var needsGraphRebuild = false
+    private var deferredStopGeneration: UInt64 = 0
+    private var interruptionStatus = "Camera temporarily unavailable."
+    private var frameDeliveryPausedState = false
     private var sessionAvailability: Availability = .idle
     private var pendingPhotoCompletion: PhotoCompletion?
     private var pendingPhotoCapturedAt: Date?
@@ -473,46 +482,86 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// simulator or a device without a camera this becomes a clean empty state.
     public func start() {
         sessionQueue.async { [weak self] in
-            self?.publishAvailability(.starting)
-            self?.wantsToRun = true
-            self?.requestAuthorizationAndStartOnQueue()
+            guard let self else { return }
+            self.deferredStopGeneration &+= 1
+            self.wantsToRun = true
+            if self.session.isRunning {
+                // A deferred stop was still pending or the session survived a
+                // tab switch: report the live state without a restart flicker.
+                self.publishAlreadyRunningOnQueue()
+                return
+            }
+            self.publishAvailability(.starting)
+            self.requestAuthorizationAndStartOnQueue()
         }
+    }
+
+    /// Stops capture after a grace period unless `start()` is called first.
+    /// Quick trips to the Roll, Settings, or the review sheet return to a live
+    /// viewfinder instantly; longer absences still release the camera.
+    public func stop(after delay: TimeInterval) {
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            self.deferredStopGeneration &+= 1
+            let generation = self.deferredStopGeneration
+            self.sessionQueue.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self,
+                      self.deferredStopGeneration == generation,
+                      self.wantsToRun else { return }
+                self.stopOnQueue()
+            }
+        }
+    }
+
+    /// Pauses preview frame delivery while the session keeps running, for
+    /// example under the review sheet, so the GPU is free for the still render
+    /// and the viewfinder resumes with no restart latency.
+    public func setFrameDeliveryPaused(_ paused: Bool) {
+        frameHandlersLock.lock()
+        frameDeliveryPausedState = paused
+        frameHandlersLock.unlock()
     }
 
     /// Stops capture while retaining the configured session for a later start.
     public func stop() {
         sessionQueue.async { [weak self] in
             guard let self else { return }
-            self.wantsToRun = false
-            let previousAvailability = self.sessionAvailability
-            let nextAvailability = Self.availabilityAfterStopping(
-                authorizationStatus: AVCaptureDevice.authorizationStatus(for: .video),
-                hasCameraDevice: self.hasAnyCameraDeviceOnQueue(),
-                previousAvailability: previousAvailability
-            )
-            if self.session.isRunning {
-                self.session.stopRunning()
-            }
-            self.cancelPendingPhotoOnQueue(status: "Capture canceled.")
-            self.focusExposureLocked = false
-            self.publishFocusExposureLocked(false)
-            self.publishRunning(false)
+            self.deferredStopGeneration &+= 1
+            self.stopOnQueue()
+        }
+    }
 
-            self.publishAvailability(nextAvailability)
-            switch nextAvailability {
-            case .permissionDenied:
-                self.publishStatus("Camera access is disabled in Settings.")
-            case .simulator:
-                self.publishStatus("Camera unavailable in Simulator. Use an iPhone or iPad to preview and capture.")
-            case .idle:
-                self.publishStatus("Camera is ready")
-            case .unavailable:
-                self.publishStatus("Camera access is unavailable.")
-            case .needsRecovery:
-                self.publishStatus("Camera needs to be reopened.")
-            default:
-                self.publishStatus("Camera paused")
-            }
+    private func stopOnQueue() {
+        wantsToRun = false
+        recoveryAttempt = 0
+        let previousAvailability = sessionAvailability
+        let nextAvailability = Self.availabilityAfterStopping(
+            authorizationStatus: AVCaptureDevice.authorizationStatus(for: .video),
+            hasCameraDevice: self.hasAnyCameraDeviceOnQueue(),
+            previousAvailability: previousAvailability
+        )
+        if self.session.isRunning {
+            self.session.stopRunning()
+        }
+        self.cancelPendingPhotoOnQueue(status: "Capture canceled.")
+        self.focusExposureLocked = false
+        self.publishFocusExposureLocked(false)
+        self.publishRunning(false)
+
+        self.publishAvailability(nextAvailability)
+        switch nextAvailability {
+        case .permissionDenied:
+            self.publishStatus("Camera access is disabled in Settings.")
+        case .simulator:
+            self.publishStatus("Camera unavailable in Simulator. Use an iPhone or iPad to preview and capture.")
+        case .idle:
+            self.publishStatus("Camera is ready")
+        case .unavailable:
+            self.publishStatus("Camera access is unavailable.")
+        case .needsRecovery:
+            self.publishStatus("Camera needs to be reopened.")
+        default:
+            self.publishStatus("Camera paused")
         }
     }
 
@@ -550,6 +599,12 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// swatches), so handlers fan out rather than replace one another, and a
     /// stale SwiftUI representable can only remove its own callback.
     @discardableResult
+    private func updateFrameConsumersOnMain(hasOnFrame: Bool) {
+        frameHandlersLock.lock()
+        hasOnFrameConsumer = hasOnFrame
+        frameHandlersLock.unlock()
+    }
+
     public func installFrameHandler(_ handler: @escaping FrameHandler) -> UUID {
         let id = UUID()
         frameHandlersLock.lock()
@@ -988,14 +1043,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
 
         guard !session.isRunning else {
-            if let device = activeDevice() {
-                refreshCaptureCapabilitiesOnQueue(for: device)
-            } else {
-                resetCaptureCapabilitiesOnQueue()
-            }
-            publishRunning(true)
-            publishAvailability(.running)
-            publishStatus("Camera ready")
+            publishAlreadyRunningOnQueue()
             return
         }
 
@@ -1052,35 +1100,22 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private func configureAndStartOnQueue() {
         guard wantsToRun else { return }
         guard !session.isRunning else {
-            if let device = activeDevice() {
-                refreshCaptureCapabilitiesOnQueue(for: device)
-            } else {
-                resetCaptureCapabilitiesOnQueue()
-            }
-            publishRunning(true)
-            publishAvailability(.running)
-            publishStatus("Camera ready")
+            publishAlreadyRunningOnQueue()
             return
         }
 
         // A stopped session keeps its inputs and outputs. Reuse the existing
         // graph when returning from background or another tab instead of
-        // trying to add duplicate AVFoundation objects.
-        if isConfigured {
-            guard let device = activeDevice() else {
-                resetCaptureCapabilitiesOnQueue()
-                publishRunning(false)
-                publishAvailability(.needsRecovery)
-                publishStatus("Camera needs to be reopened.")
-                return
-            }
+        // trying to add duplicate AVFoundation objects. A graph whose input
+        // vanished (device reset, runtime error) is rebuilt from scratch.
+        if isConfigured, needsGraphRebuild || activeDevice() == nil {
+            tearDownSessionGraphOnQueue()
+        }
+        if isConfigured, let device = activeDevice() {
             refreshCaptureCapabilitiesOnQueue(for: device)
             configureOrientation()
             session.startRunning()
-            let running = session.isRunning
-            publishRunning(running)
-            publishAvailability(running ? .running : .unavailable)
-            publishStatus(running ? "Camera ready" : "Camera could not start.")
+            publishStartOutcomeOnQueue(running: session.isRunning)
             return
         }
 
@@ -1107,6 +1142,11 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             session.sessionPreset = .photo
         } else if session.canSetSessionPreset(.high) {
             session.sessionPreset = .high
+        }
+        // On iPad the camera would otherwise be interrupted in Split View and
+        // Slide Over. Keeping it live there is part of "always available".
+        if session.isMultitaskingCameraAccessSupported {
+            session.isMultitaskingCameraAccessEnabled = true
         }
 
         guard session.canAddInput(input) else {
@@ -1149,12 +1189,103 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         configurePreviewFrameRate(for: device)
         configureOrientation()
         isConfigured = true
+        needsGraphRebuild = false
         session.startRunning()
+        publishStartOutcomeOnQueue(running: session.isRunning)
+    }
 
-        let running = session.isRunning
+    /// Publishes the state of a session that is already running, without
+    /// claiming a live preview while AVFoundation still holds an interruption.
+    private func publishAlreadyRunningOnQueue() {
+        if let device = activeDevice() {
+            refreshCaptureCapabilitiesOnQueue(for: device)
+        } else {
+            resetCaptureCapabilitiesOnQueue()
+        }
+        guard !session.isInterrupted else {
+            publishRunning(false)
+            publishAvailability(.interrupted)
+            publishStatus(interruptionStatus)
+            return
+        }
+        recoveryAttempt = 0
+        publishRunning(true)
+        publishAvailability(.running)
+        publishStatus("Camera ready")
+    }
+
+    private func publishStartOutcomeOnQueue(running: Bool) {
         publishRunning(running)
-        publishAvailability(running ? .running : .unavailable)
-        publishStatus(running ? "Camera ready" : "Camera could not start.")
+        if running {
+            recoveryAttempt = 0
+            publishAvailability(.running)
+            publishStatus("Camera ready")
+        } else {
+            publishAvailability(.needsRecovery)
+            publishStatus("Camera could not start.")
+            scheduleAutomaticRecoveryOnQueue()
+        }
+    }
+
+    static let maxAutomaticRecoveryAttempts = 6
+
+    /// Exponential backoff for reconnecting after a failed start or a runtime
+    /// error: 0.5 s, 1 s, 2 s, then 4 s between attempts.
+    static func automaticRecoveryDelay(afterAttempt attempt: Int) -> TimeInterval {
+        min(0.5 * pow(2, Double(max(attempt, 0))), 4)
+    }
+
+    /// The camera should never be left waiting for a tap. Failed starts and
+    /// runtime errors retry on their own with backoff; the "Resume Camera"
+    /// placeholder remains only as a fallback once the attempts run out.
+    private func scheduleAutomaticRecoveryOnQueue() {
+        guard wantsToRun,
+              !recoveryScheduled,
+              recoveryAttempt < Self.maxAutomaticRecoveryAttempts else { return }
+        let delay = Self.automaticRecoveryDelay(afterAttempt: recoveryAttempt)
+        recoveryAttempt += 1
+        recoveryScheduled = true
+        publishStatus("Reconnecting to the camera…")
+        sessionQueue.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self else { return }
+            self.recoveryScheduled = false
+            guard self.wantsToRun, !self.session.isRunning else { return }
+            self.requestAuthorizationAndStartOnQueue()
+        }
+    }
+
+    private func tearDownSessionGraphOnQueue() {
+        session.beginConfiguration()
+        for input in session.inputs {
+            session.removeInput(input)
+        }
+        for output in session.outputs {
+            session.removeOutput(output)
+        }
+        session.commitConfiguration()
+        isConfigured = false
+        needsGraphRebuild = false
+        configuredPhotoDimensions = CMVideoDimensions(width: 0, height: 0)
+        resetCaptureCapabilitiesOnQueue()
+    }
+
+    /// Human-readable reason for an `AVCaptureSession` interruption. Reasons
+    /// are compared by raw value so newer SDK cases fall through safely.
+    static func interruptionStatus(forReasonRawValue rawValue: Int?) -> String {
+        typealias Reason = AVCaptureSession.InterruptionReason
+        switch rawValue {
+        case Reason.videoDeviceNotAvailableInBackground.rawValue:
+            return "Camera paused in the background."
+        case Reason.videoDeviceInUseByAnotherClient.rawValue,
+             Reason.audioDeviceInUseByAnotherClient.rawValue:
+            return "Another app is using the camera."
+        case Reason.videoDeviceNotAvailableWithMultipleForegroundApps.rawValue:
+            return "Camera paused while multitasking. Make Filmy Camera full screen to continue."
+        case Reason.videoDeviceNotAvailableDueToSystemPressure.rawValue:
+            return "Camera paused until the device cools down."
+        default:
+            return "Camera temporarily unavailable."
+        }
     }
 
     private func installRotationCoordinatorOnQueue(for device: AVCaptureDevice) {
@@ -1249,7 +1380,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 forName: AVCaptureSession.wasInterruptedNotification,
                 object: session,
                 queue: nil
-            ) { [weak self] _ in
+            ) { [weak self] notification in
+                let reasonRawValue = (notification.userInfo?[AVCaptureSessionInterruptionReasonKey] as? NSNumber)?.intValue
                 self?.sessionQueue.async { [weak self] in
                     guard let self, self.wantsToRun else { return }
                     // An interrupted photo request is not guaranteed to
@@ -1257,9 +1389,10 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                     // so the shutter UI cannot remain stuck in a busy state;
                     // any late callback is rejected by its cleared unique ID.
                     self.cancelPendingPhotoOnQueue(status: "Capture interrupted.")
+                    self.interruptionStatus = Self.interruptionStatus(forReasonRawValue: reasonRawValue)
                     self.publishRunning(false)
                     self.publishAvailability(.interrupted)
-                    self.publishStatus("Camera temporarily unavailable.")
+                    self.publishStatus(self.interruptionStatus)
                 }
             },
             notificationCenter.addObserver(
@@ -1273,11 +1406,10 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                           AVCaptureDevice.authorizationStatus(for: .video) == .authorized else {
                         return
                     }
-                    self.session.startRunning()
-                    let running = self.session.isRunning
-                    self.publishRunning(running)
-                    self.publishAvailability(running ? .running : .needsRecovery)
-                    self.publishStatus(running ? "Camera ready" : "Camera could not start.")
+                    if !self.session.isRunning {
+                        self.session.startRunning()
+                    }
+                    self.publishStartOutcomeOnQueue(running: self.session.isRunning && !self.session.isInterrupted)
                 }
             }
         ]
@@ -1291,16 +1423,20 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         cancelPendingPhotoOnQueue(status: "Capture interrupted.")
         if codeRawValue == AVError.Code.mediaServicesWereReset.rawValue, isConfigured {
             session.startRunning()
-            let running = session.isRunning
-            publishRunning(running)
-            publishAvailability(running ? .running : .needsRecovery)
-            publishStatus(running ? "Camera ready" : "Camera needs to be reopened.")
+            publishStartOutcomeOnQueue(running: session.isRunning)
             return
         }
 
+        // Any other runtime error leaves the graph suspect: rebuild it on the
+        // next (automatic) start instead of retrying a broken configuration.
+        needsGraphRebuild = true
+        if session.isRunning {
+            session.stopRunning()
+        }
         publishRunning(false)
         publishAvailability(.needsRecovery)
         publishStatus("Camera needs to be reopened.")
+        scheduleAutomaticRecoveryOnQueue()
     }
 
     private static let discoveryDeviceTypes: [AVCaptureDevice.DeviceType] = [
@@ -1925,13 +2061,13 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func configureCaptureCapabilitiesOnQueue(for device: AVCaptureDevice) {
-        refreshFlashCapabilitiesOnQueue(for: device)
+        refreshFlashCapabilitiesOnQueue(for: device, restoringRememberedSelection: true)
         configureLowLightBoostOnQueue(for: device)
         refreshExposureBiasOnQueue(for: device)
     }
 
     private func refreshCaptureCapabilitiesOnQueue(for device: AVCaptureDevice) {
-        refreshFlashCapabilitiesOnQueue(for: device)
+        refreshFlashCapabilitiesOnQueue(for: device, restoringRememberedSelection: false)
         publishLowLightBoostState(
             supported: device.isLowLightBoostSupported,
             enabled: device.isLowLightBoostEnabled
@@ -1984,7 +2120,30 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         device.setExposureTargetBias(bias, completionHandler: nil)
     }
 
-    private func refreshFlashCapabilitiesOnQueue(for device: AVCaptureDevice) {
+    /// Decides which flash mode stays selected after a capability refresh.
+    ///
+    /// A camera becoming active restores the remembered preference. A refresh
+    /// on the camera that is already active (including the one that runs right
+    /// before every capture) keeps the in-memory choice: persistence can be
+    /// disabled (UI tests) or lag behind, and the shutter must honor what the
+    /// control shows.
+    static func resolvedFlashSelection(
+        current: FlashMode,
+        remembered: FlashMode,
+        supportedModeRawValues: Set<Int>,
+        restoringRememberedSelection: Bool
+    ) -> FlashMode {
+        var selection = current
+        if restoringRememberedSelection, supportedModeRawValues.contains(remembered.rawValue) {
+            selection = remembered
+        }
+        return supportedModeRawValues.contains(selection.rawValue) ? selection : .off
+    }
+
+    private func refreshFlashCapabilitiesOnQueue(
+        for device: AVCaptureDevice,
+        restoringRememberedSelection: Bool
+    ) {
         let supportedModes = supportedFlashModeRawValuesOnQueue()
         let availability = Self.resolveFlashAvailability(
             hasFlash: device.hasFlash,
@@ -2001,14 +2160,12 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             return
         }
 
-        // Flash is a first-class capture choice: restore the last explicit
-        // selection whenever a camera that supports it becomes active.
-        let remembered = Self.rememberedFlashMode()
-        if supportedModes.contains(remembered.rawValue) {
-            selectedFlashMode = remembered
-        } else if !supportedModes.contains(selectedFlashMode.rawValue) {
-            selectedFlashMode = .off
-        }
+        selectedFlashMode = Self.resolvedFlashSelection(
+            current: selectedFlashMode,
+            remembered: Self.rememberedFlashMode(),
+            supportedModeRawValues: supportedModes,
+            restoringRememberedSelection: restoringRememberedSelection
+        )
         publishFlashMode(selectedFlashMode)
         configureFlashSceneMonitoringOnQueue(supportedModes: supportedModes)
     }
@@ -2090,6 +2247,9 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func setFlashModeOnQueue(_ mode: FlashMode) {
+        // The preference outlives the active camera: a choice made while the
+        // front camera is up applies as soon as a flash-capable camera returns.
+        Self.rememberFlashMode(mode)
         if mode != .off, flashAvailabilityState != .available {
             if flashAvailabilityState == .temporarilyUnavailable {
                 publishStatus("Flash is temporarily unavailable.")
@@ -2422,6 +2582,13 @@ extension CameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
             lastDeliveredFrameSize = frameSize
             publishPreviewFrameSize(frameSize)
         }
+
+        // Nobody is looking (review sheet, another tab): skip the CIImage and
+        // the main-queue hop entirely while the session stays warm.
+        frameHandlersLock.lock()
+        let shouldDeliver = !frameDeliveryPausedState && (hasOnFrameConsumer || !frameHandlers.isEmpty)
+        frameHandlersLock.unlock()
+        guard shouldDeliver else { return }
 
         let image = Self.previewImage(from: pixelBuffer)
 

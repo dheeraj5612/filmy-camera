@@ -486,7 +486,8 @@ final class CameraServiceAvailabilityTests: XCTestCase {
                 isCameraTabActive: true,
                 availability: .running
             ),
-            .stop
+            .stopAfterGrace,
+            "Review keeps the session warm so Retake is instant"
         )
         XCTAssertEqual(
             CameraActivityPolicy.action(
@@ -495,7 +496,18 @@ final class CameraServiceAvailabilityTests: XCTestCase {
                 isCameraTabActive: true,
                 availability: .running
             ),
-            .stop
+            .stop,
+            "Leaving the foreground releases the camera immediately"
+        )
+        XCTAssertEqual(
+            CameraActivityPolicy.action(
+                hasReview: true,
+                sceneIsActive: false,
+                isCameraTabActive: true,
+                availability: .running
+            ),
+            .stop,
+            "Background wins over the review grace period"
         )
         XCTAssertEqual(
             CameraActivityPolicy.action(
@@ -504,8 +516,110 @@ final class CameraServiceAvailabilityTests: XCTestCase {
                 isCameraTabActive: false,
                 availability: .running
             ),
-            .stop
+            .stopAfterGrace,
+            "Another tab keeps the session warm for a quick return"
         )
+        XCTAssertGreaterThanOrEqual(CameraActivityPolicy.gracePeriod, 30)
+        XCTAssertLessThanOrEqual(CameraActivityPolicy.gracePeriod, 120)
+    }
+
+    func testFlashSelectionSurvivesAPreCaptureRefreshWithoutPersistence() {
+        let supported: Set<Int> = [
+            CameraService.FlashMode.off.rawValue,
+            CameraService.FlashMode.auto.rawValue,
+            CameraService.FlashMode.on.rawValue
+        ]
+        // The refresh that runs right before capture must keep what the
+        // control shows, even when persistence still says Off (UI tests).
+        XCTAssertEqual(
+            CameraService.resolvedFlashSelection(
+                current: .on,
+                remembered: .off,
+                supportedModeRawValues: supported,
+                restoringRememberedSelection: false
+            ),
+            .on
+        )
+        // Activating a camera restores the remembered preference.
+        XCTAssertEqual(
+            CameraService.resolvedFlashSelection(
+                current: .off,
+                remembered: .auto,
+                supportedModeRawValues: supported,
+                restoringRememberedSelection: true
+            ),
+            .auto
+        )
+        // Unsupported selections fall back to Off either way.
+        XCTAssertEqual(
+            CameraService.resolvedFlashSelection(
+                current: .on,
+                remembered: .on,
+                supportedModeRawValues: [CameraService.FlashMode.off.rawValue],
+                restoringRememberedSelection: true
+            ),
+            .off
+        )
+        XCTAssertEqual(
+            CameraService.resolvedFlashSelection(
+                current: .auto,
+                remembered: .on,
+                supportedModeRawValues: [CameraService.FlashMode.off.rawValue, CameraService.FlashMode.on.rawValue],
+                restoringRememberedSelection: false
+            ),
+            .off
+        )
+    }
+
+    func testAutomaticRecoveryBacksOffAndStaysBounded() {
+        XCTAssertEqual(CameraService.automaticRecoveryDelay(afterAttempt: 0), 0.5, accuracy: 0.001)
+        XCTAssertEqual(CameraService.automaticRecoveryDelay(afterAttempt: 1), 1.0, accuracy: 0.001)
+        XCTAssertEqual(CameraService.automaticRecoveryDelay(afterAttempt: 2), 2.0, accuracy: 0.001)
+        XCTAssertEqual(CameraService.automaticRecoveryDelay(afterAttempt: 3), 4.0, accuracy: 0.001)
+        XCTAssertEqual(CameraService.automaticRecoveryDelay(afterAttempt: 9), 4.0, accuracy: 0.001)
+        XCTAssertEqual(CameraService.automaticRecoveryDelay(afterAttempt: -3), 0.5, accuracy: 0.001)
+        let total = (0..<CameraService.maxAutomaticRecoveryAttempts)
+            .map(CameraService.automaticRecoveryDelay(afterAttempt:))
+            .reduce(0, +)
+        XCTAssertLessThanOrEqual(total, 20, "Automatic recovery must give up within a reasonable window")
+        XCTAssertGreaterThanOrEqual(CameraService.maxAutomaticRecoveryAttempts, 3)
+    }
+
+    func testInterruptionStatusExplainsEveryKnownReason() {
+        typealias Reason = AVCaptureSession.InterruptionReason
+        XCTAssertEqual(
+            CameraService.interruptionStatus(forReasonRawValue: Reason.videoDeviceNotAvailableInBackground.rawValue),
+            "Camera paused in the background."
+        )
+        XCTAssertEqual(
+            CameraService.interruptionStatus(forReasonRawValue: Reason.videoDeviceInUseByAnotherClient.rawValue),
+            "Another app is using the camera."
+        )
+        XCTAssertEqual(
+            CameraService.interruptionStatus(forReasonRawValue: Reason.audioDeviceInUseByAnotherClient.rawValue),
+            "Another app is using the camera."
+        )
+        XCTAssertTrue(
+            CameraService.interruptionStatus(
+                forReasonRawValue: Reason.videoDeviceNotAvailableWithMultipleForegroundApps.rawValue
+            ).contains("full screen")
+        )
+        XCTAssertTrue(
+            CameraService.interruptionStatus(
+                forReasonRawValue: Reason.videoDeviceNotAvailableDueToSystemPressure.rawValue
+            ).contains("cools down")
+        )
+        XCTAssertEqual(CameraService.interruptionStatus(forReasonRawValue: nil), "Camera temporarily unavailable.")
+        XCTAssertEqual(CameraService.interruptionStatus(forReasonRawValue: 9_999), "Camera temporarily unavailable.")
+    }
+
+    func testLaunchRecipeFollowsThePersistedBuiltInSelection() {
+        let defaults = UserDefaults(suiteName: "launch-recipe-\(UUID().uuidString)")!
+        XCTAssertEqual(CameraViewModel.launchRecipe(defaults: defaults).id, CameraViewModel.defaultRecipeID)
+        defaults.set("classic-chrome", forKey: CameraViewModel.selectedRecipeIDKey)
+        XCTAssertEqual(CameraViewModel.launchRecipe(defaults: defaults).id, "classic-chrome")
+        defaults.set("custom-not-built-in", forKey: CameraViewModel.selectedRecipeIDKey)
+        XCTAssertEqual(CameraViewModel.launchRecipe(defaults: defaults).id, CameraViewModel.defaultRecipeID)
     }
 
     func testCameraActivityPolicyHoldsAnActiveInterruptedSessionForObserverRecovery() {

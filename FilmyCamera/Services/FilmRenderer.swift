@@ -65,6 +65,18 @@ public final class FilmRenderer {
         ]) { _, new in new })
     }()
 
+    /// Builds the shared context, the grain texture, and the compiled kernels
+    /// ahead of the first camera frame, so the viewfinder's first draw does
+    /// not pay for shader compilation on the main thread. Safe to call from
+    /// any thread; later calls are cheap.
+    public static func warmUp(recipe: FilmRecipe) {
+        _ = sharedContext
+        _ = immutableResources
+        let scene = sampleScene(size: CGSize(width: 96, height: 64))
+        let rendered = render(scene, recipe: recipe, quality: .preview)
+        _ = outputCGImage(rendered, from: rendered.extent)
+    }
+
     private struct CubeRecipeKey: Hashable, Sendable {
         let filmBase: FilmRecipe.FilmBase
         let colorChrome: Double

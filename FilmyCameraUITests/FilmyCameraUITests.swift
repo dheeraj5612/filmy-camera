@@ -396,6 +396,13 @@ final class FilmyCameraUITests: XCTestCase {
             "A G7 X flash capture should reach the review sheet"
         )
         attachScreenshot(named: "device-g7x-flash-review")
+        // A review that reached the sheet is not enough: the resolved capture
+        // settings must confirm the flash fired, or the flash-aware G7 X
+        // treatment never ran.
+        XCTAssertTrue(
+            compactApp.staticTexts["Full resolution · Flash fired"].waitForExistence(timeout: 5),
+            "The review caption must confirm the flash fired: \(compactApp.staticTexts.allElementsBoundByIndex.map(\.label).filter { $0.contains("resolution") })"
+        )
 
         let retake = compactApp.buttons["Retake"]
         assertMinimumHitTarget(retake, named: "Retake")
@@ -683,6 +690,132 @@ final class FilmyCameraUITests: XCTestCase {
             } else {
                 app.swipeDown(velocity: .slow)
             }
+        }
+    }
+
+    // MARK: - Lifecycle and resilience
+
+    /// True when the shutter is live on camera hardware; false on Simulator,
+    /// where the viewfinder shows the preview-mode placeholder instead.
+    private func waitForLiveShutter(in target: XCUIApplication, timeout: TimeInterval = 20) -> Bool {
+        let shutter = target.buttons["Capture photo"]
+        guard shutter.waitForExistence(timeout: timeout) else { return false }
+        return shutter.isEnabled
+    }
+
+    private func waitForCameraShell(in target: XCUIApplication, timeout: TimeInterval = 15) -> Bool {
+        target.buttons["recipe-menu"].waitForExistence(timeout: timeout)
+    }
+
+    func testBackgroundingAndForegroundingRestoresTheViewfinder() throws {
+        XCTAssertTrue(waitForCameraShell(in: app), "The camera shell should be up before backgrounding")
+        let isPhysical = waitForLiveShutter(in: app, timeout: 15)
+
+        for round in 1...2 {
+            XCUIDevice.shared.press(.home)
+            // Let the scene reach the background so the session really stops.
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 2))
+            app.activate()
+            XCTAssertTrue(
+                waitForCameraShell(in: app),
+                "Round \(round): the camera shell must come back after foregrounding"
+            )
+            if isPhysical {
+                XCTAssertTrue(
+                    waitForLiveShutter(in: app, timeout: 10),
+                    "Round \(round): the viewfinder must be live again within 10 s of foregrounding"
+                )
+            }
+        }
+        attachScreenshot(named: "lifecycle-after-foreground")
+    }
+
+    func testTabRoundTripReturnsToTheViewfinderQuickly() throws {
+        XCTAssertTrue(waitForCameraShell(in: app))
+        let isPhysical = waitForLiveShutter(in: app, timeout: 15)
+
+        for tab in ["roll-tab", "settings-tab"] {
+            let destination = app.buttons[tab]
+            XCTAssertTrue(destination.waitForExistence(timeout: 5), "\(tab) should be in the dock")
+            destination.tap()
+            let cameraTab = app.buttons["camera-tab"]
+            XCTAssertTrue(cameraTab.waitForExistence(timeout: 5))
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 1))
+            cameraTab.tap()
+            XCTAssertTrue(waitForCameraShell(in: app), "Returning from \(tab) must show the camera shell")
+            if isPhysical {
+                let start = Date()
+                XCTAssertTrue(
+                    waitForLiveShutter(in: app, timeout: 8),
+                    "The viewfinder must be live again after \(tab)"
+                )
+                let elapsed = Date().timeIntervalSince(start)
+                XCTAssertLessThan(elapsed, 4, "A quick return from \(tab) should reuse the warm session (took \(elapsed) s)")
+            }
+        }
+    }
+
+    func testRapidRecipeSwitchingKeepsTheViewfinderResponsive() throws {
+        XCTAssertTrue(waitForCameraShell(in: app))
+        let isPhysical = waitForLiveShutter(in: app, timeout: 15)
+        let candidates = [
+            "recipe-provia-standard", "recipe-velvia-vivid", "recipe-astia-soft",
+            "recipe-classic-chrome", "recipe-classic-negative", "recipe-g7x-compact",
+            "recipe-nostalgic-negative", "recipe-eterna-cinema", "recipe-acros-monochrome"
+        ]
+        var taps = 0
+        for _ in 0..<3 {
+            for identifier in candidates {
+                let swatch = app.buttons[identifier]
+                guard swatch.exists, swatch.isHittable else { continue }
+                swatch.tap()
+                taps += 1
+            }
+        }
+        XCTAssertGreaterThanOrEqual(taps, 6, "The rail should expose several recipes to switch between")
+        XCTAssertTrue(waitForCameraShell(in: app, timeout: 5), "The shell must survive rapid recipe switching")
+        if isPhysical {
+            XCTAssertTrue(waitForLiveShutter(in: app, timeout: 5), "The viewfinder must stay live while switching recipes")
+            app.buttons["Capture photo"].tap()
+            let retake = app.buttons["Retake"]
+            XCTAssertTrue(retake.waitForExistence(timeout: 30), "A capture after rapid switching must still reach review")
+            retake.tap()
+            XCTAssertTrue(waitForLiveShutter(in: app, timeout: 8))
+        }
+        attachScreenshot(named: "lifecycle-after-rapid-switching")
+    }
+
+    func testPhysicalRetakeReturnsToALiveViewfinderInstantly() throws {
+        guard waitForLiveShutter(in: app, timeout: 20) else {
+            throw XCTSkip("Requires camera hardware")
+        }
+        for round in 1...3 {
+            app.buttons["Capture photo"].tap()
+            let retake = app.buttons["Retake"]
+            XCTAssertTrue(retake.waitForExistence(timeout: 30), "Round \(round): capture should reach review")
+            retake.tap()
+            let start = Date()
+            XCTAssertTrue(waitForLiveShutter(in: app, timeout: 8), "Round \(round): the viewfinder must return after Retake")
+            let elapsed = Date().timeIntervalSince(start)
+            XCTAssertLessThan(elapsed, 3, "Round \(round): Retake should reuse the warm session (took \(elapsed) s)")
+        }
+    }
+
+    /// Cold-launch benchmark on hardware. The number lands in the result
+    /// bundle; the assertion only guards against a launch that never settles.
+    func testPhysicalLaunchPerformance() throws {
+        guard waitForLiveShutter(in: app, timeout: 20) else {
+            throw XCTSkip("Launch timing is only meaningful on camera hardware")
+        }
+        app.terminate()
+        let options = XCTMeasureOptions()
+        options.iterationCount = 5
+        measure(metrics: [XCTApplicationLaunchMetric()], options: options) {
+            let launched = XCUIApplication()
+            launched.launchArguments = ["-ui-testing", "-selectedRecipeID", "classic-chrome"]
+            launched.launch()
+            XCTAssertTrue(launched.buttons["recipe-menu"].waitForExistence(timeout: 15))
+            launched.terminate()
         }
     }
 
