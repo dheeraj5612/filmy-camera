@@ -7,6 +7,10 @@ import XCTest
 /// attaches labelled side-by-side composites for visual review of recipe
 /// tuning. Fixtures live in `FilmyCameraTests/Fixtures/fixture-*.jpg`, are
 /// intentionally not committed, and the tests skip when none are bundled.
+///
+/// To use locally: drop JPEGs into that folder, run `xcodegen generate` so they
+/// are bundled, run this suite, then regenerate the project without the folder
+/// before committing (the CI reproducibility gate diffs the generated project).
 final class RecipeRenderGalleryTests: XCTestCase {
     private static let panelWidth: CGFloat = 520
     private static let panelsPerRow = 4
