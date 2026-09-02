@@ -127,9 +127,17 @@ struct CameraScreen: View {
             }
             .ignoresSafeArea()
 
-            if shouldShowCameraEmptyState {
+            // The session is intentionally stopped while a frame is under
+            // review. On iPad the review is a centered sheet, so the paused
+            // viewfinder stays visible; keep it quiet instead of announcing
+            // "Camera unavailable" behind the user's own photo.
+            if shouldShowCameraEmptyState, !isReviewing {
                 cameraPlaceholder
                     .ignoresSafeArea()
+            } else if isReviewing {
+                Color.black.opacity(0.55)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
             }
 
             viewfinderScrim
@@ -444,6 +452,8 @@ struct CameraScreen: View {
     private var captureControl: some View {
         if isViewfinderChromePreview {
             CaptureButton(isCapturing: viewModel.isCapturing, isEnabled: false) {}
+        } else if isReviewing {
+            CaptureButton(isCapturing: false, isEnabled: false) {}
         } else if shouldShowCameraEmptyState {
             captureNotice
         } else {
@@ -641,6 +651,10 @@ struct CameraScreen: View {
 
     private var shouldShowCameraEmptyState: Bool {
         !camera.isRunning
+    }
+
+    private var isReviewing: Bool {
+        viewModel.reviewImage != nil
     }
 
     private var isViewfinderChromePreview: Bool {
