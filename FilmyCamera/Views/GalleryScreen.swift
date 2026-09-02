@@ -454,6 +454,7 @@ private struct GalleryDetailView: View {
     @State private var image: UIImage?
     @State private var isLoadingImage = false
     @State private var imageLoadFailed = false
+    @State private var loadGeneration = 0
     @State private var shareURL: URL?
     @State private var isShowingShareSheet = false
     @State private var isShowingDeleteConfirmation = false
@@ -719,8 +720,12 @@ private struct GalleryDetailView: View {
         }
     }
 
+    /// Each request is stamped with a generation so a replacement load (a
+    /// new request key while one is in flight) always supersedes the older
+    /// one instead of being rejected by it.
     private func loadImage() async {
-        guard !isLoadingImage else { return }
+        loadGeneration += 1
+        let generation = loadGeneration
 
         image = nil
         imageLoadFailed = false
@@ -740,10 +745,7 @@ private struct GalleryDetailView: View {
             targetSize: CGSize(width: 1600, height: 2200),
             contentMode: .aspectFit
         )
-        guard !Task.isCancelled else {
-            isLoadingImage = false
-            return
-        }
+        guard generation == loadGeneration, !Task.isCancelled else { return }
 
         image = loadedImage
         imageLoadFailed = loadedImage == nil

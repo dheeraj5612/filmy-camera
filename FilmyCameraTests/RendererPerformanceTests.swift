@@ -13,6 +13,12 @@ final class RendererPerformanceTests: XCTestCase {
     }
 
     func testPreviewRenderTimings() throws {
+        // Hundreds of synchronous Metal renders: opt in explicitly, e.g.
+        // TEST_RUNNER_FILMY_RUN_PERF=1 xcodebuild ... -only-testing:FilmyCameraTests/RendererPerformanceTests
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["FILMY_RUN_PERF"] == "1",
+            "Set FILMY_RUN_PERF=1 to run the on-device render benchmark"
+        )
         let context = FilmRenderer.sharedContext
         let sizes: [(String, CGSize)] = [
             ("iPad 1x 834x1112", CGSize(width: 834, height: 1112)),

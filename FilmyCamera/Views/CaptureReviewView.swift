@@ -5,6 +5,7 @@ struct CaptureReviewView: View {
     let image: UIImage
     let recipe: FilmRecipe
     let source: CameraViewModel.ReviewSource
+    var isFullResolution = true
     let isSaving: Bool
     let saveErrorMessage: String?
     let onSave: () -> Void
@@ -96,6 +97,16 @@ struct CaptureReviewView: View {
         source == .photoLibrary
     }
 
+    /// Never promise full resolution for an import that was bounded to the
+    /// pixel budget; say what actually happened.
+    private var resolutionCaption: String {
+        switch (isImported, isFullResolution) {
+        case (true, true): return "Filter applied · Full resolution"
+        case (true, false): return "Filter applied · Resized to fit \(Int(CameraViewModel.importPixelBudget / 1_000_000)) MP"
+        case (false, _): return "Full resolution"
+        }
+    }
+
     private func framePreview(maxWidth: CGFloat, maxHeight: CGFloat) -> some View {
         let fitted = Self.fittedSize(
             for: image.size,
@@ -151,7 +162,7 @@ struct CaptureReviewView: View {
                 Text(recipe.name)
                     .font(.system(size: 12, weight: .bold, design: .rounded))
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                Text(isImported ? "Filter applied · Full resolution" : "Full resolution")
+                Text(resolutionCaption)
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.78))
             }

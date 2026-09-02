@@ -39,6 +39,7 @@ struct CameraScreen: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @AppStorage("showGrid") private var showGrid = true
+    @StateObject private var livePreviews = LiveRecipePreviewStore()
     @State private var recipeForDetail: FilmRecipe?
     @State private var isShowingTools: Bool
     @State private var focusPoint: CGPoint?
@@ -181,6 +182,17 @@ struct CameraScreen: View {
             }
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: viewModel.toastMessage)
+        // Every swatch under the viewfinder (rail, menu, detail hero) renders
+        // its recipe over the live scene, the way a film simulation picker
+        // should: choosing a look means seeing this scene in that look.
+        .environment(\.recipePreviewScene, livePreviews.scene)
+        .onChange(of: camera.isRunning, initial: true) { _, isRunning in
+            if isRunning {
+                livePreviews.attach(to: camera)
+            } else {
+                livePreviews.detach()
+            }
+        }
         .sheet(item: $recipeForDetail) { recipe in
             RecipeDetailView(
                 recipe: recipe,
@@ -207,6 +219,7 @@ struct CameraScreen: View {
                     image: image,
                     recipe: recipe,
                     source: viewModel.reviewSource,
+                    isFullResolution: viewModel.reviewIsFullResolution,
                     isSaving: viewModel.isSaving,
                     saveErrorMessage: viewModel.saveErrorMessage,
                     onSave: { viewModel.saveReview(photoLibrary: photoLibrary) },

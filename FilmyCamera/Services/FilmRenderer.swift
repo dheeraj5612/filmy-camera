@@ -298,56 +298,7 @@ public final class FilmRenderer {
             return thumbnailCache.insert(persisted, for: cacheKey)
         }
         let extent = CGRect(x: 0, y: 0, width: width, height: height)
-        var reference = CIImage(
-            color: CIColor(red: 0.15, green: 0.12, blue: 0.10, alpha: 1)
-        )
-        .cropped(to: extent)
-
-        let blocks: [(CGRect, CIColor)] = [
-            (
-                CGRect(x: 0, y: height * 0.48, width: width, height: height * 0.52),
-                CIColor(red: 0.28, green: 0.47, blue: 0.58, alpha: 1)
-            ),
-            (
-                CGRect(x: 0, y: height * 0.18, width: width, height: height * 0.30),
-                CIColor(red: 0.72, green: 0.56, blue: 0.34, alpha: 1)
-            ),
-            (
-                CGRect(x: width * 0.04, y: height * 0.16, width: width * 0.42, height: height * 0.30),
-                CIColor(red: 0.15, green: 0.29, blue: 0.18, alpha: 1)
-            ),
-            (
-                CGRect(x: width * 0.56, y: height * 0.14, width: width * 0.36, height: height * 0.24),
-                CIColor(red: 0.68, green: 0.19, blue: 0.12, alpha: 1)
-            ),
-            (
-                CGRect(x: width * 0.48, y: height * 0.48, width: width * 0.30, height: height * 0.34),
-                CIColor(red: 0.66, green: 0.39, blue: 0.28, alpha: 1)
-            ),
-            (
-                CGRect(x: width * 0.10, y: height * 0.56, width: width * 0.20, height: height * 0.22),
-                CIColor(red: 0.91, green: 0.78, blue: 0.53, alpha: 1)
-            ),
-            (
-                CGRect(x: width * 0.80, y: height * 0.56, width: width * 0.12, height: height * 0.22),
-                CIColor(red: 0.86, green: 0.86, blue: 0.82, alpha: 1)
-            ),
-            (
-                CGRect(x: width * 0.33, y: height * 0.57, width: width * 0.12, height: height * 0.18),
-                CIColor(red: 0.69, green: 0.18, blue: 0.58, alpha: 1)
-            ),
-            (
-                CGRect(x: width * 0.80, y: height * 0.80, width: width * 0.12, height: height * 0.14),
-                CIColor(red: 0.43, green: 0.44, blue: 0.45, alpha: 1)
-            )
-        ]
-
-        for (blockRect, color) in blocks {
-            reference = CIImage(color: color)
-                .cropped(to: blockRect)
-                .composited(over: reference)
-        }
-
+        let reference = sampleScene(size: extent.size)
         let rendered = render(reference, recipe: recipe, quality: .preview)
         guard let image = outputCGImage(rendered, from: extent) else {
             return nil
@@ -357,19 +308,167 @@ public final class FilmRenderer {
         return thumbnailCache.insert(thumbnail, for: cacheKey)
     }
 
+    /// Bump when the sample scene or thumbnail composition changes so stale
+    /// PNGs in Caches are not served for the new look.
+    static let thumbnailSceneVersion = 2
+
+    /// Renders a recipe over an arbitrary scene, e.g. a live viewfinder
+    /// snapshot, at that scene's size. Not cached: callers debounce.
+    public static func previewThumbnail(for recipe: FilmRecipe, over scene: CIImage) -> UIImage? {
+        let extent = scene.extent
+        guard extent.width >= 1, extent.height >= 1 else { return nil }
+        let rendered = render(scene, recipe: recipe, quality: .preview)
+        guard let image = outputCGImage(rendered, from: extent) else { return nil }
+        return UIImage(cgImage: image)
+    }
+
+    /// A photographic stand-in used wherever no live frame exists: a
+    /// golden-hour sky, a sun, layered hills, warm ground, a skin-toned
+    /// subject, and a neutral card. Every recipe control (sky blues, greens,
+    /// skin warmth, highlight shoulder, neutral cast) reads on it at a glance.
+    public static func sampleScene(size: CGSize) -> CIImage {
+        let width = max(size.width, 1)
+        let height = max(size.height, 1)
+        let extent = CGRect(x: 0, y: 0, width: width, height: height)
+
+        func gradient(_ from: CIColor, at p0: CGPoint, to: CIColor, at p1: CGPoint) -> CIImage {
+            guard let filter = CIFilter(name: "CILinearGradient") else { return CIImage(color: from) }
+            filter.setValue(CIVector(cgPoint: p0), forKey: "inputPoint0")
+            filter.setValue(CIVector(cgPoint: p1), forKey: "inputPoint1")
+            filter.setValue(from, forKey: "inputColor0")
+            filter.setValue(to, forKey: "inputColor1")
+            return (filter.outputImage ?? CIImage(color: from)).cropped(to: extent)
+        }
+        func disc(center: CGPoint, radius: CGFloat, color: CIColor, feather: CGFloat = 1) -> CIImage {
+            guard let filter = CIFilter(name: "CIRadialGradient") else { return CIImage.empty() }
+            filter.setValue(CIVector(cgPoint: center), forKey: "inputCenter")
+            filter.setValue(max(radius - feather, 0), forKey: "inputRadius0")
+            filter.setValue(radius + feather, forKey: "inputRadius1")
+            filter.setValue(color, forKey: "inputColor0")
+            filter.setValue(CIColor(red: 0, green: 0, blue: 0, alpha: 0), forKey: "inputColor1")
+            return (filter.outputImage ?? CIImage.empty()).cropped(to: extent)
+        }
+
+        // Sky: deep blue high, warm peach at the horizon (Core Image y is up).
+        var scene = gradient(
+            CIColor(red: 0.93, green: 0.72, blue: 0.52, alpha: 1), at: CGPoint(x: 0, y: height * 0.42),
+            to: CIColor(red: 0.24, green: 0.45, blue: 0.78, alpha: 1), at: CGPoint(x: 0, y: height)
+        )
+        // Sun glow.
+        scene = disc(
+            center: CGPoint(x: width * 0.72, y: height * 0.62),
+            radius: width * 0.16,
+            color: CIColor(red: 1.0, green: 0.90, blue: 0.68, alpha: 0.85),
+            feather: width * 0.14
+        ).composited(over: scene)
+        // Far hills (teal) and near hills (green).
+        scene = disc(
+            center: CGPoint(x: width * 0.28, y: height * 0.14),
+            radius: width * 0.42,
+            color: CIColor(red: 0.28, green: 0.47, blue: 0.46, alpha: 1)
+        ).composited(over: scene)
+        scene = disc(
+            center: CGPoint(x: width * 0.84, y: height * 0.08),
+            radius: width * 0.40,
+            color: CIColor(red: 0.18, green: 0.40, blue: 0.24, alpha: 1)
+        ).composited(over: scene)
+        // Warm ground.
+        scene = gradient(
+            CIColor(red: 0.62, green: 0.46, blue: 0.32, alpha: 1), at: CGPoint(x: 0, y: 0),
+            to: CIColor(red: 0.62, green: 0.46, blue: 0.32, alpha: 0), at: CGPoint(x: 0, y: height * 0.34)
+        ).composited(over: scene)
+        // Subject: a skin-toned figure with a darker hair cap and a red accent.
+        scene = disc(
+            center: CGPoint(x: width * 0.30, y: height * 0.33),
+            radius: width * 0.13,
+            color: CIColor(red: 0.80, green: 0.56, blue: 0.42, alpha: 1)
+        ).composited(over: scene)
+        scene = disc(
+            center: CGPoint(x: width * 0.30, y: height * 0.41),
+            radius: width * 0.11,
+            color: CIColor(red: 0.16, green: 0.11, blue: 0.09, alpha: 1)
+        ).composited(over: scene)
+        scene = CIImage(color: CIColor(red: 0.72, green: 0.16, blue: 0.14, alpha: 1))
+            .cropped(to: CGRect(x: width * 0.19, y: 0, width: width * 0.22, height: height * 0.22))
+            .composited(over: scene)
+        // Neutral card: white with a mid-gray step to expose casts and shoulder.
+        scene = CIImage(color: CIColor(red: 0.92, green: 0.92, blue: 0.90, alpha: 1))
+            .cropped(to: CGRect(x: width * 0.66, y: height * 0.05, width: width * 0.24, height: height * 0.16))
+            .composited(over: scene)
+        scene = CIImage(color: CIColor(red: 0.50, green: 0.50, blue: 0.50, alpha: 1))
+            .cropped(to: CGRect(x: width * 0.66, y: height * 0.05, width: width * 0.10, height: height * 0.16))
+            .composited(over: scene)
+        return scene.cropped(to: extent)
+    }
+
     /// Recipe swatches are pure functions of (recipe, renderer version, size),
     /// so their PNGs are kept in Caches across launches. Thirty tiles cost a
     /// few hundred milliseconds of GPU on every launch otherwise, competing
     /// with the live viewfinder while the rail first appears.
     private enum ThumbnailDiskCache {
+        /// Entries live in a directory named for the renderer and scene
+        /// version; any other directory is stale and removed on first use.
+        /// The directory itself is capped by count, oldest first, so slider
+        /// drafts that pause long enough to persist cannot grow it unbounded.
+        private static let entryLimit = 240
+        private static let pruneCounter = PruneCounter(every: 40)
+
+        private final class PruneCounter: @unchecked Sendable {
+            private let lock = NSLock()
+            private let interval: Int
+            private var count = 0
+
+            init(every interval: Int) {
+                self.interval = interval
+            }
+
+            func recordStore() -> Bool {
+                lock.lock()
+                defer { lock.unlock() }
+                count += 1
+                guard count >= interval else { return false }
+                count = 0
+                return true
+            }
+        }
+
         private static let directoryURL: URL? = {
             guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
                 return nil
             }
-            let url = caches.appendingPathComponent("RecipeThumbnails", isDirectory: true)
-            try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            let root = caches.appendingPathComponent("RecipeThumbnails", isDirectory: true)
+            let versionName = "v\(FilmRecipe.rendererVersion)-s\(thumbnailSceneVersion)"
+            let url = root.appendingPathComponent(versionName, isDirectory: true)
+            let fileManager = FileManager.default
+            try? fileManager.createDirectory(at: url, withIntermediateDirectories: true)
+            if let siblings = try? fileManager.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) {
+                for sibling in siblings where sibling.lastPathComponent != versionName {
+                    try? fileManager.removeItem(at: sibling)
+                }
+            }
+            prune(in: url)
             return url
         }()
+
+        private static func prune(in directory: URL) {
+            let fileManager = FileManager.default
+            guard let files = try? fileManager.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+                options: .skipsHiddenFiles
+            ), files.count > entryLimit else {
+                return
+            }
+            let dated = files.map { url -> (URL, Date) in
+                let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+                    .contentModificationDate ?? .distantPast
+                return (url, date)
+            }
+            .sorted { $0.1 < $1.1 }
+            for (url, _) in dated.prefix(files.count - entryLimit) {
+                try? fileManager.removeItem(at: url)
+            }
+        }
 
         private static func fileURL(for key: ThumbnailCacheKey) -> URL? {
             guard let directoryURL,
@@ -378,7 +477,7 @@ public final class FilmRenderer {
             }
             var hasher = SHA256()
             hasher.update(data: Data(FilmRecipe.rendererVersion.utf8))
-            hasher.update(data: Data("\(key.width)x\(key.height)".utf8))
+            hasher.update(data: Data("scene\(thumbnailSceneVersion)-\(key.width)x\(key.height)".utf8))
             hasher.update(data: recipeData)
             let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
             return directoryURL.appendingPathComponent("\(digest).png", isDirectory: false)
@@ -394,10 +493,14 @@ public final class FilmRenderer {
 
         static func store(_ image: UIImage, for key: ThumbnailCacheKey) {
             guard let url = fileURL(for: key),
+                  let directoryURL,
                   let data = image.pngData() else {
                 return
             }
             try? data.write(to: url, options: .atomic)
+            if pruneCounter.recordStore() {
+                prune(in: directoryURL)
+            }
         }
     }
 

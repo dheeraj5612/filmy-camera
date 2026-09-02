@@ -16,6 +16,7 @@
 		3E434087A6331965A83F900D /* RecipeReferenceCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 348CFAEC84B4CF9E4F843E66 /* RecipeReferenceCatalogTests.swift */; };
 		3F104912E7B0F794D16EC5E3 /* GalleryScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10A0F8269AA5365633E9A3C0 /* GalleryScreen.swift */; };
 		47FDBDD59FA6A75558E422B8 /* FilmRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F56BE8EB7D6BDB867CFD8C3A /* FilmRenderer.swift */; };
+		4C90B51F6CFE219E37FC2FF5 /* LiveRecipePreviewStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A78EE0BDE17DD2170E519D17 /* LiveRecipePreviewStore.swift */; };
 		589A5A125A91DA3228E84E06 /* RendererOutputBoundsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2F0913587D09FEB4D0E8E14 /* RendererOutputBoundsTests.swift */; };
 		58D2691A3560CD81FC291D7D /* FilmRecipeReferenceCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6940256A8100B915539E21CB /* FilmRecipeReferenceCatalog.swift */; };
 		59F0B3BA74FBD1876642993A /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31718B2CA6575E585EA91B06 /* OnboardingView.swift */; };
@@ -86,6 +87,7 @@
 		99D74C27D238C00120CAABB3 /* RecipeRenderGalleryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeRenderGalleryTests.swift; sourceTree = "<group>"; };
 		A3940D2834957A9E44F66872 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A657E128117A2C10BAD8B761 /* FilmyCamera.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = FilmyCamera.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A78EE0BDE17DD2170E519D17 /* LiveRecipePreviewStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveRecipePreviewStore.swift; sourceTree = "<group>"; };
 		B9D2815FF289A04B992AC100 /* AppIconSource.svg */ = {isa = PBXFileReference; path = AppIconSource.svg; sourceTree = "<group>"; };
 		C2F0913587D09FEB4D0E8E14 /* RendererOutputBoundsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RendererOutputBoundsTests.swift; sourceTree = "<group>"; };
 		C34BB7CBA412A194086446CD /* FilmyCameraTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = FilmyCameraTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -146,6 +148,7 @@
 				8D82A69BBE148C6317A2FA41 /* CameraFrameLayout.swift */,
 				DC1520CC0C54A1860FEB034D /* CameraService.swift */,
 				F56BE8EB7D6BDB867CFD8C3A /* FilmRenderer.swift */,
+				A78EE0BDE17DD2170E519D17 /* LiveRecipePreviewStore.swift */,
 				8433ABA6CF2F34E7F51023B6 /* PhotoLibraryService.swift */,
 				3E54A0716052C16B09DBEF38 /* PhotoOutputEncoder.swift */,
 			);
@@ -370,6 +373,7 @@
 				1FA4D1311CC59621E8A662B9 /* FilmyCameraApp.swift in Sources */,
 				801054D3CB7F421A0300E64B /* FilteredCameraPreview.swift in Sources */,
 				3F104912E7B0F794D16EC5E3 /* GalleryScreen.swift in Sources */,
+				4C90B51F6CFE219E37FC2FF5 /* LiveRecipePreviewStore.swift in Sources */,
 				59F0B3BA74FBD1876642993A /* OnboardingView.swift in Sources */,
 				D28FC5CE68D1A36040EFD9B0 /* PhotoLibraryService.swift in Sources */,
 				D85A08E3EF9A9317F589EBD3 /* PhotoOutputEncoder.swift in Sources */,

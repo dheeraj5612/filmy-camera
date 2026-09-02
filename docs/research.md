@@ -412,3 +412,25 @@ preview/photo/export contract enforced by the renderer tests still holds.
 Recipe swatches are pure functions of recipe, renderer version, and size, so
 their PNGs are now persisted under Caches (`RecipeThumbnails`) instead of
 being re-rendered on every launch while the camera is starting.
+
+## Design pass: recipe previews that show the scene — 2026-09-02
+
+The best current camera apps (Halide Mark III's one-tap looks, Kino's film
+grades) present a look as *this scene rendered that way*: a strip of small
+thumbnails of the actual frame, each through one preset, with a compact name
+beneath, monochrome icon pills over dark chrome, uppercase tracked micro
+labels, and a single accent color. Filmy Camera's rail previously showed a
+synthetic color-block pattern per recipe, which read as a test chart.
+
+Every recipe swatch under the viewfinder (rail, landscape menu, recipe detail
+hero) now renders its recipe over a live snapshot of the viewfinder.
+`LiveRecipePreviewStore` samples the frame stream every two seconds into a
+264×176 upright scene, off the main thread and only when the previous sample
+has finished, and publishes it through the `recipePreviewScene` SwiftUI
+environment. Swatches render themselves over it (debounced, detached) and fall
+back to the built-in scene when no camera is live. That built-in scene is now
+a photographic stand-in (`FilmRenderer.sampleScene`): golden-hour sky, sun,
+layered hills, warm ground, a skin-toned subject with a red accent, and a
+neutral card, so onboarding, the Roll's empty state, and the simulator show
+recipes on something that looks like a photograph. No third-party assets or
+screenshots are used; only the interaction pattern is borrowed.

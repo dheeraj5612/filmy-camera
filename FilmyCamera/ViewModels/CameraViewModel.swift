@@ -137,6 +137,7 @@ final class CameraViewModel: ObservableObject {
         let image: UIImage
         let data: Data
         let capturedAt: Date
+        var isFullResolution = true
     }
 
     static let selectedRecipeIDKey = "selectedRecipeID"
@@ -170,6 +171,8 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var reviewImage: UIImage?
     @Published private(set) var reviewRecipe: FilmRecipe?
     @Published private(set) var reviewSource: ReviewSource = .camera
+    /// False when a library import was bounded to `importPixelBudget`.
+    @Published private(set) var reviewIsFullResolution = true
     @Published private var recipeOverrides: [String: FilmRecipe] = [:]
 
     private var toastTask: Task<Void, Never>?
@@ -302,7 +305,13 @@ final class CameraViewModel: ObservableObject {
         saveErrorMessage = nil
         let recipe = selectedRecipe
         let viewportSize = camera.previewViewportSize
-        let previewScale = max(UIScreen.main.scale, 1)
+        // The viewfinder renders into a bounded drawable, so use its actual
+        // scale (not the raw screen scale) or grain lands in a different
+        // place on the still than it did in the preview.
+        let previewScale = FilteredCameraPreviewView.drawableScale(
+            for: viewportSize,
+            screenScale: UIScreen.main.scale
+        )
         let previewDrawableSize = CGSize(
             width: viewportSize.width * previewScale,
             height: viewportSize.height * previewScale
@@ -355,6 +364,7 @@ final class CameraViewModel: ObservableObject {
                         self.reviewCapturedAt = renderedPhoto.capturedAt
                         self.reviewRecipe = recipe
                         self.reviewSource = .camera
+                        self.reviewIsFullResolution = true
                         self.isCapturing = false
                     }
                 }
@@ -392,6 +402,7 @@ final class CameraViewModel: ObservableObject {
         reviewCapturedAt = renderedPhoto.capturedAt
         reviewRecipe = recipe
         reviewSource = .photoLibrary
+        reviewIsFullResolution = renderedPhoto.isFullResolution
         HapticFeedback.play(.success)
     }
 
@@ -421,6 +432,7 @@ final class CameraViewModel: ObservableObject {
                 self.reviewCapturedAt = nil
                 self.reviewRecipe = nil
                 self.reviewSource = .camera
+                self.reviewIsFullResolution = true
                 self.showToast("Saved with \(reviewRecipe.name)")
             } else {
                 self.saveErrorMessage = "Photo access is needed to save this frame. Enable Photos access in Settings, then try again."
@@ -436,6 +448,7 @@ final class CameraViewModel: ObservableObject {
         reviewCapturedAt = nil
         reviewRecipe = nil
         reviewSource = .camera
+        reviewIsFullResolution = true
         saveErrorMessage = nil
     }
 
@@ -590,12 +603,12 @@ final class CameraViewModel: ObservableObject {
 
         // Library photos keep their original framing. Rebase to a zero origin
         // so spatial effects such as grain are independent of EXIF transforms.
-        let framedInput = Self.boundedImportInput(
-            input.transformed(by: CGAffineTransform(
-                translationX: -extent.minX,
-                y: -extent.minY
-            ))
-        )
+        let unboundedInput = input.transformed(by: CGAffineTransform(
+            translationX: -extent.minX,
+            y: -extent.minY
+        ))
+        let framedInput = Self.boundedImportInput(unboundedInput)
+        let isFullResolution = framedInput.extent.size == unboundedInput.extent.size
         let filtered = FilmRenderer.render(
             framedInput,
             recipe: recipe,
@@ -614,7 +627,8 @@ final class CameraViewModel: ObservableObject {
         return RenderedPhoto(
             image: downsampledReviewImage(from: data) ?? UIImage(cgImage: output),
             data: data,
-            capturedAt: importedAt
+            capturedAt: importedAt,
+            isFullResolution: isFullResolution
         )
     }
 

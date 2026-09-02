@@ -772,15 +772,26 @@ struct RecipeSwatch: View {
     var showsLabel = true
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.recipePreviewScene) private var previewScene
     @State private var thumbnailData: Data?
+    @State private var liveThumbnail: UIImage?
 
     private var cornerRadius: CGFloat {
         compact ? 12 : 16
     }
 
+    private struct LiveKey: Equatable {
+        let recipe: FilmRecipe
+        let sceneVersion: Int?
+    }
+
     var body: some View {
         ZStack {
-            if let thumbnailData,
+            if let liveThumbnail {
+                Image(uiImage: liveThumbnail)
+                    .resizable()
+                    .scaledToFill()
+            } else if let thumbnailData,
                let image = UIImage(data: thumbnailData) {
                 Image(uiImage: image)
                     .resizable()
@@ -847,6 +858,32 @@ struct RecipeSwatch: View {
             guard !Task.isCancelled else { return }
             thumbnailData = renderedData
         }
+        // When the viewfinder is live, show this recipe applied to the actual
+        // scene, refreshed at the snapshot store's cadence.
+        .task(id: LiveKey(recipe: recipe, sceneVersion: previewScene?.version)) {
+            guard let previewScene else {
+                liveThumbnail = nil
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled else { return }
+            let sceneBox = SceneBox(previewScene.image)
+            let rendered = await Task.detached(priority: .utility) {
+                FilmRenderer.previewThumbnail(for: recipe, over: sceneBox.image)
+            }.value
+            guard !Task.isCancelled else { return }
+            if let rendered {
+                liveThumbnail = rendered
+            }
+        }
+    }
+}
+
+private final class SceneBox: @unchecked Sendable {
+    let image: CIImage
+
+    init(_ image: CIImage) {
+        self.image = image
     }
 }
 
