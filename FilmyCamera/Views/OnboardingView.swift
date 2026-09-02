@@ -18,10 +18,10 @@ struct OnboardingView: View {
     private static let pages = [
         Page(
             id: 0,
-            eyebrow: "CHOOSE YOUR FEELING",
+            eyebrow: "CHOOSE A RECIPE",
             title: "Start with a feeling.",
             message: "Pick a film-inspired recipe before you shoot, then shape it until the frame feels like yours.",
-            icon: "camera.aperture",
+            icon: "film.stack",
             detail: "Choose a feeling first",
             accent: FilmyTheme.accent
         ),
@@ -55,12 +55,14 @@ struct OnboardingView: View {
             FilmyTheme.background
                 .ignoresSafeArea()
 
-            LinearGradient(
-                colors: [Self.pages[selectedPage].accent.opacity(0.1), .clear],
-                startPoint: .top,
-                endPoint: .center
+            RadialGradient(
+                colors: [Self.pages[selectedPage].accent.opacity(0.16), .clear],
+                center: .top,
+                startRadius: 0,
+                endRadius: 520
             )
             .ignoresSafeArea()
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.4), value: selectedPage)
 
             VStack(spacing: 0) {
                 header
@@ -83,15 +85,14 @@ struct OnboardingView: View {
 
     private var header: some View {
         HStack(alignment: .center, spacing: 12) {
-            HStack(spacing: 9) {
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(FilmyTheme.accent)
-                    .frame(width: 4, height: 26)
-                .accessibilityHidden(true)
-
-                Text("FILMY")
+            HStack(spacing: 8) {
+                Image(systemName: "camera.aperture")
                     .font(.system(size: 14, weight: .bold))
-                    .tracking(0.4)
+                    .foregroundStyle(FilmyTheme.accent)
+                    .accessibilityHidden(true)
+
+                Text("Filmy Camera")
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
                     .foregroundStyle(FilmyTheme.primary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.78)
@@ -99,16 +100,16 @@ struct OnboardingView: View {
 
             Spacer(minLength: 12)
 
-            Text("\(String(format: "%02d", selectedPage + 1)) / \(String(format: "%02d", Self.pages.count))")
-                .font(.system(.caption2, design: .default).weight(.semibold))
-                .foregroundStyle(Self.pages[selectedPage].accent)
+            Text("\(selectedPage + 1) of \(Self.pages.count)")
+                .font(.system(.caption, design: .rounded).weight(.semibold))
+                .foregroundStyle(FilmyTheme.tertiary)
                 .monospacedDigit()
                 .accessibilityLabel("Introduction page \(selectedPage + 1) of \(Self.pages.count)")
 
             Button("Skip") {
                 onFinish()
             }
-            .font(.system(.subheadline, design: .default).weight(.semibold))
+            .font(.system(.subheadline, design: .rounded).weight(.semibold))
             .foregroundStyle(FilmyTheme.secondary)
             .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
             .contentShape(Rectangle())
@@ -122,16 +123,14 @@ struct OnboardingView: View {
 
     private func pageView(_ page: Page) -> some View {
         ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 26) {
                 visual(for: page)
 
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(page.eyebrow)
-                        .font(.system(.caption, design: .default).weight(.semibold))
-                        .foregroundStyle(page.accent)
+                VStack(alignment: .leading, spacing: 12) {
+                    Eyebrow(text: page.eyebrow, color: page.accent)
 
                     Text(page.title)
-                        .font(.system(.largeTitle, design: .default).weight(.bold))
+                        .font(.system(.largeTitle, design: .rounded).weight(.bold))
                         .foregroundStyle(FilmyTheme.primary)
                         .fixedSize(horizontal: false, vertical: true)
 
@@ -143,203 +142,191 @@ struct OnboardingView: View {
                 }
 
                 HStack(alignment: .center, spacing: 12) {
-                    Image(systemName: page.icon)
-                        .font(.system(.headline, weight: .semibold))
-                        .foregroundStyle(page.accent)
-                        .frame(width: 38, height: 38)
-                            .background(page.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    SettingIcon(systemName: page.icon, tint: page.accent)
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("THE POINT")
-                            .font(.system(.caption2, design: .default).weight(.semibold))
-                            .foregroundStyle(FilmyTheme.tertiary)
-
-                        Text(page.detail)
-                            .font(.system(.subheadline, design: .default).weight(.semibold))
-                            .foregroundStyle(FilmyTheme.primary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                    Text(page.detail)
+                        .font(.system(.subheadline, design: .default).weight(.semibold))
+                        .foregroundStyle(FilmyTheme.primary)
+                        .fixedSize(horizontal: false, vertical: true)
 
                     Spacer(minLength: 8)
                 }
-                .padding(.vertical, 13)
-                .overlay(alignment: .top) {
-                    Rectangle()
-                        .fill(FilmyTheme.line)
-                        .frame(height: 1)
-                }
-                .overlay(alignment: .bottom) {
-                    Rectangle()
-                        .fill(FilmyTheme.line)
-                        .frame(height: 1)
+                .padding(12)
+                .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(FilmyTheme.line, lineWidth: 1)
                 }
                 .accessibilityElement(children: .combine)
-
-                if page.id == 0 {
-                    HStack(spacing: 8) {
-                        Image(systemName: "hand.draw")
-                            .font(.system(.caption, weight: .bold))
-                            .foregroundStyle(page.accent)
-                        Text("Swipe to explore the looks")
-                            .font(.system(.caption, design: .rounded).weight(.semibold))
-                            .foregroundStyle(FilmyTheme.secondary)
-                    }
-                    .accessibilityElement(children: .combine)
-                }
             }
             .frame(maxWidth: 620, alignment: .leading)
             .padding(.horizontal, 22)
-            .padding(.top, 16)
+            .padding(.top, 14)
             .padding(.bottom, 18)
         }
     }
 
+    // MARK: - Visuals
+
+    @ViewBuilder
     private func visual(for page: Page) -> some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [page.accent.opacity(0.18), FilmyTheme.panel.opacity(0.96), Color.black.opacity(0.8)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-
-            VStack(spacing: 12) {
-                HStack(alignment: .center) {
-                    Text("FILMY / CAMERA")
-                        .font(.system(.caption2, design: .monospaced).weight(.bold))
-                        .tracking(1.1)
-                        .foregroundStyle(.white.opacity(0.76))
-
-                    Spacer(minLength: 12)
-
-                    Text("FRAME \(String(format: "%02d", page.id + 1))")
-                        .font(.system(.caption2, design: .monospaced).weight(.bold))
-                        .foregroundStyle(page.accent)
-                        .monospacedDigit()
-                }
-
-                HStack(spacing: 5) {
-                    ForEach(0..<8, id: \.self) { _ in
-                        RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                            .fill(page.accent.opacity(0.55))
-                            .frame(width: 10, height: 3)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityHidden(true)
-
-                Spacer(minLength: 8)
-
-                ZStack {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [page.accent.opacity(0.75), page.accent.opacity(0.16), Color.black.opacity(0.72)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-
-                    VStack(spacing: 8) {
-                        Image(systemName: page.icon)
-                            .font(.system(.largeTitle, weight: .light))
-                            .foregroundStyle(.white.opacity(0.92))
-
-                        Text(page.detail.uppercased())
-                            .font(.system(.caption2, design: .rounded).weight(.black))
-                            .tracking(1.1)
-                            .foregroundStyle(.white.opacity(0.82))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.72)
-                    }
-                    .padding(.horizontal, 18)
-                }
-                .frame(maxWidth: .infinity)
-                .frame(height: 158)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(Color.white.opacity(0.16), lineWidth: 1)
-                }
-                .overlay(alignment: .topLeading) {
-                    ViewfinderCorner(color: page.accent)
-                        .padding(14)
-                }
-                .overlay(alignment: .topTrailing) {
-                    ViewfinderCorner(color: page.accent)
-                        .rotationEffect(.degrees(90))
-                        .padding(14)
-                }
-                .overlay(alignment: .bottomTrailing) {
-                    ViewfinderCorner(color: page.accent)
-                        .rotationEffect(.degrees(180))
-                        .padding(14)
-                }
-                .overlay(alignment: .bottomLeading) {
-                    ViewfinderCorner(color: page.accent)
-                        .rotationEffect(.degrees(270))
-                        .padding(14)
-                }
-
-                HStack(spacing: 14) {
-                    onboardingMetric(title: "LOOK", value: page.id == 0 ? "RECIPE" : "LIVE")
-                    onboardingMetric(title: "FORMAT", value: "35 MM")
-                    onboardingMetric(title: "STATE", value: page.id == 2 ? "KEPT" : "READY")
-                }
+        Group {
+            switch page.id {
+            case 0:
+                recipeFanVisual(accent: page.accent)
+            case 1:
+                viewfinderVisual(accent: page.accent)
+            default:
+                keptFrameVisual(accent: page.accent)
             }
-            .padding(16)
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 284)
+        .frame(height: 290)
+        .background(FilmyTheme.backgroundRaised, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .strokeBorder(FilmyTheme.lineStrong, lineWidth: 1)
         }
-        .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
+        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .accessibilityHidden(true)
-        // The viewfinder card is decorative and already has an accessible
-        // semantic explanation below it. Keep its typography bounded so a
-        // large-text setting cannot make the fixed visual chrome collide.
+        // The visual is decorative and already has an accessible semantic
+        // explanation below it. Keep its typography bounded so a large-text
+        // setting cannot make the fixed chrome collide.
         .dynamicTypeSize(.xSmall ... .xxxLarge)
     }
 
-    private func onboardingMetric(title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.system(.caption2, design: .monospaced).weight(.bold))
-                .foregroundStyle(.white.opacity(0.5))
-                .tracking(0.8)
+    /// Three real recipe renders fanned like film boxes on a shelf.
+    private func recipeFanVisual(accent: Color) -> some View {
+        let recipes = [FilmRecipe.builtIns[6], FilmRecipe.builtIns[1], FilmRecipe.builtIns[2]]
 
-            Text(value)
-                .font(.system(.caption, design: .rounded).weight(.bold))
-                .foregroundStyle(.white.opacity(0.9))
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
+        return ZStack {
+            ForEach(Array(recipes.enumerated()), id: \.element.id) { index, recipe in
+                let isCenter = index == 1
+                VStack(spacing: 8) {
+                    RecipeSwatch(recipe: recipe, isSelected: isCenter, compact: false, showsLabel: false)
+                        .frame(width: 150, height: 104)
+                        .shadow(color: .black.opacity(0.45), radius: 14, y: 8)
+
+                    Text(recipe.name)
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(isCenter ? accent : Color.white.opacity(0.7))
+                }
+                .rotationEffect(.degrees(Double(index - 1) * 9))
+                .offset(x: CGFloat(index - 1) * 96, y: isCenter ? -8 : 22)
+                .scaleEffect(isCenter ? 1 : 0.9)
+                .zIndex(isCenter ? 1 : 0)
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var pageControls: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 8) {
-                HStack(spacing: 7) {
-                    ForEach(Self.pages) { page in
-                        Capsule()
-                            .fill(page.id == selectedPage ? page.accent : Color.white.opacity(0.2))
-                            .frame(width: page.id == selectedPage ? 28 : 7, height: 6)
-                            .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: selectedPage)
+    /// A miniature viewfinder: the live preview shows the recipe, the chrome
+    /// stays at the edges, and the shutter waits for the photographer.
+    private func viewfinderVisual(accent: Color) -> some View {
+        ZStack {
+            RecipeSwatch(recipe: FilmRecipe.builtIns[1], compact: false, showsLabel: false)
+                .padding(-2)
+
+            LinearGradient(
+                colors: [Color.black.opacity(0.35), .clear, Color.black.opacity(0.6)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            VStack {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(accent)
+                        .frame(width: 6, height: 6)
+                    Text("LIVE")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .tracking(0.8)
+                        .foregroundStyle(.white)
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 28)
+                .viewfinderCapsule()
+
+                Spacer()
+
+                HStack(spacing: 8) {
+                    ForEach([1, 2, 6], id: \.self) { index in
+                        RecipeSwatch(recipe: FilmRecipe.builtIns[index], isSelected: index == 1, compact: true, showsLabel: false)
+                            .frame(width: 44, height: 30)
                     }
                 }
 
-                Spacer(minLength: 12)
-
-                Text("Swipe or tap continue")
-                        .font(.system(.caption2, design: .default).weight(.semibold))
-                    .foregroundStyle(FilmyTheme.tertiary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
+                Circle()
+                    .strokeBorder(Color.white, lineWidth: 3)
+                    .frame(width: 52, height: 52)
+                    .overlay {
+                        Circle()
+                            .fill(Color.white)
+                            .frame(width: 42, height: 42)
+                    }
+                    .padding(.top, 10)
             }
+            .padding(16)
+        }
+    }
+
+    /// A kept frame settling into the Roll with its recipe attached.
+    private func keptFrameVisual(accent: Color) -> some View {
+        ZStack {
+            HStack(spacing: 4) {
+                ForEach([2, 6, 4, 1], id: \.self) { index in
+                    RecipeSwatch(recipe: FilmRecipe.builtIns[index], compact: true, showsLabel: false)
+                        .aspectRatio(1, contentMode: .fill)
+                        .frame(height: 72)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+            }
+            .opacity(0.5)
+            .offset(y: 92)
+
+            VStack(spacing: 12) {
+                RecipeSwatch(recipe: FilmRecipe.builtIns[1], isSelected: true, compact: false, showsLabel: false)
+                    .frame(width: 172, height: 118)
+                    .shadow(color: .black.opacity(0.5), radius: 16, y: 10)
+                    .overlay(alignment: .topTrailing) {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 11, weight: .black))
+                            .foregroundStyle(FilmyTheme.background)
+                            .frame(width: 24, height: 24)
+                            .background(accent, in: Circle())
+                            .padding(8)
+                    }
+
+                HStack(spacing: 6) {
+                    Image(systemName: "camera.aperture")
+                        .font(.system(size: 10, weight: .bold))
+                    Text("Muted Color")
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                    Text("·")
+                    Text("Kept")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .frame(height: 28)
+                .viewfinderCapsule()
+            }
+            .offset(y: -30)
+        }
+    }
+
+    // MARK: - Controls
+
+    private var pageControls: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 7) {
+                ForEach(Self.pages) { page in
+                    Capsule()
+                        .fill(page.id == selectedPage ? page.accent : Color.white.opacity(0.2))
+                        .frame(width: page.id == selectedPage ? 26 : 7, height: 6)
+                        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: selectedPage)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Introduction page \(selectedPage + 1) of \(Self.pages.count)")
             .accessibilityValue("Swipe left or right to explore")
@@ -371,23 +358,15 @@ struct OnboardingView: View {
                     Image(systemName: selectedPage == Self.pages.count - 1 ? "camera.fill" : "arrow.right")
                         .accessibilityHidden(true)
                 }
-                .font(.system(.headline, design: .default).weight(.semibold))
-                .foregroundStyle(FilmyTheme.background)
-                .frame(maxWidth: .infinity, minHeight: 56)
-                .background(FilmyTheme.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
-                }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.filmyPrimary)
             .accessibilityIdentifier("onboarding-continue")
             .accessibilityHint(selectedPage == Self.pages.count - 1 ? "Open the camera" : "Move to the next introduction page")
 
             Button("Skip for now") {
                 onFinish()
             }
-            .font(.system(.subheadline, design: .default).weight(.semibold))
+            .font(.system(.subheadline, design: .rounded).weight(.semibold))
             .foregroundStyle(FilmyTheme.secondary)
             .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
             .contentShape(Rectangle())
@@ -395,21 +374,6 @@ struct OnboardingView: View {
         }
         .padding(.horizontal, 22)
         .padding(.bottom, 8)
-    }
-}
-
-private struct ViewfinderCorner: View {
-    let color: Color
-
-    var body: some View {
-        Path { path in
-            path.move(to: CGPoint(x: 1, y: 20))
-            path.addLine(to: CGPoint(x: 1, y: 1))
-            path.addLine(to: CGPoint(x: 20, y: 1))
-        }
-        .stroke(color, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-        .frame(width: 22, height: 22)
-        .accessibilityHidden(true)
     }
 }
 
