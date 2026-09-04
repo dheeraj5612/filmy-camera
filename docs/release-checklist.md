@@ -33,8 +33,10 @@ The current media workflow uses one public-safe generated original in a fresh si
 
 - [ ] Complete iPhone hardware acceptance for lens switching, flash, capture/import parity, save, interruption recovery, and sustained thermal behavior. The completed iPad pass cannot prove iPhone 5× telephoto switching.
 - [ ] Complete a controlled portrait and color comparison before making comparative image-quality claims.
-- [ ] Enter and verify the App Review contact phone and email; both were blank at the latest readback.
-- [ ] Confirm current agreements, tax/banking readiness, review notes, age rating, export compliance, pricing, availability, privacy, and public support/privacy URLs at submission time.
+- [x] Verify the saved App Review contact phone and email through the visible native browser form after reload. The text snapshot omits these values and is not evidence that they are blank.
+- [x] Run Add for Review validation and verify the draft lists iOS App 1.0 / binary 1.0.0 (5) as Item Ready to Submit.
+- [x] Confirm saved review notes, age rating, export compliance, free pricing, availability, privacy and public support/privacy URLs; paid-app, banking, tax and Digital Services Act statuses read Active.
+- [ ] Account Holder must review and accept the updated Developer Program License Agreement. The Business page reports Active (New Agreement Available) for Free Apps and says acceptance is required before app submission.
 - [ ] Submit version 1.0 for App Review and read back the resulting status. Build selection is not submission or public release.
 
 Do not describe the rendering as camera-exact or claim G7 X superiority without controlled same-scene references. Keep the existing original-renderer, non-affiliation, and no-proprietary-data disclosures in the listing.

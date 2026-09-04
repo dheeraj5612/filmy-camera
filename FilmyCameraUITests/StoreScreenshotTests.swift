@@ -2,7 +2,7 @@ import XCTest
 
 @MainActor
 final class StoreScreenshotTests: XCTestCase {
-    private var app: XCUIApplication!
+    private nonisolated(unsafe) var app: XCUIApplication!
 
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -31,7 +31,10 @@ final class StoreScreenshotTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
-        app?.terminate()
+        let launchedApp = app
+        MainActor.assumeIsolated {
+            launchedApp?.terminate()
+        }
     }
 
     func testCaptureCurrentStoreScreens() throws {
