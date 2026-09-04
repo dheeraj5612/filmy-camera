@@ -54,11 +54,12 @@ Filmy Camera is a camera-first photo app with an in-app Roll. Camera access is r
 
 ## Screenshot plan
 
-Capture the same polished flow for each required display size:
+Build matching five-image packs for the iPhone 6.5-inch and iPad 13-inch slots:
 
-1. Camera preview with the recipe rail visible
-2. Recipe detail controls showing tone, color, and grain adjustments
-3. A captured photo with the selected look applied
-4. Recent-photo grid and saved result
+1. `01-g7x-import` — generated public-safe original in G7 X Compact import review
+2. `02-film-import` — the same original in Muted Color import review
+3. `03-monochrome-import` — the same original in Fine Monochrome import review
+4. `04-roll` — the normal app’s populated Roll with the three saved production outputs
+5. `05-photo-detail` — a saved output opened in Roll detail
 
-Use real device captures with permission prompts handled before the final screenshot set. Do not use simulator camera placeholders in the submitted screenshot set. The screenshot assets and final App Store Connect upload remain account-owner release steps.
+These import, review, save, Roll, and detail screens may be captured from the normal app on fresh, photo-seeded simulators because they exercise the real product paths and renderer. Do not use a simulator camera-unavailable placeholder as a camera screenshot or imply that it is a live preview. Capture any physical-camera hero separately on an iPhone, after permission prompts are handled. Keep private fixtures and test-only UI out of submitted media.
