@@ -91,9 +91,9 @@ final class StoreScreenshotTests: XCTestCase {
     ) throws {
         launchNormalApp(recipeID: recipeID)
 
-        let selectedRecipe = app.buttons["recipe-\(recipeID)"]
-        XCTAssertTrue(selectedRecipe.waitForExistence(timeout: 15))
-        XCTAssertEqual(selectedRecipe.value as? String, "Selected")
+        let currentLook = app.buttons["recipe-menu"]
+        XCTAssertTrue(currentLook.waitForExistence(timeout: 15))
+        XCTAssertTrue(currentLook.label.contains(recipeName))
 
         let importPhoto = app.buttons["import-photo"]
         XCTAssertTrue(importPhoto.waitForExistence(timeout: 10))
@@ -127,6 +127,14 @@ final class StoreScreenshotTests: XCTestCase {
                 NSPredicate(format: "label BEGINSWITH 'Filter applied'")
             ).firstMatch.exists
         )
+        let review = app.descendants(matching: .any)["review-screen"]
+        let photo = app.descendants(matching: .any)["review-image"]
+        XCTAssertTrue(review.waitForExistence(timeout: 5))
+        XCTAssertTrue(photo.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(review.frame.width, app.frame.width * 0.95)
+        XCTAssertGreaterThan(photo.frame.width, app.frame.width * 0.42,
+                             "Review must use the display instead of a small iPad card")
+        XCTAssertFalse(photo.frame.intersects(app.buttons["Save filtered photo"].frame))
         attachScreenshot(named: screenshotName)
 
         let save = app.buttons["Save filtered photo"]

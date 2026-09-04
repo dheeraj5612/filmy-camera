@@ -37,6 +37,9 @@ struct SettingsView: View {
                     .padding(.bottom, 40)
                 }
             }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                CameraReturnBar(accessibilityIdentifier: "settings-back-to-camera", action: onBackToCamera)
+            }
             .toolbar(.hidden, for: .navigationBar)
         }
         .onAppear { refreshPermissionState() }
@@ -47,15 +50,8 @@ struct SettingsView: View {
     }
 
     private var settingsHeader: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            BackToCameraButton(
-                accessibilityIdentifier: "settings-back-to-camera",
-                action: onBackToCamera
-            )
-
-            SectionHeading(eyebrow: "FILMY CAMERA \(appVersion)", title: "Settings")
-                .accessibilityLabel("Filmy Camera settings, version \(appVersion)")
-        }
+        SectionHeading(eyebrow: "FILMY CAMERA \(appVersion)", title: "Settings")
+            .accessibilityLabel("Filmy Camera settings, version \(appVersion)")
     }
 
     private var flashSettingDetail: String {

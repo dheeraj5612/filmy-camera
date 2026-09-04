@@ -29,12 +29,6 @@ struct GalleryScreen: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 16) {
-                        BackToCameraButton(
-                            accessibilityIdentifier: "roll-back-to-camera",
-                            action: onBackToCamera
-                        )
-                        .padding(.horizontal, FilmyTheme.pageMargin)
-
                         SectionHeading(
                             eyebrow: "LIBRARY",
                             title: "Roll",
@@ -52,6 +46,9 @@ struct GalleryScreen: View {
                     .padding(.top, 18)
                     .padding(.bottom, 28)
                 }
+            }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                CameraReturnBar(accessibilityIdentifier: "roll-back-to-camera", action: onBackToCamera)
             }
             .toolbar(.hidden, for: .navigationBar)
             .refreshable {
@@ -78,16 +75,13 @@ struct GalleryScreen: View {
         .onChange(of: photoLibrary.localSavedFrames.map(\.assetIdentifier)) { _, _ in
             clearSelectionIfUnavailable()
         }
-        .sheet(item: $selectedAsset) { asset in
+        .fullScreenCover(item: $selectedAsset) { asset in
             GalleryDetailView(
                 asset: asset,
                 photoLibrary: photoLibrary,
                 onBackToCamera: onBackToCamera
             )
-                .presentationDetents([.large])
                 .presentationBackground(FilmyTheme.background)
-                .presentationCornerRadius(30)
-                .presentationDragIndicator(.visible)
         }
     }
 
@@ -598,7 +592,7 @@ private struct GalleryDetailView: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             detailToolbar
         }
-        .overlay(alignment: .bottom) {
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             if let metadata = photoLibrary.metadata(for: asset) {
                 metadataCard(metadata)
                     .padding(.horizontal, 16)

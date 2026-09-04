@@ -82,27 +82,27 @@ enum HapticFeedback {
 
 // MARK: - Design tokens
 
-/// The visual system for Filmy Camera. Surfaces are near-black with a faint
-/// warm cast, ink is a soft warm white, and a single amber accent carries the
-/// "halation" character of film without decorating the viewfinder.
+/// A quiet camera body: neutral surfaces keep attention on the image.
+/// Amber identifies compact digital looks; muted green identifies film.
 enum FilmyTheme {
     // Surfaces
-    static let background = Color(red: 0.043, green: 0.039, blue: 0.035)
-    static let backgroundRaised = Color(red: 0.078, green: 0.071, blue: 0.063)
-    static let panel = Color(red: 0.102, green: 0.094, blue: 0.082)
-    static let panelRaised = Color(red: 0.148, green: 0.136, blue: 0.118)
+    static let background = Color(white: 0.035)
+    static let backgroundRaised = Color(white: 0.065)
+    static let panel = Color(white: 0.10)
+    static let panelRaised = Color(white: 0.15)
     static let line = Color.white.opacity(0.08)
     static let lineStrong = Color.white.opacity(0.14)
 
     // Ink
-    static let primary = Color(red: 0.97, green: 0.955, blue: 0.93)
-    static let secondary = Color(red: 0.97, green: 0.955, blue: 0.93).opacity(0.64)
+    static let primary = Color(white: 0.96)
+    static let secondary = Color(white: 0.96).opacity(0.64)
     // 0.56 keeps 10-11pt supporting text above 4.5:1 on both background and panel.
-    static let tertiary = Color(red: 0.97, green: 0.955, blue: 0.93).opacity(0.56)
+    static let tertiary = Color(white: 0.96).opacity(0.56)
 
     // Signal colors
     static let accent = Color(red: 0.96, green: 0.73, blue: 0.30)
     static let accentWarm = Color(red: 0.95, green: 0.49, blue: 0.36)
+    static let filmAccent = Color(red: 0.64, green: 0.79, blue: 0.66)
     static let mint = Color(red: 0.47, green: 0.86, blue: 0.66)
     static let danger = Color(red: 1.0, green: 0.44, blue: 0.40)
 
@@ -112,11 +112,11 @@ enum FilmyTheme {
     /// The letterbox bands around the viewfinder. Pure black, like a camera
     /// body, so the frame reads as the only picture on screen.
     static let viewfinderBand = Color.black
-    static let viewfinderCornerRadius: CGFloat = 14
+    static let viewfinderCornerRadius: CGFloat = 10
 
     static let cornerRadius: CGFloat = 20
     static let controlRadius: CGFloat = 14
-    static let actionPlateRadius: CGFloat = 24
+    static let actionPlateRadius: CGFloat = 20
     static let minimumHitTarget: CGFloat = 44
     /// Tool-strip controls sit behind a presented sheet at times, where iOS
     /// scales the presenting view to about 92%. 48pt keeps their measured
@@ -126,7 +126,7 @@ enum FilmyTheme {
 
     static let titleFont = Font.system(.title2, design: .default).weight(.bold)
     static let bodyFont = Font.system(.body, design: .default)
-    static let metadataFont = Font.system(.caption, design: .rounded).weight(.semibold)
+    static let metadataFont = Font.system(.caption, design: .default).weight(.medium)
 
     static let pageGradient = LinearGradient(
         colors: [backgroundRaised, background, background],
@@ -192,18 +192,25 @@ struct BackToCameraButton: View {
     }
 }
 
+/// Secondary destinations keep a one-tap return to shooting while scrolling.
+struct CameraReturnBar: View {
+    let accessibilityIdentifier: String
+    let action: () -> Void
+
+    var body: some View {
+        HStack {
+            BackToCameraButton(accessibilityIdentifier: accessibilityIdentifier, action: action)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, FilmyTheme.pageMargin)
+        .padding(.vertical, 6)
+        .background(FilmyTheme.background)
+    }
+}
+
 struct FilmyPageBackground: View {
     var body: some View {
-        ZStack(alignment: .top) {
-            FilmyTheme.pageGradient
-
-            RadialGradient(
-                colors: [FilmyTheme.accent.opacity(0.10), .clear],
-                center: .topTrailing,
-                startRadius: 0,
-                endRadius: 420
-            )
-        }
+        FilmyTheme.pageGradient
         .ignoresSafeArea()
         .allowsHitTesting(false)
     }
@@ -297,11 +304,11 @@ struct FilmyPrimaryButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(.headline, design: .rounded).weight(.bold))
+            .font(.system(.headline, design: .default).weight(.semibold))
             .foregroundStyle(FilmyTheme.background)
             .frame(maxWidth: .infinity, minHeight: 54)
             .padding(.horizontal, 16)
-            .background(FilmyTheme.accent, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+            .background(FilmyTheme.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .opacity(isEnabled ? 1 : 0.5)
             .scaleEffect(configuration.isPressed ? 0.98 : 1)
             .animation(
@@ -317,13 +324,13 @@ struct FilmySecondaryButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(.headline, design: .rounded).weight(.semibold))
+            .font(.system(.headline, design: .default).weight(.semibold))
             .foregroundStyle(FilmyTheme.primary)
             .frame(maxWidth: .infinity, minHeight: 54)
             .padding(.horizontal, 16)
-            .background(FilmyTheme.panelRaised, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+            .background(FilmyTheme.panelRaised, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 17, style: .continuous)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .strokeBorder(FilmyTheme.lineStrong, lineWidth: 1)
             }
             .opacity(isEnabled ? 1 : 0.5)
@@ -358,8 +365,8 @@ struct Eyebrow: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 11, weight: .bold, design: .rounded))
-            .tracking(1.4)
+            .font(.system(size: 11, weight: .semibold, design: .default))
+            .tracking(1.2)
             .foregroundStyle(color)
             .lineLimit(1)
             .minimumScaleFactor(0.8)
@@ -373,7 +380,7 @@ struct FilmyTag: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 10, weight: .black, design: .rounded))
+            .font(.system(size: 10, weight: .bold, design: .default))
             .tracking(0.8)
             .foregroundStyle(filled ? FilmyTheme.background : tint)
             .padding(.horizontal, 8)
@@ -597,7 +604,7 @@ struct CameraStatusPill: View {
                 .shadow(color: (isLive ? FilmyTheme.mint : FilmyTheme.accent).opacity(0.8), radius: 4)
 
             Text(condensedMessage)
-                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .font(.system(size: 11, weight: .semibold, design: .default))
                 .tracking(0.6)
                 .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
                 .fixedSize(horizontal: false, vertical: true)

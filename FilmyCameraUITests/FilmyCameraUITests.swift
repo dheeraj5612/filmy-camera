@@ -48,27 +48,13 @@ final class FilmyCameraUITests: XCTestCase {
     }
 
     func testCameraShellAndRecipeDetails() throws {
-        let cameraTab = app.buttons["camera-tab"]
-        assertMinimumHitTarget(cameraTab, named: "Camera tab")
-        let importPhoto = app.buttons["import-photo"]
-        assertMinimumHitTarget(importPhoto, named: "Import photo")
+        assertMinimumHitTarget(app.buttons["recipe-menu"], named: "Current look")
+        assertMinimumHitTarget(app.buttons["import-photo"], named: "Import photo")
         XCTAssertTrue(app.buttons["Open roll"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.staticTexts["RECIPE"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Natural Standard"].waitForExistence(timeout: 5))
-
-        let recipePicker = app.descendants(matching: .any)["recipe-picker"]
-        XCTAssertTrue(recipePicker.waitForExistence(timeout: 5))
-        XCTAssertLessThanOrEqual(
-            recipePicker.frame.height,
-            150,
-            "The standard recipe picker should remain content-sized"
-        )
-        attachScreenshot(named: "camera-shell-expanded")
-
-        let controlsToggle = app.buttons["camera-chrome-toggle"]
-        if controlsToggle.exists, controlsToggle.label == "Show camera controls" {
-            controlsToggle.tap()
-        }
+        XCTAssertFalse(app.buttons["camera-tab"].exists, "The camera should have one control area")
+        XCTAssertFalse(app.descendants(matching: .any)["recipe-picker"].exists)
+        openRecipeDrawer(in: app)
+        attachScreenshot(named: "camera-look-drawer")
 
         let classicChrome = app.buttons.matching(
             NSPredicate(format: "label BEGINSWITH 'Muted Color'")
@@ -90,8 +76,6 @@ final class FilmyCameraUITests: XCTestCase {
         scrollToHittable(reset, in: app)
         XCTAssertTrue(reset.isHittable, "Reset recipe controls should be reachable")
 
-        let exposure = app.descendants(matching: .any)["exposure-control"]
-        assertMinimumAccessibilityFrame(exposure, named: "Exposure control")
         let fxBlue = app.descendants(matching: .any)["fx-blue-control"]
         XCTAssertTrue(fxBlue.waitForExistence(timeout: 5), "FX Blue control should be discoverable")
         let colorChrome = app.descendants(matching: .any)["recipe-choice-Color Chrome"]
@@ -103,8 +87,12 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Decrease exposure compensation"].exists)
         XCTAssertFalse(app.buttons["Increase exposure compensation"].exists)
 
+        let information = app.buttons["recipe-info-toggle"]
+        scrollToHittable(information, in: app)
+        information.tap()
         let referenceCard = app.descendants(matching: .any)["public-reference-settings"]
-        scrollToHittable(referenceCard, in: app)
+        scrollToHittable(app.staticTexts["PUBLIC REFERENCE"], in: app)
+        XCTAssertTrue(referenceCard.exists)
         XCTAssertTrue(
             app.staticTexts["PUBLIC REFERENCE"].waitForExistence(timeout: 5),
             "Recipe details should expose the public reference settings"
@@ -124,7 +112,7 @@ final class FilmyCameraUITests: XCTestCase {
         ]
         expandedApp.launch()
 
-        XCTAssertTrue(expandedApp.staticTexts["Nostalgic Summer"].waitForExistence(timeout: 8))
+        openRecipeDrawer(in: expandedApp)
         XCTAssertTrue(expandedApp.buttons["Tune Nostalgic Summer"].waitForExistence(timeout: 5))
 
         let selectedRecipe = expandedApp.buttons["recipe-nostalgic-summer"]
@@ -144,8 +132,8 @@ final class FilmyCameraUITests: XCTestCase {
         compactApp.launch()
         defer { compactApp.terminate() }
 
+        openRecipeDrawer(in: compactApp)
         XCTAssertTrue(compactApp.staticTexts["CAMERA PROFILE"].waitForExistence(timeout: 8))
-        XCTAssertTrue(compactApp.staticTexts["G7 X Compact"].waitForExistence(timeout: 5))
 
         let selectedRecipe = compactApp.buttons["recipe-g7x-compact"]
         assertMinimumHitTarget(selectedRecipe, named: "G7 X recipe")
@@ -155,8 +143,11 @@ final class FilmyCameraUITests: XCTestCase {
         assertMinimumHitTarget(tune, named: "Tune G7 X profile")
         tune.tap()
 
+        let information = compactApp.buttons["recipe-info-toggle"]
+        scrollToHittable(information, in: compactApp)
+        information.tap()
         let profile = compactApp.descendants(matching: .any)["g7x-profile-details"]
-        scrollToHittable(profile, in: compactApp)
+        scrollToHittable(compactApp.staticTexts["G7 X PROFILE"], in: compactApp)
         XCTAssertTrue(profile.waitForExistence(timeout: 5))
         XCTAssertTrue(compactApp.staticTexts["G7 X PROFILE"].exists)
         XCTAssertTrue(compactApp.staticTexts["Dedicated compact-digital pipeline"].exists)
@@ -176,7 +167,11 @@ final class FilmyCameraUITests: XCTestCase {
         compactApp.launch()
         defer { compactApp.terminate() }
 
-        XCTAssertTrue(compactApp.staticTexts["CAMERA PROFILE"].waitForExistence(timeout: 8))
+        assertMinimumHitTarget(compactApp.buttons["recipe-menu"], named: "G7 X current look")
+        XCTAssertFalse(compactApp.descendants(matching: .any)["recipe-picker"].exists)
+        let tools = compactApp.buttons["camera-chrome-toggle"]
+        assertMinimumHitTarget(tools, named: "Camera controls")
+        tools.tap()
 
         let captureControls = compactApp.descendants(matching: .any)["g7x-capture-controls"]
         XCTAssertTrue(captureControls.waitForExistence(timeout: 5))
@@ -190,47 +185,34 @@ final class FilmyCameraUITests: XCTestCase {
         grid.tap()
         XCTAssertNotEqual(grid.value as? String, initialGridValue)
 
-        XCTAssertTrue(compactApp.descendants(matching: .any)["recipe-picker"].exists)
+        XCTAssertFalse(compactApp.descendants(matching: .any)["recipe-picker"].exists)
         attachScreenshot(named: "g7x-quick-capture-controls")
     }
 
     func testLandscapeCameraShell() throws {
         XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
 
-        let cameraTab = app.buttons["camera-tab"]
-        assertMinimumHitTarget(cameraTab, named: "Landscape camera tab")
-        let importPhoto = app.buttons["import-photo"]
-        assertMinimumHitTarget(importPhoto, named: "Landscape import photo")
-
-        let controlsToggle = app.buttons["camera-chrome-toggle"]
-        if controlsToggle.waitForExistence(timeout: 2), controlsToggle.label == "Show camera controls" {
-            controlsToggle.tap()
-        }
-
-        let recipeMenu = app.descendants(matching: .any)["recipe-menu"]
-        XCTAssertTrue(recipeMenu.waitForExistence(timeout: 8), "Landscape recipe menu should exist")
-        assertMinimumAccessibilityFrame(recipeMenu, named: "Landscape recipe menu")
-
-        let tune = app.buttons["Tune Muted Color"]
-        assertMinimumHitTarget(tune, named: "Landscape tune recipe")
-
-        // The side column keeps the recipe menu above the capture controls,
-        // with Roll and Tune sharing one row so the column fits an iPhone's
-        // landscape height above the dock.
+        let currentLook = app.buttons["recipe-menu"]
         let roll = app.buttons["Open roll"]
-        assertMinimumHitTarget(roll, named: "Landscape Roll")
-        XCTAssertLessThan(
-            recipeMenu.frame.maxY,
-            tune.frame.minY,
-            "The recipe menu should sit above the capture controls in the side column"
-        )
-        XCTAssertEqual(roll.frame.midY, tune.frame.midY, accuracy: 1, "Roll and Tune share a row")
-        XCTAssertLessThan(
-            roll.frame.maxY,
-            cameraTab.frame.minY,
-            "Landscape capture controls must stay clear of the dock"
-        )
+        let importPhoto = app.buttons["import-photo"]
+        for (element, name) in [(currentLook, "Current look"), (roll, "Roll"), (importPhoto, "Import")] {
+            assertMinimumHitTarget(element, named: "Landscape " + name)
+            assertContained(element, in: app, named: name)
+        }
+        XCTAssertFalse(app.buttons["camera-tab"].exists)
         attachScreenshot(named: "camera-landscape")
+        openRecipeDrawer(in: app)
+        let tune = app.buttons["Tune Muted Color"]
+        let close = app.buttons["recipe-drawer-close"]
+        assertMinimumHitTarget(tune, named: "Landscape Tune")
+        assertMinimumHitTarget(close, named: "Landscape close picker")
+        assertContained(tune, in: app, named: "Tune")
+        assertContained(close, in: app, named: "Close picker")
+        XCTAssertFalse(tune.frame.intersects(close.frame))
+        attachScreenshot(named: "camera-landscape-look-drawer")
+        close.tap()
+        XCTAssertFalse(app.descendants(matching: .any)["recipe-picker"].exists)
     }
 
     #if !targetEnvironment(simulator)
@@ -315,7 +297,7 @@ final class FilmyCameraUITests: XCTestCase {
         let keepFrame = app.buttons["Keep frame"]
         XCTAssertTrue(
             keepFrame.waitForExistence(timeout: 30),
-            "A capture should reach the review sheet"
+            "A capture should reach the review screen"
         )
         XCTAssertTrue(app.buttons["Retake"].exists)
         attachScreenshot(named: "device-capture-review")
@@ -333,7 +315,7 @@ final class FilmyCameraUITests: XCTestCase {
         )
         XCTAssertTrue(
             waitForDisappearance(keepFrame, timeout: 5),
-            "Keeping a frame should dismiss the review sheet"
+            "Keeping a frame should dismiss the review screen"
         )
 
         // `-ui-testing` deliberately forces Photos read access to denied so the
@@ -508,7 +490,7 @@ final class FilmyCameraUITests: XCTestCase {
 
         let shutter = compactApp.buttons["Capture photo"]
         XCTAssertTrue(shutter.waitForExistence(timeout: 20))
-        XCTAssertTrue(compactApp.staticTexts["CAMERA PROFILE"].waitForExistence(timeout: 5))
+        XCTAssertTrue(compactApp.buttons["recipe-menu"].waitForExistence(timeout: 5))
 
         // The app only offers the control when the active camera has a flash,
         // so its absence means this hardware cannot exercise the flash path.
@@ -527,7 +509,7 @@ final class FilmyCameraUITests: XCTestCase {
         let keepFrame = compactApp.buttons["Keep frame"]
         XCTAssertTrue(
             keepFrame.waitForExistence(timeout: 40),
-            "A G7 X flash capture should reach the review sheet"
+            "A G7 X flash capture should reach the review screen"
         )
         attachScreenshot(named: "device-g7x-flash-review")
         // A review that reached the sheet is not enough: the resolved capture
@@ -598,7 +580,7 @@ final class FilmyCameraUITests: XCTestCase {
             shutter.waitForExistence(timeout: 20) && shutter.isEnabled,
             "Normal app launch must reach a live physical camera"
         )
-        XCTAssertTrue(rollApp.staticTexts["G7 X Compact"].waitForExistence(timeout: 5))
+        XCTAssertTrue(rollApp.buttons["recipe-menu"].waitForExistence(timeout: 5))
         attachScreenshot(named: "roll-qa-g7x-viewfinder")
 
         shutter.tap()
@@ -729,45 +711,24 @@ final class FilmyCameraUITests: XCTestCase {
         }
         defer { accessibilityApp.terminate() }
 
-        XCTAssertTrue(accessibilityApp.staticTexts["RECIPE"].waitForExistence(timeout: 8))
-
         let roll = accessibilityApp.buttons["Open roll"]
-        assertMinimumHitTarget(roll, named: "Accessibility-size Roll")
-
-        let cameraTab = accessibilityApp.buttons["camera-tab"]
-        assertMinimumHitTarget(cameraTab, named: "Accessibility-size Camera tab")
-        XCTAssertLessThan(
-            roll.frame.maxY,
-            cameraTab.frame.minY,
-            "Accessibility-size camera actions must remain above the tab bar"
-        )
-
-        let tune = accessibilityApp.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH 'Tune '")
-        ).firstMatch
+        let currentLook = accessibilityApp.buttons["recipe-menu"]
+        let importPhoto = accessibilityApp.buttons["import-photo"]
+        for (element, name) in [(roll, "Roll"), (currentLook, "Current look"), (importPhoto, "Import")] {
+            assertMinimumHitTarget(element, named: "Accessibility-size " + name)
+            assertContained(element, in: accessibilityApp, named: name)
+        }
+        XCTAssertFalse(roll.frame.intersects(currentLook.frame))
+        XCTAssertFalse(currentLook.frame.intersects(importPhoto.frame))
+        XCTAssertFalse(accessibilityApp.descendants(matching: .any)["recipe-picker"].exists)
+        openRecipeDrawer(in: accessibilityApp)
+        let tune = accessibilityApp.buttons["Tune Muted Color"]
         assertMinimumHitTarget(tune, named: "Accessibility-size Tune")
-
-        let recipePicker = accessibilityApp.descendants(matching: .any)["recipe-picker"]
-        XCTAssertTrue(recipePicker.waitForExistence(timeout: 5))
-        XCTAssertLessThanOrEqual(
-            recipePicker.frame.height,
-            96,
-            "Compact recipe rail should not expand into an empty panel"
-        )
-        XCTAssertLessThan(
-            recipePicker.frame.maxY,
-            roll.frame.minY,
-            "Compact recipe rail must remain above the camera actions"
-        )
-        XCTAssertLessThanOrEqual(
-            roll.frame.minY - recipePicker.frame.maxY,
-            32,
-            "The compact recipe rail should remain visually connected to its actions"
-        )
-
-        let captureNotice = accessibilityApp.staticTexts["Capture on iPhone or iPad"]
-        XCTAssertTrue(captureNotice.waitForExistence(timeout: 5))
-        attachScreenshot(named: "accessibility-camera-shell-bounded")
+        assertMinimumHitTarget(accessibilityApp.buttons["recipe-drawer-close"], named: "Close picker")
+        attachScreenshot(named: "accessibility-camera-look-drawer")
+        tune.tap()
+        XCTAssertTrue(accessibilityApp.staticTexts["Recipe controls"].waitForExistence(timeout: 5))
+        assertMinimumHitTarget(accessibilityApp.buttons["Done editing Muted Color"], named: "Done editing")
     }
 
     func testMonochromeEditorHidesNoOpColorControls() throws {
@@ -782,6 +743,7 @@ final class FilmyCameraUITests: XCTestCase {
         monochromeApp.launch()
         defer { monochromeApp.terminate() }
 
+        openRecipeDrawer(in: monochromeApp)
         let tune = monochromeApp.buttons["Tune Neutral Monochrome"]
         XCTAssertTrue(tune.waitForExistence(timeout: 8))
         tune.tap()
@@ -809,7 +771,9 @@ final class FilmyCameraUITests: XCTestCase {
         }
         defer { previewApp.terminate() }
 
-        XCTAssertTrue(previewApp.staticTexts["RECIPE"].waitForExistence(timeout: 8))
+        assertMinimumHitTarget(previewApp.buttons["recipe-menu"], named: "Current look")
+        XCTAssertFalse(previewApp.descendants(matching: .any)["recipe-picker"].exists)
+        XCTAssertFalse(previewApp.descendants(matching: .any)["camera-tool-strip"].exists)
 
         let roll = previewApp.buttons["Open roll"]
         assertMinimumHitTarget(roll, named: "Viewfinder preview Roll")
@@ -838,8 +802,9 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Photo access is off"].waitForExistence(timeout: 5))
         attachScreenshot(named: "gallery-empty-state")
 
+        returnToMainCamera(using: app.buttons["roll-back-to-camera"], named: "Roll back to camera")
         let settings = app.buttons["settings-tab"]
-        assertMinimumHitTarget(settings, named: "Settings tab")
+        assertMinimumHitTarget(settings, named: "Settings")
         settings.tap()
 
         let settingsHeading = app.staticTexts["Settings"]
@@ -875,6 +840,8 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(clearCache.frame.width, 44, "Clear local cache needs a 44pt width")
         XCTAssertGreaterThanOrEqual(clearCache.frame.height, 44, "Clear local cache needs a 44pt height")
         attachScreenshot(named: "settings")
+        // The return action stays pinned even after scrolling deep into Settings.
+        returnToMainCamera(using: app.buttons["settings-back-to-camera"], named: "Scrolled Settings back to camera")
     }
 
     func testEveryTopLevelPageCanReturnToCamera() throws {
@@ -890,10 +857,7 @@ final class FilmyCameraUITests: XCTestCase {
         let settingsBack = app.buttons["settings-back-to-camera"]
         returnToMainCamera(using: settingsBack, named: "Settings back to camera")
 
-        let controlsToggle = app.buttons["camera-chrome-toggle"]
-        if controlsToggle.waitForExistence(timeout: 2), controlsToggle.label == "Show camera controls" {
-            controlsToggle.tap()
-        }
+        openRecipeDrawer(in: app)
 
         let mutedColor = app.buttons.matching(
             NSPredicate(format: "label BEGINSWITH 'Muted Color'")
@@ -921,7 +885,7 @@ final class FilmyCameraUITests: XCTestCase {
             waitForDisappearance(backButton, timeout: 5),
             named + " should leave its source page"
         )
-        XCTAssertTrue(app.buttons["camera-tab"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 5))
     }
 
     private func waitForDisappearance(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
@@ -979,6 +943,22 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertTrue(onboardingApp.buttons["Open roll"].waitForExistence(timeout: 8))
     }
 
+    private func openRecipeDrawer(in target: XCUIApplication) {
+        let drawer = target.descendants(matching: .any)["recipe-drawer"]
+        if !drawer.exists {
+            let currentLook = target.buttons["recipe-menu"]
+            assertMinimumHitTarget(currentLook, named: "Current look")
+            currentLook.tap()
+        }
+        XCTAssertTrue(drawer.waitForExistence(timeout: 5))
+        assertMinimumHitTarget(target.buttons["recipe-drawer-close"], named: "Close look picker")
+    }
+
+    private func assertContained(_ element: XCUIElement, in target: XCUIApplication, named: String) {
+        let tolerance = target.frame.insetBy(dx: -1, dy: -1)
+        XCTAssertTrue(tolerance.contains(element.frame), named + " must remain inside the visible screen")
+    }
+
     private func assertMinimumHitTarget(_ element: XCUIElement, named: String) {
         XCTAssertTrue(element.waitForExistence(timeout: 5), named + " should exist")
         XCTAssertTrue(element.isHittable, named + " should be hittable")
@@ -993,29 +973,37 @@ final class FilmyCameraUITests: XCTestCase {
     }
 
     private func scrollToHittable(_ element: XCUIElement, in app: XCUIApplication) {
-        XCTAssertTrue(element.waitForExistence(timeout: 5))
-        let recipeDetailScroll = app.scrollViews["recipe-detail-scroll"]
-        let scrollView = recipeDetailScroll.exists ? recipeDetailScroll : app.scrollViews.firstMatch
-        for _ in 0..<16 where !element.isHittable {
-            if scrollView.exists {
-                scrollView.swipeUp(velocity: .slow)
-            } else {
-                app.swipeUp(velocity: .slow)
-            }
-        }
+        scrollIntoView(element, in: app, downward: false)
     }
 
     private func scrollBackToHittable(_ element: XCUIElement, in app: XCUIApplication) {
-        XCTAssertTrue(element.waitForExistence(timeout: 5))
+        scrollIntoView(element, in: app, downward: true)
+    }
+
+    private func scrollIntoView(_ element: XCUIElement, in app: XCUIApplication, downward: Bool) {
         let recipeDetailScroll = app.scrollViews["recipe-detail-scroll"]
         let scrollView = recipeDetailScroll.exists ? recipeDetailScroll : app.scrollViews.firstMatch
-        for _ in 0..<16 where !element.isHittable {
-            if scrollView.exists {
-                scrollView.swipeDown(velocity: .slow)
+        for _ in 0..<20 {
+            if element.exists, element.isHittable {
+                let viewport = scrollView.exists ? scrollView.frame.intersection(app.frame) : app.frame
+                // A partly exposed button can report hittable while its center
+                // lies underneath the pinned action bar. Fully reveal small
+                // controls before tapping; large information cards may scroll.
+                if element.frame.height > viewport.height || viewport.contains(element.frame) {
+                    return
+                }
+            }
+            let viewport = scrollView.exists ? scrollView.frame.intersection(app.frame) : app.frame
+            let shouldScrollDown = element.exists
+                ? element.frame.midY < viewport.midY
+                : downward
+            if shouldScrollDown {
+                (scrollView.exists ? scrollView : app).swipeDown(velocity: .slow)
             } else {
-                app.swipeDown(velocity: .slow)
+                (scrollView.exists ? scrollView : app).swipeUp(velocity: .slow)
             }
         }
+        XCTAssertTrue(element.exists && element.isHittable, "The requested control must scroll into view")
     }
 
     // MARK: - Lifecycle and resilience
@@ -1028,6 +1016,16 @@ final class FilmyCameraUITests: XCTestCase {
         return shutter.isEnabled
     }
 
+    private func requiresLiveCamera(in target: XCUIApplication) -> Bool {
+        #if targetEnvironment(simulator)
+        return false
+        #else
+        XCTAssertTrue(waitForLiveShutter(in: target, timeout: 15),
+                      "A physical-device acceptance test must start with a live camera")
+        return true
+        #endif
+    }
+
     private func waitForCameraShell(in target: XCUIApplication, timeout: TimeInterval = 15) -> Bool {
         // The Roll thumbnail sits in the capture row of every camera layout,
         // on hardware and in Simulator preview mode alike.
@@ -1036,7 +1034,7 @@ final class FilmyCameraUITests: XCTestCase {
 
     func testBackgroundingAndForegroundingRestoresTheViewfinder() throws {
         XCTAssertTrue(waitForCameraShell(in: app), "The camera shell should be up before backgrounding")
-        let isPhysical = waitForLiveShutter(in: app, timeout: 15)
+        let isPhysical = requiresLiveCamera(in: app)
 
         for round in 1...2 {
             XCUIDevice.shared.press(.home)
@@ -1059,16 +1057,17 @@ final class FilmyCameraUITests: XCTestCase {
 
     func testTabRoundTripReturnsToTheViewfinderQuickly() throws {
         XCTAssertTrue(waitForCameraShell(in: app))
-        let isPhysical = waitForLiveShutter(in: app, timeout: 15)
+        let isPhysical = requiresLiveCamera(in: app)
 
         for tab in ["roll-tab", "settings-tab"] {
             let destination = app.buttons[tab]
-            XCTAssertTrue(destination.waitForExistence(timeout: 5), "\(tab) should be in the dock")
+            XCTAssertTrue(destination.waitForExistence(timeout: 5), "\(tab) should be reachable from the camera")
             destination.tap()
-            let cameraTab = app.buttons["camera-tab"]
-            XCTAssertTrue(cameraTab.waitForExistence(timeout: 5))
+            let backID = tab == "roll-tab" ? "roll-back-to-camera" : "settings-back-to-camera"
+            let back = app.buttons[backID]
+            XCTAssertTrue(back.waitForExistence(timeout: 5))
             RunLoop.current.run(until: Date(timeIntervalSinceNow: 1))
-            cameraTab.tap()
+            back.tap()
             XCTAssertTrue(waitForCameraShell(in: app), "Returning from \(tab) must show the camera shell")
             if isPhysical {
                 let start = Date()
@@ -1084,7 +1083,8 @@ final class FilmyCameraUITests: XCTestCase {
 
     func testRapidRecipeSwitchingKeepsTheViewfinderResponsive() throws {
         XCTAssertTrue(waitForCameraShell(in: app))
-        let isPhysical = waitForLiveShutter(in: app, timeout: 15)
+        let isPhysical = requiresLiveCamera(in: app)
+        openRecipeDrawer(in: app)
         let candidates = [
             "recipe-provia-standard", "recipe-velvia-vivid", "recipe-astia-soft",
             "recipe-classic-chrome", "recipe-classic-negative", "recipe-g7x-compact",
@@ -1099,7 +1099,8 @@ final class FilmyCameraUITests: XCTestCase {
                 taps += 1
             }
         }
-        XCTAssertGreaterThanOrEqual(taps, 6, "The rail should expose several recipes to switch between")
+        XCTAssertGreaterThanOrEqual(taps, 6, "The look drawer should expose several recipes to switch between")
+        app.buttons["recipe-drawer-close"].tap()
         XCTAssertTrue(waitForCameraShell(in: app, timeout: 5), "The shell must survive rapid recipe switching")
         if isPhysical {
             XCTAssertTrue(waitForLiveShutter(in: app, timeout: 5), "The viewfinder must stay live while switching recipes")
