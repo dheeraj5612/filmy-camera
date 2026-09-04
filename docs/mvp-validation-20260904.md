@@ -56,8 +56,29 @@ Archive validation is intentionally tied to the recorded source commit. To reval
 ## Current store media and device setting
 
 - [GitHub Actions 33915751007](https://github.com/dheeraj5612/filmy-camera/actions/runs/33915751007) passed all required jobs on follow-up commit `eb5f2a5`.
-- [GitHub Actions 33918845284](https://github.com/dheeraj5612/filmy-camera/actions/runs/33918845284) passed release validation but failed while compiling the new opt-in screenshot test under Xcode 16.4. XCTest's synchronous teardown override is nonisolated; the test now snapshots its application reference and terminates it inside `MainActor.assumeIsolated`, matching the existing test holder's isolation treatment. Local simulator build-for-testing passed after the test-only fix. The application source remains identical to the uploaded build; the follow-up commit requires its own CI result.
+- [GitHub Actions 33918845284](https://github.com/dheeraj5612/filmy-camera/actions/runs/33918845284) passed release validation but failed while compiling the new opt-in screenshot test under Xcode 16.4. XCTest's synchronous teardown override is nonisolated; the test now snapshots its application reference and terminates it inside `MainActor.assumeIsolated`, matching the existing test holder's isolation treatment. Local simulator build-for-testing passed after the test-only fix. The application source remains identical to the uploaded build; the successful follow-up CI result is recorded below.
+- [GitHub Actions 33919773477](https://github.com/dheeraj5612/filmy-camera/actions/runs/33919773477) passed all required jobs on `e4b63da`, including hosted unit and UI suites after the screenshot-test isolation fix. The local no-opt-in screenshot test also completed safely with one expected skip and zero failures.
 - `store-iphone-final.xcresult` and `store-ipad-final.xcresult` each passed the opt-in screenshot workflow with no failures, producing five actual screenshots: G7X import, Muted Color import, Fine Monochrome import, populated Roll and photo detail. Earlier screenshot-harness attempts exposed an inherited onboarding identifier and older simulator Photos placeholders; the corrected harness uses the visible Skip label and the newly seeded source position. Those attempts do not establish application failures.
 - These are actual build-5 UI screenshots from dedicated iPhone 11 Pro Max and iPad Pro 13-inch simulators on iOS 26.5. The original generated cafe image was imported through the real renderer and explicitly saved. The packs contain no private photos, composited viewfinders or generated app UI. Visual review verified readable controls, completed loading, distinct results and truthful import captions. The source and generation prompt are retained under `docs/app-store/screenshots/demo-source/`.
 - All five iPhone PNGs are 1242 × 2688; all five iPad PNGs are 2064 × 2752. Updated media validation, ShellCheck, project preflight and metadata checks passed. Apple accepted both uploaded packs; a fresh reload read back five images in each slot in numeric order. No App Review submission was performed.
 - Physical iPad Auto-Lock is now **15 minutes**. A separate temporary signed Settings runner selected it and verified the setting after navigating back. `settings-control/settings-auto-lock-6.xcresult` reports one passed test, no failures. The workflow changed no production app code or passcode or biometric configuration.
+
+## Prepared iPhone lens acceptance
+
+`CameraLensAcceptanceTests` is an opt-in physical iPhone 16 Pro check. It exercises the lens selector and 0.5× → 1× → 5× → 1× zoom, checks the actual session's hardware zoom and continuing frames, and retains a 5× capture with constituent/EXIF evidence. It requires a continuous telephoto stabilization interval and corroborates the photo's EXIF aperture against the discovered telephoto lens. Scene-dependent fallback or insufficient metadata is explicitly inconclusive, not a successful telephoto acceptance result.
+
+Generic **physical iOS** build-for-testing passed with signing disabled, compiling the device-only branch. Simulator build-for-testing also passed. After a transient CoreSimulator server error, `lens-simulator-skip.xcresult` completed with one expected no-opt-in skip and zero failures. This is harness validation; the physical test has not run because the iPhone remains locked.
+
+Use an unlocked, authorized iPhone 16 Pro aimed at a bright, distant subject:
+
+```sh
+TEST_RUNNER_FILMY_RUN_LENS_ACCEPTANCE=1 xcodebuild test \
+  -project FilmyCamera.xcodeproj -scheme FilmyCamera \
+  -destination 'platform=iOS,id=<device-udid>' \
+  -derivedDataPath build/LensAcceptanceDerivedData \
+  -parallel-testing-enabled NO \
+  -only-testing:FilmyCameraTests/CameraLensAcceptanceTests \
+  -resultBundlePath build/mvp-20260904/iphone-lens-acceptance.xcresult
+```
+
+Retain the result bundle locally and inspect the attached capture and metadata. Do not substitute the simulator skip or compile result for physical acceptance.

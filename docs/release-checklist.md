@@ -14,7 +14,7 @@ Current candidate: version 1.0.0, build 5. Historical release notes and older â€
 
 ## Current head and media
 
-- [x] Required CI passed on `eb5f2a5` in [run 33915751007](https://github.com/dheeraj5612/filmy-camera/actions/runs/33915751007). Later media/test changes need their own PR checks; do not attribute an older run to a newer commit.
+- [x] Required CI passed on `e4b63da` in [run 33919773477](https://github.com/dheeraj5612/filmy-camera/actions/runs/33919773477), including the current media and screenshot-test isolation fix. Later test changes need their own PR checks; do not attribute an older run to a newer commit.
 - [x] Finish and inspect the five-image current-app packs for the iPhone 6.5-inch and iPad 13-inch slots.
 - [x] Upload both final packs to App Store Connect, reload, and verify all five names in numeric order in each device slot.
 - [x] Set the connected iPad Auto-Lock to 15 minutes and verify on the device with a temporary Settings runner.
