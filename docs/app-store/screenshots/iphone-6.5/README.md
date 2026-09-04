@@ -8,4 +8,4 @@ This directory contains the five 1242×2688 JPEGs staged for the iPhone 6.5-inch
 4. Recipe details and tuning controls
 5. Roll / recent-photo surface
 
-The current pack mirrors the media already attached to the Filmy Camera 1.0 submission. It was generated from the iPhone 17 Pro UI-test capture set and is suitable for the current simulator-safe submission flow. Replace the preview-state captures with physical-device captures after camera and Photos QA is complete; run `scripts/release/validate-store-media.sh` after replacement.
+This historical pack was generated from an earlier iPhone simulator UI-test capture set. It includes Preview mode, clipped recipe text, and an empty Roll, and is not approved for launch. Replace it with current physical-device camera, review, tuning, and populated Roll screenshots after camera and Photos QA is complete. Run `scripts/release/validate-store-media.sh` after replacement; its structural checks do not establish visual quality or freshness.

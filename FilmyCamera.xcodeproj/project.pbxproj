@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		1768F2BE69F5DF79C97A1832 /* AppIconSource.svg in Resources */ = {isa = PBXBuildFile; fileRef = B9D2815FF289A04B992AC100 /* AppIconSource.svg */; };
 		1FA4D1311CC59621E8A662B9 /* FilmyCameraApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D59729E8AC667A9120C460CB /* FilmyCameraApp.swift */; };
+		250271E0E5A4918FC7762C91 /* StoreScreenshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EC33B29E08BDF6AF6178EFA /* StoreScreenshotTests.swift */; };
 		269C88773100AEDB94BC74A4 /* FlashHardwareDeviceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F50AF57ED0353408C3CC952 /* FlashHardwareDeviceTests.swift */; };
 		2700E6F80817004C1415242D /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 432F02B03418EEADA550733F /* PrivacyInfo.xcprivacy */; };
 		28C6A5B2352ED08BD1E21114 /* CameraViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A9AFC52D1FB5ECED33CB2DA /* CameraViewModel.swift */; };
@@ -27,6 +28,7 @@
 		7DCDAA29B2717548B36D8992 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8F580BECA95D881DF1EB3789 /* Assets.xcassets */; };
 		801054D3CB7F421A0300E64B /* FilteredCameraPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E3E5451BF5130228EAD7B57 /* FilteredCameraPreview.swift */; };
 		8C7CB45FC3BFE9E2C786ACCF /* PhotoOutputEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AD7C3AEFA8B673A5F790009 /* PhotoOutputEncoderTests.swift */; };
+		9962D2011C0D8FAA6CF131B3 /* CameraLensAcceptanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0569FE61E3015B082CAB8031 /* CameraLensAcceptanceTests.swift */; };
 		AF1962852DF723AD8B04E986 /* CameraScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57D96867146ACDDA4F134F19 /* CameraScreen.swift */; };
 		B0CAE865F8D5D837818DF498 /* RecipePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E85F3412BBC965E4A33B9EB /* RecipePickerView.swift */; };
 		B22522279FEB9D04C091754C /* CameraViewModelRenderingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5373778E34C64A9AC521C02 /* CameraViewModelRenderingTests.swift */; };
@@ -63,6 +65,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		0569FE61E3015B082CAB8031 /* CameraLensAcceptanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraLensAcceptanceTests.swift; sourceTree = "<group>"; };
 		09CCB0FEDDDA669EB40BAF2B /* RecipeDetailCommitPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeDetailCommitPolicyTests.swift; sourceTree = "<group>"; };
 		10A0F8269AA5365633E9A3C0 /* GalleryScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalleryScreen.swift; sourceTree = "<group>"; };
 		1E3E5451BF5130228EAD7B57 /* FilteredCameraPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilteredCameraPreview.swift; sourceTree = "<group>"; };
@@ -76,6 +79,7 @@
 		39AFAD26579DD804EBC3552B /* RendererPerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RendererPerformanceTests.swift; sourceTree = "<group>"; };
 		3E54A0716052C16B09DBEF38 /* PhotoOutputEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoOutputEncoder.swift; sourceTree = "<group>"; };
 		3E85F3412BBC965E4A33B9EB /* RecipePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipePickerView.swift; sourceTree = "<group>"; };
+		3EC33B29E08BDF6AF6178EFA /* StoreScreenshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreScreenshotTests.swift; sourceTree = "<group>"; };
 		432F02B03418EEADA550733F /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		535194C6145CBC3D755665B3 /* ColorSpaceBoundaryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorSpaceBoundaryTests.swift; sourceTree = "<group>"; };
 		53925B09E478B6CD4AF36BE1 /* CaptureReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureReviewView.swift; sourceTree = "<group>"; };
@@ -119,6 +123,7 @@
 		2B5AB398864BBC150E221C4B /* FilmyCameraTests */ = {
 			isa = PBXGroup;
 			children = (
+				0569FE61E3015B082CAB8031 /* CameraLensAcceptanceTests.swift */,
 				34105C69677310EA27B9F6C4 /* CameraServiceAvailabilityTests.swift */,
 				F595081C082AD030B6FE6A2F /* CameraViewModelPersistenceTests.swift */,
 				D5373778E34C64A9AC521C02 /* CameraViewModelRenderingTests.swift */,
@@ -177,6 +182,7 @@
 			isa = PBXGroup;
 			children = (
 				61617C6B4DB09D291F5DEA10 /* FilmyCameraUITests.swift */,
+				3EC33B29E08BDF6AF6178EFA /* StoreScreenshotTests.swift */,
 			);
 			path = FilmyCameraUITests;
 			sourceTree = "<group>";
@@ -344,6 +350,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9962D2011C0D8FAA6CF131B3 /* CameraLensAcceptanceTests.swift in Sources */,
 				C4D440CDE09BDCC292A6DCB8 /* CameraServiceAvailabilityTests.swift in Sources */,
 				E1D802D0212D6E268DD15A8E /* CameraViewModelPersistenceTests.swift in Sources */,
 				B22522279FEB9D04C091754C /* CameraViewModelRenderingTests.swift in Sources */,
@@ -391,6 +398,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C70373098CEE45627237523A /* FilmyCameraUITests.swift in Sources */,
+				250271E0E5A4918FC7762C91 /* StoreScreenshotTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -511,7 +519,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 6;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 6ALSCF5GBV;
 				ENABLE_NS_ASSERTIONS = NO;
@@ -575,7 +583,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 6;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 6ALSCF5GBV;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;

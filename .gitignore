@@ -9,6 +9,9 @@ DerivedData/
 .derived-launch/
 .derived-ui-hardening/
 .ci/
+artifacts/
+*.trace/
+*.xcresult/
 *.xcuserstate
 xcuserdata/
 *.moved-aside
@@ -17,6 +20,7 @@ xcuserdata/
 .build/
 .swiftpm/
 Packages/
+FilmyCameraTests/Fixtures/
 
 # Local release credentials and archives
 *.p12

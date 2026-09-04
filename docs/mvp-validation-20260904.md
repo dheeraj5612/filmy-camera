@@ -1,0 +1,94 @@
+# MVP validation — September 4, 2026
+
+Uploaded baseline: version 1.0.0, build 5, archived and uploaded from source `d9ef13836fdacea4929dd60cddb32b8eb0afd785`, on branch `codex/mvp-launch-sweep-20260904`. Application source stayed unchanged through `2c12d0e`. The post-review save fix below advances the source candidate to build 6, which needs its own archive and upload. This record distinguishes the app installed on test hardware from the version available through Apple. Local result bundles and photos stay under ignored `build/mvp-20260904/`; no private photographic fixtures are included in the project or release.
+
+## Post-review save fix and latest release state
+
+The automated review at `2c12d0e` found that Photos success could close review before the detached local JPEG write and index update finished. With Add Photos Only access, this local copy supplies the in-app Roll. Build 6 makes the completion chain await that write and index update while keeping filesystem work off the main actor. Photos remains the source of truth: a cache failure after a successful Photos write does not report a failed save that would encourage duplicate assets.
+
+`build6-cache-unit.xcresult` passed the focused simulator suite: 19 tests passed, one physical-only test skipped, zero failures. Final generic physical-iOS build-for-testing also passed, including the device-only branches. The opt-in physical integration test snapshots the new Roll entry inside the actual save callback, then verifies the cached JPEG bytes and restoration in a new service instance. A separate normal-app UI test covers add-only capture/save and Roll detail after relaunch. Physical results must be recorded separately; compilation and the simulator skip do not prove those flows.
+
+A second review finding about one-shot autofocus was rejected after examining the state contract. `focusExposureLocked` records the user's explicit AE/AF Lock request; it is not a mirror of hardware focus mode. Ordinary tap-to-focus and manual unlock already clear that flag while using one-shot metering on devices that cannot track continuously. No focus behavior was changed in response to that finding.
+
+Subsequent App Store Connect readbacks verified **manual release** and an **Active** updated Free Apps agreement effective September 4. These supersede the earlier automatic-release and pending-agreement observations below. Build 5 was added to a review draft but was not submitted. Build 6 must replace it before the final submission decision. All required CI checks passed at `2c12d0e` in [run 33921457584](https://github.com/dheeraj5612/filmy-camera/actions/runs/33921457584); that result does not validate the later build 6 change.
+
+## Scope and changes
+
+Astra Ultra reviewed all 19 production Swift files and the complete tracked configuration/resource/release inventory. Sol and Luna implemented bounded camera, renderer/cache, and interface fixes. The existing uncommitted camera redesign was preserved. The [audit](mvp-audit-20260904.md) records source coverage and remaining acceptance limits.
+
+Changes include hardware-scaled zoom ceilings, actual AE/AF restoration, terminal capture-error recovery, import preview suspension, consistent G7X portrait context for capture/import, typed save recovery, asynchronous JPEG caching with encoded dimensions and clear-generation protection, stable thumbnail identity, reduced thumbnail work, bounded gallery gestures, iPad sharing, applicable monochrome controls, contextual camera guidance, busy navigation, and camera idle-timer ownership. Release preparation now removes temporary credential staging on normal/error/signal exits.
+
+## Executed checks
+
+| Evidence | Result | Scope |
+| --- | --- | --- |
+| `unit-iphone.xcresult` | 161 passed, 3 skipped | Initial simulator unit suite with ten private local photo fixtures; photographic G7X/Fuji/creator sheets visually inspected. |
+| `ui-iphone.xcresult` | 15 passed, 2 skipped | Simulator UI/navigation/onboarding, portrait/landscape and large text. Predates final thumbnail/idle/navigation updates. |
+| `final-unit-iphone.xcresult` | 158 passed, 6 skipped | Final color-conversion and strict fixture tests compiled; no local fixtures bundled. Three photo-gallery tests, hardware-only checks and opt-in timing account for skips. |
+| `ipad-validation.xcresult` | 175 passed, 6 skipped | iPad Pro 11-inch (2nd generation), iPadOS 26.6.1, development-signed build 5. Includes real shutter, G7X flash with flash-fired review, Photos save, import/save, retake, lifecycle, and responsive recipe switches. Predates the final busy-navigation fix. |
+| Release cleanup sentinel test | Passed | Normal exit, explicit failure and SIGTERM remove fake key staging. No real credentials used. |
+| Public legal/support website | Passed | Landing, privacy, support and terms rendered in browser. GitHub Pages deployment was already live; this sweep did not redeploy it. |
+
+Hardware screenshots show a stationary indoor fabric/wallet scene. They establish capture and visible controls, but are unsuitable as final store artwork or a controlled portrait/color comparison. The G7X flash review explicitly reports flash fired. The saved JPEG readback confirmed both capture and import outputs at 3024 × 4032, orientation 1, Filmy Camera software attribution, recipe provenance and no GPS metadata. Normal-mode testing also reached a populated Roll and verified zoom, pan and reset. The iPad activity controller appeared as a popover rather than an XCTest sheet; the assertion was corrected to identify its visible Copy and Close controls.
+
+## Live distribution readback
+
+App Store Connect was inspected in an authenticated browser on September 4. The initial state was Developer Rejected with build 3 selected. Build 5 subsequently uploaded successfully through Xcode, completed processing and became Ready to Submit. Build 5 was selected and saved; a separate fresh browser tab confirmed the version is now Prepare for Submission with build 5 associated. The five historical iPhone screenshots were replaced, and the previously empty iPad 13-inch slot now has five current images. A fresh reload confirmed both sets in 01–05 order with build 5 still selected. Review-contact phone/email were verified as populated in the visible native browser form after a fresh reload. The browser text snapshot omits those values; its apparent blanks must not be treated as missing saved metadata. The published privacy disclosure says Data Not Collected; pricing was verified at $0.00 with 175 available regions. Updated description and review notes were saved and read back after reload. The public App Store URL for app ID 6801404866 returned HTTP 404.
+
+These observations supersede older checklist statements that describe a build as current. An installed development build, an uploaded TestFlight build, and a public App Store release are separate states.
+
+Apple's **Add for Review** validation succeeded. The draft submission lists iOS App 1.0, binary 1.0.0 (5), as **Item Ready to Submit** with an enabled **Submit for Review** button. This prepares the draft; it does not send it to Apple. Automatic release after approval remains the selected setting, so final submission requires the user's confirmation.
+
+The Business page reports an updated Developer Program License Agreement that the Account Holder must accept before submitting apps. The agreement is open for the user's review; it has not been accepted by the agent. Paid Apps, banking, tax and Digital Services Act statuses read Active. The existing Free Apps agreement reads Active (New Agreement Available).
+
+## Remaining launch acceptance
+
+- Final regression, device timing and the resolved test-harness issues are recorded below. Sustained thermal behavior and a controlled portrait/color calibration session remain outside this stationary indoor pass.
+- Verify iPhone hardware-specific lens/flash behavior. A fresh physical iPhone lock-state query still failed with CoreDevice error 10003 / RemotePairing error 1016 because it had not been unlocked recently. The connected iPad cannot establish 5x telephoto switching.
+- Current import/review/Roll store images are complete and saved in both required device slots. A physical iPhone camera hero can supplement them; no generated image is presented as a live camera capture.
+- Complete final Apple submission. The signed archive/IPA, source-commit CI, upload processing, saved build selection and draft validation are complete; submission and public release are not complete.
+- Establish controlled same-scene G7X/flag7x/vendor references before claiming superior or camera-exact image quality. Current G7X live preview deliberately omits still-photo subject analysis; capture and import use matching detected subject context.
+
+## Final-source regression and release evidence
+
+- `committed-unit-iphone.xcresult`: 159 passed, 6 skipped, 0 failed (165 total).
+- `final-regression-iphone.xcresult`: 56 passed, 2 skipped, 0 failed, covering camera publication and simulator UI after the final production edits.
+- `ipad-final-regression.xcresult`: 176 passed, 2 failed, 5 skipped. The earlier SwiftUI publishing warnings are gone. The only runtime warning is the intentionally direct flash diagnostic in the test harness, not production camera startup. The new Roll test reached the actual share popover but looked for an XCTest sheet. The long capture-sheet run lost its test launch session and reported SIGKILL; available diagnostics contained no crash/Jetsam report proving which process or cause. These failures are retained as evidence rather than rewritten as a passing full-suite run.
+- `ipad-focused-acceptance.xcresult`: both focused tests passed, zero skips/failures. The normal G7X flow verified save, populated Roll, pinch/pan/reset, activity-popover presentation and cancellation. The complete 13-recipe flash-off/flash-on pass produced all 26 review images. The earlier test-session termination did not recur; its cause remains unproven.
+- `ipad-performance.xcresult`: both opt-in tests passed. Five app launches measured 0.499–0.522 seconds (mean about 0.507 seconds). On Apple A12Z, G7X rendering took 14.2 ms at 834 × 1112, 21.7 ms at 1206 × 1610, and 41.9 ms at 1668 × 2224. Production preview is capped at 1.3 MP. These isolated rendering timings are not a claim of sustained whole-app frame rate.
+- [GitHub Actions 33914142237](https://github.com/dheeraj5612/filmy-camera/actions/runs/33914142237) passed all required jobs on source `d9ef138` with hosted Xcode 16.4.
+- `build/FilmyCamera-d9ef138-signed.xcarchive` passed distribution signing, source provenance, privacy and matching executable/dSYM architecture UUID checks. `build/export-d9ef138/FilmyCamera.ipa` passed independent IPA/archive parity validation; SHA-256 `7b1c0670c7a9a6120082968c184caa904290c0bce005c6a2afe5dc3b370880db`.
+- The first native upload attempt failed because Xcode lacked a saved account token. After the user signed in, the retry succeeded. Apple completed processing build 5, and the fresh version page read back build 5 in Prepare for Submission.
+
+Archive validation is intentionally tied to the recorded source commit. To revalidate this archived build after later test/documentation commits, use a clean checkout of `d9ef138`; do not change or restamp archive provenance.
+
+
+## Current store media and device setting
+
+- [GitHub Actions 33915751007](https://github.com/dheeraj5612/filmy-camera/actions/runs/33915751007) passed all required jobs on follow-up commit `eb5f2a5`.
+- [GitHub Actions 33918845284](https://github.com/dheeraj5612/filmy-camera/actions/runs/33918845284) passed release validation but failed while compiling the new opt-in screenshot test under Xcode 16.4. XCTest's synchronous teardown override is nonisolated; the test now snapshots its application reference and terminates it inside `MainActor.assumeIsolated`, matching the existing test holder's isolation treatment. Local simulator build-for-testing passed after the test-only fix. The application source remains identical to the uploaded build; the successful follow-up CI result is recorded below.
+- [GitHub Actions 33919773477](https://github.com/dheeraj5612/filmy-camera/actions/runs/33919773477) passed all required jobs on `e4b63da`, including hosted unit and UI suites after the screenshot-test isolation fix. The local no-opt-in screenshot test also completed safely with one expected skip and zero failures.
+- `store-iphone-final.xcresult` and `store-ipad-final.xcresult` each passed the opt-in screenshot workflow with no failures, producing five actual screenshots: G7X import, Muted Color import, Fine Monochrome import, populated Roll and photo detail. Earlier screenshot-harness attempts exposed an inherited onboarding identifier and older simulator Photos placeholders; the corrected harness uses the visible Skip label and the newly seeded source position. Those attempts do not establish application failures.
+- These are actual build-5 UI screenshots from dedicated iPhone 11 Pro Max and iPad Pro 13-inch simulators on iOS 26.5. The original generated cafe image was imported through the real renderer and explicitly saved. The packs contain no private photos, composited viewfinders or generated app UI. Visual review verified readable controls, completed loading, distinct results and truthful import captions. The source and generation prompt are retained under `docs/app-store/screenshots/demo-source/`.
+- All five iPhone PNGs are 1242 × 2688; all five iPad PNGs are 2064 × 2752. Updated media validation, ShellCheck, project preflight and metadata checks passed. Apple accepted both uploaded packs; a fresh reload read back five images in each slot in numeric order. No App Review submission was performed.
+- Physical iPad Auto-Lock is now **15 minutes**. A separate temporary signed Settings runner selected it and verified the setting after navigating back. `settings-control/settings-auto-lock-6.xcresult` reports one passed test, no failures. The workflow changed no production app code or passcode or biometric configuration.
+
+## Prepared iPhone lens acceptance
+
+`CameraLensAcceptanceTests` is an opt-in physical iPhone 16 Pro check. It exercises the lens selector and 0.5× → 1× → 5× → 1× zoom, checks the actual session's hardware zoom and continuing frames, and retains a 5× capture with constituent/EXIF evidence. It requires a continuous telephoto stabilization interval and corroborates the photo's EXIF aperture against the discovered telephoto lens. Scene-dependent fallback or insufficient metadata is explicitly inconclusive, not a successful telephoto acceptance result.
+
+Generic **physical iOS** build-for-testing passed with signing disabled, compiling the device-only branch. Simulator build-for-testing also passed. After a transient CoreSimulator server error, `lens-simulator-skip.xcresult` completed with one expected no-opt-in skip and zero failures. This is harness validation; the physical test has not run because the iPhone remains locked.
+
+Use an unlocked, authorized iPhone 16 Pro aimed at a bright, distant subject:
+
+```sh
+TEST_RUNNER_FILMY_RUN_LENS_ACCEPTANCE=1 xcodebuild test \
+  -project FilmyCamera.xcodeproj -scheme FilmyCamera \
+  -destination 'platform=iOS,id=<device-udid>' \
+  -derivedDataPath build/LensAcceptanceDerivedData \
+  -parallel-testing-enabled NO \
+  -only-testing:FilmyCameraTests/CameraLensAcceptanceTests \
+  -resultBundlePath build/mvp-20260904/iphone-lens-acceptance.xcresult
+```
+
+Retain the result bundle locally and inspect the attached capture and metadata. Do not substitute the simulator skip or compile result for physical acceptance.

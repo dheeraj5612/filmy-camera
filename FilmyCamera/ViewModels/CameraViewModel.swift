@@ -176,6 +176,7 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var isImporting = false
     @Published private(set) var isSaving = false
     @Published private(set) var saveErrorMessage: String?
+    @Published private(set) var saveErrorRequiresSettings = false
     @Published private(set) var toastMessage: String?
     @Published private(set) var toastStyle: ToastStyle = .success
     @Published private(set) var lastCaptureDate: Date?
@@ -315,6 +316,7 @@ final class CameraViewModel: ObservableObject {
         guard !isCapturing, !isImporting else { return }
         isCapturing = true
         saveErrorMessage = nil
+        saveErrorRequiresSettings = false
         let recipe = selectedRecipe
         let viewportSize = camera.previewViewportSize
         // Use the drawable the viewfinder really rendered into: its scale
@@ -370,11 +372,15 @@ final class CameraViewModel: ObservableObject {
                     }
 
                     DispatchQueue.main.async {
-                        guard let self else { return }
+                        guard let self else {
+                            camera.setFrameDeliveryPaused(false)
+                            return
+                        }
                         guard let renderedPhoto else {
                             // CameraScreen owns session lifecycle. Ending the
                             // capture without a review lets its visibility-aware
                             // policy decide whether the camera should resume.
+                            camera.setFrameDeliveryPaused(false)
                             self.isCapturing = false
                             self.showToast("The selected look could not be rendered. Try the capture again.", style: .error)
                             return
@@ -393,11 +399,13 @@ final class CameraViewModel: ObservableObject {
         }
     }
 
-    func importPhoto(data: Data) async {
+    func importPhoto(data: Data, camera: CameraService? = nil) async {
         guard !isCapturing, !isImporting, !isSaving, reviewImage == nil else { return }
 
         isImporting = true
         saveErrorMessage = nil
+        saveErrorRequiresSettings = false
+        camera?.setFrameDeliveryPaused(true)
         let recipe = selectedRecipe
         let importedAt = Date()
 
@@ -412,8 +420,12 @@ final class CameraViewModel: ObservableObject {
         }.value
 
         isImporting = false
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled else {
+            camera?.setFrameDeliveryPaused(false)
+            return
+        }
         guard let renderedPhoto else {
+            camera?.setFrameDeliveryPaused(false)
             showToast("That photo could not be opened. Try a different image.", style: .error)
             return
         }
@@ -439,15 +451,17 @@ final class CameraViewModel: ObservableObject {
 
         isSaving = true
         saveErrorMessage = nil
+        saveErrorRequiresSettings = false
         photoLibrary.save(
             image: reviewImage,
             imageData: reviewImageData,
             recipe: reviewRecipe,
             capturedAt: reviewCapturedAt ?? Date()
-        ) { [weak self] saved in
+        ) { [weak self] result in
             guard let self else { return }
             self.isSaving = false
-            if saved {
+            switch result {
+            case .success:
                 self.lastCaptureDate = self.reviewCapturedAt ?? Date()
                 self.reviewImage = nil
                 self.reviewImageData = nil
@@ -455,9 +469,11 @@ final class CameraViewModel: ObservableObject {
                 self.reviewRecipe = nil
                 self.reviewSource = .camera
                 self.reviewIsFullResolution = true
+                self.saveErrorRequiresSettings = false
                 self.showToast("Saved with \(reviewRecipe.name)")
-            } else {
-                self.saveErrorMessage = "Photo access is needed to save this frame. Enable Photos access in Settings, then try again."
+            case .failure(let error):
+                self.saveErrorMessage = error.localizedDescription
+                self.saveErrorRequiresSettings = error == .accessDenied
                 HapticFeedback.play(.error)
             }
         }
@@ -472,6 +488,7 @@ final class CameraViewModel: ObservableObject {
         reviewSource = .camera
         reviewIsFullResolution = true
         saveErrorMessage = nil
+        saveErrorRequiresSettings = false
     }
 
     private func showToast(_ message: String, style: ToastStyle = .success) {
@@ -632,10 +649,19 @@ final class CameraViewModel: ObservableObject {
         ))
         let framedInput = Self.boundedImportInput(unboundedInput)
         let isFullResolution = framedInput.extent.size == unboundedInput.extent.size
+        let renderContext: FilmRenderer.CaptureContext
+        if recipe.filmBase == .compactDigital {
+            renderContext = FilmRenderer.CaptureContext(
+                subjectRegions: FilmRenderer.portraitSubjectRegions(in: framedInput)
+            )
+        } else {
+            renderContext = .standard
+        }
         let filtered = FilmRenderer.render(
             framedInput,
             recipe: recipe,
-            quality: .export
+            quality: .export,
+            captureContext: renderContext
         )
         guard let output = FilmRenderer.outputCGImage(filtered, from: filtered.extent),
               let data = PhotoOutputEncoder.jpegData(

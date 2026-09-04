@@ -18,6 +18,11 @@ struct LocalSavedFrame: Identifiable, Hashable, Sendable {
     var id: String { assetIdentifier }
 }
 
+struct PhotoPixelDimensions: Equatable, Sendable {
+    let width: Int
+    let height: Int
+}
+
 enum PhotoLibraryGalleryAsset: Identifiable {
     case photos(PHAsset)
     case cached(LocalSavedFrame)
@@ -115,6 +120,24 @@ enum PhotoLibraryServiceError: LocalizedError, Sendable {
     }
 }
 
+enum PhotoLibrarySaveError: LocalizedError, Equatable, Sendable {
+    case accessDenied
+    case writeFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .accessDenied:
+            return "Photo access is needed to save this frame. Enable Photos access in Settings, then try again."
+        case .writeFailed:
+            return "Photos could not save this frame. Keep the review open and try again in a moment."
+        }
+    }
+
+    static func failure(for authorizationStatus: PHAuthorizationStatus) -> Self {
+        PhotoLibraryAuthorizationPolicy.canAdd(authorizationStatus) ? .writeFailed : .accessDenied
+    }
+}
+
 enum PhotoLibraryCompletionBridge {
     private final class MainActorCompletionBox: @unchecked Sendable {
         private let completion: @MainActor (Bool) -> Void
@@ -130,6 +153,20 @@ enum PhotoLibraryCompletionBridge {
         }
     }
 
+    private final class MainActorAsyncCompletionBox: @unchecked Sendable {
+        private let completion: @MainActor (Bool) async -> Void
+
+        init(completion: @escaping @MainActor (Bool) async -> Void) {
+            self.completion = completion
+        }
+
+        nonisolated func callAsynchronously(with success: Bool) {
+            Task { @MainActor in
+                await completion(success)
+            }
+        }
+    }
+
     /// PhotoKit invokes change completions on its own serial queue. Build the
     /// callback outside main-actor isolation, then explicitly hop before
     /// touching service state or SwiftUI-facing completion handlers.
@@ -137,6 +174,17 @@ enum PhotoLibraryCompletionBridge {
         _ completion: @escaping @MainActor (Bool) -> Void
     ) -> @Sendable (Bool, Error?) -> Void {
         let box = MainActorCompletionBox(completion: completion)
+        return { success, _ in
+            box.callAsynchronously(with: success)
+        }
+    }
+
+    /// Async variant used when a PhotoKit result must await local durability
+    /// before the UI is told that the save is complete.
+    nonisolated static func mainActorAsync(
+        _ completion: @escaping @MainActor (Bool) async -> Void
+    ) -> @Sendable (Bool, Error?) -> Void {
+        let box = MainActorAsyncCompletionBox(completion: completion)
         return { success, _ in
             box.callAsynchronously(with: success)
         }
@@ -408,6 +456,7 @@ final class PhotoLibraryService: ObservableObject {
     }
 
     private var cacheMaintenanceTask: Task<Void, Never>?
+    private var cacheWriteGeneration: UInt64 = 0
 
     /// Runs migration, reconciliation, budget trimming, and share-file pruning
     /// on a background executor, then applies the result on the main actor.
@@ -596,7 +645,7 @@ final class PhotoLibraryService: ObservableObject {
         imageData: Data? = nil,
         recipe: FilmRecipe,
         capturedAt: Date = Date(),
-        completion: @escaping @MainActor (Bool) -> Void
+        completion: @escaping @MainActor (Result<Void, PhotoLibrarySaveError>) -> Void
     ) {
         Task { @MainActor in
             let status = PHPhotoLibrary.authorizationStatus(for: .addOnly)
@@ -609,7 +658,7 @@ final class PhotoLibraryService: ObservableObject {
             addOnlyAuthorizationStatus = resolvedStatus
 
             guard PhotoLibraryAuthorizationPolicy.canAdd(resolvedStatus) else {
-                completion(false)
+                completion(.failure(.accessDenied))
                 return
             }
 
@@ -623,14 +672,15 @@ final class PhotoLibraryService: ObservableObject {
             let cacheData = imageData.flatMap { $0.isEmpty ? nil : $0 }
                 ?? image.jpegData(compressionQuality: 0.95)
 
-            let photoWriteCompletion = PhotoLibraryCompletionBridge.mainActor { [weak self] success in
+            let photoWriteCompletion = PhotoLibraryCompletionBridge.mainActorAsync { [weak self] success in
                 guard let self else { return }
                 guard success, let assetIdentifier = assetIdentifierBox.get() else {
-                    completion(false)
+                    let currentStatus = PHPhotoLibrary.authorizationStatus(for: .addOnly)
+                    completion(.failure(PhotoLibrarySaveError.failure(for: currentStatus)))
                     return
                 }
 
-                self.rememberSavedAsset(
+                await self.rememberSavedAsset(
                     assetIdentifier,
                     metadata: metadata,
                     imageData: cacheData,
@@ -638,7 +688,7 @@ final class PhotoLibraryService: ObservableObject {
                 )
                 guard canManageAppAlbum else {
                     self.refresh()
-                    completion(true)
+                    completion(.success(()))
                     return
                 }
 
@@ -648,7 +698,7 @@ final class PhotoLibraryService: ObservableObject {
                     // fails. Do not report a false save failure or ask the user to
                     // retry and create a duplicate asset.
                     _ = albumSaved
-                    completion(true)
+                    completion(.success(()))
                 }
             }
 
@@ -781,7 +831,7 @@ final class PhotoLibraryService: ObservableObject {
         metadata: SavedFrameMetadata,
         imageData: Data?,
         image: UIImage
-    ) {
+    ) async {
         savedAssetIdentifiers = PhotoLibraryAssetOwnership.adding(
             identifier,
             to: savedAssetIdentifiers,
@@ -792,7 +842,7 @@ final class PhotoLibraryService: ObservableObject {
         metadataByAssetIdentifier = metadataByAssetIdentifier.filter { retainedIdentifiers.contains($0.key) }
         persistMetadata()
         pruneResources(keeping: savedAssetIdentifiers)
-        cacheFrame(
+        await cacheFrame(
             identifier: identifier,
             imageData: imageData,
             fallbackImage: image
@@ -901,7 +951,7 @@ final class PhotoLibraryService: ObservableObject {
         }
     }
 
-    private func cacheFrame(identifier: String, imageData: Data?, fallbackImage: UIImage) {
+    private func cacheFrame(identifier: String, imageData: Data?, fallbackImage: UIImage) async {
         guard let data = imageData, !data.isEmpty,
               let directoryURL = localFramesDirectoryURL else {
             return
@@ -909,34 +959,82 @@ final class PhotoLibraryService: ObservableObject {
 
         let filename = "\(UUID().uuidString).jpg"
         guard let resourceURL = localFrameURL(for: filename) else { return }
-        do {
-            try FileManager.default.createDirectory(
-                at: directoryURL,
-                withIntermediateDirectories: true
-            )
-            protectLocalResource(at: directoryURL)
-            try data.write(to: resourceURL, options: .atomic)
-            protectLocalResource(at: resourceURL)
+        let dimensions = Self.pixelDimensions(in: data, fallbackImage: fallbackImage)
+        let generation = cacheWriteGeneration
 
-            var resources = savedFrameResources
-            if let previousResource = resources[identifier], previousResource.filename != filename {
-                if let previousResourceURL = localFrameURL(for: previousResource.filename) {
-                    try? FileManager.default.removeItem(at: previousResourceURL)
-                }
-            }
-            let pixelWidth = fallbackImage.cgImage?.width ?? max(Int(fallbackImage.size.width * fallbackImage.scale), 1)
-            let pixelHeight = fallbackImage.cgImage?.height ?? max(Int(fallbackImage.size.height * fallbackImage.scale), 1)
-            resources[identifier] = SavedFrameResource(
-                filename: filename,
-                pixelWidth: pixelWidth,
-                pixelHeight: pixelHeight
-            )
-            savedFrameResources = resources
-            scheduleCacheMaintenance(includingLaunchPasses: false)
-        } catch {
-            // The Photos write remains the source-of-truth save operation. A
-            // cache failure must not make the user retry and create a duplicate.
+        let didWrite = await Self.persistCachedFrameData(
+            data,
+            directoryURL: directoryURL,
+            resourceURL: resourceURL
+        )
+        guard didWrite else { return }
+        guard cacheWriteGeneration == generation else {
+            try? FileManager.default.removeItem(at: resourceURL)
+            return
         }
+        guard PhotoLibraryAssetOwnership.contains(identifier, in: savedAssetIdentifiers) else {
+            try? FileManager.default.removeItem(at: resourceURL)
+            return
+        }
+        var resources = savedFrameResources
+        if let previousResource = resources[identifier], previousResource.filename != filename {
+            if let previousResourceURL = localFrameURL(for: previousResource.filename) {
+                try? FileManager.default.removeItem(at: previousResourceURL)
+            }
+        }
+        resources[identifier] = SavedFrameResource(
+            filename: filename,
+            pixelWidth: dimensions.width,
+            pixelHeight: dimensions.height
+        )
+        savedFrameResources = resources
+        scheduleCacheMaintenance(includingLaunchPasses: false)
+    }
+
+    /// Performs all cache filesystem work off the main actor and returns only
+    /// after the atomic JPEG write and file-protection metadata are complete.
+    nonisolated static func persistCachedFrameData(
+        _ data: Data,
+        directoryURL: URL,
+        resourceURL: URL
+    ) async -> Bool {
+        await Task.detached(priority: .utility) {
+            do {
+                try FileManager.default.createDirectory(
+                    at: directoryURL,
+                    withIntermediateDirectories: true
+                )
+                Self.protectLocalResource(at: directoryURL)
+                try data.write(to: resourceURL, options: .atomic)
+                Self.protectLocalResource(at: resourceURL)
+                return true
+            } catch {
+                return false
+            }
+        }.value
+    }
+
+    /// Reads encoded dimensions from ImageIO without decoding the full JPEG.
+    /// The UIImage passed by the review flow is deliberately downsampled, so it
+    /// is only a fallback when encoded metadata is unavailable.
+    nonisolated static func pixelDimensions(
+        in data: Data,
+        fallbackImage: UIImage
+    ) -> PhotoPixelDimensions {
+        if let source = CGImageSourceCreateWithData(data as CFData, nil),
+           let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any],
+           let width = (properties[kCGImagePropertyPixelWidth as String] as? NSNumber)?.intValue,
+           let height = (properties[kCGImagePropertyPixelHeight as String] as? NSNumber)?.intValue,
+           width > 0, height > 0 {
+            return PhotoPixelDimensions(width: width, height: height)
+        }
+
+        return PhotoPixelDimensions(
+            width: fallbackImage.cgImage?.width
+                ?? max(Int(fallbackImage.size.width * fallbackImage.scale), 1),
+            height: fallbackImage.cgImage?.height
+                ?? max(Int(fallbackImage.size.height * fallbackImage.scale), 1)
+        )
     }
 
     private func removeCachedFrame(identifier: String) {
@@ -1093,6 +1191,10 @@ final class PhotoLibraryService: ObservableObject {
     /// never deleted. Failed file deletions retain their cache mappings so a
     /// later clear can retry them.
     func clearLocalRollCache() {
+        // Invalidate writes already running off the main actor so they cannot
+        // recreate a cache entry after the user clears it.
+        cacheWriteGeneration &+= 1
+
         guard let directoryURL = localFramesDirectoryURL else {
             savedFrameResources = [:]
             refreshCachedFrames(excluding: Set(assets.map(\.localIdentifier)))

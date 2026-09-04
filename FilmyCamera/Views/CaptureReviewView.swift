@@ -9,6 +9,7 @@ struct CaptureReviewView: View {
     var flashFired = false
     let isSaving: Bool
     let saveErrorMessage: String?
+    var saveErrorRequiresSettings = false
     let onSave: () -> Void
     let onRetake: () -> Void
     let onOpenSettings: () -> Void
@@ -185,11 +186,21 @@ struct CaptureReviewView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isStaticText)
 
-            Button("Open Photos Settings", action: onOpenSettings)
-                .font(.system(.footnote, design: .rounded).weight(.bold))
-                .foregroundStyle(FilmyTheme.accent)
-                .frame(minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
-                .accessibilityHint("Opens Filmy Camera Photos permissions")
+            if saveErrorRequiresSettings {
+                Button("Open Photos Settings", action: onOpenSettings)
+                    .font(.system(.footnote, design: .rounded).weight(.bold))
+                    .foregroundStyle(FilmyTheme.accent)
+                    .frame(minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
+                    .accessibilityIdentifier("review-save-error-settings")
+                    .accessibilityHint("Opens Filmy Camera Photos permissions")
+            } else {
+                Button("Try Again", action: onSave)
+                    .font(.system(.footnote, design: .rounded).weight(.bold))
+                    .foregroundStyle(FilmyTheme.accent)
+                    .frame(minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
+                    .accessibilityIdentifier("review-save-error-retry")
+                    .accessibilityHint("Retries saving this finished photo")
+            }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)

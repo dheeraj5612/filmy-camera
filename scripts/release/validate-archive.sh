@@ -62,9 +62,58 @@ plist_value() {
   /usr/libexec/PlistBuddy -c "Print :$1" "${info_plist}" 2>/dev/null
 }
 
+macho_uuid_records() {
+  local binary_path="$1"
+  local artifact_name="$2"
+  local dwarfdump_output=""
+  local line=""
+  local uuid=""
+  local architecture=""
+  local records=""
+  local uuid_line_pattern='^UUID:[[:space:]]+([0-9A-Fa-f-]+)[[:space:]]+[(]([^)]*)[)]'
+
+  [[ -f "${binary_path}" ]] || {
+    echo "${artifact_name} Mach-O was not found: ${binary_path}" >&2
+    return 1
+  }
+
+  dwarfdump_output="$(xcrun dwarfdump --uuid "${binary_path}" 2>&1)" || {
+    echo "Unable to read Mach-O UUIDs from ${artifact_name}: ${binary_path}" >&2
+    printf '%s\n' "${dwarfdump_output}" >&2
+    return 1
+  }
+
+  while IFS= read -r line; do
+    if [[ "${line}" =~ ${uuid_line_pattern} ]]; then
+      uuid="${BASH_REMATCH[1]}"
+      architecture="${BASH_REMATCH[2]}"
+      [[ "${uuid}" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]] || continue
+      [[ -n "${architecture}" ]] || continue
+      uuid="$(printf '%s' "${uuid}" | tr '[:upper:]' '[:lower:]')"
+      architecture="$(printf '%s' "${architecture}" | tr '[:upper:]' '[:lower:]')"
+      records+="${architecture}:${uuid}"$'\n'
+    fi
+  done <<<"${dwarfdump_output}"
+
+  [[ -n "${records}" ]] || {
+    echo "${artifact_name} has no readable architecture UUIDs: ${binary_path}" >&2
+    return 1
+  }
+
+  printf '%s' "${records}" | LC_ALL=C sort -u
+}
+
+print_uuid_records() {
+  local records="$1"
+  while IFS= read -r record; do
+    [[ -n "${record}" ]] && printf '    %s\n' "${record}" >&2
+  done <<<"${records}"
+}
+
 bundle_id="$(plist_value CFBundleIdentifier)"
 version="$(plist_value CFBundleShortVersionString)"
 build="$(plist_value CFBundleVersion)"
+executable_name="$(plist_value CFBundleExecutable || true)"
 
 expected_version="$(sed -n 's/^[[:space:]]*MARKETING_VERSION:[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' "${project_spec}" | head -n 1)"
 expected_build="$(sed -n 's/^[[:space:]]*CURRENT_PROJECT_VERSION:[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' "${project_spec}" | head -n 1)"
@@ -76,6 +125,11 @@ expected_build="$(sed -n 's/^[[:space:]]*CURRENT_PROJECT_VERSION:[[:space:]]*"\(
 
 [[ -n "${version}" && -n "${build}" ]] || {
   echo "Archive is missing marketing version or build number" >&2
+  exit 1
+}
+
+[[ -n "${executable_name}" && "${executable_name}" != */* && "${executable_name}" != "." && "${executable_name}" != ".." ]] || {
+  echo "Archive has an invalid or missing CFBundleExecutable: ${executable_name:-missing}" >&2
   exit 1
 }
 
@@ -151,6 +205,25 @@ fi
   exit 1
 }
 
+command -v xcrun >/dev/null || {
+  echo "Xcode command-line tools are required to inspect Mach-O UUIDs" >&2
+  exit 127
+}
+
+app_executable_path="${app_path}/${executable_name}"
+dsym_executable_path="${dsym_path}/Contents/Resources/DWARF/${executable_name}"
+app_uuid_records="$(macho_uuid_records "${app_executable_path}" "Archive app executable")" || exit 1
+dsym_uuid_records="$(macho_uuid_records "${dsym_executable_path}" "Archive app dSYM")" || exit 1
+[[ "${app_uuid_records}" == "${dsym_uuid_records}" ]] || {
+  echo "Archive app executable and dSYM architecture UUIDs do not match" >&2
+  echo "  executable UUIDs:" >&2
+  print_uuid_records "${app_uuid_records}"
+  echo "  dSYM UUIDs:" >&2
+  print_uuid_records "${dsym_uuid_records}"
+  echo "Rebuild the archive so its executable and dSYM come from the same Release build." >&2
+  exit 1
+}
+
 [[ -f "${app_path}/PrivacyInfo.xcprivacy" ]] || {
   echo "Archive is missing PrivacyInfo.xcprivacy" >&2
   exit 1
@@ -177,7 +250,6 @@ case "${authority}" in
 esac
 
 codesign --verify --deep --strict --verbose=2 "${app_path}" >/dev/null
-xcrun dwarfdump --uuid "${dsym_path}" >/dev/null
 
 echo "Release archive validated"
 echo "  bundle: ${bundle_id}"

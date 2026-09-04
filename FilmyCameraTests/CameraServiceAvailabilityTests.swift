@@ -1,4 +1,5 @@
 import XCTest
+import Combine
 @preconcurrency import AVFoundation
 import CoreVideo
 @testable import FilmyCamera
@@ -11,6 +12,32 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         XCTAssertEqual(camera.availability, .idle)
         XCTAssertFalse(camera.isRunning)
         XCTAssertEqual(camera.statusMessage, "Camera is ready")
+    }
+
+    func testPreviewDrawableSizePublishesOnTheNextMainTurn() async {
+        let camera = CameraService()
+        let initialSize = camera.previewDrawableSize
+        let expectedSize = CGSize(width: 320, height: 480)
+        let updateExpectation = expectation(description: "preview drawable size update")
+        var didReceiveUpdate = false
+        var cancellables = Set<AnyCancellable>()
+
+        camera.$previewDrawableSize
+            .dropFirst()
+            .sink { value in
+                didReceiveUpdate = true
+                XCTAssertEqual(value, expectedSize)
+                updateExpectation.fulfill()
+            }
+            .store(in: &cancellables)
+
+        camera.updatePreviewDrawableSize(expectedSize)
+
+        XCTAssertFalse(didReceiveUpdate)
+        XCTAssertEqual(camera.previewDrawableSize, initialSize)
+        await fulfillment(of: [updateExpectation], timeout: 1)
+        XCTAssertTrue(didReceiveUpdate)
+        XCTAssertEqual(camera.previewDrawableSize, expectedSize)
     }
 
     func testVideoRotationUsesTheFullInterfaceOrientation() {
@@ -406,6 +433,38 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         )
     }
 
+    func testVirtualZoomLimitUsesWideHardwareAnchorAndKeepsTeleReachable() {
+        XCTAssertEqual(
+            CameraService.maximumHardwareZoomFactor(
+                deviceMaximum: 30,
+                userFacingPerHardwareFactor: 0.5,
+                minimumRequiredHardwareFactor: 10
+            ),
+            12,
+            accuracy: 0.0001,
+            "A virtual camera whose wide lens starts at hardware 2x needs hardware 12x for user-facing 6x"
+        )
+        XCTAssertEqual(
+            CameraService.maximumHardwareZoomFactor(
+                deviceMaximum: 11,
+                userFacingPerHardwareFactor: 0.5,
+                minimumRequiredHardwareFactor: 10
+            ),
+            11,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            CameraService.maximumHardwareZoomFactor(
+                deviceMaximum: 30,
+                userFacingPerHardwareFactor: 0.5,
+                minimumRequiredHardwareFactor: 14
+            ),
+            14,
+            accuracy: 0.0001,
+            "An advertised constituent threshold must remain selectable even beyond the normal digital zoom cap"
+        )
+    }
+
     func testStandaloneLensMagnificationUsesFieldOfViewRelationships() {
         let magnification = CameraService.standaloneLensMagnification(
             wideFieldOfView: 70,
@@ -757,6 +816,49 @@ final class CameraServiceAvailabilityTests: XCTestCase {
             CameraService.preferredExposureLockMode(
                 supportsAutoExpose: false,
                 supportsLocked: false
+            )
+        )
+    }
+
+    func testUnlockRestoresContinuousFocusAndExposureWhenSupported() {
+        XCTAssertEqual(
+            CameraService.preferredFocusUnlockMode(
+                supportsContinuous: true,
+                supportsAuto: true
+            ),
+            .continuousAutoFocus
+        )
+        XCTAssertEqual(
+            CameraService.preferredFocusUnlockMode(
+                supportsContinuous: false,
+                supportsAuto: true
+            ),
+            .autoFocus
+        )
+        XCTAssertNil(
+            CameraService.preferredFocusUnlockMode(
+                supportsContinuous: false,
+                supportsAuto: false
+            )
+        )
+        XCTAssertEqual(
+            CameraService.preferredExposureUnlockMode(
+                supportsContinuous: true,
+                supportsAuto: true
+            ),
+            .continuousAutoExposure
+        )
+        XCTAssertEqual(
+            CameraService.preferredExposureUnlockMode(
+                supportsContinuous: false,
+                supportsAuto: true
+            ),
+            .autoExpose
+        )
+        XCTAssertNil(
+            CameraService.preferredExposureUnlockMode(
+                supportsContinuous: false,
+                supportsAuto: false
             )
         )
     }

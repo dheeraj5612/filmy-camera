@@ -5,6 +5,17 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root_dir="$(cd "${script_dir}/../.." && pwd)"
 icon_file="${root_dir}/FilmyCamera/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png"
 screenshot_dir="${root_dir}/docs/app-store/screenshots/iphone-6.5"
+current_screenshot_names=(
+  "01-g7x-import.png"
+  "02-film-import.png"
+  "03-monochrome-import.png"
+  "04-roll.png"
+  "05-photo-detail.png"
+)
+current_screenshot_sets=(
+  "${root_dir}/docs/app-store/screenshots/iphone-6.5-current|iPhone 6.5-inch|1242|2688"
+  "${root_dir}/docs/app-store/screenshots/ipad-13-current|iPad 13-inch|2064|2752"
+)
 
 expected_screenshots=(
   "01-camera-preview.jpg"
@@ -86,6 +97,62 @@ if [[ -d "${screenshot_dir}" ]]; then
   fi
 fi
 
+validate_current_screenshot_set() {
+  local current_dir="$1"
+  local device_name="$2"
+  local expected_width="$3"
+  local expected_height="$4"
+  local screenshot_count=0
+  local screenshot_hashes=""
+  local screenshot_file file_description screenshot_dimensions screenshot_hash actual_png_count
+
+  require_file "${current_dir}/README.md" "${device_name} screenshot manifest"
+  if [[ ! -d "${current_dir}" ]]; then
+    return
+  fi
+
+  for filename in "${current_screenshot_names[@]}"; do
+    screenshot_file="${current_dir}/${filename}"
+    require_file "${screenshot_file}" "${device_name} screenshot"
+    if [[ ! -f "${screenshot_file}" ]]; then
+      continue
+    fi
+
+    screenshot_count=$((screenshot_count + 1))
+    file_description="$(file -b "${screenshot_file}")"
+    if [[ "${file_description}" != PNG\ image\ data* ]]; then
+      echo "Screenshot must be a PNG: ${screenshot_file}" >&2
+      failures=$((failures + 1))
+    fi
+
+    screenshot_dimensions="$(sips -g pixelWidth -g pixelHeight "${screenshot_file}" 2>/dev/null || true)"
+    if ! grep -Fq "pixelWidth: ${expected_width}" <<<"${screenshot_dimensions}" \
+      || ! grep -Fq "pixelHeight: ${expected_height}" <<<"${screenshot_dimensions}"; then
+      echo "Screenshot must be ${expected_width}x${expected_height}: ${screenshot_file}" >&2
+      failures=$((failures + 1))
+    fi
+
+    screenshot_hash="$(shasum -a 256 "${screenshot_file}" | awk '{ print $1 }')"
+    if grep -Fq "${screenshot_hash}" <<<"${screenshot_hashes}"; then
+      echo "Duplicate screenshot content: ${screenshot_file}" >&2
+      failures=$((failures + 1))
+    fi
+    screenshot_hashes+="${screenshot_hash}"$'\n'
+  done
+
+  actual_png_count="$(find "${current_dir}" -maxdepth 1 -type f -name '*.png' | wc -l | tr -d ' ')"
+  if [[ "${screenshot_count}" -ne "${#current_screenshot_names[@]}" \
+    || "${actual_png_count}" -ne "${#current_screenshot_names[@]}" ]]; then
+    echo "Expected ${#current_screenshot_names[@]} ${device_name} PNG screenshots; found ${actual_png_count}" >&2
+    failures=$((failures + 1))
+  fi
+}
+
+for screenshot_set in "${current_screenshot_sets[@]}"; do
+  IFS='|' read -r current_dir device_name expected_width expected_height <<<"${screenshot_set}"
+  validate_current_screenshot_set "${current_dir}" "${device_name}" "${expected_width}" "${expected_height}"
+done
+
 if [[ "${failures}" -gt 0 ]]; then
   echo "App Store media validation failed" >&2
   exit 1
@@ -95,3 +162,5 @@ echo "App Store media validation passed"
 echo "  app icon: 1024x1024 opaque PNG"
 echo "  screenshots: ${#expected_screenshots[@]} x 1242x2688 JPEG"
 echo "  slot: iPhone 6.5-inch Display"
+echo "  current iPhone screenshots: ${#current_screenshot_names[@]} x 1242x2688 PNG"
+echo "  current iPad screenshots: ${#current_screenshot_names[@]} x 2064x2752 PNG"

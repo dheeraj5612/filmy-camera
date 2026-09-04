@@ -324,6 +324,26 @@ public final class FilmRenderer {
     /// PNGs in Caches are not served for the new look.
     static let thumbnailSceneVersion = 2
 
+    /// Stable across processes so the disk cache can reuse thumbnails from a
+    /// previous launch. JSON object key order is otherwise intentionally
+    /// unspecified and can produce a different SHA for the same recipe.
+    static func thumbnailCacheDigest(
+        for recipe: FilmRecipe,
+        size: CGSize
+    ) -> String? {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let recipeData = try? encoder.encode(recipe) else { return nil }
+
+        let width = max(Int(size.width.rounded()), 1)
+        let height = max(Int(size.height.rounded()), 1)
+        var hasher = SHA256()
+        hasher.update(data: Data(FilmRecipe.rendererVersion.utf8))
+        hasher.update(data: Data("scene\(thumbnailSceneVersion)-\(width)x\(height)".utf8))
+        hasher.update(data: recipeData)
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
     /// Renders a recipe over an arbitrary scene, e.g. a live viewfinder
     /// snapshot, at that scene's size. Not cached: callers debounce.
     public static func previewThumbnail(for recipe: FilmRecipe, over scene: CIImage) -> UIImage? {
@@ -484,14 +504,12 @@ public final class FilmRenderer {
 
         private static func fileURL(for key: ThumbnailCacheKey) -> URL? {
             guard let directoryURL,
-                  let recipeData = try? JSONEncoder().encode(key.recipe) else {
+                  let digest = FilmRenderer.thumbnailCacheDigest(
+                    for: key.recipe,
+                    size: CGSize(width: key.width, height: key.height)
+                  ) else {
                 return nil
             }
-            var hasher = SHA256()
-            hasher.update(data: Data(FilmRecipe.rendererVersion.utf8))
-            hasher.update(data: Data("scene\(thumbnailSceneVersion)-\(key.width)x\(key.height)".utf8))
-            hasher.update(data: recipeData)
-            let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
             return directoryURL.appendingPathComponent("\(digest).png", isDirectory: false)
         }
 

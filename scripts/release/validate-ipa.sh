@@ -22,9 +22,10 @@ Options:
   --archive PATH   Validated source archive used to create the IPA.
   -h, --help       Show this help.
 
-This command validates bundle/version/build parity, App Store provisioning,
-distribution signing, privacy manifest presence, and archive source
-provenance. It does not contact Apple or upload anything.
+This command validates bundle/version/build and executable architecture UUID
+parity with the archive, App Store provisioning, distribution signing,
+privacy manifest presence, and archive source provenance. It does not contact
+Apple or upload anything.
 EOF
 }
 
@@ -92,6 +93,54 @@ profile_expiration_epoch() {
     || true
 }
 
+macho_uuid_records() {
+  local binary_path="$1"
+  local artifact_name="$2"
+  local dwarfdump_output=""
+  local line=""
+  local uuid=""
+  local architecture=""
+  local records=""
+  local uuid_line_pattern='^UUID:[[:space:]]+([0-9A-Fa-f-]+)[[:space:]]+[(]([^)]*)[)]'
+
+  [[ -f "${binary_path}" ]] || {
+    echo "IPA validation error: ${artifact_name} Mach-O was not found: ${binary_path}" >&2
+    return 1
+  }
+
+  dwarfdump_output="$(xcrun dwarfdump --uuid "${binary_path}" 2>&1)" || {
+    echo "IPA validation error: unable to read Mach-O UUIDs from ${artifact_name}: ${binary_path}" >&2
+    printf '%s\n' "${dwarfdump_output}" >&2
+    return 1
+  }
+
+  while IFS= read -r line; do
+    if [[ "${line}" =~ ${uuid_line_pattern} ]]; then
+      uuid="${BASH_REMATCH[1]}"
+      architecture="${BASH_REMATCH[2]}"
+      [[ "${uuid}" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]] || continue
+      [[ -n "${architecture}" ]] || continue
+      uuid="$(printf '%s' "${uuid}" | tr '[:upper:]' '[:lower:]')"
+      architecture="$(printf '%s' "${architecture}" | tr '[:upper:]' '[:lower:]')"
+      records+="${architecture}:${uuid}"$'\n'
+    fi
+  done <<<"${dwarfdump_output}"
+
+  [[ -n "${records}" ]] || {
+    echo "IPA validation error: ${artifact_name} has no readable architecture UUIDs: ${binary_path}" >&2
+    return 1
+  }
+
+  printf '%s' "${records}" | LC_ALL=C sort -u
+}
+
+print_uuid_records() {
+  local records="$1"
+  while IFS= read -r record; do
+    [[ -n "${record}" ]] && printf '    %s\n' "${record}" >&2
+  done <<<"${records}"
+}
+
 "${script_dir}/validate-archive.sh" "${archive_path}" >/dev/null
 
 archive_app_path="${archive_path}/Products/Applications/FilmyCamera.app"
@@ -99,6 +148,11 @@ archive_info_plist="${archive_app_path}/Info.plist"
 archive_bundle_id="$(plist_value CFBundleIdentifier "${archive_info_plist}")"
 archive_version="$(plist_value CFBundleShortVersionString "${archive_info_plist}")"
 archive_build="$(plist_value CFBundleVersion "${archive_info_plist}")"
+archive_executable_name="$(plist_value CFBundleExecutable "${archive_info_plist}" || true)"
+[[ -n "${archive_executable_name}" && "${archive_executable_name}" != */* \
+  && "${archive_executable_name}" != "." && "${archive_executable_name}" != ".." ]] || {
+  die "validated archive has an invalid or missing CFBundleExecutable"
+}
 
 work_dir="$(mktemp -d -t filmycamera-ipa-validation)"
 temp_paths+=("${work_dir}")
@@ -111,10 +165,33 @@ info_plist="${app_path}/Info.plist"
 bundle_id="$(plist_value CFBundleIdentifier "${info_plist}")"
 version="$(plist_value CFBundleShortVersionString "${info_plist}")"
 build="$(plist_value CFBundleVersion "${info_plist}")"
+executable_name="$(plist_value CFBundleExecutable "${info_plist}" || true)"
 [[ "${bundle_id}" == "${archive_bundle_id}" \
   && "${version}" == "${archive_version}" \
   && "${build}" == "${archive_build}" ]] || {
   die "IPA metadata does not match the validated archive"
+}
+[[ -n "${executable_name}" && "${executable_name}" != */* \
+  && "${executable_name}" != "." && "${executable_name}" != ".." ]] || {
+  die "IPA has an invalid or missing CFBundleExecutable"
+}
+[[ "${executable_name}" == "${archive_executable_name}" ]] || {
+  die "IPA CFBundleExecutable does not match the validated archive"
+}
+
+command -v xcrun >/dev/null || die "Xcode command-line tools are required to inspect Mach-O UUIDs"
+archive_executable_path="${archive_app_path}/${archive_executable_name}"
+ipa_executable_path="${app_path}/${executable_name}"
+archive_uuid_records="$(macho_uuid_records "${archive_executable_path}" "archive app executable")" || exit 1
+ipa_uuid_records="$(macho_uuid_records "${ipa_executable_path}" "IPA app executable")" || exit 1
+[[ "${archive_uuid_records}" == "${ipa_uuid_records}" ]] || {
+  echo "IPA validation error: IPA and archive executable architecture UUIDs do not match" >&2
+  echo "  archive UUIDs:" >&2
+  print_uuid_records "${archive_uuid_records}"
+  echo "  IPA UUIDs:" >&2
+  print_uuid_records "${ipa_uuid_records}"
+  echo "Export the IPA again from the validated archive; do not mix artifacts from different builds." >&2
+  exit 1
 }
 
 [[ -f "${app_path}/PrivacyInfo.xcprivacy" ]] || {

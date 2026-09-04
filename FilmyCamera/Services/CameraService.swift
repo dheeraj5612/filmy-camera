@@ -198,6 +198,30 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         return userFacingZoomFactor / opticalMagnification
     }
 
+    /// Converts the app's conservative user-facing zoom limit into the active
+    /// device's hardware scale. Virtual multi-camera devices commonly anchor
+    /// the wide camera above hardware 1x (for example, at 2x), so applying the
+    /// user limit directly to `videoZoomFactor` can make an advertised 5x
+    /// constituent unreachable.
+    static func maximumHardwareZoomFactor(
+        deviceMaximum: CGFloat,
+        userFacingPerHardwareFactor: CGFloat,
+        minimumRequiredHardwareFactor: CGFloat = 0,
+        userFacingLimit: CGFloat = 6
+    ) -> CGFloat {
+        guard deviceMaximum.isFinite, deviceMaximum > 0 else { return 1 }
+        let scale = userFacingPerHardwareFactor.isFinite && userFacingPerHardwareFactor > 0
+            ? userFacingPerHardwareFactor
+            : 1
+        let limit = userFacingLimit.isFinite && userFacingLimit > 0
+            ? userFacingLimit / scale
+            : deviceMaximum
+        let required = minimumRequiredHardwareFactor.isFinite
+            ? max(minimumRequiredHardwareFactor, 0)
+            : 0
+        return min(deviceMaximum, max(limit, required))
+    }
+
     static func shouldRestoreStandaloneLens(
         origin: LensSelectionOrigin?
     ) -> Bool {
@@ -545,6 +569,9 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             hasCameraDevice: self.hasAnyCameraDeviceOnQueue(),
             previousAvailability: previousAvailability
         )
+        if let device = self.activeDevice() {
+            self.restoreContinuousFocusExposureOnQueue(for: device)
+        }
         if self.session.isRunning {
             self.session.stopRunning()
         }
@@ -983,6 +1010,52 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         return (value * 3).rounded() / 3
     }
 
+    static func preferredFocusUnlockMode(
+        supportsContinuous: Bool,
+        supportsAuto: Bool
+    ) -> AVCaptureDevice.FocusMode? {
+        if supportsContinuous { return .continuousAutoFocus }
+        if supportsAuto { return .autoFocus }
+        return nil
+    }
+
+    static func preferredExposureUnlockMode(
+        supportsContinuous: Bool,
+        supportsAuto: Bool
+    ) -> AVCaptureDevice.ExposureMode? {
+        if supportsContinuous { return .continuousAutoExposure }
+        if supportsAuto { return .autoExpose }
+        return nil
+    }
+
+    /// Keeps device state aligned with the published lock indicator across a
+    /// stop/reuse cycle. Clearing only the Boolean leaves the physical lens and
+    /// metering frozen after returning from another tab or the background.
+    private func restoreContinuousFocusExposureOnQueue(for device: AVCaptureDevice) {
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+            if let focusMode = Self.preferredFocusUnlockMode(
+                supportsContinuous: device.isFocusModeSupported(.continuousAutoFocus),
+                supportsAuto: device.isFocusModeSupported(.autoFocus)
+            ) {
+                device.focusMode = focusMode
+            }
+            if let exposureMode = Self.preferredExposureUnlockMode(
+                supportsContinuous: device.isExposureModeSupported(.continuousAutoExposure),
+                supportsAuto: device.isExposureModeSupported(.autoExpose)
+            ) {
+                device.exposureMode = exposureMode
+                applyExposureBiasOnQueue(to: device)
+            }
+        } catch {
+            // Retry when the configured graph is reused. Device configuration
+            // may be temporarily unavailable while the app is backgrounding.
+        }
+        focusExposureLocked = false
+        publishFocusExposureLocked(false)
+    }
+
     /// A point-based lock should meter once before freezing the lens. Prefer
     /// `.autoFocus`, which performs one adjustment and then locks, while
     /// retaining `.locked` as a fallback for devices with narrower support.
@@ -1118,6 +1191,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
         if isConfigured, let device = activeDevice() {
             refreshCaptureCapabilitiesOnQueue(for: device)
+            restoreContinuousFocusExposureOnQueue(for: device)
             configureOrientation()
             session.startRunning()
             publishStartOutcomeOnQueue(running: session.isRunning)
@@ -1632,7 +1706,18 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private func setHardwareZoomOnQueue(_ factor: CGFloat) -> Bool {
         guard let device = activeDevice() else { return false }
         let lowerBound = device.minAvailableVideoZoomFactor
-        let upperBound = min(device.maxAvailableVideoZoomFactor, 6)
+        let userFacingPerHardwareFactor = userFacingZoomFactorOnQueue(
+            for: device,
+            hardwareFactor: 1
+        )
+        let requiredVirtualSwitchOver = device.isVirtualDevice
+            ? currentLensOptions.map(\.zoomFactor).max() ?? 0
+            : 0
+        let upperBound = Self.maximumHardwareZoomFactor(
+            deviceMaximum: device.maxAvailableVideoZoomFactor,
+            userFacingPerHardwareFactor: userFacingPerHardwareFactor,
+            minimumRequiredHardwareFactor: requiredVirtualSwitchOver
+        )
         let nextFactor = min(max(factor, lowerBound), max(lowerBound, upperBound))
         guard nextFactor.isFinite else { return false }
 
@@ -1892,7 +1977,16 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             ),
             maximum: userFacingZoomFactorOnQueue(
                 for: device,
-                hardwareFactor: min(device.maxAvailableVideoZoomFactor, 6)
+                hardwareFactor: Self.maximumHardwareZoomFactor(
+                    deviceMaximum: device.maxAvailableVideoZoomFactor,
+                    userFacingPerHardwareFactor: userFacingZoomFactorOnQueue(
+                        for: device,
+                        hardwareFactor: 1
+                    ),
+                    minimumRequiredHardwareFactor: device.isVirtualDevice
+                        ? options.map(\.zoomFactor).max() ?? 0
+                        : 0
+                )
             )
         )
         publishZoom(
@@ -2527,12 +2621,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
     private func publishOnMain(_ work: @escaping () -> Void) {
         let workBox = MainWorkBox(work)
-        if Thread.isMainThread {
+        DispatchQueue.main.async {
             workBox.work()
-        } else {
-            DispatchQueue.main.async {
-                workBox.work()
-            }
         }
     }
 
@@ -2641,6 +2731,26 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
                 )
             }
             self.finishPhotoOnQueue(capturedPhoto, uniqueID: uniqueID)
+        }
+    }
+
+    public func photoOutput(
+        _ output: AVCapturePhotoOutput,
+        didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings,
+        error: Error?
+    ) {
+        guard output === photoOutput, error != nil else { return }
+        let uniqueID = resolvedSettings.uniqueID
+        sessionQueue.async { [weak self] in
+            guard let self,
+                  Self.acceptsPhotoCallback(
+                    pendingUniqueID: self.pendingPhotoUniqueID,
+                    callbackUniqueID: uniqueID
+                  ) else { return }
+            // A terminal capture error is not guaranteed to be accompanied by
+            // a usable processing callback. Complete the matching request so
+            // the shutter cannot remain busy indefinitely.
+            self.finishPhotoOnQueue(nil, uniqueID: uniqueID)
         }
     }
 }

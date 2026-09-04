@@ -54,6 +54,65 @@ The analog character comes from tone, color, grain, and halation. The interface 
 
 The revamp was built and reviewed on the iPhone 17 Pro simulator. The camera screenshot is intentionally a simulator fallback state; it proves the shell and unavailable-camera hierarchy, not physical-device camera output.
 
+## UI revamp — 2026-09-02
+
+A third pass, modeled on how the system Camera, Halide, VSCO, and Moment lay
+out an iPhone camera: the picture is a letterboxed frame on a black body,
+controls live on the bands around it, and the chrome is Liquid Glass on
+iOS 26 with an ultra-thin-material fallback on iOS 17 and 18.
+
+### Camera
+
+- The viewfinder is a 4:3 frame with rounded corners on a pure-black band
+  instead of a full-bleed surface under gradient scrims. `ViewfinderLayout`
+  fits the frame to the space left by the bands; on iPhone it stretches to the
+  full width and accepts a slight crop, on iPad it keeps strict 4:3 with side
+  bands. The saved still follows the same crop through the existing preview
+  drawable contract, so the frame is still what is kept.
+- Top bar, left to right: icon-only flash (amber when armed), camera switch,
+  the recipe identity (`RECIPE` or `CAMERA PROFILE` eyebrow over the name, plus
+  the `EDITED` tag), the status pill only while the camera is not live, and
+  the tools chevron.
+- Apple-style zoom presets (`0.5 · 1× · 2 · 5`) float along the bottom edge of
+  the frame whenever the camera is live; the active bubble shows the exact
+  factor and the bar stays VoiceOver-adjustable. The old zoom menu is gone.
+- The tools strip and the G7 X quick controls float above the presets rather
+  than sitting in the bottom band, so the rail and capture row never move.
+  Exposure, focus lock, a grid toggle, and the lens menu live there; flash and
+  camera switch moved to the top bar.
+- Bottom band: the recipe rail (smaller 4:3 swatches, the name beneath, an
+  accent ring on the selection) above a capture row of Roll thumbnail, a
+  larger ring-and-disc shutter, and an icon-only Tune button. Captions under
+  the round buttons were dropped; the accessibility labels carry the names.
+- The frame blinks black for an instant on capture, and the focus reticle is
+  a square with tick marks in the accent.
+- Landscape keeps the frame on the left with the top bar and zoom presets
+  overlaid, and stacks the recipe menu, Tune, shutter, and Roll in a side
+  column. A new UI test covers that layout.
+- The simulator and unavailable-camera placeholders now center inside the
+  frame instead of assuming a full-screen surface.
+
+### Shared chrome
+
+- `viewfinderChrome`, `viewfinderCapsule`, and `ChromeShapeBackground` render
+  Liquid Glass (`glassEffect`, tinted and optionally interactive) when built
+  with Xcode 26 and running on iOS 26, and fall back to the previous material
+  on older systems and on the Xcode 16.4 CI toolchain (`#if compiler(>=6.2)`).
+- The dock is a glass pill with a warm-white selected segment; Import keeps
+  the amber accent as the one coloured action. The camera tab sits on black;
+  Roll and Settings keep the warm page background.
+
+### Verification
+
+- Built and reviewed on the iPhone 17 Pro and iPad Air 11-inch (M4) simulators
+  (iOS 26.5) in Preview mode, including the G7 X quick controls and the
+  accessibility-size shell. The simulator UI suite (15 tests, 2 hardware-only
+  skips) and the unit suite pass.
+- On the paired iPad Pro 11-inch (iOS 26.6.1): camera shell, landscape shell,
+  G7 X quick controls, G7 X flash capture to review, and the tab round trip
+  pass against the live camera. The landscape column was tightened after the
+  first device run showed it taller than an iPhone's landscape height.
+
 ## UI revamp — 2026-09-01
 
 A second, larger visual pass. The goal was to make the viewfinder feel like a camera again: chrome lives at the edges, nothing is boxed into stacked panels, and choosing a recipe reads like choosing a film stock.

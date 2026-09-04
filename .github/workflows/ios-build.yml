@@ -433,6 +433,8 @@ jobs:
 
           bash -n scripts/release/*.sh
           shellcheck --severity=warning scripts/release/*.sh
+          bash scripts/release/test-private-temp.sh
+          bash scripts/release/test-macho-uuid-validation.sh
           scripts/release/validate-store-metadata.sh --final
           scripts/release/validate-store-media.sh
 

@@ -307,6 +307,7 @@ private struct GalleryThumbnail: View {
     @ObservedObject var photoLibrary: PhotoLibraryService
 
     @State private var image: UIImage?
+    @State private var imageLoadFailed = false
 
     private var imageRequestKey: PhotoLibraryImageRequestKey {
         PhotoLibraryGalleryImagePolicy.requestKey(
@@ -324,6 +325,14 @@ private struct GalleryThumbnail: View {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFill()
+                } else if imageLoadFailed {
+                    VStack(spacing: 5) {
+                        Image(systemName: "photo.badge.exclamationmark")
+                            .font(.system(size: 18, weight: .medium))
+                        Text("Unavailable")
+                            .font(.system(.caption2, design: .rounded).weight(.semibold))
+                    }
+                    .foregroundStyle(FilmyTheme.secondary)
                 } else {
                     FilmyTheme.panel
                         .overlay {
@@ -350,10 +359,12 @@ private struct GalleryThumbnail: View {
             .contentShape(Rectangle())
             .task(id: imageRequestKey) {
                 image = nil
+                imageLoadFailed = false
                 guard PhotoLibraryGalleryImagePolicy.canLoad(
                     isPhotosAsset: asset.isPhotosAsset,
                     authorizationStatus: photoLibrary.authorizationStatus
                 ) else {
+                    imageLoadFailed = true
                     return
                 }
 
@@ -363,6 +374,7 @@ private struct GalleryThumbnail: View {
                 )
                 guard !Task.isCancelled else { return }
                 image = loadedImage
+                imageLoadFailed = loadedImage == nil
             }
     }
 }
@@ -486,63 +498,78 @@ private struct GalleryDetailView: View {
             Color.black.ignoresSafeArea()
 
             if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .padding(.vertical, 20)
-                    .scaleEffect(zoomScale)
-                    .offset(imageOffset)
-                    .contentShape(Rectangle())
-                    .accessibilityLabel("Photo")
-                    .accessibilityValue(zoomScale > 1 ? "Zoomed \(Int(zoomScale * 100)) percent" : "Fit to screen")
-                    .accessibilityHint("Pinch to zoom, drag while zoomed, or double tap to reset")
-                    .accessibilityAdjustableAction { direction in
-                        switch direction {
-                        case .increment:
-                            zoomScale = min(zoomScale + 0.5, 4)
-                        case .decrement:
-                            zoomScale = max(zoomScale - 0.5, 1)
-                        @unknown default:
-                            break
+                GeometryReader { proxy in
+                    let fittedSize = fittedImageSize(for: image.size, in: proxy.size)
+
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: fittedSize.width, height: fittedSize.height)
+                        .padding(.vertical, 20)
+                        .scaleEffect(zoomScale)
+                        .offset(constrainedOffset(imageOffset, in: proxy.size))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                        .contentShape(Rectangle())
+                        .accessibilityLabel("Photo")
+                        .accessibilityValue(zoomScale > 1 ? "Zoomed \(Int(zoomScale * 100)) percent" : "Fit to screen")
+                        .accessibilityHint("Pinch to zoom, drag while zoomed, or double tap to reset")
+                        .accessibilityAdjustableAction { direction in
+                            switch direction {
+                            case .increment:
+                                zoomScale = min(zoomScale + 0.5, 4)
+                            case .decrement:
+                                zoomScale = max(zoomScale - 0.5, 1)
+                            @unknown default:
+                                break
+                            }
+                            if zoomScale == 1 {
+                                resetImageTransform()
+                            }
                         }
-                        if zoomScale == 1 {
-                            resetImageTransform()
-                        }
-                    }
-                    .accessibilityAction(named: "Reset zoom", resetImageTransform)
-                    .gesture(
-                        MagnificationGesture()
-                            .onChanged { value in
-                                let baseZoom = pinchBaseZoom ?? zoomScale
-                                if pinchBaseZoom == nil {
-                                    pinchBaseZoom = zoomScale
+                        .accessibilityAction(named: "Reset zoom", resetImageTransform)
+                        .gesture(
+                            MagnificationGesture()
+                                .onChanged { value in
+                                    let baseZoom = pinchBaseZoom ?? zoomScale
+                                    if pinchBaseZoom == nil {
+                                        pinchBaseZoom = zoomScale
+                                    }
+                                    zoomScale = min(max(baseZoom * value, 1), 4)
+                                    if zoomScale == 1 {
+                                        imageOffset = .zero
+                                        dragBaseOffset = .zero
+                                    } else {
+                                        imageOffset = constrainedOffset(imageOffset, in: proxy.size)
+                                    }
                                 }
-                                zoomScale = min(max(baseZoom * value, 1), 4)
-                                if zoomScale == 1 {
-                                    imageOffset = .zero
+                                .onEnded { _ in
+                                    pinchBaseZoom = nil
+                                    if zoomScale <= 1.05 {
+                                        resetImageTransform()
+                                    } else {
+                                        imageOffset = constrainedOffset(imageOffset, in: proxy.size)
+                                        dragBaseOffset = imageOffset
+                                    }
                                 }
-                            }
-                            .onEnded { _ in
-                                pinchBaseZoom = nil
-                                if zoomScale <= 1.05 {
-                                    resetImageTransform()
+                        )
+                        .simultaneousGesture(
+                            DragGesture(minimumDistance: 8)
+                                .onChanged { value in
+                                    guard zoomScale > 1 else { return }
+                                    imageOffset = constrainedOffset(
+                                        CGSize(
+                                            width: dragBaseOffset.width + value.translation.width,
+                                            height: dragBaseOffset.height + value.translation.height
+                                        ),
+                                        in: proxy.size
+                                    )
                                 }
-                            }
-                    )
-                    .simultaneousGesture(
-                        DragGesture(minimumDistance: 8)
-                            .onChanged { value in
-                                guard zoomScale > 1 else { return }
-                                imageOffset = CGSize(
-                                    width: dragBaseOffset.width + value.translation.width,
-                                    height: dragBaseOffset.height + value.translation.height
-                                )
-                            }
-                            .onEnded { _ in
-                                dragBaseOffset = imageOffset
-                            }
-                    )
-                    .onTapGesture(count: 2, perform: resetImageTransform)
+                                .onEnded { _ in
+                                    dragBaseOffset = imageOffset
+                                }
+                        )
+                        .onTapGesture(count: 2, perform: resetImageTransform)
+                }
             } else if imageLoadFailed {
                 VStack(spacing: 14) {
                     Image(systemName: "photo.badge.exclamationmark")
@@ -776,13 +803,60 @@ private struct GalleryDetailView: View {
             dragBaseOffset = .zero
         }
     }
+
+    /// Keep at least part of a zoomed image in the viewport. Without this
+    /// bound, a long drag could move a frame completely offscreen and leave
+    /// the detail sheet looking empty until the user reset zoom.
+    private func constrainedOffset(_ offset: CGSize, in viewport: CGSize) -> CGSize {
+        // `scaledToFit` receives the viewport after the 20pt vertical padding
+        // on each side. Use that actual fitted image size: a portrait or
+        // panoramic frame has empty margins in one axis and should not be
+        // allowed to drift out of view as though it filled the whole sheet.
+        let fittedSize = fittedImageSize(for: image?.size ?? viewport, in: viewport)
+        let paddedSize = CGSize(width: fittedSize.width, height: fittedSize.height + 40)
+        let maxX = max(0, (paddedSize.width * zoomScale - viewport.width) / 2)
+        let maxY = max(0, (paddedSize.height * zoomScale - viewport.height) / 2)
+        return CGSize(
+            width: min(max(offset.width, -maxX), maxX),
+            height: min(max(offset.height, -maxY), maxY)
+        )
+    }
+
+    private func fittedImageSize(for imageSize: CGSize, in viewport: CGSize) -> CGSize {
+        let availableImageSize = CGSize(
+            width: max(viewport.width, 1),
+            height: max(viewport.height - 40, 1)
+        )
+        let fitScale = min(
+            availableImageSize.width / max(imageSize.width, 1),
+            availableImageSize.height / max(imageSize.height, 1)
+        )
+        return CGSize(
+            width: imageSize.width * fitScale,
+            height: imageSize.height * fitScale
+        )
+    }
 }
 
 private struct ShareSheet: UIViewControllerRepresentable {
     let items: [Any]
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: items, applicationActivities: nil)
+        let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        // iPad presents activity sheets as popovers. Give UIKit a stable,
+        // centered anchor so sharing never crashes or chooses an off-screen
+        // source when the detail view is opened from a narrow split view.
+        if let popover = controller.popoverPresentationController {
+            popover.sourceView = controller.view
+            popover.sourceRect = CGRect(
+                x: controller.view.bounds.midX,
+                y: controller.view.bounds.midY,
+                width: 0,
+                height: 0
+            )
+            popover.permittedArrowDirections = []
+        }
+        return controller
     }
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
