@@ -595,22 +595,21 @@ final class FilmyCameraUITests: XCTestCase {
         )
         attachScreenshot(named: "roll-qa-detail-reset")
 
-        let existingSheetCount = rollApp.sheets.count
         share.tap()
+        let copyAction = rollApp.descendants(matching: .any)["Copy"]
         XCTAssertTrue(
-            waitUntil(timeout: 30) { rollApp.sheets.count > existingSheetCount },
-            "Share frame must present the iPad activity sheet"
+            copyAction.waitForExistence(timeout: 30),
+            "Share frame must present the iPad activity popover with system actions"
         )
-        let shareSheet = try XCTUnwrap(
-            rollApp.sheets.allElementsBoundByIndex.first {
-                !$0.buttons["Share frame"].exists
-            },
-            "Could not identify the presented activity sheet"
+        let closeShare = rollApp.descendants(matching: .any)["Close"]
+        XCTAssertTrue(
+            closeShare.waitForExistence(timeout: 5),
+            "The iPad activity popover must expose its system Close control"
         )
         attachScreenshot(named: "roll-qa-ipad-share-sheet")
-        shareSheet.swipeDown(velocity: .fast)
+        closeShare.tap()
         XCTAssertTrue(
-            waitForDisappearance(shareSheet, timeout: 10),
+            waitForDisappearance(copyAction, timeout: 10),
             "Cancelling the activity sheet must return to frame detail"
         )
         XCTAssertTrue(share.exists, "Frame detail must remain open after cancelling share")
