@@ -109,6 +109,10 @@ enum FilmyTheme {
     // Chrome that floats over the live viewfinder
     static let chromeFill = Color.black.opacity(0.42)
     static let chromeStroke = Color.white.opacity(0.13)
+    /// The letterbox bands around the viewfinder. Pure black, like a camera
+    /// body, so the frame reads as the only picture on screen.
+    static let viewfinderBand = Color.black
+    static let viewfinderCornerRadius: CGFloat = 14
 
     static let cornerRadius: CGFloat = 20
     static let controlRadius: CGFloat = 14
@@ -206,11 +210,35 @@ struct FilmyPageBackground: View {
 }
 
 /// Frosted, darkened chrome for controls that sit over the live preview.
+/// On iOS 26 this is Liquid Glass; earlier systems get an ultra-thin material
+/// with the same tint so both read as the same surface.
 struct ViewfinderChromeModifier<S: InsettableShape>: ViewModifier {
     let shape: S
     let fill: Color
+    var interactive = false
 
     func body(content: Content) -> some View {
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *) {
+            content
+                .glassEffect(glass, in: shape)
+        } else {
+            legacy(content)
+        }
+        #else
+        legacy(content)
+        #endif
+    }
+
+    #if compiler(>=6.2)
+    @available(iOS 26.0, *)
+    private var glass: Glass {
+        let tinted = Glass.regular.tint(fill)
+        return interactive ? tinted.interactive() : tinted
+    }
+    #endif
+
+    private func legacy(_ content: Content) -> some View {
         content
             .background(.ultraThinMaterial, in: shape)
             .background(fill, in: shape)
@@ -223,13 +251,14 @@ struct ViewfinderChromeModifier<S: InsettableShape>: ViewModifier {
 extension View {
     func viewfinderChrome<S: InsettableShape>(
         _ shape: S,
-        fill: Color = FilmyTheme.chromeFill
+        fill: Color = FilmyTheme.chromeFill,
+        interactive: Bool = false
     ) -> some View {
-        modifier(ViewfinderChromeModifier(shape: shape, fill: fill))
+        modifier(ViewfinderChromeModifier(shape: shape, fill: fill, interactive: interactive))
     }
 
-    func viewfinderCapsule(fill: Color = FilmyTheme.chromeFill) -> some View {
-        viewfinderChrome(Capsule(), fill: fill)
+    func viewfinderCapsule(fill: Color = FilmyTheme.chromeFill, interactive: Bool = false) -> some View {
+        viewfinderChrome(Capsule(), fill: fill, interactive: interactive)
     }
 }
 
@@ -239,10 +268,8 @@ struct ChromeShapeBackground<S: InsettableShape>: View {
     var fillColor: Color = FilmyTheme.chromeFill
 
     var body: some View {
-        shape
-            .fill(.ultraThinMaterial)
-            .overlay { shape.fill(fillColor) }
-            .overlay { shape.strokeBorder(FilmyTheme.chromeStroke, lineWidth: 1) }
+        Color.clear
+            .viewfinderChrome(shape, fill: fillColor, interactive: true)
     }
 }
 
@@ -468,36 +495,29 @@ struct FilmyIconButton: View {
     }
 }
 
+/// Icon-only circular action beside the shutter (Tune). Captions are left
+/// off, as on every iPhone camera; the accessibility label carries the name.
 struct CameraActionButton: View {
     let systemName: String
-    let title: String
     let accessibilityLabel: String
     var isProminent = false
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 6) {
-                Image(systemName: systemName)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(isProminent ? FilmyTheme.background : .white)
-                    .frame(width: 54, height: 54)
-                    .background {
-                        if isProminent {
-                            Circle().fill(FilmyTheme.accent)
-                        } else {
-                            ChromeShapeBackground(shape: Circle())
-                        }
+            Image(systemName: systemName)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(isProminent ? FilmyTheme.background : .white)
+                .frame(width: 52, height: 52)
+                .background {
+                    if isProminent {
+                        Circle().fill(FilmyTheme.accent)
+                    } else {
+                        ChromeShapeBackground(shape: Circle())
                     }
-
-                Text(title)
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.88))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
-            }
-            .frame(minWidth: 64)
-            .contentShape(Rectangle())
+                }
+                .frame(width: 60, height: 60)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.pressable)
         .accessibilityLabel(accessibilityLabel)
@@ -507,10 +527,17 @@ struct CameraActionButton: View {
 struct FlashControl: View {
     let mode: CameraService.FlashMode
     let availability: CameraService.FlashAvailability
+    /// Icon-only in the top bar (the way every iPhone camera shows flash);
+    /// labelled inside a control strip.
+    var iconOnly = false
     let action: () -> Void
 
     private var isTemporarilyUnavailable: Bool {
         availability == .temporarilyUnavailable
+    }
+
+    private var tint: Color {
+        mode == .off ? .white : FilmyTheme.accent
     }
 
     var body: some View {
@@ -518,12 +545,21 @@ struct FlashControl: View {
             HapticFeedback.play(.controlStep)
             action()
         } label: {
-            Label(mode.title, systemImage: mode.systemImageName)
-                .font(.system(size: 12, weight: .bold, design: .rounded))
-                .foregroundStyle(mode == .off ? .white : FilmyTheme.accent)
-                .padding(.horizontal, 12)
-                .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.toolControlHeight)
-                .viewfinderCapsule()
+            if iconOnly {
+                Image(systemName: mode.systemImageName)
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(tint)
+                    .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+                    .background { ChromeShapeBackground(shape: Circle()) }
+                    .contentShape(Circle())
+            } else {
+                Label(mode.title, systemImage: mode.systemImageName)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(tint)
+                    .padding(.horizontal, 12)
+                    .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.toolControlHeight)
+                    .viewfinderCapsule(interactive: true)
+            }
         }
         .buttonStyle(.pressable)
         .disabled(isTemporarilyUnavailable)
@@ -561,14 +597,14 @@ struct CameraStatusPill: View {
                 .shadow(color: (isLive ? FilmyTheme.mint : FilmyTheme.accent).opacity(0.8), radius: 4)
 
             Text(condensedMessage)
-                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .font(.system(size: 11, weight: .bold, design: .rounded))
                 .tracking(0.6)
                 .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
                 .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(.white)
         }
-        .padding(.horizontal, 12)
-        .frame(minHeight: 36)
+        .padding(.horizontal, 11)
+        .frame(minHeight: 30)
         .viewfinderCapsule()
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Camera status")
@@ -605,53 +641,67 @@ struct CameraStatusPill: View {
     }
 }
 
-struct ZoomControl: View {
+/// Apple Camera-style zoom presets: a glass capsule of small circles, with
+/// the active factor drawn larger and in the accent. It sits over the bottom
+/// edge of the viewfinder while the camera is live.
+struct ZoomPresetBar: View {
     let value: CGFloat
-    let onAdjust: (AccessibilityAdjustmentDirection) -> Void
+    let minZoom: CGFloat
+    let maxZoom: CGFloat
     let onSelect: (CGFloat) -> Void
+    let onAdjust: (AccessibilityAdjustmentDirection) -> Void
 
-    private let zoomPresets: [CGFloat] = [0.5, 1, 2, 3, 5]
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private static let candidates: [CGFloat] = [0.5, 1, 2, 3, 5]
+
+    static func presets(minZoom: CGFloat, maxZoom: CGFloat) -> [CGFloat] {
+        let available = candidates.filter { $0 >= minZoom - 0.01 && $0 <= maxZoom + 0.01 }
+        return available.isEmpty ? [1] : available
+    }
+
+    private var presets: [CGFloat] {
+        Self.presets(minZoom: minZoom, maxZoom: maxZoom)
+    }
+
+    /// The preset whose bubble shows the live factor: the nearest one at or
+    /// below the current zoom, the way the system camera assigns a lens.
+    private var activePreset: CGFloat? {
+        presets.last(where: { $0 <= value + 0.02 }) ?? presets.first
+    }
 
     var body: some View {
-        Menu {
-            Section("Quick zoom") {
-                ForEach(zoomPresets, id: \.self) { preset in
-                    Button {
-                        HapticFeedback.play(.controlStep)
-                        onSelect(preset)
-                    } label: {
-                        if abs(value - preset) < 0.05 {
-                            Label(presetTitle(preset), systemImage: "checkmark")
-                        } else {
-                            Text(presetTitle(preset))
+        HStack(spacing: 4) {
+            ForEach(presets, id: \.self) { preset in
+                let isActive = preset == activePreset
+                Button {
+                    HapticFeedback.play(.controlStep)
+                    onSelect(preset)
+                } label: {
+                    Text(isActive ? Self.zoomTitle(value) : Self.presetTitle(preset))
+                        .font(.system(size: isActive ? 12 : 11, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(isActive ? FilmyTheme.accent : .white.opacity(0.92))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .frame(width: isActive ? 40 : 32, height: isActive ? 40 : 32)
+                        .background {
+                            Circle().fill(Color.black.opacity(isActive ? 0.62 : 0.28))
                         }
-                    }
+                        .contentShape(Circle())
                 }
+                .buttonStyle(.pressable)
+                .accessibilityHidden(true)
             }
-
-            Divider()
-
-            Button("Zoom out", systemImage: "minus") {
-                HapticFeedback.play(.controlStep)
-                onAdjust(.decrement)
-            }
-            Button("Zoom in", systemImage: "plus") {
-                HapticFeedback.play(.controlStep)
-                onAdjust(.increment)
-            }
-        } label: {
-            Text(Self.zoomTitle(value))
-                .font(.system(size: 13, weight: .bold, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(FilmyTheme.accent)
-                .frame(width: FilmyTheme.minimumHitTarget + 4, height: FilmyTheme.toolControlHeight)
-                .viewfinderCapsule()
         }
-        .accessibilityElement()
+        .padding(4)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: activePreset)
+        .viewfinderCapsule()
+        .accessibilityElement(children: .ignore)
         .accessibilityIdentifier("zoom-control")
         .accessibilityLabel("Zoom")
         .accessibilityValue("\(value, specifier: "%.1f") times")
-        .accessibilityHint("Choose a quick zoom, swipe up or down to adjust, or pinch the preview.")
+        .accessibilityHint("Swipe up or down to adjust, or pinch the preview.")
         .accessibilityAdjustableAction { direction in
             HapticFeedback.play(.controlStep)
             onAdjust(direction)
@@ -666,8 +716,8 @@ struct ZoomControl: View {
         return String(format: "%.1f×", tenths)
     }
 
-    private func presetTitle(_ preset: CGFloat) -> String {
-        Self.zoomTitle(preset)
+    static func presetTitle(_ preset: CGFloat) -> String {
+        preset == preset.rounded() ? String(format: "%.0f", preset) : String(format: "%.1f", preset)
     }
 }
 
@@ -701,7 +751,7 @@ struct ExposureControl: View {
 
             adjustmentButton(systemName: "plus", direction: .increment)
         }
-        .viewfinderCapsule()
+        .viewfinderCapsule(interactive: true)
         .accessibilityElement(children: .ignore)
         .accessibilityIdentifier("exposure-control")
         .accessibilityLabel("Exposure compensation")
@@ -773,16 +823,21 @@ struct RecipeSwatch: View {
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.recipePreviewScene) private var previewScene
-    @State private var thumbnailData: Data?
+    @State private var thumbnailImage: UIImage?
     @State private var liveThumbnail: UIImage?
 
     private var cornerRadius: CGFloat {
-        compact ? 12 : 16
+        compact ? 12 : 12
     }
 
     private struct LiveKey: Equatable {
         let recipe: FilmRecipe
         let sceneVersion: Int?
+    }
+
+    private struct ThumbnailKey: Equatable {
+        let recipe: FilmRecipe
+        let hasLiveScene: Bool
     }
 
     var body: some View {
@@ -791,9 +846,8 @@ struct RecipeSwatch: View {
                 Image(uiImage: liveThumbnail)
                     .resizable()
                     .scaledToFill()
-            } else if let thumbnailData,
-               let image = UIImage(data: thumbnailData) {
-                Image(uiImage: image)
+            } else if let thumbnailImage {
+                Image(uiImage: thumbnailImage)
                     .resizable()
                     .scaledToFill()
             } else {
@@ -845,18 +899,25 @@ struct RecipeSwatch: View {
                     lineWidth: isSelected ? 2 : 1
                 )
         }
-        .task(id: recipe) {
+        .task(id: ThumbnailKey(recipe: recipe, hasLiveScene: previewScene != nil)) {
+            // Clear a prior recipe's image immediately, so a slider change
+            // never presents stale settings while the replacement is rendered.
+            thumbnailImage = nil
+            // A live scene is the useful source for swatches in the camera
+            // rail. Skip the second synthetic render while it is available;
+            // this keeps a recipe change from doing two full thumbnail passes.
+            guard previewScene == nil else { return }
             // Editor sliders mutate the draft many times per second, and each
             // change re-runs this task. Debounce first so a drag cannot queue
             // one full renderer pass per tick; .task(id:) cancels the sleeping
             // predecessor whenever the recipe changes again.
             try? await Task.sleep(for: .milliseconds(150))
             guard !Task.isCancelled else { return }
-            let renderedData = await Task.detached(priority: .utility) {
-                FilmRenderer.thumbnail(for: recipe)?.pngData()
+            let renderedImage = await Task.detached(priority: .utility) {
+                FilmRenderer.thumbnail(for: recipe)
             }.value
             guard !Task.isCancelled else { return }
-            thumbnailData = renderedData
+            thumbnailImage = renderedImage
         }
         // When the viewfinder is live, show this recipe applied to the actual
         // scene, refreshed at the snapshot store's cadence.
@@ -932,32 +993,32 @@ struct CaptureButton: View {
         } label: {
             ZStack {
                 Circle()
-                    .strokeBorder(Color.white.opacity(0.92), lineWidth: 3.5)
-                    .frame(width: 80, height: 80)
+                    .strokeBorder(Color.white.opacity(0.95), lineWidth: 4)
+                    .frame(width: 74, height: 74)
 
                 Circle()
                     .fill(Color.white)
-                    .frame(width: isCapturing ? 58 : 66, height: isCapturing ? 58 : 66)
+                    .frame(width: isCapturing ? 50 : 60, height: isCapturing ? 50 : 60)
 
                 if isCapturing {
                     ProgressView()
                         .tint(FilmyTheme.background)
                 }
             }
+            .frame(width: 80, height: 80)
             .contentShape(Circle())
         }
         .buttonStyle(ShutterButtonStyle())
-        .opacity(isEnabled ? 1 : 0.45)
-        .shadow(color: .black.opacity(isEnabled ? 0.35 : 0), radius: 10, y: 4)
+        .opacity(isEnabled ? 1 : 0.4)
         .disabled(isCapturing || !isEnabled)
         .accessibilityLabel(
             isCapturing
-                ? "Saving photo"
+                ? "Processing photo"
                 : (isEnabled ? "Capture photo" : "Capture unavailable in Preview mode")
         )
         .accessibilityHint(
             isEnabled
-                ? "Captures the current frame using the selected recipe"
+                ? (isCapturing ? "Applying the selected recipe" : "Captures the current frame using the selected recipe")
                 : "Capture is available on a physical device"
         )
     }
@@ -968,7 +1029,7 @@ private struct ShutterButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.9 : 1)
+            .scaleEffect(configuration.isPressed ? 0.88 : 1)
             .animation(
                 reduceMotion ? nil : .spring(response: 0.2, dampingFraction: 0.65),
                 value: configuration.isPressed
@@ -993,7 +1054,7 @@ struct RuleOfThirdsGrid: View {
                 path.move(to: CGPoint(x: 0, y: height * 2 / 3))
                 path.addLine(to: CGPoint(x: width, y: height * 2 / 3))
             }
-            .stroke(Color.white.opacity(0.22), lineWidth: 0.5)
+            .stroke(Color.white.opacity(0.3), lineWidth: 0.5)
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
@@ -1002,16 +1063,21 @@ struct RuleOfThirdsGrid: View {
 
 struct FocusReticle: View {
     var body: some View {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
-            .strokeBorder(FilmyTheme.accent, lineWidth: 1.5)
-            .frame(width: 76, height: 76)
-            .overlay {
-                Circle()
+        ZStack {
+            Rectangle()
+                .strokeBorder(FilmyTheme.accent, lineWidth: 1.2)
+                .frame(width: 72, height: 72)
+
+            ForEach(0..<4, id: \.self) { index in
+                Rectangle()
                     .fill(FilmyTheme.accent)
-                    .frame(width: 4, height: 4)
+                    .frame(width: 1.2, height: 7)
+                    .offset(y: -36)
+                    .rotationEffect(.degrees(Double(index) * 90))
             }
-            .shadow(color: .black.opacity(0.4), radius: 2)
-            .accessibilityHidden(true)
+        }
+        .shadow(color: .black.opacity(0.45), radius: 2)
+        .accessibilityHidden(true)
     }
 }
 
@@ -1174,7 +1240,7 @@ struct PreviewPlaceholder: View {
 
     var body: some View {
         GeometryReader { proxy in
-            ZStack(alignment: .top) {
+            ZStack {
                 LinearGradient(
                     colors: recipe.previewColors,
                     startPoint: .topLeading,
@@ -1224,13 +1290,12 @@ struct PreviewPlaceholder: View {
                 .padding(.vertical, 22)
                 .frame(maxWidth: 340)
                 .viewfinderChrome(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                .padding(.horizontal, 24)
-                .padding(.top, max(proxy.safeAreaInsets.top + 76, 100))
-                // Reserve room below the card so, on short or landscape
-                // displays and at accessibility text sizes, the recovery
-                // action can be scrolled clear of the bottom camera chrome.
-                .padding(.bottom, max(proxy.size.height * 0.5, 280))
-                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 24)
+                // Centered inside the viewfinder; on short displays and at
+                // accessibility text sizes the card scrolls instead of
+                // pushing its recovery action out of reach.
+                .frame(maxWidth: .infinity, minHeight: proxy.size.height)
                 .scrollableWhenTaller()
             }
         }

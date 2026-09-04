@@ -147,6 +147,10 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertTrue(compactApp.staticTexts["CAMERA PROFILE"].waitForExistence(timeout: 8))
         XCTAssertTrue(compactApp.staticTexts["G7 X Compact"].waitForExistence(timeout: 5))
 
+        let selectedRecipe = compactApp.buttons["recipe-g7x-compact"]
+        assertMinimumHitTarget(selectedRecipe, named: "G7 X recipe")
+        XCTAssertEqual(selectedRecipe.value as? String, "Selected")
+
         let tune = compactApp.buttons["Tune G7 X Compact"]
         assertMinimumHitTarget(tune, named: "Tune G7 X profile")
         tune.tap()
@@ -209,6 +213,23 @@ final class FilmyCameraUITests: XCTestCase {
 
         let tune = app.buttons["Tune Muted Color"]
         assertMinimumHitTarget(tune, named: "Landscape tune recipe")
+
+        // The side column keeps the recipe menu above the capture controls,
+        // with Roll and Tune sharing one row so the column fits an iPhone's
+        // landscape height above the dock.
+        let roll = app.buttons["Open roll"]
+        assertMinimumHitTarget(roll, named: "Landscape Roll")
+        XCTAssertLessThan(
+            recipeMenu.frame.maxY,
+            tune.frame.minY,
+            "The recipe menu should sit above the capture controls in the side column"
+        )
+        XCTAssertEqual(roll.frame.midY, tune.frame.midY, accuracy: 1, "Roll and Tune share a row")
+        XCTAssertLessThan(
+            roll.frame.maxY,
+            cameraTab.frame.minY,
+            "Landscape capture controls must stay clear of the dock"
+        )
         attachScreenshot(named: "camera-landscape")
     }
 
@@ -449,6 +470,153 @@ final class FilmyCameraUITests: XCTestCase {
     }
     #endif
 
+    /// Opt-in, non-destructive Roll acceptance on a provisioned physical iPad.
+    /// The saved frame is intentionally retained in Photos and the local cache.
+    func testPhysicalG7XSaveRollDetailAndShareAcceptance() throws {
+        #if targetEnvironment(simulator)
+        throw XCTSkip("Roll capture and share acceptance requires a physical iPad")
+        #else
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["FILMY_RUN_PHOTOS_WRITE"] == "1",
+            "Set FILMY_RUN_PHOTOS_WRITE=1 to allow the test to keep a real photo"
+        )
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["FILMY_RUN_ROLL_QA"] == "1",
+            "Set FILMY_RUN_ROLL_QA=1 to run the physical Roll acceptance flow"
+        )
+
+        app.terminate()
+        let rollApp = XCUIApplication()
+        // Deliberately omit -ui-testing: this exercises normal Photos access,
+        // the real local fallback cache, and the real share controller.
+        rollApp.launchArguments = ["-selectedRecipeID", "g7x-compact"]
+        rollApp.launch()
+        app = rollApp
+        defer { rollApp.terminate() }
+
+        try XCTSkipUnless(
+            rollApp.frame.width >= 700,
+            "The share-popover acceptance path requires a full-screen physical iPad"
+        )
+
+        let onboarding = rollApp.descendants(matching: .any)["onboarding-screen"]
+        if onboarding.waitForExistence(timeout: 3) {
+            let skip = rollApp.buttons["onboarding-skip"]
+            XCTAssertTrue(skip.waitForExistence(timeout: 5))
+            skip.tap()
+        }
+
+        // Give the interruption monitor an interaction for a first-launch
+        // camera prompt before requiring the live hardware shutter.
+        rollApp.tap()
+        let shutter = rollApp.buttons["Capture photo"]
+        XCTAssertTrue(
+            shutter.waitForExistence(timeout: 20) && shutter.isEnabled,
+            "Normal app launch must reach a live physical camera"
+        )
+        XCTAssertTrue(rollApp.staticTexts["G7 X Compact"].waitForExistence(timeout: 5))
+        attachScreenshot(named: "roll-qa-g7x-viewfinder")
+
+        shutter.tap()
+        let keepFrame = rollApp.buttons["Keep frame"]
+        XCTAssertTrue(
+            keepFrame.waitForExistence(timeout: 40),
+            "G7 X capture must reach full-resolution review"
+        )
+        attachScreenshot(named: "roll-qa-g7x-review")
+        keepFrame.tap()
+        // Invokes the permission monitor if add-only Photos access is being
+        // requested for this normal-app save.
+        rollApp.tap()
+
+        let savedToast = rollApp.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH 'Saved with '")
+        ).firstMatch
+        XCTAssertTrue(
+            savedToast.waitForExistence(timeout: 20),
+            "The G7 X frame must be accepted by Photos before Roll QA continues"
+        )
+
+        let openRoll = rollApp.buttons["Open roll"]
+        XCTAssertTrue(openRoll.waitForExistence(timeout: 10))
+        openRoll.tap()
+        XCTAssertTrue(rollApp.staticTexts["Roll"].waitForExistence(timeout: 10))
+
+        let sourceSummary = rollApp.descendants(matching: .any).matching(
+            NSPredicate(format: "label BEGINSWITH 'Newest first. Source:'")
+        ).firstMatch
+        XCTAssertTrue(
+            sourceSummary.waitForExistence(timeout: 30),
+            "The Roll must publish whether the saved frame came from Photos or local cache"
+        )
+        let savedFrame = rollApp.buttons.matching(
+            NSPredicate(format: "label == 'Photo in your gallery, G7 X Compact'")
+        ).firstMatch
+        XCTAssertTrue(
+            savedFrame.waitForExistence(timeout: 30),
+            "The newly saved G7 X frame must populate the Roll"
+        )
+        attachScreenshot(named: "roll-qa-populated-roll")
+        savedFrame.tap()
+
+        let photo = rollApp.descendants(matching: .any).matching(
+            NSPredicate(format: "label == 'Photo'")
+        ).firstMatch
+        XCTAssertTrue(photo.waitForExistence(timeout: 30), "Saved frame detail must load")
+        let share = rollApp.buttons["Share frame"]
+        XCTAssertTrue(
+            waitUntil(timeout: 20) { share.exists && share.isEnabled },
+            "The loaded saved frame must be shareable"
+        )
+        XCTAssertEqual(photo.value as? String, "Fit to screen")
+        attachScreenshot(named: "roll-qa-detail-fit")
+
+        photo.pinch(withScale: 2, velocity: 1)
+        XCTAssertTrue(
+            waitUntil(timeout: 5) {
+                (photo.value as? String)?.hasPrefix("Zoomed ") == true
+            },
+            "Pinching must zoom the Roll detail image"
+        )
+        photo.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.55)).press(
+            forDuration: 0.1,
+            thenDragTo: photo.coordinate(withNormalizedOffset: CGVector(dx: 0.30, dy: 0.35))
+        )
+        XCTAssertTrue(
+            (photo.value as? String)?.hasPrefix("Zoomed ") == true,
+            "Panning must keep the detail image zoomed"
+        )
+        attachScreenshot(named: "roll-qa-detail-zoomed-panned")
+
+        photo.doubleTap()
+        XCTAssertTrue(
+            waitUntil(timeout: 5) { (photo.value as? String) == "Fit to screen" },
+            "Double tap must reset zoom and pan"
+        )
+        attachScreenshot(named: "roll-qa-detail-reset")
+
+        let existingSheetCount = rollApp.sheets.count
+        share.tap()
+        XCTAssertTrue(
+            waitUntil(timeout: 30) { rollApp.sheets.count > existingSheetCount },
+            "Share frame must present the iPad activity sheet"
+        )
+        let shareSheet = try XCTUnwrap(
+            rollApp.sheets.allElementsBoundByIndex.first {
+                !$0.buttons["Share frame"].exists
+            },
+            "Could not identify the presented activity sheet"
+        )
+        attachScreenshot(named: "roll-qa-ipad-share-sheet")
+        shareSheet.swipeDown(velocity: .fast)
+        XCTAssertTrue(
+            waitForDisappearance(shareSheet, timeout: 10),
+            "Cancelling the activity sheet must return to frame detail"
+        )
+        XCTAssertTrue(share.exists, "Frame detail must remain open after cancelling share")
+        #endif
+    }
+
     #if targetEnvironment(simulator)
     func testSimulatorFallbackExposesReadableStateWithoutPreviewAction() throws {
         XCTAssertTrue(app.staticTexts["Preview mode"].waitForExistence(timeout: 8))
@@ -514,11 +682,34 @@ final class FilmyCameraUITests: XCTestCase {
             "The compact recipe rail should remain visually connected to its actions"
         )
 
-        let captureNotice = accessibilityApp.staticTexts[
-            "Capture is available on a physical device"
-        ]
+        let captureNotice = accessibilityApp.staticTexts["Capture on iPhone or iPad"]
         XCTAssertTrue(captureNotice.waitForExistence(timeout: 5))
         attachScreenshot(named: "accessibility-camera-shell-bounded")
+    }
+
+    func testMonochromeEditorHidesNoOpColorControls() throws {
+        app.terminate()
+
+        let monochromeApp = XCUIApplication()
+        monochromeApp.launchArguments = [
+            "-ui-testing",
+            "-selectedRecipeID",
+            "acros-neutral-filter"
+        ]
+        monochromeApp.launch()
+        defer { monochromeApp.terminate() }
+
+        let tune = monochromeApp.buttons["Tune Neutral Monochrome"]
+        XCTAssertTrue(tune.waitForExistence(timeout: 8))
+        tune.tap()
+
+        XCTAssertTrue(monochromeApp.staticTexts["Monochrome recipe"].waitForExistence(timeout: 5))
+        XCTAssertFalse(
+            monochromeApp.sliders["Color"].exists,
+            "Monochrome recipes should not expose a saturation slider that cannot affect the render"
+        )
+        XCTAssertFalse(monochromeApp.descendants(matching: .any)["recipe-choice-Color Chrome"].exists)
+        XCTAssertFalse(monochromeApp.descendants(matching: .any)["fx-blue-control"].exists)
     }
 
     func testViewfinderFirstChromePreviewKeepsCameraQuiet() throws {
@@ -656,6 +847,18 @@ final class FilmyCameraUITests: XCTestCase {
             object: element
         )
         return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    private func waitUntil(
+        timeout: TimeInterval,
+        condition: () -> Bool
+    ) -> Bool {
+        let deadline = Date(timeIntervalSinceNow: timeout)
+        repeat {
+            if condition() { return true }
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+        } while Date() < deadline
+        return condition()
     }
 
     func testRecipeFirstOnboardingFlow() throws {
@@ -859,6 +1062,7 @@ final class FilmyCameraUITests: XCTestCase {
         }
         #endif
     }
+
 
     private func attachScreenshot(named name: String) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())

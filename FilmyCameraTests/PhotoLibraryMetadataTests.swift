@@ -1,4 +1,8 @@
+import CoreGraphics
 import Foundation
+import ImageIO
+import UIKit
+import UniformTypeIdentifiers
 import XCTest
 @testable import FilmyCamera
 
@@ -34,6 +38,46 @@ final class PhotoLibraryMetadataTests: XCTestCase {
         XCTAssertTrue(PhotoLibraryServiceError.accessDenied.localizedDescription.contains("Settings"))
         XCTAssertTrue(PhotoLibraryServiceError.notOwned.localizedDescription.contains("created"))
         XCTAssertTrue(PhotoLibraryServiceError.changeFailed.localizedDescription.contains("Try again"))
+    }
+
+    func testSaveFailuresDistinguishAuthorizationFromPhotoKitWriteFailure() {
+        XCTAssertEqual(PhotoLibrarySaveError.failure(for: .denied), .accessDenied)
+        XCTAssertEqual(PhotoLibrarySaveError.failure(for: .restricted), .accessDenied)
+        XCTAssertEqual(PhotoLibrarySaveError.failure(for: .authorized), .writeFailed)
+        XCTAssertTrue(PhotoLibrarySaveError.accessDenied.localizedDescription.contains("Settings"))
+        XCTAssertTrue(PhotoLibrarySaveError.writeFailed.localizedDescription.contains("try again"))
+    }
+
+    func testCachedFrameDimensionsComeFromFullResolutionJPEG() throws {
+        let colorSpace = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        let context = try XCTUnwrap(CGContext(
+            data: nil,
+            width: 40,
+            height: 30,
+            bitsPerComponent: 8,
+            bytesPerRow: 40 * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        let image = try XCTUnwrap(context.makeImage())
+        let data = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(
+            data,
+            UTType.jpeg.identifier as CFString,
+            1,
+            nil
+        ))
+        CGImageDestinationAddImage(destination, image, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+
+        let downsampledFallback = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 3)).image { _ in }
+        XCTAssertEqual(
+            PhotoLibraryService.pixelDimensions(
+                in: data as Data,
+                fallbackImage: downsampledFallback
+            ),
+            PhotoPixelDimensions(width: 40, height: 30)
+        )
     }
 
     func testReadWriteAuthorizationAllowsFullAndLimitedAccess() {

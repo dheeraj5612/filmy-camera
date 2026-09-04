@@ -1,5 +1,7 @@
 # Filmy Camera release checklist
 
+> **Current MVP sweep: September 4, 2026, version 1.0.0 build 5.** Use [the current validation record](mvp-validation-20260904.md) and [source audit](mvp-audit-20260904.md) for this candidate. All checked historical items below apply only to the commits/builds named there. They do not establish build 5 upload, physical acceptance, or public release. Live App Store Connect readback on September 4 showed version 1.0 as **Developer Rejected**, build 3 selected, and build 4 uploaded and Ready to Submit.
+
 ## Current workspace gate
 
 - [x] Audited release candidate is `5ce57c55f7a50fd425b01bee40aa0c8a8a617c28`; every release artifact records `FilmyCamera.source-sha`, which equals the reviewed source commit.

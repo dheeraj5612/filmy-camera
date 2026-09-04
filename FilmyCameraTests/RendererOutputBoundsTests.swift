@@ -1560,6 +1560,33 @@ final class RendererOutputBoundsTests: XCTestCase {
         XCTAssertFalse(first === tunedImage, "Edited recipe values must render a distinct thumbnail")
     }
 
+    func testRecipeThumbnailDiskIdentityIsStableAndIncludesRenderInputs() throws {
+        let recipe = try XCTUnwrap(FilmRecipe.builtIns.first)
+        let roundTripped = try JSONDecoder().decode(
+            FilmRecipe.self,
+            from: JSONEncoder().encode(recipe)
+        )
+        let size = CGSize(width: 96, height: 64)
+
+        let first = try XCTUnwrap(FilmRenderer.thumbnailCacheDigest(for: recipe, size: size))
+        XCTAssertEqual(
+            first,
+            FilmRenderer.thumbnailCacheDigest(for: roundTripped, size: size),
+            "Equivalent persisted recipes must address the same cross-launch cache entry"
+        )
+
+        var tuned = recipe
+        tuned.exposure += 0.1
+        XCTAssertNotEqual(first, FilmRenderer.thumbnailCacheDigest(for: tuned, size: size))
+        XCTAssertNotEqual(
+            first,
+            FilmRenderer.thumbnailCacheDigest(
+                for: recipe,
+                size: CGSize(width: size.width + 1, height: size.height)
+            )
+        )
+    }
+
     func testRecipeContactSheetRendersEveryBuiltInLook() throws {
         let tileSize = CGSize(width: 264, height: 160)
         let labelHeight: CGFloat = 30

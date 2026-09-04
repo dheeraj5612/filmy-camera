@@ -23,6 +23,17 @@ struct ContentView: View {
         isLoadingImportedPhoto || cameraViewModel.isImporting
     }
 
+    /// The dock and Import entry point must share one busy policy. During a
+    /// capture, save, or review, changing tabs can otherwise open the picker;
+    /// the selected image is then rejected by the view model and appears to
+    /// have disappeared. The review sheet's own actions remain available.
+    private var isCameraBusy: Bool {
+        isImportInProgress
+            || cameraViewModel.isCapturing
+            || cameraViewModel.isSaving
+            || cameraViewModel.reviewImage != nil
+    }
+
     var body: some View {
         selectedTabContent
             // The camera screen keeps the session warm across tab switches.
@@ -53,13 +64,21 @@ struct ContentView: View {
                     }
                 }
                 .padding(.horizontal, FilmyLayout.compactHorizontalMargin)
-                .padding(.top, 6)
-                .padding(.bottom, 4)
+                .padding(.top, 8)
+                .padding(.bottom, 2)
                 .frame(maxWidth: .infinity)
-                .disabled(isImportInProgress)
+                .disabled(isCameraBusy)
             }
             .tint(FilmyTheme.accent)
-            .background { FilmyPageBackground() }
+            .background {
+                // The camera sits on a black body; the Roll and Settings keep
+                // the warm page surface.
+                if selectedTab == .camera {
+                    FilmyTheme.viewfinderBand.ignoresSafeArea()
+                } else {
+                    FilmyPageBackground()
+                }
+            }
             .preferredColorScheme(.dark)
             .onChange(of: importedPhotoItem) { _, item in
                 guard let item else { return }
@@ -79,7 +98,7 @@ struct ContentView: View {
                             }
                             return
                         }
-                        await cameraViewModel.importPhoto(data: data)
+                        await cameraViewModel.importPhoto(data: data, camera: camera)
                     } catch {
                         guard !Task.isCancelled else { return }
                         cameraViewModel.reportImportFailure()
@@ -116,7 +135,7 @@ struct ContentView: View {
     /// a capture.
     private func importPhotoButton(showsLabel: Bool) -> some View {
         PhotosPicker(selection: $importedPhotoItem, matching: .images) {
-            HStack(spacing: 7) {
+            HStack(spacing: 6) {
                 Image(systemName: "photo.badge.plus")
                     .font(.system(size: 15, weight: .bold))
 
@@ -128,14 +147,14 @@ struct ContentView: View {
                 }
             }
             .foregroundStyle(FilmyTheme.background)
-            .padding(.horizontal, showsLabel ? 16 : 0)
-            .frame(minWidth: 54, minHeight: 54)
+            .padding(.horizontal, showsLabel ? 15 : 0)
+            .frame(minWidth: 48, minHeight: 48)
             .background(FilmyTheme.accent, in: Capsule())
             .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
-        .shadow(color: .black.opacity(0.38), radius: 16, y: 8)
-        .disabled(isImportInProgress)
+        .buttonStyle(.pressable)
+        .shadow(color: .black.opacity(0.3), radius: 12, y: 6)
+        .disabled(isCameraBusy)
         .accessibilityLabel("Import photo")
         .accessibilityHint("Choose a photo and apply the current film recipe")
         .accessibilityIdentifier("import-photo")
@@ -173,21 +192,17 @@ struct ContentView: View {
         }
     }
 
-    /// A compact floating pill. The active destination expands to show its
-    /// name; the others stay icon-only so the camera keeps the screen.
+    /// A compact floating glass pill. The active destination expands to show
+    /// its name; the others stay icon-only so the camera keeps the screen.
     private var tabBar: some View {
         HStack(spacing: 2) {
             tabButton(.camera, title: "Camera", systemImage: "camera.fill")
             tabButton(.gallery, title: "Roll", systemImage: "square.grid.3x3.fill")
             tabButton(.settings, title: "Settings", systemImage: "gearshape.fill")
         }
-        .padding(4)
-        .background(.ultraThinMaterial, in: Capsule())
-        .background(FilmyTheme.panel.opacity(0.88), in: Capsule())
-        .overlay {
-            Capsule().strokeBorder(FilmyTheme.lineStrong, lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.38), radius: 16, y: 8)
+        .padding(3)
+        .viewfinderCapsule(fill: Color.black.opacity(0.5))
+        .shadow(color: .black.opacity(0.3), radius: 12, y: 6)
     }
 
     private func tabButton(_ tab: Tab, title: String, systemImage: String) -> some View {
@@ -200,7 +215,7 @@ struct ContentView: View {
                 selectedTab = tab
             }
         } label: {
-            HStack(spacing: 7) {
+            HStack(spacing: 6) {
                 Image(systemName: systemImage)
                     .font(.system(size: 15, weight: .bold))
 
@@ -211,10 +226,10 @@ struct ContentView: View {
                         .fixedSize()
                 }
             }
-            .foregroundStyle(isSelected ? FilmyTheme.background : FilmyTheme.secondary)
-            .padding(.horizontal, isSelected ? 18 : 15)
-            .frame(minWidth: 54, minHeight: 46)
-            .background(isSelected ? FilmyTheme.accent : Color.clear, in: Capsule())
+            .foregroundStyle(isSelected ? FilmyTheme.background : FilmyTheme.primary.opacity(0.78))
+            .padding(.horizontal, isSelected ? 16 : 13)
+            .frame(minWidth: 48, minHeight: 44)
+            .background(isSelected ? FilmyTheme.primary : Color.clear, in: Capsule())
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)

@@ -21,17 +21,8 @@ mode="check"
 mode_was_set=false
 allow_provisioning_updates=false
 ipa_path=""
-temp_paths=()
-
-cleanup() {
-  local path
-  if [[ "${#temp_paths[@]}" -gt 0 ]]; then
-    for path in "${temp_paths[@]}"; do
-      [[ -n "${path}" ]] && rm -rf "${path}"
-    done
-  fi
-}
-trap cleanup EXIT HUP INT TERM
+# shellcheck source=scripts/release/private-temp.sh
+source "${script_dir}/private-temp.sh"
 
 die() {
   echo "Release preparation error: $*" >&2
@@ -123,20 +114,6 @@ if [[ "${mode}" == check && "${allow_provisioning_updates}" == true ]]; then
   die "--allow-provisioning-updates is only valid with --export or --upload"
 fi
 
-new_temp_file() {
-  local path
-  path="$(mktemp -t filmycamera-release)"
-  temp_paths+=("${path}")
-  printf '%s\n' "${path}"
-}
-
-new_temp_dir() {
-  local path
-  path="$(mktemp -d -t filmycamera-release)"
-  temp_paths+=("${path}")
-  printf '%s\n' "${path}"
-}
-
 canonical_existing_path() {
   local path="$1"
   local directory
@@ -200,7 +177,7 @@ has_installed_app_store_profile() {
     "${user_home}/Library/MobileDevice/Provisioning Profiles"
     "${user_home}/Library/Developer/Xcode/UserData/Provisioning Profiles"
   )
-  decoded_profile="$(new_temp_file)"
+  new_temp_file decoded_profile
 
   for profile_dir in "${profile_dirs[@]}"; do
     [[ -d "${profile_dir}" ]] || continue
@@ -327,102 +304,7 @@ ensure_empty_export_path() {
 }
 
 validate_exported_ipa() {
-  local ipa="$1"
-  local archive_app_path="${archive_path}/Products/Applications/FilmyCamera.app"
-  local archive_info_plist="${archive_app_path}/Info.plist"
-  local ipa_work_dir
-  local ipa_app_path
-  local ipa_info_plist
-  local decoded_profile
-  local archive_version
-  local archive_build
-  local ipa_version
-  local ipa_build
-  local application_identifier
-  local profile_bundle_id
-  local profile_team_id
-  local get_task_allow
-  local expiration_date
-  local expiration_epoch
-  local signature_details
-
-  [[ -f "${ipa}" ]] || {
-    echo "Xcode export did not produce FilmyCamera.ipa" >&2
-    return 1
-  }
-  command -v unzip >/dev/null 2>&1 || {
-    echo "unzip is required to validate the exported IPA" >&2
-    return 127
-  }
-  command -v codesign >/dev/null 2>&1 || {
-    echo "codesign is required to validate the exported IPA" >&2
-    return 127
-  }
-  command -v security >/dev/null 2>&1 || {
-    echo "The macOS security tool is required to validate the exported IPA" >&2
-    return 127
-  }
-
-  ipa_work_dir="$(new_temp_dir)"
-  unzip -qq "${ipa}" -d "${ipa_work_dir}" >/dev/null 2>&1 || {
-    echo "Exported IPA is not a valid ZIP archive" >&2
-    return 1
-  }
-  ipa_app_path="${ipa_work_dir}/Payload/FilmyCamera.app"
-  ipa_info_plist="${ipa_app_path}/Info.plist"
-  if [[ ! -d "${ipa_app_path}" || ! -f "${ipa_info_plist}" ]]; then
-    echo "Exported IPA does not contain FilmyCamera.app" >&2
-    return 1
-  fi
-
-  archive_version="$(plist_value CFBundleShortVersionString "${archive_info_plist}")"
-  archive_build="$(plist_value CFBundleVersion "${archive_info_plist}")"
-  ipa_version="$(plist_value CFBundleShortVersionString "${ipa_info_plist}")"
-  ipa_build="$(plist_value CFBundleVersion "${ipa_info_plist}")"
-  if [[ "$(plist_value CFBundleIdentifier "${ipa_info_plist}")" != "${bundle_id}" \
-    || "${ipa_version}" != "${archive_version}" \
-    || "${ipa_build}" != "${archive_build}" ]]; then
-    echo "Exported IPA metadata does not match the validated archive" >&2
-    return 1
-  fi
-
-  [[ -f "${ipa_app_path}/embedded.mobileprovision" ]] || {
-    echo "Exported IPA has no embedded provisioning profile" >&2
-    return 1
-  }
-  decoded_profile="$(new_temp_file)"
-  security cms -D -i "${ipa_app_path}/embedded.mobileprovision" -o "${decoded_profile}" 2>/dev/null || {
-    echo "Unable to decode the exported IPA provisioning profile" >&2
-    return 1
-  }
-  application_identifier="$(plist_value 'Entitlements:application-identifier' "${decoded_profile}" 2>/dev/null || true)"
-  profile_team_id="${application_identifier%%.*}"
-  profile_bundle_id="${application_identifier#*.}"
-  get_task_allow="$(plist_value 'Entitlements:get-task-allow' "${decoded_profile}" 2>/dev/null || true)"
-  expiration_date="$(plist_value ExpirationDate "${decoded_profile}" 2>/dev/null || true)"
-  expiration_epoch="$(profile_expiration_epoch "${expiration_date}")"
-  [[ "${profile_team_id}" == "${team_id}" && "${profile_bundle_id}" == "${bundle_id}" ]] || {
-    echo "Exported IPA provisioning profile does not match the production app" >&2
-    return 1
-  }
-  [[ "${get_task_allow}" == false ]] || {
-    echo "Exported IPA must disable get-task-allow" >&2
-    return 1
-  }
-  [[ -n "${expiration_epoch}" && "${expiration_epoch}" -gt "$(date '+%s')" ]] || {
-    echo "Exported IPA provisioning profile is expired or has an unreadable expiration date" >&2
-    return 1
-  }
-
-  signature_details="$(codesign -dv --verbose=4 "${ipa_app_path}" 2>&1 || true)"
-  if ! codesign --verify --deep --strict --verbose=2 "${ipa_app_path}" >/dev/null 2>&1; then
-    echo "Exported IPA app signature failed verification" >&2
-    return 1
-  fi
-  if ! grep -Eq '^Authority=(Apple Distribution|iPhone Distribution):' <<<"${signature_details}"; then
-    echo "Exported IPA is not signed for App Store distribution" >&2
-    return 1
-  fi
+  "${script_dir}/validate-ipa.sh" --ipa "$1" --archive "${archive_path}"
 }
 
 write_export_options() {
@@ -459,8 +341,8 @@ prepare_export() {
   require_local_distribution_material
   ensure_empty_export_path
 
-  export_options_path="$(new_temp_file)"
-  export_log="$(new_temp_file)"
+  new_temp_file export_options_path
+  new_temp_file export_log
   write_export_options "${export_options_path}"
 
   exporter_args=(
@@ -518,7 +400,7 @@ upload_to_app_store_connect() {
     return 127
   }
 
-  transporter_work_dir="$(new_temp_dir)"
+  new_temp_dir transporter_work_dir
   private_keys_dir="${transporter_work_dir}/private_keys"
   mkdir -m 700 "${private_keys_dir}"
   if ! cp "${asc_key_path}" "${private_keys_dir}/AuthKey_${asc_key_id}.p8" >/dev/null 2>&1; then
@@ -526,7 +408,7 @@ upload_to_app_store_connect() {
     return 1
   fi
   chmod 600 "${private_keys_dir}/AuthKey_${asc_key_id}.p8"
-  upload_log="$(new_temp_file)"
+  new_temp_file upload_log
   transporter_args=(
     -m upload
     -apiIssuer "${asc_issuer_id}"

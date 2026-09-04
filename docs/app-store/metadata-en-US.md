@@ -17,13 +17,13 @@ Status: final
 
 Filmy Camera is a camera for people who want to choose a feeling before they shoot.
 
-Pick a recipe, frame the moment, and capture with a warm, tactile look inspired by classic film cameras. The live preview keeps the selected look in view so you can make the image—not fix it later.
+Choose the G7 X Compact look for warm compact-digital color and direct-flash character, or explore expressive film-style recipes. Frame the moment with a live preview, then review and save the finished photo.
 
 What you get:
 
 - A focused camera screen designed for one-handed shooting
-- A quick rail of curated film-style recipes
-- Import an existing photo and apply your selected recipe at full resolution
+- A quick rail of compact-digital, color-film, and monochrome looks
+- Import an existing photo with its framing preserved, at full resolution up to 40 MP
 - Adjustable tone, color, Kelvin white balance, fine-tuning, grain, clarity, and vignette controls
 - Live preview and full-resolution exports with the selected look applied
 - A review step to retake or explicitly save each finished frame

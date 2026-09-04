@@ -86,12 +86,15 @@ final class RecipeRenderGalleryTests: XCTestCase {
             FilmRecipe.builtIns.first { $0.id == identifier }
         }
         XCTAssertEqual(recipes.count, recipeIDs.count, "Every requested recipe should exist")
+        let expectedPanelCount = 1 + recipes.count + recipes.filter {
+            includeFlashVariant && $0.filmBase == .compactDigital
+        }.count
 
         for url in urls {
-            guard let decoded = CIImage(contentsOf: url, options: [.applyOrientationProperty: true]) else {
-                XCTFail("Could not decode \(url.lastPathComponent)")
-                continue
-            }
+            let decoded = try XCTUnwrap(
+                CIImage(contentsOf: url, options: [.applyOrientationProperty: true]),
+                "Could not decode \(url.lastPathComponent)"
+            )
             let extent = decoded.extent
             let source = decoded.transformed(by: CGAffineTransform(
                 translationX: -extent.minX,
@@ -100,9 +103,11 @@ final class RecipeRenderGalleryTests: XCTestCase {
             let faces = FilmRenderer.portraitSubjectRegions(in: source)
 
             var panels: [(String, CGImage)] = []
-            if let sourceImage = FilmRenderer.outputCGImage(source, from: source.extent) {
-                panels.append(("source · \(faces.count) face(s)", sourceImage))
-            }
+            let sourceImage = try XCTUnwrap(
+                FilmRenderer.outputCGImage(source, from: source.extent),
+                "Could not materialize source \(url.lastPathComponent)"
+            )
+            panels.append(("source · \(faces.count) face(s)", sourceImage))
 
             for recipe in recipes {
                 let context: FilmRenderer.CaptureContext = recipe.filmBase == .compactDigital
@@ -114,9 +119,11 @@ final class RecipeRenderGalleryTests: XCTestCase {
                     quality: .photo,
                     captureContext: context
                 )
-                if let image = FilmRenderer.outputCGImage(rendered, from: source.extent) {
-                    panels.append((recipe.name, image))
-                }
+                let image = try XCTUnwrap(
+                    FilmRenderer.outputCGImage(rendered, from: source.extent),
+                    "Could not materialize \(recipe.id) for \(url.lastPathComponent)"
+                )
+                panels.append((recipe.name, image))
 
                 if includeFlashVariant, recipe.filmBase == .compactDigital {
                     let flashContext = FilmRenderer.CaptureContext(
@@ -129,12 +136,19 @@ final class RecipeRenderGalleryTests: XCTestCase {
                         quality: .photo,
                         captureContext: flashContext
                     )
-                    if let image = FilmRenderer.outputCGImage(flashRendered, from: source.extent) {
-                        panels.append(("\(recipe.name) · flash", image))
-                    }
+                    let flashImage = try XCTUnwrap(
+                        FilmRenderer.outputCGImage(flashRendered, from: source.extent),
+                        "Could not materialize \(recipe.id) flash for \(url.lastPathComponent)"
+                    )
+                    panels.append(("\(recipe.name) · flash", flashImage))
                 }
             }
 
+            XCTAssertEqual(
+                panels.count,
+                expectedPanelCount,
+                "\(url.lastPathComponent) must contain every requested render panel"
+            )
             let composite = Self.composite(panels, faces: faces, sourceExtent: source.extent)
             let attachment = XCTAttachment(image: composite, quality: .medium)
             attachment.name = "\(name)-\(url.deletingPathExtension().lastPathComponent)"

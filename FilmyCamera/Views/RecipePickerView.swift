@@ -30,25 +30,36 @@ struct RecipePickerView: View {
         }
         // Regular widths (iPad) have room for a slightly larger swatch.
         return horizontalSizeClass == .regular
-            ? CGSize(width: 122, height: 78)
-            : CGSize(width: 98, height: 64)
+            ? CGSize(width: 96, height: 70)
+            : CGSize(width: 78, height: 58)
     }
 
     private var tileSpacing: CGFloat {
-        compact ? 10 : 12
+        compact ? 10 : 10
     }
 
     /// Compact tiles keep the name inside the swatch; standard tiles add a
     /// caption beneath. Both stay well under the camera chrome's budget.
     private var railHeight: CGFloat {
-        compact ? swatchSize.height + 12 : swatchSize.height + 36
+        compact ? swatchSize.height + 12 : swatchSize.height + 30
+    }
+
+    /// Put the compact digital profile in the first glance of the rail. Its
+    /// identity is different from the Fuji-inspired looks, so a new user can
+    /// compare the G7 X option with film recipes without a long horizontal
+    /// hunt. IDs and the relative order of every other recipe stay intact.
+    private var presentationRecipes: [FilmRecipe] {
+        guard let compactProfile = recipes.first(where: { $0.filmBase == .compactDigital }) else {
+            return recipes
+        }
+        return [compactProfile] + recipes.filter { $0.id != compactProfile.id }
     }
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: tileSpacing) {
-                    ForEach(recipes) { recipe in
+                    ForEach(presentationRecipes) { recipe in
                         recipeButton(for: recipe)
                             .id(recipe.id)
                     }
@@ -111,7 +122,7 @@ struct RecipePickerView: View {
     private func recipeTile(_ recipe: FilmRecipe) -> some View {
         let isSelected = selectedRecipeID == recipe.id
 
-        return VStack(spacing: 7) {
+        return VStack(spacing: 6) {
             RecipeSwatch(
                 recipe: recipe,
                 isSelected: isSelected,
@@ -119,23 +130,18 @@ struct RecipePickerView: View {
                 showsLabel: compact
             )
             .frame(width: swatchSize.width, height: swatchSize.height)
-            .shadow(
-                color: isSelected ? FilmyTheme.accent.opacity(0.38) : Color.black.opacity(0.35),
-                radius: isSelected ? 10 : 6,
-                y: 3
-            )
 
             if !compact {
                 Text(recipe.name)
-                    .font(.system(size: 12, weight: isSelected ? .bold : .semibold, design: .rounded))
-                    .foregroundStyle(isSelected ? FilmyTheme.accent : Color.white.opacity(0.8))
+                    .font(.system(size: 11, weight: isSelected ? .bold : .semibold, design: .rounded))
+                    .foregroundStyle(isSelected ? FilmyTheme.accent : Color.white.opacity(0.72))
                     .lineLimit(1)
                     .minimumScaleFactor(0.78)
-                    .frame(width: swatchSize.width + 6)
+                    .frame(width: swatchSize.width + 8)
             }
         }
-        .opacity(isSelected ? 1 : 0.84)
-        .scaleEffect(isSelected ? 1 : 0.94)
+        .opacity(isSelected ? 1 : 0.8)
+        .scaleEffect(isSelected ? 1 : 0.95)
         .contentShape(Rectangle())
         .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: isSelected)
     }
@@ -769,16 +775,28 @@ struct RecipeDetailView: View {
             }
         case .color:
             VStack(spacing: 14) {
-                RecipeSliderRow(title: "Color", value: binding(\.saturation), range: 0...2, format: "%.2f")
-                RecipeChoiceRow(title: "Color Chrome", selection: colorChromeLevelBinding) {
-                    ForEach(FilmRecipe.ColorChromeLevel.allCases, id: \.self) { level in
-                        Text(level.displayName).tag(level)
+                if draft.filmBase.monochromeFilter == nil {
+                    RecipeSliderRow(title: "Color", value: binding(\.saturation), range: 0...2, format: "%.2f")
+                    RecipeChoiceRow(title: "Color Chrome", selection: colorChromeLevelBinding) {
+                        ForEach(FilmRecipe.ColorChromeLevel.allCases, id: \.self) { level in
+                            Text(level.displayName).tag(level)
+                        }
                     }
-                }
-                RecipeChoiceRow(title: "FX Blue", selection: fxBlueLevelBinding) {
-                    ForEach(FilmRecipe.FXBlueLevel.allCases, id: \.self) { level in
-                        Text(level.displayName).tag(level)
+                    RecipeChoiceRow(title: "FX Blue", selection: fxBlueLevelBinding) {
+                        ForEach(FilmRecipe.FXBlueLevel.allCases, id: \.self) { level in
+                            Text(level.displayName).tag(level)
+                        }
                     }
+                } else {
+                    Label("Monochrome recipe", systemImage: "circle.lefthalf.filled")
+                        .font(.system(.subheadline, design: .rounded).weight(.bold))
+                        .foregroundStyle(FilmyTheme.accent)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Text("Color saturation and color effects are fixed for this look. Warmth, tint, and the monochromatic axes remain available below.")
+                        .font(.system(.caption, design: .rounded).weight(.medium))
+                        .foregroundStyle(FilmyTheme.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 RecipeChoiceRow(title: "White balance", selection: whiteBalanceModeBinding) {
                     ForEach(FilmRecipe.WhiteBalanceMode.allCases, id: \.self) { mode in
