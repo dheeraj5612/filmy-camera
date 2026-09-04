@@ -6,11 +6,27 @@ Uploaded baseline: version 1.0.0, build 5, archived and uploaded from source `d9
 
 The automated review at `2c12d0e` found that Photos success could close review before the detached local JPEG write and index update finished. With Add Photos Only access, this local copy supplies the in-app Roll. Build 6 makes the completion chain await that write and index update while keeping filesystem work off the main actor. Photos remains the source of truth: a cache failure after a successful Photos write does not report a failed save that would encourage duplicate assets.
 
-`build6-cache-unit.xcresult` passed the focused simulator suite: 19 tests passed, one physical-only test skipped, zero failures. Final generic physical-iOS build-for-testing also passed, including the device-only branches. The opt-in physical integration test snapshots the new Roll entry inside the actual save callback, then verifies the cached JPEG bytes and restoration in a new service instance. A separate normal-app UI test covers add-only capture/save and Roll detail after relaunch. Physical results must be recorded separately; compilation and the simulator skip do not prove those flows.
+`build6-cache-unit.xcresult` passed the focused simulator suite: 19 tests passed, one physical-only test skipped, zero failures. Final generic physical-iOS build-for-testing also passed, including the device-only branches. The opt-in physical integration test snapshots the new Roll entry inside the actual save callback, then verifies the cached JPEG bytes and restoration in a new service instance. A separate normal-app UI test covers add-only capture/save and Roll detail after relaunch.
+
+The following completed checks ran on the physical iPad Pro 11-inch (2nd generation), iPadOS 26.6.1, with build 6 from `e2837c603e96aa73b00bb7e24b4c394573dbd43b`:
+
+| Evidence under `build/mvp-20260904/` | Result | Scope |
+| --- | --- | --- |
+| `build6-ipad-cache-callback-1823.xcresult` | 1 passed, no skips/failures | New local Roll entry exists inside the actual Photos-success callback; JPEG bytes match the test input and a recreated service restores the entry. |
+| `build6-ipad-add-only-ui-1821.xcresult` | 1 passed, no skips/failures | Normal-app capture/save with Add Photos Only access, local Roll detail and app relaunch. |
+| `build6-ipad-g7x-flash-1824.xcresult` | 1 passed, no skips/failures | G7X capture reaches review with Flash fired, then Retake restores the viewfinder. |
+| `settings-control/photos-settings-restore-full-1826.xcresult` | 1 passed, no skips/failures | Original Photos Full Access restored after temporary add-only validation. |
+| `build6-ipad-restore-foreground-1827.xcresult` | 1 passed, no skips/failures | Main build 6 installed and camera navigation restored. A later normal launch was denied after the iPad locked; the earlier pass does not claim current foreground operation while locked. |
+
+The signed archive `build/FilmyCamera-e2837c6-signed.xcarchive` passed source, signing, privacy and executable/dSYM UUID checks. The exported `build/export-e2837c6/FilmyCamera.ipa` passed independent archive parity validation; SHA-256 is `71959c950c405a221ddee960962f798464560e45e6d5cebbf9a65a7b4e88deb0`. All required CI passed on `e2837c6` in [run 33924488772](https://github.com/dheeraj5612/filmy-camera/actions/runs/33924488772). [PR 80](https://github.com/dheeraj5612/filmy-camera/pull/80) merged to main as `b30a4ca85b1ea742ee420713440c365b7c684d8d`; a fresh full-tree comparison verified its content matches the archive source exactly. Later documentation-only updates do not change the binary source stamp.
 
 A second review finding about one-shot autofocus was rejected after examining the state contract. `focusExposureLocked` records the user's explicit AE/AF Lock request; it is not a mirror of hardware focus mode. Ordinary tap-to-focus and manual unlock already clear that flag while using one-shot metering on devices that cannot track continuously. No focus behavior was changed in response to that finding.
 
-Subsequent App Store Connect readbacks verified **manual release** and an **Active** updated Free Apps agreement effective September 4. These supersede the earlier automatic-release and pending-agreement observations below. Build 5 was added to a review draft but was not submitted. Build 6 must replace it before the final submission decision. All required CI checks passed at `2c12d0e` in [run 33921457584](https://github.com/dheeraj5612/filmy-camera/actions/runs/33921457584); that result does not validate the later build 6 change.
+Subsequent App Store Connect readbacks verified **manual release** and an **Active** updated Free Apps agreement effective September 4. These supersede the earlier automatic-release and pending-agreement observations below. Build 5 was added to a review draft but was not submitted. That draft was removed while preparing build 6; a fresh version reload shows the editable existing Developer Rejected status, Add for Review, and manual release still checked. This is not a new Apple rejection. Build 6 must replace build 5 before the final submission decision.
+
+Both build 6 upload attempts stopped before transfer with `exportArchive Failed to Use Accounts`, and Computer Use then reported that the Mac is locked. The user was asked to unlock the Mac before inspecting Xcode account access and retrying. A subsequent TestFlight readback still lists build 5 as the newest completed upload; no build 6 upload, App Review submission or public release is claimed.
+
+The later review comment about an active zoom bubble was assessed against `docs/design-pass-20260812.md`: displaying the live factor while a tap resets to the preset is intentional. Accessibility exposes one adjustable Zoom control with the current factor. No production change was justified. All three automated review threads were resolved with their dispositions recorded in the PR description.
 
 ## Scope and changes
 
