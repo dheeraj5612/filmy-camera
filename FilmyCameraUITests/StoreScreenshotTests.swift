@@ -102,15 +102,20 @@ final class StoreScreenshotTests: XCTestCase {
         let photos = app.images.matching(
             NSPredicate(format: "identifier == 'PXGGridLayout-Info'")
         )
+        let priorSaves = Int(ProcessInfo.processInfo.environment["FILMY_STORE_PRIOR_SAVES"] ?? "0") ?? 0
+        XCTAssertGreaterThanOrEqual(priorSaves, 0)
+        let expectedPhotoCount = minimumPhotoCount + priorSaves
         XCTAssertTrue(
-            waitUntil(timeout: 15) { photos.count >= minimumPhotoCount },
+            waitUntil(timeout: 30) { photos.count >= expectedPhotoCount },
             "Seed exactly one public-safe source before running; prior saves should remain visible"
         )
 
         // PhotosPicker is newest-first. The freshly seeded original starts at
         // index zero and moves one place after each save. Fresh simulators may
         // also show older system sample placeholders; never select those.
-        let originalPhoto = photos.element(boundBy: minimumPhotoCount - 1)
+        // A partial run can be resumed with its exact prior save count while
+        // retaining the same original; never feed a filtered output back in.
+        let originalPhoto = photos.element(boundBy: expectedPhotoCount - 1)
         let photoFrame = originalPhoto.frame
         let appFrame = app.frame
         app.coordinate(
@@ -131,21 +136,49 @@ final class StoreScreenshotTests: XCTestCase {
         let photo = app.descendants(matching: .any)["review-image"]
         XCTAssertTrue(review.waitForExistence(timeout: 5))
         XCTAssertTrue(photo.waitForExistence(timeout: 5))
+        let save = app.buttons["Save filtered photo"]
+        let heading = app.staticTexts["IMPORTED PHOTO"]
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        // These seeded media devices have a visible status bar and bottom
+        // gesture area. PhotosPicker dismissal must settle before review is
+        // accepted; existence alone can capture a full-screen transition.
+        let topClearance: CGFloat = app.frame.width < 600 ? 44 : 20
+        XCTAssertTrue(waitUntil(timeout: 10) {
+            heading.frame.minY >= app.frame.minY + topClearance
+                && save.frame.maxY <= app.frame.maxY - 20
+        }, "Review controls must clear the status bar and bottom gesture area")
         XCTAssertGreaterThanOrEqual(review.frame.width, app.frame.width * 0.95)
-        XCTAssertGreaterThan(photo.frame.width, app.frame.width * 0.42,
-                             "Review must use the display instead of a small iPad card")
+        XCTAssertGreaterThan(photo.frame.width, app.frame.width * 0.70,
+                             "Portrait review must give the photo most of the display width")
+        let coveredLookControl = app.buttons["recipe-menu"]
+        XCTAssertFalse(coveredLookControl.isHittable,
+                       "Review must block interaction with the covered camera")
+        if coveredLookControl.exists {
+            XCTAssertFalse(coveredLookControl.isEnabled,
+                           "Covered camera actions must remain disabled for assistive input")
+        }
         XCTAssertFalse(photo.frame.intersects(app.buttons["Save filtered photo"].frame))
         attachScreenshot(named: screenshotName)
 
-        let save = app.buttons["Save filtered photo"]
-        XCTAssertTrue(save.waitForExistence(timeout: 5))
         save.tap()
         app.tap()
         let savedToast = app.staticTexts.matching(
             NSPredicate(format: "label BEGINSWITH 'Saved with '")
         ).firstMatch
         XCTAssertTrue(
-            savedToast.waitForExistence(timeout: 20),
+            waitUntil(timeout: 40) {
+                if savedToast.exists { return true }
+                // The first Photos prompt can arrive after the initial tap,
+                // so keep handling it while waiting for the save callback.
+                // A passive wait alone never invokes an interruption monitor.
+                let alert = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch
+                if alert.exists,
+                   alert.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Filmy Camera'")).firstMatch.exists {
+                    let allow = alert.buttons["Allow"]
+                    if allow.exists { allow.tap() }
+                }
+                return false
+            },
             "The \(recipeName) output must save before the next treatment"
         )
     }

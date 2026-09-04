@@ -294,6 +294,7 @@ struct RecipePickerView: View {
 struct CurrentRecipeButton: View {
     let recipe: FilmRecipe
     let isCustomized: Bool
+    let compactLayout: Bool
     let action: () -> Void
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -311,33 +312,79 @@ struct CurrentRecipeButton: View {
         return "Film look"
     }
 
+    private var recipeIcon: some View {
+        Image(systemName: recipe.filmBase == .compactDigital ? "camera.fill" : "film")
+            .font(.system(size: 14, weight: .bold))
+            .foregroundStyle(accentColor)
+            .accessibilityHidden(true)
+    }
+
+    private var regularLabel: some View {
+        HStack(spacing: 8) {
+            recipeIcon
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(recipe.name)
+                    .font(.system(.subheadline, design: .rounded).weight(.bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                    .minimumScaleFactor(0.72)
+
+                Text(semanticSubtitle)
+                    .font(.system(.caption2, design: .rounded).weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.64))
+                    .lineLimit(1)
+            }
+
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.white.opacity(0.58))
+                .accessibilityHidden(true)
+        }
+    }
+
+    private var narrowLabel: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                recipeIcon
+                Text(recipe.name)
+                    .font(.system(.caption, design: .rounded).weight(.bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.82)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Text(semanticSubtitle)
+                .font(.system(.caption2, design: .rounded).weight(.semibold))
+                .foregroundStyle(.white.opacity(0.64))
+                .lineLimit(2)
+                .minimumScaleFactor(0.82)
+        }
+    }
+
+    init(
+        recipe: FilmRecipe,
+        isCustomized: Bool,
+        compactLayout: Bool = false,
+        action: @escaping () -> Void
+    ) {
+        self.recipe = recipe
+        self.isCustomized = isCustomized
+        self.compactLayout = compactLayout
+        self.action = action
+    }
+
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: recipe.filmBase == .compactDigital ? "camera.fill" : "film")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(accentColor)
-                    .accessibilityHidden(true)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(recipe.name)
-                        .font(.system(.subheadline, design: .rounded).weight(.bold))
-                        .foregroundStyle(.white)
-                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                        .minimumScaleFactor(0.72)
-
-                    Text(semanticSubtitle)
-                        .font(.system(.caption2, design: .rounded).weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.64))
-                        .lineLimit(1)
+            Group {
+                if compactLayout {
+                    narrowLabel
+                } else {
+                    regularLabel
                 }
-
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.58))
-                    .accessibilityHidden(true)
             }
-            .frame(maxWidth: .infinity, minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: compactLayout ? 58 : FilmyTheme.minimumHitTarget, alignment: .leading)
             .padding(.horizontal, 11)
             .background(Color.black.opacity(0.48), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
             .overlay {

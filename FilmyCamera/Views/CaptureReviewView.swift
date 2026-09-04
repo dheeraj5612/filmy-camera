@@ -14,7 +14,6 @@ struct CaptureReviewView: View {
     let onRetake: () -> Void
     let onOpenSettings: () -> Void
 
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
@@ -39,6 +38,8 @@ struct CaptureReviewView: View {
                     .padding(.horizontal, 32)
                     .padding(.vertical, 24)
                 } else {
+                    let isPortraitTablet = proxy.size.width >= 700 && proxy.size.height > proxy.size.width
+                    let previewHeight = proxy.size.height * (isPortraitTablet ? 0.78 : 0.64)
                     // Keep the photo and its metadata together in a bounded
                     // scroll view for phone portrait, landscape, and large
                     // Dynamic Type sizes.
@@ -51,7 +52,7 @@ struct CaptureReviewView: View {
 
                             framePreview(
                                 maxWidth: max(proxy.size.width - 32, 1),
-                                maxHeight: max(proxy.size.height * 0.64, 160)
+                                maxHeight: max(previewHeight, 160)
                             )
                             .padding(.horizontal, 16)
 
@@ -66,7 +67,6 @@ struct CaptureReviewView: View {
                             }
                         }
                         .padding(.bottom, 16)
-                        .frame(maxWidth: FilmyLayout.readableMaxWidth)
                         .frame(maxWidth: .infinity)
                     }
                     .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -83,11 +83,10 @@ struct CaptureReviewView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("review-screen")
-        .interactiveDismissDisabled(isSaving)
     }
 
     private func usesSidePanel(for size: CGSize) -> Bool {
-        size.width >= 700 && size.height >= 500
+        size.width > size.height && size.width >= 700 && size.height >= 500
     }
 
     private var sidePanel: some View {
@@ -104,7 +103,10 @@ struct CaptureReviewView: View {
                 .padding(.bottom, 18)
             }
 
-            actionBar
+            VStack(spacing: 10) {
+                retakeButton
+                keepFrameButton
+            }
                 .padding(.top, 14)
         }
         .frame(maxHeight: .infinity)
@@ -254,7 +256,6 @@ struct CaptureReviewView: View {
         Button {
             HapticFeedback.play(.discard)
             onRetake()
-            dismiss()
         } label: {
             Label(
                 isImported ? "Cancel" : "Retake",

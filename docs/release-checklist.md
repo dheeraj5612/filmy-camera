@@ -7,7 +7,7 @@ Current candidate: version 1.0.0, build 7, with the [camera UX redesign](design-
 - [x] Implement a camera-first layout, on-demand grouped looks, full-screen review/detail, and pinned return navigation.
 - [x] Validate simulator camera portrait/landscape, large text, editor, navigation, and renderer behavior. See [design validation](design-pass-20260904.md#validation) for the full-run and focused rerun evidence.
 - [x] Build for physical iOS and install version 1.0.0 (7) on the connected iPad.
-- [ ] Finish refreshed public-photo screenshot packs on iPhone and iPad simulators.
+- [x] Finish refreshed public-photo screenshot packs on iPhone and iPad simulators; all three normal import/save flows and safe-area/interaction checks passed. Matching Apple uploads remain pending.
 - [ ] Complete the redesigned capture/review/save/Retake hardware pass after unlocking the Mac and iPad.
 - [ ] Pass required CI, archive the clean final source, and validate signed archive/IPA parity.
 - [ ] Upload build 7, verify processing, select it with matching screenshots, and validate the review draft. Prior build 5 draft validation does not validate build 7.

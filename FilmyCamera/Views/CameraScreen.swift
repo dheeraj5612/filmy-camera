@@ -132,36 +132,60 @@ struct CameraScreen: View {
     }
 
     var body: some View {
-        GeometryReader { proxy in
-            let isLandscape = proxy.size.width > proxy.size.height
-            let usesEdgeControlColumn = isLandscape || proxy.size.width >= 720
+        ZStack {
+            GeometryReader { proxy in
+                let isLandscape = proxy.size.width > proxy.size.height
+                let usesEdgeControlColumn = isLandscape || proxy.size.width >= 720
 
-            Group {
-                if usesEdgeControlColumn {
-                    edgeControlShell(
-                        isLandscape: isLandscape,
-                        availableHeight: proxy.size.height
-                    )
-                } else {
-                    portraitShell(availableHeight: proxy.size.height)
+                Group {
+                    if usesEdgeControlColumn {
+                        edgeControlShell(
+                            isLandscape: isLandscape,
+                            availableHeight: proxy.size.height
+                        )
+                    } else {
+                        portraitShell(availableHeight: proxy.size.height)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // The chrome is a constrained shell rather than a scrolling
+                // document. Cap its visual scale one step below the largest
+                // Dynamic Type sizes so every capture, Roll, and Tune action
+                // remains reachable.
+                .dynamicTypeSize(.xSmall ... .accessibility1)
+            }
+            .background(FilmyTheme.viewfinderBand.ignoresSafeArea())
+            .overlay(alignment: .top) {
+                if let toastMessage = viewModel.toastMessage {
+                    ToastView(message: toastMessage, style: viewModel.toastStyle)
+                        .padding(.top, 56)
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // The chrome is a constrained shell rather than a scrolling
-            // document. Cap its visual scale one step below the largest
-            // Dynamic Type sizes so every capture, Roll, and Tune action
-            // remains reachable.
-            .dynamicTypeSize(.xSmall ... .accessibility1)
-        }
-        .background(FilmyTheme.viewfinderBand.ignoresSafeArea())
-        .overlay(alignment: .top) {
-            if let toastMessage = viewModel.toastMessage {
-                ToastView(message: toastMessage, style: viewModel.toastStyle)
-                    .padding(.top, 56)
-                    .transition(.move(edge: .top).combined(with: .opacity))
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: viewModel.toastMessage)
+            .allowsHitTesting(!isReviewing)
+            .disabled(isReviewing)
+            .accessibilityElement(children: .contain)
+            .accessibilityHidden(isReviewing)
+
+            if let image = viewModel.reviewImage, let recipe = viewModel.reviewRecipe {
+                CaptureReviewView(
+                    image: image,
+                    recipe: recipe,
+                    source: viewModel.reviewSource,
+                    isFullResolution: viewModel.reviewIsFullResolution,
+                    flashFired: viewModel.reviewFlashFired,
+                    isSaving: viewModel.isSaving,
+                    saveErrorMessage: viewModel.saveErrorMessage,
+                    saveErrorRequiresSettings: viewModel.saveErrorRequiresSettings,
+                    onSave: { viewModel.saveReview(photoLibrary: photoLibrary) },
+                    onRetake: viewModel.discardReview,
+                    onOpenSettings: openSystemSettings
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .zIndex(1)
             }
         }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: viewModel.toastMessage)
         // Visible recipe choices render over the live scene. When the drawer
         // and detail are both closed, their frame consumer is detached so the
         // renderer does no hidden thumbnail work.
@@ -195,26 +219,6 @@ struct CameraScreen: View {
             .presentationBackground(FilmyTheme.background)
             .presentationCornerRadius(30)
         }
-        .fullScreenCover(isPresented: reviewPresentation) {
-            if let image = viewModel.reviewImage, let recipe = viewModel.reviewRecipe {
-                CaptureReviewView(
-                    image: image,
-                    recipe: recipe,
-                    source: viewModel.reviewSource,
-                    isFullResolution: viewModel.reviewIsFullResolution,
-                    flashFired: viewModel.reviewFlashFired,
-                    isSaving: viewModel.isSaving,
-                    saveErrorMessage: viewModel.saveErrorMessage,
-                    saveErrorRequiresSettings: viewModel.saveErrorRequiresSettings,
-                    onSave: { viewModel.saveReview(photoLibrary: photoLibrary) },
-                    onRetake: viewModel.discardReview,
-                    onOpenSettings: openSystemSettings
-                )
-                .presentationDragIndicator(.hidden)
-                .presentationBackground(FilmyTheme.background)
-                .interactiveDismissDisabled(viewModel.reviewImage != nil || viewModel.isSaving)
-            }
-        }
         .onAppear {
             updateCameraActivity()
             updateIdleTimer()
@@ -244,9 +248,12 @@ struct CameraScreen: View {
         .onChange(of: viewModel.reviewImage != nil) { _, hasReview in
             if hasReview {
                 camera.setFrameDeliveryPaused(true)
+                livePreviews.detach()
+                livePreviews.clear()
             }
             updateCameraActivity()
             updateIdleTimer()
+            updateLiveRecipePreviews()
         }
         .onChange(of: viewModel.isCapturing) { _, isCapturing in
             if isCapturing {
@@ -667,7 +674,7 @@ struct CameraScreen: View {
 
     private var primaryBottomBar: some View {
         VStack(spacing: 4) {
-            currentRecipeButton
+            currentRecipeButton()
 
             ZStack {
                 HStack {
@@ -692,7 +699,7 @@ struct CameraScreen: View {
         VStack(spacing: 10) {
             Spacer(minLength: 0)
 
-            currentRecipeButton
+            currentRecipeButton(compact: true)
             captureControl
 
             HStack(spacing: 8) {
@@ -705,10 +712,11 @@ struct CameraScreen: View {
         .frame(maxHeight: .infinity)
     }
 
-    private var currentRecipeButton: some View {
+    private func currentRecipeButton(compact: Bool = false) -> some View {
         CurrentRecipeButton(
             recipe: viewModel.selectedRecipe,
             isCustomized: viewModel.isCustomized(viewModel.selectedRecipe),
+            compactLayout: compact,
             action: toggleLookDrawer
         )
     }
@@ -991,18 +999,6 @@ struct CameraScreen: View {
         ProcessInfo.processInfo.arguments.contains("-ui-testing-viewfinder-chrome")
     }
 
-    private var reviewPresentation: Binding<Bool> {
-        Binding(
-            get: { viewModel.reviewImage != nil },
-            set: { isPresented in
-                guard !viewModel.isSaving else { return }
-                if !isPresented {
-                    viewModel.discardReview()
-                }
-            }
-        )
-    }
-
     @ViewBuilder
     private var cameraPlaceholder: some View {
         switch camera.availability {
@@ -1080,7 +1076,9 @@ struct CameraScreen: View {
     }
 
     private func updateLiveRecipePreviews() {
-        if camera.isRunning, isShowingLookDrawer || recipeForDetail != nil {
+        if camera.isRunning,
+           !isReviewing,
+           isShowingLookDrawer || recipeForDetail != nil {
             livePreviews.attach(to: camera)
         } else {
             livePreviews.detach()
