@@ -1,10 +1,37 @@
 import CoreGraphics
 import Foundation
 import ImageIO
+import Photos
 import UIKit
 import UniformTypeIdentifiers
 import XCTest
 @testable import FilmyCamera
+
+private actor PhotoLibraryTestGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func open() {
+        isOpen = true
+        let pending = waiters
+        waiters.removeAll()
+        pending.forEach { $0.resume() }
+    }
+}
+
+private actor PhotoLibraryTestFlag {
+    private var value = false
+
+    func set() { value = true }
+    func read() -> Bool { value }
+}
 
 final class PhotoLibraryMetadataTests: XCTestCase {
     func testPhotoLibraryCompletionBridgeHopsToMainActor() async {
@@ -20,6 +47,33 @@ final class PhotoLibraryMetadataTests: XCTestCase {
         }
 
         await fulfillment(of: [completionExpectation], timeout: 2)
+    }
+
+    func testAsyncCompletionBridgeCanDelayPublishedSuccessUntilCommitFinishes() async throws {
+        let enteredCommit = expectation(description: "Entered cache commit")
+        let publishedSuccess = expectation(description: "Published save success")
+        let commitGate = PhotoLibraryTestGate()
+        let didPublish = PhotoLibraryTestFlag()
+        let callback = PhotoLibraryCompletionBridge.mainActorAsync { success in
+            MainActor.assertIsolated()
+            XCTAssertTrue(success)
+            enteredCommit.fulfill()
+            await commitGate.wait()
+            await didPublish.set()
+            publishedSuccess.fulfill()
+        }
+
+        DispatchQueue(label: "PhotoLibraryMetadataTests.asyncCallback").async {
+            callback(true, nil)
+        }
+
+        await fulfillment(of: [enteredCommit], timeout: 2)
+        try await Task.sleep(for: .milliseconds(100))
+        let publishedBeforeCommit = await didPublish.read()
+        XCTAssertFalse(publishedBeforeCommit)
+
+        await commitGate.open()
+        await fulfillment(of: [publishedSuccess], timeout: 2)
     }
 
     func testSavedFrameMetadataPreservesRecipeAndCaptureDate() throws {
@@ -78,6 +132,95 @@ final class PhotoLibraryMetadataTests: XCTestCase {
             ),
             PhotoPixelDimensions(width: 40, height: 30)
         )
+    }
+
+    func testCachePersistenceReturnsAfterAtomicJPEGIsReadable() async throws {
+        let fileManager = FileManager.default
+        let directory = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let resourceURL = directory.appendingPathComponent("saved-frame.jpg")
+        let expected = Data((0..<4_096).map { UInt8($0 % 251) })
+        defer { try? fileManager.removeItem(at: directory) }
+
+        let didWrite = await PhotoLibraryService.persistCachedFrameData(
+            expected,
+            directoryURL: directory,
+            resourceURL: resourceURL
+        )
+
+        XCTAssertTrue(didWrite)
+        XCTAssertEqual(try Data(contentsOf: resourceURL), expected)
+    }
+
+    @MainActor
+    func testPhysicalAddOnlySaveCallbackHasReadablePersistentCache() async throws {
+        #if targetEnvironment(simulator)
+        throw XCTSkip("Add-only cache integration requires a physical iOS device")
+        #else
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["FILMY_RUN_ADD_ONLY_CACHE_QA"] == "1",
+            "Set FILMY_RUN_ADD_ONLY_CACHE_QA=1 after configuring Add Photos Only access"
+        )
+
+        let service = PhotoLibraryService()
+        try XCTSkipUnless(
+            service.canSaveToPhotos,
+            "Grant Add Photos Only access in Settings before running this opt-in test"
+        )
+        try XCTSkipUnless(
+            !PhotoLibraryAuthorizationPolicy.canRead(
+                PHPhotoLibrary.authorizationStatus(for: .readWrite)
+            ),
+            "Configure Photos access as Add Photos Only so this test exercises the local Roll cache"
+        )
+
+        service.refresh()
+        let identifiersBeforeSave = Set(service.localSavedFrames.map(\.assetIdentifier))
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 48)).image { context in
+            UIColor(red: 0.18, green: 0.42, blue: 0.68, alpha: 1).setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 64, height: 48))
+            UIColor(red: 0.92, green: 0.58, blue: 0.24, alpha: 1).setFill()
+            context.fill(CGRect(x: 32, y: 0, width: 32, height: 48))
+        }
+        let imageData = try XCTUnwrap(image.jpegData(compressionQuality: 0.95))
+
+        let (saveResult, frameAtCallback) = await withCheckedContinuation { continuation in
+            service.save(
+                image: image,
+                imageData: imageData,
+                recipe: FilmRecipe.builtIns[0]
+            ) { result in
+                let newFrame = service.localSavedFrames.first {
+                    !identifiersBeforeSave.contains($0.assetIdentifier)
+                }
+                continuation.resume(returning: (result, newFrame))
+            }
+        }
+        try saveResult.get()
+
+        let newFrame = try XCTUnwrap(
+            frameAtCallback,
+            "Save success must publish only after the new local cache is indexed"
+        )
+        let resolvedCacheURL = await service.shareURL(for: .cached(newFrame))
+        let cacheURL = try XCTUnwrap(
+            resolvedCacheURL,
+            "Save success must publish only after the local JPEG is readable"
+        )
+        XCTAssertEqual(try Data(contentsOf: cacheURL), imageData)
+
+        let recreatedService = PhotoLibraryService()
+        recreatedService.refresh()
+        let recreatedFrame = try XCTUnwrap(
+            recreatedService.localSavedFrames.first {
+                $0.assetIdentifier == newFrame.assetIdentifier
+            },
+            "A new service instance must restore the committed local cache index"
+        )
+        let resolvedRecreatedURL = await recreatedService.shareURL(for: .cached(recreatedFrame))
+        let recreatedURL = try XCTUnwrap(resolvedRecreatedURL)
+        XCTAssertEqual(try Data(contentsOf: recreatedURL), imageData)
+        #endif
     }
 
     func testReadWriteAuthorizationAllowsFullAndLimitedAccess() {

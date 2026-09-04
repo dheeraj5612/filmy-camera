@@ -1,6 +1,16 @@
 # MVP validation — September 4, 2026
 
-Candidate: version 1.0.0, build 5, archived and uploaded from source `d9ef13836fdacea4929dd60cddb32b8eb0afd785`, on branch `codex/mvp-launch-sweep-20260904`. Subsequent changes cover tests, release-media validation, store images and documentation; the application source is unchanged. This record distinguishes the app installed on test hardware from the version available through Apple. Local result bundles and photos stay under ignored `build/mvp-20260904/`; no private photographic fixtures are included in the project or release.
+Uploaded baseline: version 1.0.0, build 5, archived and uploaded from source `d9ef13836fdacea4929dd60cddb32b8eb0afd785`, on branch `codex/mvp-launch-sweep-20260904`. Application source stayed unchanged through `2c12d0e`. The post-review save fix below advances the source candidate to build 6, which needs its own archive and upload. This record distinguishes the app installed on test hardware from the version available through Apple. Local result bundles and photos stay under ignored `build/mvp-20260904/`; no private photographic fixtures are included in the project or release.
+
+## Post-review save fix and latest release state
+
+The automated review at `2c12d0e` found that Photos success could close review before the detached local JPEG write and index update finished. With Add Photos Only access, this local copy supplies the in-app Roll. Build 6 makes the completion chain await that write and index update while keeping filesystem work off the main actor. Photos remains the source of truth: a cache failure after a successful Photos write does not report a failed save that would encourage duplicate assets.
+
+`build6-cache-unit.xcresult` passed the focused simulator suite: 19 tests passed, one physical-only test skipped, zero failures. Final generic physical-iOS build-for-testing also passed, including the device-only branches. The opt-in physical integration test snapshots the new Roll entry inside the actual save callback, then verifies the cached JPEG bytes and restoration in a new service instance. A separate normal-app UI test covers add-only capture/save and Roll detail after relaunch. Physical results must be recorded separately; compilation and the simulator skip do not prove those flows.
+
+A second review finding about one-shot autofocus was rejected after examining the state contract. `focusExposureLocked` records the user's explicit AE/AF Lock request; it is not a mirror of hardware focus mode. Ordinary tap-to-focus and manual unlock already clear that flag while using one-shot metering on devices that cannot track continuously. No focus behavior was changed in response to that finding.
+
+Subsequent App Store Connect readbacks verified **manual release** and an **Active** updated Free Apps agreement effective September 4. These supersede the earlier automatic-release and pending-agreement observations below. Build 5 was added to a review draft but was not submitted. Build 6 must replace it before the final submission decision. All required CI checks passed at `2c12d0e` in [run 33921457584](https://github.com/dheeraj5612/filmy-camera/actions/runs/33921457584); that result does not validate the later build 6 change.
 
 ## Scope and changes
 

@@ -1,8 +1,16 @@
 # Filmy Camera release checklist
 
-Current candidate: version 1.0.0, build 5. Historical release notes and older “current” statements are preserved in [release-history.md](release-history.md).
+Current source candidate: version 1.0.0, build 6, incorporating the post-review local Roll save fix. Build 5 remains the uploaded baseline until build 6 is archived, uploaded and selected. Historical release notes and older “current” statements are preserved in [release-history.md](release-history.md).
 
-## Verified candidate state
+## Build 6 release gates
+
+- [x] Make save success await the off-main atomic local JPEG write and Roll index update. Photos write failures retain their existing recovery; a local cache failure after Photos success must not encourage duplicate saving.
+- [ ] Validate the new callback-ordering regression and physical add-only save/relaunch flow.
+- [ ] Archive and upload build 6 from a clean committed source revision; verify executable/dSYM/IPA parity and Apple's processing result.
+- [ ] Replace the build 5 draft with build 6 and verify the selected binary after reload.
+- [ ] Read back the required CI result for the exact final source revision.
+
+## Verified build 5 baseline
 
 - [x] Build 5 was archived and uploaded from source `d9ef13836fdacea4929dd60cddb32b8eb0afd785`.
 - [x] `build/FilmyCamera-d9ef138-signed.xcarchive` passed distribution signing, source provenance, privacy-manifest, and executable/dSYM architecture UUID validation.
@@ -36,7 +44,8 @@ The current media workflow uses one public-safe generated original in a fresh si
 - [x] Verify the saved App Review contact phone and email through the visible native browser form after reload. The text snapshot omits these values and is not evidence that they are blank.
 - [x] Run Add for Review validation and verify the draft lists iOS App 1.0 / binary 1.0.0 (5) as Item Ready to Submit.
 - [x] Confirm saved review notes, age rating, export compliance, free pricing, availability, privacy and public support/privacy URLs; paid-app, banking, tax and Digital Services Act statuses read Active.
-- [ ] Account Holder must review and accept the updated Developer Program License Agreement. The Business page reports Active (New Agreement Available) for Free Apps and says acceptance is required before app submission.
+- [x] The updated Free Apps agreement is Active, effective September 4, 2026, with no pending-agreement banner on the subsequent Business-page readback.
+- [x] Select **Manually release this version**, save, and verify after reload. Apple approval must not automatically publish before the remaining iPhone acceptance.
 - [ ] Submit version 1.0 for App Review and read back the resulting status. Build selection is not submission or public release.
 
 Do not describe the rendering as camera-exact or claim G7 X superiority without controlled same-scene references. Keep the existing original-renderer, non-affiliation, and no-proprietary-data disclosures in the listing.

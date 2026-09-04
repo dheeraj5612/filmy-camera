@@ -346,6 +346,90 @@ final class FilmyCameraUITests: XCTestCase {
         attachScreenshot(named: "device-after-keep")
     }
 
+    /// Exercises the add-only fallback through a normal save and relaunch.
+    /// Configure this app in Settings for Add Photos Only first.
+    func testPhysicalAddOnlySaveAndRelaunchShowsLocalRoll() throws {
+        try skipUnlessPhotosWritesAreAllowed()
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["FILMY_RUN_ADD_ONLY_CACHE_QA"] == "1",
+            "Set FILMY_RUN_ADD_ONLY_CACHE_QA=1 after configuring Add Photos Only access"
+        )
+
+        app.terminate()
+        let cacheApp = XCUIApplication()
+        cacheApp.launchArguments = ["-selectedRecipeID", "g7x-compact"]
+        cacheApp.launch()
+        app = cacheApp
+        defer { cacheApp.terminate() }
+
+        let onboarding = cacheApp.descendants(matching: .any)["onboarding-screen"]
+        if onboarding.waitForExistence(timeout: 3) {
+            let skip = cacheApp.buttons["Skip"]
+            XCTAssertTrue(skip.waitForExistence(timeout: 5))
+            skip.tap()
+        }
+        cacheApp.tap()
+
+        let openRoll = cacheApp.buttons["Open roll"]
+        XCTAssertTrue(openRoll.waitForExistence(timeout: 10))
+        openRoll.tap()
+        XCTAssertTrue(cacheApp.staticTexts["Roll"].waitForExistence(timeout: 10))
+        let countBeforeSave = try XCTUnwrap(rollFrameCount(in: cacheApp))
+        cacheApp.buttons["roll-back-to-camera"].tap()
+
+        let shutter = cacheApp.buttons["Capture photo"]
+        XCTAssertTrue(shutter.waitForExistence(timeout: 20) && shutter.isEnabled)
+        shutter.tap()
+        let keepFrame = cacheApp.buttons["Keep frame"]
+        XCTAssertTrue(keepFrame.waitForExistence(timeout: 40))
+        keepFrame.tap()
+        cacheApp.tap()
+
+        let savedToast = cacheApp.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH 'Saved with '")
+        ).firstMatch
+        XCTAssertTrue(savedToast.waitForExistence(timeout: 20))
+
+        openRoll.tap()
+        XCTAssertTrue(cacheApp.staticTexts["Roll"].waitForExistence(timeout: 10))
+        let sourceSummary = cacheApp.descendants(matching: .any).matching(
+            NSPredicate(format: "label == 'Newest first. Source: Local cache'")
+        ).firstMatch
+        XCTAssertTrue(
+            sourceSummary.exists,
+            "Add Photos Only must expose the committed local cache; configure Photos access to Add Photos Only"
+        )
+        XCTAssertEqual(try XCTUnwrap(rollFrameCount(in: cacheApp)), countBeforeSave + 1)
+
+        let savedFrame = cacheApp.buttons.matching(
+            NSPredicate(format: "label == 'Photo in your gallery, G7 X Compact'")
+        ).firstMatch
+        XCTAssertTrue(savedFrame.exists, "The newly committed cache entry must be listed")
+        savedFrame.tap()
+        XCTAssertTrue(
+            cacheApp.descendants(matching: .any).matching(
+                NSPredicate(format: "label == 'Photo'")
+            ).firstMatch.waitForExistence(timeout: 5),
+            "The committed local JPEG must be readable"
+        )
+
+        cacheApp.terminate()
+        cacheApp.launch()
+        XCTAssertTrue(cacheApp.buttons["Open roll"].waitForExistence(timeout: 10))
+        cacheApp.buttons["Open roll"].tap()
+        XCTAssertTrue(cacheApp.staticTexts["Roll"].waitForExistence(timeout: 10))
+        XCTAssertTrue(sourceSummary.exists, "The cache index must survive service recreation")
+        XCTAssertEqual(try XCTUnwrap(rollFrameCount(in: cacheApp)), countBeforeSave + 1)
+        XCTAssertTrue(savedFrame.exists, "The saved local frame must survive app relaunch")
+        savedFrame.tap()
+        XCTAssertTrue(
+            cacheApp.descendants(matching: .any).matching(
+                NSPredicate(format: "label == 'Photo'")
+            ).firstMatch.waitForExistence(timeout: 5),
+            "The relaunched service must still read the cached JPEG"
+        )
+    }
+
     /// Captures the same scene through every color recipe, flash off and
     /// flash on, and attaches each review so the rendered stills can be
     /// compared against reference looks. Frames are discarded, not saved.
@@ -858,6 +942,16 @@ final class FilmyCameraUITests: XCTestCase {
             RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
         } while Date() < deadline
         return condition()
+    }
+
+    private func rollFrameCount(in target: XCUIApplication) -> Int? {
+        for label in target.staticTexts.allElementsBoundByIndex.map(\.label)
+            where label.hasSuffix(" frames") {
+            if let count = Int(label.dropLast(" frames".count)) {
+                return count
+            }
+        }
+        return target.staticTexts["Roll"].exists ? 0 : nil
     }
 
     func testRecipeFirstOnboardingFlow() throws {
