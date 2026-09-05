@@ -13,8 +13,21 @@ enum CameraActivityAction: Equatable {
 }
 
 enum CameraActivityPolicy {
-    /// How long the session stays warm while the viewfinder is covered.
-    static let gracePeriod: TimeInterval = 45
+    /// How long the session stays warm while a captured frame is under review,
+    /// so Retake can return to the finder without a session restart.
+    static let reviewGracePeriod: TimeInterval = 45
+
+    /// A short return window for Roll, Settings, and other inactive camera
+    /// destinations. The viewfinder is no longer consuming frames there, so
+    /// keeping the capture session warm for the review window wastes power.
+    static let inactiveGracePeriod: TimeInterval = 8
+
+    /// Kept as the review grace alias for existing policy clients and tests.
+    static let gracePeriod = reviewGracePeriod
+
+    static func deferredStopDelay(hasReview: Bool) -> TimeInterval {
+        hasReview ? reviewGracePeriod : inactiveGracePeriod
+    }
 
     /// Unit tests run inside this app as their host. They must own the camera
     /// themselves (hardware tests start their own session), so the host UI
@@ -234,7 +247,7 @@ struct CameraScreen: View {
             // more: unregister the swatch handler before this view is released.
             livePreviews.detach()
             livePreviews.clear()
-            camera.stop(after: CameraActivityPolicy.gracePeriod)
+            camera.stop(after: CameraActivityPolicy.inactiveGracePeriod)
             UIApplication.shared.isIdleTimerDisabled = false
         }
         .onChange(of: scenePhase) { _, _ in
@@ -1106,7 +1119,7 @@ struct CameraScreen: View {
         if isImporting {
             if scenePhase == .active, isCameraTabActive {
                 camera.setFrameDeliveryPaused(true)
-                camera.stop(after: CameraActivityPolicy.gracePeriod)
+                camera.stop(after: CameraActivityPolicy.inactiveGracePeriod)
             } else {
                 camera.stop()
             }
@@ -1127,7 +1140,9 @@ struct CameraScreen: View {
         case .stop:
             camera.stop()
         case .stopAfterGrace:
-            camera.stop(after: CameraActivityPolicy.gracePeriod)
+            camera.stop(after: CameraActivityPolicy.deferredStopDelay(
+                hasReview: viewModel.reviewImage != nil
+            ))
         case .hold:
             break
         }
