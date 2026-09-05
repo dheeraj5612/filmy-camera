@@ -1943,12 +1943,12 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         )
         flashAvailabilityState = availability
         publishFlashAvailability(availability)
-        // Restore the user's selection even if the flash is momentarily
-        // unavailable while Auto exposure settles. Availability remains a
-        // separate, truthful hardware signal and capture safely falls back to
-        // Off until the device can fire; the preference must not be lost.
-        guard availability != .unsupported,
-              supportedModes.contains(previous.rawValue) else { return }
+        // The output's supported modes can briefly disappear while Auto
+        // exposure settles. Restore the user's selection for a flash-equipped
+        // device independently of that transient capability snapshot;
+        // availability remains truthful and capture still falls back to Off
+        // until the output can fire.
+        guard device.hasFlash else { return }
         flashModeBeforeManualExposure = nil
         selectedFlashMode = previous
         publishFlashMode(previous)
@@ -3208,17 +3208,36 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         flashAvailabilityState = availability
         publishFlashAvailability(availability)
 
-        if availability == .unsupported {
-            selectedFlashMode = .off
-            publishFlashMode(.off)
-            photoOutput.photoSettingsForSceneMonitoring = nil
-            return
-        }
-
         if isManualExposureActiveOrRequested {
+            // A reused input can still report Custom until the desired Auto
+            // mode is reapplied. Preserve the choice suppressed here just as
+            // when the user enters manual exposure, so Auto can restore it.
+            if selectedFlashMode != .off {
+                flashModeBeforeManualExposure = selectedFlashMode
+            }
             selectedFlashMode = .off
             publishFlashMode(.off)
             configureFlashSceneMonitoringOnQueue(supportedModes: supportedModes)
+            return
+        }
+
+        if availability == .unsupported {
+            // `supportedFlashModes` may be transiently empty after changing
+            // exposure or camera inputs. Keep the user's Auto-mode selection
+            // for flash hardware, while the separate availability state keeps
+            // the control and capture path honest. A camera with no flash has
+            // no selection to preserve.
+            guard device.hasFlash else {
+                selectedFlashMode = .off
+                publishFlashMode(.off)
+                photoOutput.photoSettingsForSceneMonitoring = nil
+                return
+            }
+            if let pendingRestore = flashModeBeforeManualExposure {
+                selectedFlashMode = pendingRestore
+            }
+            publishFlashMode(selectedFlashMode)
+            photoOutput.photoSettingsForSceneMonitoring = nil
             return
         }
 

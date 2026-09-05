@@ -1308,8 +1308,10 @@ final class FilmyCameraUITests: XCTestCase {
             return
         }
 
-        // Keep the existing generic behavior for Settings and other pages.
-        let scrollView = app.scrollViews.firstMatch
+        // A presented sheet can leave the camera's horizontal utility rail in
+        // the accessibility tree. Scroll the active Pro sheet explicitly.
+        let manualControlsScroll = app.scrollViews["manual-controls-scroll"]
+        let scrollView = manualControlsScroll.exists ? manualControlsScroll : app.scrollViews.firstMatch
         for _ in 0..<20 {
             if element.exists, element.isHittable {
                 let viewport = scrollView.exists ? scrollView.frame.intersection(app.frame) : app.frame

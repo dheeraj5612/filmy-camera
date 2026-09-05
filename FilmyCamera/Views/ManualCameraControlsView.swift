@@ -31,7 +31,8 @@ struct ManualCameraControlsView: View {
     private var isApplying: Bool { controls.isApplying }
 
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
+            sheetHeader
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     if hasManualCapability { statusHeader }
@@ -56,22 +57,40 @@ struct ManualCameraControlsView: View {
                 .padding(.vertical, 20)
             }
             .background(FilmyTheme.background.ignoresSafeArea())
-            .navigationTitle("Pro controls")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                        .frame(minHeight: FilmyTheme.minimumHitTarget)
-                        .accessibilityIdentifier("manual-controls-done")
-                }
-            }
+            .accessibilityIdentifier("manual-controls-scroll")
         }
+        .background(FilmyTheme.background.ignoresSafeArea())
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("manual-controls-screen")
         .onAppear {
             camera.refreshManualControls()
             syncDrafts()
         }
         .onChange(of: controls) { _, _ in syncDraftsIfIdle() }
+    }
+
+    private var sheetHeader: some View {
+        HStack(spacing: 16) {
+            Text("Pro controls")
+                .font(.system(.headline, design: .rounded).weight(.bold))
+                .foregroundStyle(FilmyTheme.primary)
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 8)
+            Button { dismiss() } label: {
+                Text("Done")
+                    .font(.system(.body, design: .rounded).weight(.semibold))
+                    .foregroundStyle(FilmyTheme.accent)
+                    .padding(.horizontal, 16)
+                    .frame(minWidth: 64, minHeight: FilmyTheme.minimumHitTarget)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("manual-controls-done")
+        }
+        .padding(.leading, horizontalSizeClass == .regular ? 28 : 20)
+        .padding(.trailing, horizontalSizeClass == .regular ? 12 : 4)
+        .padding(.top, 12)
+        .padding(.bottom, 4)
     }
 
     private var statusHeader: some View {
@@ -314,6 +333,7 @@ struct ManualCameraControlsView: View {
                 Text(title)
                     .font(.system(.headline, design: .rounded).weight(.bold))
                     .foregroundStyle(FilmyTheme.primary)
+                    .accessibilityAddTraits(.isHeader)
                 Text(subtitle)
                     .font(.system(.caption, design: .rounded).weight(.medium))
                     .foregroundStyle(FilmyTheme.secondary)
@@ -321,6 +341,7 @@ struct ManualCameraControlsView: View {
             }
             content()
         }
+        .accessibilityElement(children: .contain)
     }
 
     private func modePicker(

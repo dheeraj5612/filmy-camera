@@ -8,6 +8,9 @@ import UniformTypeIdentifiers
 enum PhotoOutputEncoder {
     static let outputProfileName = "sRGB IEC61966-2.1"
     static let recipeMetadataFormat = "filmy-camera.recipe-provenance"
+    /// Preserve fine texture through the app's single finished-JPEG encode
+    /// while keeping 12 MP files practical for Photos and the local Roll.
+    static let jpegCompressionQuality = 0.95
 
     struct RecipeProvenanceMetadata: Codable, Equatable, Sendable {
         let format: String
@@ -54,7 +57,8 @@ enum PhotoOutputEncoder {
             kCGImagePropertyProfileName as String: Self.outputProfileName,
             kCGImagePropertyPixelWidth as String: outputImage.width,
             kCGImagePropertyPixelHeight as String: outputImage.height,
-            kCGImagePropertyOrientation as String: 1
+            kCGImagePropertyOrientation as String: 1,
+            kCGImageDestinationLossyCompressionQuality as String: Self.jpegCompressionQuality
         ]
 
         let tiff: [String: Any] = [

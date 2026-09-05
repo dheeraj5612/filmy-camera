@@ -48,9 +48,24 @@ final class CameraManualHardwareTests: XCTestCase {
                             max(bounds.minimumExposureDurationSeconds, 1.0 / 125))
         let duration2 = min(bounds.maximumExposureDurationSeconds,
                             max(bounds.minimumExposureDurationSeconds, 1.0 / 60))
+        let photoOutput = try XCTUnwrap(camera.session.outputs.compactMap {
+            $0 as? AVCapturePhotoOutput
+        }.first)
         var observations: [String] = []
+        func recordFlash(_ phase: String) {
+            let activeDevice = camera.session.inputs.compactMap {
+                ($0 as? AVCaptureDeviceInput)?.device
+            }.first
+            observations.append("phase=\(phase) flashSelection=\(camera.flashMode) "
+                + "availability=\(camera.flashAvailability) activeDevice=\(activeDevice?.deviceType.rawValue ?? "none") "
+                + "deviceID=\(activeDevice?.uniqueID ?? "none") position=\(activeDevice?.position.rawValue ?? 0) "
+                + "hasFlash=\(activeDevice?.hasFlash ?? false) hardwareAvailable=\(activeDevice?.isFlashAvailable ?? false) "
+                + "supportedModes=\(photoOutput.supportedFlashModes.map(\.rawValue))")
+        }
+        recordFlash("initial-on")
         var capturedISOs: [Double] = []
         defer {
+            recordFlash("final")
             let attachment = XCTAttachment(string: observations.joined(separator: "\n"))
             attachment.name = "Manual-capture-request-and-EXIF"
             attachment.lifetime = .keepAlways
@@ -68,6 +83,7 @@ final class CameraManualHardwareTests: XCTestCase {
                     && abs(Double(wide.iso - iso)) <= max(Double(iso) * 0.05, 1)
                     && abs(wide.exposureDuration.seconds - duration) <= max(duration * 0.05, 0.0001)
             }
+            recordFlash("manual-\(index + 1)")
             let settledISO = wide.iso
             let settledDuration = wide.exposureDuration.seconds
             camera.focus(at: CGPoint(x: 0.35, y: 0.6))
@@ -81,6 +97,13 @@ final class CameraManualHardwareTests: XCTestCase {
             let source = try XCTUnwrap(CGImageSourceCreateWithData(photo.fileData as CFData, nil))
             let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
                 as? [String: Any])
+            let pixelWidth = try XCTUnwrap(properties[kCGImagePropertyPixelWidth as String] as? NSNumber).intValue
+            let pixelHeight = try XCTUnwrap(properties[kCGImagePropertyPixelHeight as String] as? NSNumber).intValue
+            let requestedPixels = Int(photoOutput.maxPhotoDimensions.width) * Int(photoOutput.maxPhotoDimensions.height)
+            XCTAssertGreaterThan(requestedPixels, 0)
+            XCTAssertEqual(pixelWidth * pixelHeight, requestedPixels,
+                           "The saved camera file must retain the requested full capture resolution")
+            observations.append("capture=\(index + 1) pixels=\(pixelWidth)x\(pixelHeight) requestedPixels=\(requestedPixels)")
             let exif = try XCTUnwrap(properties[kCGImagePropertyExifDictionary as String]
                 as? [String: Any])
             let capturedISO = try XCTUnwrap((exif[kCGImagePropertyExifISOSpeedRatings as String]
@@ -159,6 +182,7 @@ final class CameraManualHardwareTests: XCTestCase {
                 && camera.manualControls.whiteBalanceMode == beforePause.whiteBalanceMode
                 && camera.manualControls.focusMode == beforePause.focusMode
         }
+        recordFlash("session-reused")
         XCTAssertEqual(wide.iso, iso2, accuracy: max(iso2 * 0.05, 1))
         XCTAssertEqual(wide.exposureDuration.seconds, duration2,
                        accuracy: max(duration2 * 0.05, 0.0001))
@@ -178,12 +202,18 @@ final class CameraManualHardwareTests: XCTestCase {
         if camera.availableCameraPositions.contains(.front) {
             camera.setCameraPosition(.front)
             try await requireEventually("Front camera settles") {
-                camera.cameraPosition == .front && !camera.manualControls.isApplying
+                let input = camera.session.inputs.compactMap { $0 as? AVCaptureDeviceInput }.first
+                return camera.cameraPosition == .front
+                    && input?.device.position == .front
+                    && camera.manualControls.activeDeviceID == input?.device.uniqueID
+                    && !camera.manualControls.isApplying
             }
+            recordFlash("front")
             camera.resetManualControlsToAuto()
             try await requireEventually("Reset on the front camera completes") {
                 !camera.manualControls.isAnyManualModeEnabled && !camera.manualControls.isApplying
             }
+            recordFlash("front-reset")
             camera.setCameraPosition(.back)
             try await requireEventually("Returning to the old physical lens restores actual Auto") {
                 camera.cameraPosition == .back
@@ -192,6 +222,13 @@ final class CameraManualHardwareTests: XCTestCase {
                     && !camera.manualControls.isApplying
                     && wide.exposureMode != .custom && wide.whiteBalanceMode != .locked
                     && (!beforePause.manualFocusSupported || wide.focusMode != .locked)
+            }
+        }
+
+        recordFlash("back-auto")
+        if canVerifyFlashPreference {
+            try await requireEventually("Returning to the rear camera restores flash support and choice") {
+                photoOutput.supportedFlashModes.contains(.on) && camera.flashMode == .on
             }
         }
 
@@ -208,6 +245,7 @@ final class CameraManualHardwareTests: XCTestCase {
                 && wide.exposureMode != .custom && wide.whiteBalanceMode != .locked
                 && (!beforePause.manualFocusSupported || wide.focusMode != .locked)
         }
+        recordFlash("rapid-reset")
         for _ in 0..<10 {
             try await Task.sleep(for: .milliseconds(100))
             XCTAssertEqual(camera.manualControls.exposureMode, .auto)
@@ -217,6 +255,9 @@ final class CameraManualHardwareTests: XCTestCase {
         if canVerifyFlashPreference {
             try await requireEventually("Returning to Auto restores the remembered flash choice") {
                 camera.flashMode == .on
+            }
+            try await requireEventually("Auto restores actual output support for flash On") {
+                photoOutput.supportedFlashModes.contains(.on)
             }
         }
         #endif
