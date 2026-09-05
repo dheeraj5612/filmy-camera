@@ -695,6 +695,7 @@ final class FilmyCameraUITests: XCTestCase {
             "The unavailable camera preview must not remain an actionable target"
         )
     }
+    #endif
 
     func testAccessibilitySizeCameraShellKeepsRecipeControlsReachable() throws {
         let accessibilityApp = MainActor.assumeIsolated {
@@ -729,6 +730,7 @@ final class FilmyCameraUITests: XCTestCase {
         tune.tap()
         XCTAssertTrue(accessibilityApp.staticTexts["Recipe controls"].waitForExistence(timeout: 5))
         assertMinimumHitTarget(accessibilityApp.buttons["Done editing Muted Color"], named: "Done editing")
+        attachScreenshot(named: "accessibility-large-text-editor")
     }
 
     func testMonochromeEditorHidesNoOpColorControls() throws {
@@ -757,6 +759,7 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertFalse(monochromeApp.descendants(matching: .any)["fx-blue-control"].exists)
     }
 
+    #if targetEnvironment(simulator)
     func testViewfinderFirstChromePreviewKeepsCameraQuiet() throws {
         let previewApp = MainActor.assumeIsolated {
             let previewApp = XCUIApplication()
@@ -948,7 +951,23 @@ final class FilmyCameraUITests: XCTestCase {
         if !drawer.exists {
             let currentLook = target.buttons["recipe-menu"]
             assertMinimumHitTarget(currentLook, named: "Current look")
-            currentLook.tap()
+            if target.frame.width >= 700 {
+                // AssistiveTouch can overlap the center of this edge-column
+                // control on a physical iPad. Tap the leading quarter while
+                // staying inside the button's actual accessibility frame.
+                let targetFrame = target.frame
+                let buttonFrame = currentLook.frame
+                let point = CGPoint(
+                    x: buttonFrame.minX + buttonFrame.width * 0.25,
+                    y: buttonFrame.midY
+                )
+                target.coordinate(withNormalizedOffset: CGVector(
+                    dx: (point.x - targetFrame.minX) / targetFrame.width,
+                    dy: (point.y - targetFrame.minY) / targetFrame.height
+                )).tap()
+            } else {
+                currentLook.tap()
+            }
         }
         let appeared = drawer.waitForExistence(timeout: 5)
         if !appeared {
