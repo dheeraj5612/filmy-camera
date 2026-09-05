@@ -152,6 +152,27 @@ final class PhotoLibraryMetadataTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: resourceURL), expected)
     }
 
+    func testCachePersistenceFailsClosedWhenDirectoryCannotBeCreated() async throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let directoryThatIsAFile = root.appendingPathComponent("not-a-directory")
+        let resourceURL = directoryThatIsAFile.appendingPathComponent("saved-frame.jpg")
+        defer { try? fileManager.removeItem(at: root) }
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data("occupied".utf8).write(to: directoryThatIsAFile)
+
+        let didWrite = await PhotoLibraryService.persistCachedFrameData(
+            Data(repeating: 0xA5, count: 1_024),
+            directoryURL: directoryThatIsAFile,
+            resourceURL: resourceURL
+        )
+
+        XCTAssertFalse(didWrite)
+        XCTAssertFalse(fileManager.fileExists(atPath: resourceURL.path))
+        XCTAssertEqual(try Data(contentsOf: directoryThatIsAFile), Data("occupied".utf8))
+    }
+
     @MainActor
     func testPhysicalAddOnlySaveCallbackHasReadablePersistentCache() async throws {
         #if targetEnvironment(simulator)
@@ -498,5 +519,26 @@ final class PhotoLibraryMetadataTests: XCTestCase {
         }
         XCTAssertNil(cancelledResult)
         XCTAssertFalse(cancelledState.canCacheResult())
+    }
+
+    @MainActor
+    func testImageRequestCancelledBeforeContinuationIgnoresLateResults() async {
+        let state = PhotoLibraryService.ImageRequestState(
+            imageManager: PHImageManager.default()
+        )
+        state.cancel()
+
+        let result: UIImage? = await withCheckedContinuation { continuation in
+            state.install(continuation)
+        }
+        XCTAssertNil(result)
+
+        let lateImage = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).image { context in
+            UIColor.systemPurple.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        }
+        state.finish(with: lateImage, cacheable: true)
+
+        XCTAssertFalse(state.canCacheResult())
     }
 }

@@ -9,6 +9,7 @@ Filmy Camera is a native iPhone and iPad camera built around the feeling of choo
 - Native bi-planar YUV preview buffers when available, with a BGRA fallback, and a session-scoped grain phase shared by preview and capture for a more faithful WYSIWYG frame.
 - A dedicated G7 X Compact profile and curated editable film recipes based on public Fujifilm-style controls: film base, tone curve, color, white-balance shift, dynamic range, Color Chrome, FX Blue, sharpness, noise reduction, clarity, grain, grain size, halation, and vignette.
 - Full-resolution capture review with retake or explicit Save to Photos, so a frame is never committed silently.
+- Try another look on the same capture or import and compare with Original before saving. Review previews are bounded to 1800 pixels, and changed looks export at full resolution on Save without changing the next shot's recipe.
 - System photo picker import that preserves the original framing and applies the selected recipe at full resolution up to the 40 MP processing budget; larger images are resized and labeled in review.
 - First-run recipe-first onboarding with a direct handoff into the camera.
 - Recipe swatches render the live viewfinder scene through each recipe (a synthetic color scene stands in when no camera is running), so choosing a look means seeing this scene in that look.
@@ -36,6 +37,8 @@ xcodebuild -project FilmyCamera.xcodeproj \
 If that simulator is not installed, replace the destination with any available iPhone ID from `xcrun simctl list devices available`.
 
 For deterministic simulator tests on CI or a busy development machine, add `-parallel-testing-enabled NO -maximum-parallel-testing-workers 1` to the test invocation.
+
+Run the complete test suite with `python3 scripts/testing/run.py ci --destination 'platform=iOS Simulator,id=YOUR_SIMULATOR_UUID'`. See [the testing guide](docs/testing.md) for unit, integration, Photos E2E, hardware, performance, coverage, and CI commands.
 
 The app requires iOS 17 or later. Camera and Photos permissions are requested only when the relevant feature is used.
 

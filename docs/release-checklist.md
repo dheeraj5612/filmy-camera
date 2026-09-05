@@ -1,8 +1,18 @@
 # Filmy Camera release checklist
 
-Current candidate: version 1.0.0, build 7, with the [camera UX redesign](design-pass-20260904.md). Build 7 builds for simulator and physical iOS and is installed on the test iPad; its hardware pass is pending device unlock. Build 5 remains the last verified Apple upload. Build 6's signed artifacts remain preserved, but build 7 supersedes it as the intended release candidate. Historical release notes are in [release-history.md](release-history.md).
+Current candidate: version 1.0.0, build 8, with the [camera UX redesign](design-pass-20260904.md) and [reversible photo review](review-editing-20260904.md). The signed development app is installed on the test iPad. Build 5 remains the last verified Apple upload; App Store Connect requires renewed sign-in for a current readback. Builds 6 and 7 are preserved historical candidates. Historical release notes are in [release-history.md](release-history.md).
 
-## Build 7 release gates
+## Build 8 release gates
+
+- [x] Implement review look switching and Original comparison with bounded previews, deferred full export, exact retry, and independent shooting selection.
+- [x] Pass local 180 unit/integration tests and three normal Photos E2E flows on iPadOS 26.5 and iOS 18.5. The test runner has 20 portable checks and selects 201 app tests for routine CI.
+- [x] Install the signed 1.0.0 (8) app and pass all 23 applicable iPad tests. The strengthened physical capture/compare/look-switch/landscape/save case also passed separately.
+- [ ] Pass required CI on the final commit, archive the clean source, and validate signed archive/IPA parity.
+- [x] Refresh and inspect five iPhone and five iPad store screenshots from isolated public-fixture runs, showing current review controls and matching saved treatments.
+- [ ] Upload build 8 and the refreshed media, verify processing, select the matching build/media, and validate the review draft.
+- [ ] Complete the iPhone-specific, controlled image-quality, and submission gates below.
+
+## Preserved build 7 release gates
 
 - [x] Implement a camera-first layout, on-demand grouped looks, full-screen review/detail, and pinned return navigation.
 - [x] Validate simulator camera portrait/landscape, large text, editor, navigation, and renderer behavior. See [design validation](design-pass-20260904.md#validation) for the full-run and focused rerun evidence.

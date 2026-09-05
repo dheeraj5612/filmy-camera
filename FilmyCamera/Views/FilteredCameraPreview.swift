@@ -9,6 +9,15 @@ import UIKit
 public struct FilteredCameraPreview: UIViewRepresentable {
     public typealias UIViewType = FilteredCameraPreviewView
 
+    /// Keeps render diagnostics out of the normal accessibility experience.
+    /// The narrower flag lets normal-app Photos tests observe the preview
+    /// without enabling the app's broader UI-testing behavior.
+    static let exposesRenderStatusForUITesting: Bool = {
+        let arguments = ProcessInfo.processInfo.arguments
+        return arguments.contains("-ui-testing")
+            || arguments.contains("-ui-testing-preview-status")
+    }()
+
     @ObservedObject private var cameraService: CameraService
     private let recipe: FilmRecipe
     private let quality: FilmRenderer.Quality
@@ -165,6 +174,12 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
     /// exactly one redraw for the newest state instead of queuing GPU work.
     private var contentRevision: UInt64 = 0
     private var isRenderInFlight = false
+    /// Test-only state read lazily through `accessibilityValue`. Updating these
+    /// integers does not publish SwiftUI state or post per-frame AX events.
+    private var successfulRenderRevision: UInt64 = 0
+    private var renderReadinessGeneration: UInt64 = 0
+    private var renderedRecipeID: String?
+    private var isWaitingForSuccessfulRender = true
 
     public override init(frame: CGRect, device: MTLDevice?) {
         let selectedDevice = device ?? FilmRenderer.metalDevice ?? MTLCreateSystemDefaultDevice()
@@ -243,6 +258,45 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
         backgroundColor = .black
         contentMode = .scaleAspectFill
         autoResizeDrawable = false
+        if FilteredCameraPreview.exposesRenderStatusForUITesting {
+            isAccessibilityElement = true
+            accessibilityIdentifier = "camera-preview-render-status"
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(resetRenderReadinessForApplicationStateChange),
+                name: UIApplication.didEnterBackgroundNotification,
+                object: nil
+            )
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(resetRenderReadinessForApplicationStateChange),
+                name: UIApplication.didBecomeActiveNotification,
+                object: nil
+            )
+        }
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    public override var accessibilityValue: String? {
+        get {
+            guard FilteredCameraPreview.exposesRenderStatusForUITesting else {
+                return super.accessibilityValue
+            }
+            let state = isWaitingForSuccessfulRender ? "waiting" : "rendered"
+            let visibleRecipeID = renderedRecipeID ?? recipe.id
+            return "state=\(state);revision=\(successfulRenderRevision);recipe=\(visibleRecipeID)"
+        }
+        set {
+            super.accessibilityValue = newValue
+        }
+    }
+
+    public override func didMoveToWindow() {
+        super.didMoveToWindow()
+        resetRenderReadiness()
     }
 
     /// Reports the drawable size the view really renders into, so captures
@@ -258,6 +312,7 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
             height: (bounds.height * scale).rounded()
         )
         if target != drawableSize, target.width > 0, target.height > 0 {
+            resetRenderReadiness()
             drawableSize = target
             onDrawableSizeChange?(target)
         }
@@ -269,6 +324,9 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
         grainSeed: UInt32
     ) {
         guard self.recipe != recipe || self.quality != quality || self.grainSeed != grainSeed else { return }
+        if self.recipe.id != recipe.id {
+            resetRenderReadiness()
+        }
         self.recipe = recipe
         self.quality = quality
         self.grainSeed = grainSeed
@@ -281,6 +339,7 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
     }
 
     func clearImage() {
+        resetRenderReadiness()
         guard latestImage != nil else { return }
         latestImage = nil
         contentRevision &+= 1
@@ -300,6 +359,8 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
             return
         }
         let renderedRevision = contentRevision
+        let renderedReadinessGeneration = renderReadinessGeneration
+        let renderedRecipeID = recipe.id
         isRenderInFlight = true
 
         let targetRect = CGRect(origin: .zero, size: drawableSize)
@@ -323,9 +384,16 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
             colorSpace: sRGBColorSpace
         )
         commandBuffer.present(drawable)
-        commandBuffer.addCompletedHandler { [weak self] _ in
+        commandBuffer.addCompletedHandler { [weak self] commandBuffer in
+            let completedSuccessfully = commandBuffer.status == .completed
+                && commandBuffer.error == nil
             DispatchQueue.main.async { [weak self] in
-                self?.finishRender(revision: renderedRevision)
+                self?.finishRender(
+                    revision: renderedRevision,
+                    readinessGeneration: renderedReadinessGeneration,
+                    recipeID: renderedRecipeID,
+                    completedSuccessfully: completedSuccessfully
+                )
             }
         }
         commandBuffer.commit()
@@ -335,6 +403,7 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
         _ view: MTKView,
         drawableSizeWillChange size: CGSize
     ) {
+        resetRenderReadiness()
         // Keep the last frame visible and recompute its aspect-fill transform
         // immediately after rotation or another drawable-size change.
         if latestImage != nil {
@@ -348,10 +417,33 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
         setNeedsDisplay()
     }
 
-    private func finishRender(revision: UInt64) {
+    private func finishRender(
+        revision: UInt64,
+        readinessGeneration: UInt64,
+        recipeID: String,
+        completedSuccessfully: Bool
+    ) {
         isRenderInFlight = false
+        if FilteredCameraPreview.exposesRenderStatusForUITesting,
+           completedSuccessfully,
+           renderReadinessGeneration == readinessGeneration {
+            successfulRenderRevision &+= 1
+            renderedRecipeID = recipeID
+            isWaitingForSuccessfulRender = false
+        }
         guard latestImage != nil, contentRevision != revision else { return }
         setNeedsDisplay()
+    }
+
+    private func resetRenderReadiness() {
+        guard FilteredCameraPreview.exposesRenderStatusForUITesting else { return }
+        renderReadinessGeneration &+= 1
+        renderedRecipeID = nil
+        isWaitingForSuccessfulRender = true
+    }
+
+    @objc private func resetRenderReadinessForApplicationStateChange() {
+        resetRenderReadiness()
     }
 
 }

@@ -10,6 +10,7 @@ on:
       - "FilmyCameraUITests/**"
       - "FilmyCamera.xcodeproj/**"
       - "scripts/ci/**"
+      - "scripts/testing/**"
       - "scripts/release/**"
       # App Store metadata is a release input; keep metadata-only commits in
       # the push gate on main.
@@ -19,6 +20,11 @@ on:
       - ".github/workflows/ios-build.yml"
   pull_request: {}
   workflow_dispatch:
+    inputs:
+      include_device_build:
+        description: "Also compile simulator-excluded tests for a generic iOS device"
+        type: boolean
+        default: false
 
 concurrency:
   group: ios-build-${{ github.event.pull_request.number || github.ref }}
@@ -51,6 +57,9 @@ jobs:
         shell: bash
         run: bash scripts/ci/check-tracked-credentials.sh
 
+      - name: Validate test routing and result handling before macOS work
+        run: python3 -m unittest discover -s scripts/testing -p 'test_*.py' -v
+
       - name: Determine whether the iOS gate is needed
         id: scope
         shell: bash
@@ -80,7 +89,7 @@ jobs:
           ios_changed=false
           release_scripts_changed=false
 
-          if grep -Eq '^(FilmyCamera/|FilmyCameraTests/|FilmyCameraUITests/|FilmyCamera\.xcodeproj/|project\.yml$|\.github/workflows/ios-build\.yml$)' <<<"${changed_files}"; then
+          if grep -Eq '^(FilmyCamera/|FilmyCameraTests/|FilmyCameraUITests/|FilmyCamera\.xcodeproj/|scripts/testing/|docs/app-store/screenshots/demo-source/|project\.yml$|\.github/workflows/ios-build\.yml$)' <<<"${changed_files}"; then
             ios_changed=true
           fi
           if grep -Eq '^(scripts/release/|scripts/ci/|project\.yml$|FilmyCamera\.xcodeproj/|FilmyCamera/Info\.plist$|FilmyCamera/Resources/PrivacyInfo\.xcprivacy$|docs/app-store/|docs/release-checklist\.md$|\.github/workflows/ios-build\.yml$)' <<<"${changed_files}"; then
@@ -226,19 +235,10 @@ jobs:
         env:
           DESTINATION: ${{ steps.simulator.outputs.destination }}
         run: |
-          set -o pipefail
-          xcodebuild \
-            -project FilmyCamera.xcodeproj \
-            -scheme FilmyCamera \
-            -destination "${DESTINATION}" \
-            -derivedDataPath "${RUNNER_TEMP}/FilmyCameraDerivedData" \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            -parallel-testing-enabled NO \
-            -maximum-parallel-testing-workers 1 \
-            -enableCodeCoverage NO \
-            -quiet \
-            build-for-testing 2>&1 | tee "${RUNNER_TEMP}/filmycamera-build-for-testing.log"
+          python3 scripts/testing/run.py build \
+            --destination "${DESTINATION}" \
+            --derived-data "${RUNNER_TEMP}/FilmyCameraDerivedData" \
+            --output-dir "${RUNNER_TEMP}"
 
       - name: Wait for iPhone simulator
         shell: bash
@@ -246,46 +246,45 @@ jobs:
           DEVICE_ID: ${{ steps.simulator.outputs.device_id }}
         run: xcrun simctl bootstatus "${DEVICE_ID}" -b
 
-      - name: Run unit tests on iPhone simulator
+      - name: Run unit and integration tests on iPhone simulator
         shell: bash
         env:
           DESTINATION: ${{ steps.simulator.outputs.destination }}
         run: |
-          set -o pipefail
-          xcodebuild \
-            -project FilmyCamera.xcodeproj \
-            -scheme FilmyCamera \
-            -destination "${DESTINATION}" \
-            -derivedDataPath "${RUNNER_TEMP}/FilmyCameraDerivedData" \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            -parallel-testing-enabled NO \
-            -maximum-parallel-testing-workers 1 \
-            -enableCodeCoverage NO \
-            -resultBundlePath "${RUNNER_TEMP}/FilmyCameraUnit.xcresult" \
-            -only-testing:FilmyCameraTests \
-            -quiet \
-            test-without-building 2>&1 | tee "${RUNNER_TEMP}/filmycamera-unit-test.log"
+          python3 scripts/testing/run.py core --skip-build \
+            --destination "${DESTINATION}" \
+            --derived-data "${RUNNER_TEMP}/FilmyCameraDerivedData" \
+            --output-dir "${RUNNER_TEMP}"
 
       - name: Run UI tests on iPhone simulator
         shell: bash
         env:
           DESTINATION: ${{ steps.simulator.outputs.destination }}
         run: |
-          set -o pipefail
-          xcodebuild \
-            -project FilmyCamera.xcodeproj \
-            -scheme FilmyCamera \
-            -destination "${DESTINATION}" \
-            -derivedDataPath "${RUNNER_TEMP}/FilmyCameraDerivedData" \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            -parallel-testing-enabled NO \
-            -maximum-parallel-testing-workers 1 \
-            -enableCodeCoverage NO \
-            -resultBundlePath "${RUNNER_TEMP}/FilmyCameraUI.xcresult" \
-            -only-testing:FilmyCameraUITests \
-            test-without-building 2>&1 | tee "${RUNNER_TEMP}/filmycamera-ui-test.log"
+          python3 scripts/testing/run.py e2e --skip-build \
+            --destination "${DESTINATION}" \
+            --derived-data "${RUNNER_TEMP}/FilmyCameraDerivedData" \
+            --output-dir "${RUNNER_TEMP}"
+
+      - name: Run normal Photos E2E in a fresh disposable simulator
+        shell: bash
+        env:
+          DESTINATION: ${{ steps.simulator.outputs.destination }}
+          DEVICE_ID: ${{ steps.simulator.outputs.device_id }}
+        run: |
+          # Release the first simulator's memory before booting the Photos fixture device.
+          xcrun simctl shutdown "${DEVICE_ID}"
+          python3 scripts/testing/run.py photos-e2e --skip-build \
+            --destination "${DESTINATION}" \
+            --derived-data "${RUNNER_TEMP}/FilmyCameraDerivedData" \
+            --output-dir "${RUNNER_TEMP}"
+
+      - name: Compile physical-device test branches when requested
+        if: github.event_name == 'workflow_dispatch' && inputs.include_device_build
+        run: |
+          python3 scripts/testing/run.py device-build \
+            --derived-data "${RUNNER_TEMP}/FilmyCameraDerivedData" \
+            --output-dir "${RUNNER_TEMP}/device-build"
 
       - name: Record test artifact provenance
         if: always()
@@ -326,7 +325,8 @@ jobs:
           for artifact_path in \
             "${RUNNER_TEMP}/filmycamera-build-for-testing.log" \
             "${RUNNER_TEMP}/filmycamera-unit-test.log" \
-            "${RUNNER_TEMP}/filmycamera-ui-test.log"; do
+            "${RUNNER_TEMP}/filmycamera-ui-test.log" \
+            "${RUNNER_TEMP}/filmycamera-photos-e2e-test.log"; do
             if [[ -f "${artifact_path}" ]]; then
               printf 'artifact_sha256=%s:%s\n' \
                 "$(basename "${artifact_path}")" \
@@ -339,7 +339,8 @@ jobs:
 
           for result_path in \
             "${RUNNER_TEMP}/FilmyCameraUnit.xcresult" \
-            "${RUNNER_TEMP}/FilmyCameraUI.xcresult"; do
+            "${RUNNER_TEMP}/FilmyCameraUI.xcresult" \
+            "${RUNNER_TEMP}/FilmyCameraPhotosE2E.xcresult"; do
             if [[ -d "${result_path}" ]]; then
               result_file_count="$(find "${result_path}" -type f | wc -l | tr -d ' ')"
               result_size_kib="$(du -sk "${result_path}" | awk '{ print $1 }')"
@@ -356,7 +357,9 @@ jobs:
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: filmycamera-xcodebuild-logs
-          path: "${{ runner.temp }}/filmycamera-*.log"
+          path: |
+            ${{ runner.temp }}/filmycamera-*.log
+            ${{ runner.temp }}/device-build/filmycamera-*.log
           if-no-files-found: warn
           retention-days: 14
 
@@ -367,6 +370,15 @@ jobs:
           name: filmycamera-test-provenance-${{ github.run_id }}
           path: "${{ runner.temp }}/filmycamera-test-provenance.txt"
           if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload compact test counts and device evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: filmycamera-test-summaries-${{ github.run_id }}
+          path: "${{ runner.temp }}/filmycamera-*-summary.json"
+          if-no-files-found: warn
           retention-days: 14
 
       - name: Upload XCTest result bundle on failure

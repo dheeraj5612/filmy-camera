@@ -150,12 +150,111 @@ final class CameraViewModel: ObservableObject {
         }
     }
 
-    private struct RenderedPhoto: @unchecked Sendable {
+    struct RenderedPhoto: @unchecked Sendable {
         let image: UIImage
         let data: Data
         let capturedAt: Date
         var isFullResolution = true
         var flashFired = false
+        var normalizedSubjectRegions: [CGRect]? = nil
+    }
+
+    struct ReviewPreview: @unchecked Sendable {
+        let image: UIImage
+        let isFullResolution: Bool
+        let flashFired: Bool
+        var normalizedSubjectRegions: [CGRect]? = nil
+    }
+
+    struct ReviewRenderSource: @unchecked Sendable {
+        enum Mode: Sendable {
+            case camera(
+                viewportSize: CGSize,
+                previewDrawableSize: CGSize,
+                flashFired: Bool,
+                grainSeed: UInt32
+            )
+            case photoLibrary
+        }
+
+        let data: Data
+        let capturedAt: Date
+        let mode: Mode
+        let normalizedSubjectRegions: [CGRect]?
+
+        func storing(normalizedSubjectRegions: [CGRect]?) -> Self {
+            Self(
+                data: data,
+                capturedAt: capturedAt,
+                mode: mode,
+                normalizedSubjectRegions: normalizedSubjectRegions
+            )
+        }
+    }
+
+    typealias ReviewPreviewRenderer = @Sendable (ReviewRenderSource, FilmRecipe) -> ReviewPreview?
+    typealias ReviewFullRenderer = @Sendable (ReviewRenderSource, FilmRecipe) -> RenderedPhoto?
+    typealias ReviewOriginalRenderer = @Sendable (ReviewRenderSource) -> UIImage?
+
+    private final class ReviewWorkQueue: @unchecked Sendable {
+        private struct Work: Sendable {
+            let run: @Sendable () -> Void
+            let cancel: @Sendable () -> Void
+        }
+
+        private let lock = NSLock()
+        private let queue = DispatchQueue(
+            label: "com.filmycamera.review-render",
+            qos: .userInitiated
+        )
+        private var pending: Work?
+        private var isWorking = false
+
+        func submit(
+            _ work: @escaping @Sendable () -> Void,
+            onCancel: @escaping @Sendable () -> Void = {}
+        ) {
+            lock.lock()
+            let replaced = pending
+            pending = Work(run: work, cancel: onCancel)
+            guard !isWorking else {
+                lock.unlock()
+                replaced?.cancel()
+                return
+            }
+            isWorking = true
+            lock.unlock()
+            replaced?.cancel()
+            queue.async { [weak self] in self?.drain() }
+        }
+
+        func cancelPending() {
+            lock.lock()
+            let cancelled = pending
+            pending = nil
+            lock.unlock()
+            cancelled?.cancel()
+        }
+
+        func flush() async {
+            await withCheckedContinuation { continuation in
+                queue.async { continuation.resume() }
+            }
+        }
+
+        private func drain() {
+            while true {
+                lock.lock()
+                guard let work = pending else {
+                    isWorking = false
+                    lock.unlock()
+                    return
+                }
+                pending = nil
+                lock.unlock()
+                autoreleasepool { work.run() }
+            }
+        }
     }
 
     nonisolated static let selectedRecipeIDKey = "selectedRecipeID"
@@ -193,14 +292,44 @@ final class CameraViewModel: ObservableObject {
     /// False when a library import was bounded to `importPixelBudget`.
     @Published private(set) var reviewIsFullResolution = true
     @Published private(set) var reviewFlashFired = false
+    @Published private(set) var isRenderingReview = false
+    @Published private(set) var reviewRenderErrorMessage: String?
+    @Published private(set) var reviewOriginalImage: UIImage?
+    @Published private(set) var isPreparingReviewOriginal = false
+    @Published private(set) var pendingReviewRecipeID: String?
     @Published private var recipeOverrides: [String: FilmRecipe] = [:]
 
     private var toastTask: Task<Void, Never>?
     private var reviewImageData: Data?
     private var reviewCapturedAt: Date?
+    private var reviewRenderSource: ReviewRenderSource?
+    private var fullResolutionReviewRecipe: FilmRecipe?
+    private var fullResolutionReviewImage: UIImage?
+    private var fullResolutionReviewIsFullResolution = true
+    private var fullResolutionReviewFlashFired = false
+    private var reviewWorkGeneration: UInt64 = 0
+    private let reviewWorkQueue = ReviewWorkQueue()
+    private let reviewPreviewRenderer: ReviewPreviewRenderer
+    private let reviewFullRenderer: ReviewFullRenderer
+    private let reviewOriginalRenderer: ReviewOriginalRenderer
+    private var pendingPhotoSaver: (any PhotoSaving)?
 
-    init(defaults: UserDefaults = .standard) {
+    init(
+        defaults: UserDefaults = .standard,
+        reviewPreviewRenderer: ReviewPreviewRenderer? = nil,
+        reviewFullRenderer: ReviewFullRenderer? = nil,
+        reviewOriginalRenderer: ReviewOriginalRenderer? = nil
+    ) {
         self.defaults = defaults
+        self.reviewPreviewRenderer = reviewPreviewRenderer ?? { source, recipe in
+            Self.renderReviewPreview(source: source, recipe: recipe)
+        }
+        self.reviewFullRenderer = reviewFullRenderer ?? { source, recipe in
+            Self.renderReviewFull(source: source, recipe: recipe)
+        }
+        self.reviewOriginalRenderer = reviewOriginalRenderer ?? { source in
+            Self.renderReviewOriginal(source: source)
+        }
 
         let storedRecipeID = defaults.string(forKey: Self.selectedRecipeIDKey)
         selectedRecipeID = storedRecipeID.flatMap {
@@ -344,6 +473,7 @@ final class CameraViewModel: ObservableObject {
                 height: viewportSize.height * previewScale
             )
         }
+        let grainSeed = camera.previewGrainSeed
 
         camera.capturePhoto { [weak self] capturedPhoto in
             Task { @MainActor [weak self] in
@@ -374,7 +504,7 @@ final class CameraViewModel: ObservableObject {
                             previewDrawableSize: previewDrawableSize,
                             capturedAt: capturedPhoto.capturedAt,
                             flashFired: capturedPhoto.flashFired,
-                            grainSeed: camera.previewGrainSeed
+                            grainSeed: grainSeed
                         )
                     }
 
@@ -399,6 +529,22 @@ final class CameraViewModel: ObservableObject {
                         self.reviewSource = .camera
                         self.reviewIsFullResolution = true
                         self.reviewFlashFired = renderedPhoto.flashFired
+                        self.reviewRenderSource = ReviewRenderSource(
+                            data: capturedPhoto.fileData,
+                            capturedAt: capturedPhoto.capturedAt,
+                            mode: .camera(
+                                viewportSize: viewportSize,
+                                previewDrawableSize: previewDrawableSize,
+                                flashFired: capturedPhoto.flashFired,
+                                grainSeed: grainSeed
+                            ),
+                            normalizedSubjectRegions: renderedPhoto.normalizedSubjectRegions
+                        )
+                        self.fullResolutionReviewRecipe = recipe
+                        self.fullResolutionReviewImage = renderedPhoto.image
+                        self.fullResolutionReviewIsFullResolution = renderedPhoto.isFullResolution
+                        self.fullResolutionReviewFlashFired = renderedPhoto.flashFired
+                        self.reviewRenderErrorMessage = nil
                         self.isCapturing = false
                     }
                 }
@@ -449,6 +595,17 @@ final class CameraViewModel: ObservableObject {
         reviewSource = .photoLibrary
         reviewIsFullResolution = renderedPhoto.isFullResolution
         reviewFlashFired = false
+        reviewRenderSource = ReviewRenderSource(
+            data: data,
+            capturedAt: importedAt,
+            mode: .photoLibrary,
+            normalizedSubjectRegions: renderedPhoto.normalizedSubjectRegions
+        )
+        fullResolutionReviewRecipe = recipe
+        fullResolutionReviewImage = renderedPhoto.image
+        fullResolutionReviewIsFullResolution = renderedPhoto.isFullResolution
+        fullResolutionReviewFlashFired = renderedPhoto.flashFired
+        reviewRenderErrorMessage = nil
         HapticFeedback.play(.success)
     }
 
@@ -457,32 +614,232 @@ final class CameraViewModel: ObservableObject {
         showToast("That photo could not be opened. Try a different image.", style: .error)
     }
 
-    func saveReview(photoLibrary: PhotoLibraryService) {
+    func applyReviewRecipe(_ recipe: FilmRecipe) {
+        guard reviewImage != nil,
+              let source = reviewRenderSource,
+              !isSaving,
+              !isPreparingReviewOriginal,
+              Self.validRecipeIDs.contains(recipe.id) else {
+            return
+        }
+
+        if recipe == fullResolutionReviewRecipe,
+           let cachedImage = fullResolutionReviewImage {
+            reviewWorkGeneration &+= 1
+            reviewWorkQueue.cancelPending()
+            reviewImage = cachedImage
+            reviewRecipe = recipe
+            reviewIsFullResolution = fullResolutionReviewIsFullResolution
+            reviewFlashFired = fullResolutionReviewFlashFired
+            isRenderingReview = false
+            pendingReviewRecipeID = nil
+            reviewRenderErrorMessage = nil
+            saveErrorMessage = nil
+            saveErrorRequiresSettings = false
+            return
+        }
+
+        if recipe == reviewRecipe {
+            if isRenderingReview {
+                reviewWorkGeneration &+= 1
+                reviewWorkQueue.cancelPending()
+                isRenderingReview = false
+                pendingReviewRecipeID = nil
+            }
+            reviewRenderErrorMessage = nil
+            return
+        }
+
+        reviewWorkGeneration &+= 1
+        let generation = reviewWorkGeneration
+        let renderer = reviewPreviewRenderer
+        isRenderingReview = true
+        pendingReviewRecipeID = recipe.id
+        reviewRenderErrorMessage = nil
+        saveErrorMessage = nil
+        saveErrorRequiresSettings = false
+
+        reviewWorkQueue.submit { [weak self] in
+            let rendered = renderer(source, recipe)
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      self.reviewWorkGeneration == generation,
+                      self.reviewRenderSource != nil else {
+                    return
+                }
+                self.isRenderingReview = false
+                self.pendingReviewRecipeID = nil
+                guard let rendered else {
+                    self.reviewRenderErrorMessage = "That look could not be rendered. Your previous review is still ready to save."
+                    return
+                }
+                self.reviewImage = rendered.image
+                self.reviewRecipe = recipe
+                self.reviewIsFullResolution = rendered.isFullResolution
+                self.reviewFlashFired = rendered.flashFired
+                if rendered.normalizedSubjectRegions != nil {
+                    self.reviewRenderSource = source.storing(
+                        normalizedSubjectRegions: rendered.normalizedSubjectRegions
+                    )
+                }
+            }
+        }
+    }
+
+    func prepareReviewOriginal() async {
+        guard reviewImage != nil,
+              reviewOriginalImage == nil,
+              let source = reviewRenderSource,
+              !isSaving,
+              !isRenderingReview,
+              !isPreparingReviewOriginal else {
+            return
+        }
+
+        reviewWorkGeneration &+= 1
+        let generation = reviewWorkGeneration
+        let renderer = reviewOriginalRenderer
+        isPreparingReviewOriginal = true
+        reviewRenderErrorMessage = nil
+
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            reviewWorkQueue.submit({ [weak self] in
+                    let image = renderer(source)
+                    DispatchQueue.main.async { [weak self] in
+                        defer { continuation.resume() }
+                        guard let self,
+                              self.reviewWorkGeneration == generation,
+                              self.reviewRenderSource != nil else {
+                            return
+                        }
+                        self.isPreparingReviewOriginal = false
+                        guard let image else {
+                            self.reviewRenderErrorMessage = "The original preview could not be prepared. Your filtered review is unchanged."
+                            return
+                        }
+                        self.reviewOriginalImage = image
+                    }
+                }, onCancel: { [weak self] in
+                    DispatchQueue.main.async { [weak self] in
+                        defer { continuation.resume() }
+                        guard let self,
+                              self.reviewWorkGeneration == generation else {
+                            return
+                        }
+                        self.isPreparingReviewOriginal = false
+                    }
+                })
+        }
+    }
+
+    func waitForReviewWorkToDrainForTesting() async {
+        await reviewWorkQueue.flush()
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+    }
+
+    func saveReview(photoLibrary: any PhotoSaving) {
         guard let reviewImage, let reviewRecipe else { return }
-        guard !isSaving else { return }
+        guard !isSaving, !isRenderingReview, !isPreparingReviewOriginal else { return }
 
         isSaving = true
         saveErrorMessage = nil
         saveErrorRequiresSettings = false
+        reviewRenderErrorMessage = nil
+        reviewWorkGeneration &+= 1
+        let generation = reviewWorkGeneration
+        let capturedAt = reviewCapturedAt ?? Date()
+
+        if fullResolutionReviewRecipe == reviewRecipe,
+           let reviewImageData {
+            performPhotoSave(
+                photoLibrary: photoLibrary,
+                image: reviewImage,
+                imageData: reviewImageData,
+                recipe: reviewRecipe,
+                capturedAt: capturedAt,
+                generation: generation
+            )
+            return
+        }
+
+        guard let source = reviewRenderSource else {
+            isSaving = false
+            reviewRenderErrorMessage = "The original frame is no longer available. Keep the current review and try again."
+            return
+        }
+
+        pendingPhotoSaver = photoLibrary
+        let renderer = reviewFullRenderer
+        reviewWorkQueue.submit { [weak self] in
+            let rendered = renderer(source, reviewRecipe)
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      self.reviewWorkGeneration == generation,
+                      self.isSaving,
+                      self.reviewRenderSource != nil else {
+                    return
+                }
+                guard let rendered else {
+                    self.pendingPhotoSaver = nil
+                    self.isSaving = false
+                    self.reviewRenderErrorMessage = "The selected look could not be prepared at full resolution. Your review is unchanged; try again."
+                    return
+                }
+                self.reviewImage = rendered.image
+                self.reviewImageData = rendered.data
+                self.reviewCapturedAt = rendered.capturedAt
+                self.reviewRecipe = reviewRecipe
+                self.reviewIsFullResolution = rendered.isFullResolution
+                self.reviewFlashFired = rendered.flashFired
+                self.fullResolutionReviewRecipe = reviewRecipe
+                self.fullResolutionReviewImage = rendered.image
+                self.fullResolutionReviewIsFullResolution = rendered.isFullResolution
+                self.fullResolutionReviewFlashFired = rendered.flashFired
+                if rendered.normalizedSubjectRegions != nil {
+                    self.reviewRenderSource = source.storing(
+                        normalizedSubjectRegions: rendered.normalizedSubjectRegions
+                    )
+                }
+                guard let saver = self.pendingPhotoSaver else {
+                    self.isSaving = false
+                    return
+                }
+                self.pendingPhotoSaver = nil
+                self.performPhotoSave(
+                    photoLibrary: saver,
+                    image: rendered.image,
+                    imageData: rendered.data,
+                    recipe: reviewRecipe,
+                    capturedAt: rendered.capturedAt,
+                    generation: generation
+                )
+            }
+        }
+    }
+
+    private func performPhotoSave(
+        photoLibrary: any PhotoSaving,
+        image: UIImage,
+        imageData: Data,
+        recipe: FilmRecipe,
+        capturedAt: Date,
+        generation: UInt64
+    ) {
         photoLibrary.save(
-            image: reviewImage,
-            imageData: reviewImageData,
-            recipe: reviewRecipe,
-            capturedAt: reviewCapturedAt ?? Date()
+            image: image,
+            imageData: imageData,
+            recipe: recipe,
+            capturedAt: capturedAt
         ) { [weak self] result in
-            guard let self else { return }
+            guard let self, self.reviewWorkGeneration == generation else { return }
             self.isSaving = false
             switch result {
             case .success:
-                self.lastCaptureDate = self.reviewCapturedAt ?? Date()
-                self.reviewImage = nil
-                self.reviewImageData = nil
-                self.reviewCapturedAt = nil
-                self.reviewRecipe = nil
-                self.reviewSource = .camera
-                self.reviewIsFullResolution = true
-                self.saveErrorRequiresSettings = false
-                self.showToast("Saved with \(reviewRecipe.name)")
+                self.lastCaptureDate = capturedAt
+                self.clearReviewState()
+                self.showToast("Saved with \(recipe.name)")
             case .failure(let error):
                 self.saveErrorMessage = error.localizedDescription
                 self.saveErrorRequiresSettings = error == .accessDenied
@@ -493,12 +850,30 @@ final class CameraViewModel: ObservableObject {
 
     func discardReview() {
         guard !isSaving else { return }
+        clearReviewState()
+    }
+
+    private func clearReviewState() {
+        reviewWorkGeneration &+= 1
+        reviewWorkQueue.cancelPending()
         reviewImage = nil
         reviewImageData = nil
         reviewCapturedAt = nil
         reviewRecipe = nil
         reviewSource = .camera
         reviewIsFullResolution = true
+        reviewFlashFired = false
+        reviewRenderSource = nil
+        fullResolutionReviewRecipe = nil
+        fullResolutionReviewImage = nil
+        fullResolutionReviewIsFullResolution = true
+        fullResolutionReviewFlashFired = false
+        reviewOriginalImage = nil
+        isRenderingReview = false
+        isPreparingReviewOriginal = false
+        pendingReviewRecipeID = nil
+        reviewRenderErrorMessage = nil
+        pendingPhotoSaver = nil
         saveErrorMessage = nil
         saveErrorRequiresSettings = false
     }
@@ -533,7 +908,8 @@ final class CameraViewModel: ObservableObject {
         previewDrawableSize: CGSize,
         capturedAt: Date,
         flashFired: Bool,
-        grainSeed: UInt32
+        grainSeed: UInt32,
+        normalizedSubjectRegions: [CGRect]? = nil
     ) -> RenderedPhoto? {
         // Resolve the source image's EXIF orientation before applying the
         // preview crop. The finished JPEG is written with orientation=1, so
@@ -574,13 +950,22 @@ final class CameraViewModel: ObservableObject {
         )
 
         let renderContext: FilmRenderer.CaptureContext
+        let resolvedSubjectRegions: [CGRect]?
         if recipe.filmBase == .compactDigital {
+            let subjectRegions = normalizedSubjectRegions.map {
+                denormalizedSubjectRegions($0, in: framedInput.extent)
+            } ?? FilmRenderer.portraitSubjectRegions(in: framedInput)
             renderContext = FilmRenderer.CaptureContext(
                 flashFired: flashFired,
-                subjectRegions: FilmRenderer.portraitSubjectRegions(in: framedInput)
+                subjectRegions: subjectRegions
+            )
+            resolvedSubjectRegions = Self.normalizedSubjectRegions(
+                subjectRegions,
+                in: framedInput.extent
             )
         } else {
             renderContext = .standard
+            resolvedSubjectRegions = normalizedSubjectRegions
         }
 
         let filtered = FilmRenderer.render(
@@ -607,7 +992,8 @@ final class CameraViewModel: ObservableObject {
             image: reviewImage,
             data: data,
             capturedAt: capturedAt,
-            flashFired: flashFired
+            flashFired: flashFired,
+            normalizedSubjectRegions: resolvedSubjectRegions
         )
     }
 
@@ -641,7 +1027,8 @@ final class CameraViewModel: ObservableObject {
     private nonisolated static func renderImported(
         sourceData: Data,
         recipe: FilmRecipe,
-        importedAt: Date
+        importedAt: Date,
+        normalizedSubjectRegions: [CGRect]? = nil
     ) -> RenderedPhoto? {
         guard !Task.isCancelled, let input = CIImage(
             data: sourceData,
@@ -663,12 +1050,21 @@ final class CameraViewModel: ObservableObject {
         let isFullResolution = framedInput.extent.size == unboundedInput.extent.size
         guard !Task.isCancelled else { return nil }
         let renderContext: FilmRenderer.CaptureContext
+        let resolvedSubjectRegions: [CGRect]?
         if recipe.filmBase == .compactDigital {
+            let subjectRegions = normalizedSubjectRegions.map {
+                denormalizedSubjectRegions($0, in: framedInput.extent)
+            } ?? FilmRenderer.portraitSubjectRegions(in: framedInput)
             renderContext = FilmRenderer.CaptureContext(
-                subjectRegions: FilmRenderer.portraitSubjectRegions(in: framedInput)
+                subjectRegions: subjectRegions
+            )
+            resolvedSubjectRegions = Self.normalizedSubjectRegions(
+                subjectRegions,
+                in: framedInput.extent
             )
         } else {
             renderContext = .standard
+            resolvedSubjectRegions = normalizedSubjectRegions
         }
         guard !Task.isCancelled else { return nil }
         let filtered = FilmRenderer.render(
@@ -694,8 +1090,221 @@ final class CameraViewModel: ObservableObject {
             image: downsampledReviewImage(from: data) ?? UIImage(cgImage: output),
             data: data,
             capturedAt: importedAt,
-            isFullResolution: isFullResolution
+            isFullResolution: isFullResolution,
+            normalizedSubjectRegions: resolvedSubjectRegions
         )
+    }
+
+    nonisolated static func renderReviewFull(
+        source: ReviewRenderSource,
+        recipe: FilmRecipe
+    ) -> RenderedPhoto? {
+        switch source.mode {
+        case .camera(let viewportSize, let previewDrawableSize, let flashFired, let grainSeed):
+            return render(
+                sourceData: source.data,
+                recipe: recipe,
+                viewportSize: viewportSize,
+                previewDrawableSize: previewDrawableSize,
+                capturedAt: source.capturedAt,
+                flashFired: flashFired,
+                grainSeed: grainSeed,
+                normalizedSubjectRegions: source.normalizedSubjectRegions
+            )
+        case .photoLibrary:
+            return renderImported(
+                sourceData: source.data,
+                recipe: recipe,
+                importedAt: source.capturedAt,
+                normalizedSubjectRegions: source.normalizedSubjectRegions
+            )
+        }
+    }
+
+    nonisolated static func renderReviewPreview(
+        source: ReviewRenderSource,
+        recipe: FilmRecipe
+    ) -> ReviewPreview? {
+        guard let prepared = preparedReviewInput(source: source) else { return nil }
+        let previewInput = boundedReviewPreviewInput(prepared.image)
+        let flashFired: Bool
+        let renderQuality: FilmRenderer.Quality
+        let grainSeed: UInt32
+        let grainPhase: CGPoint
+        switch source.mode {
+        case .camera(_, let previewDrawableSize, let didFireFlash, let seed):
+            flashFired = didFireFlash
+            renderQuality = .photo
+            grainSeed = seed
+            grainPhase = scaledGrainPhase(
+                seed,
+                grainSize: recipe.grainSize,
+                previewSize: previewDrawableSize,
+                stillSize: previewInput.extent.size
+            )
+        case .photoLibrary:
+            flashFired = false
+            renderQuality = .export
+            grainSeed = 0
+            grainPhase = .zero
+        }
+        let context: FilmRenderer.CaptureContext
+        let resolvedSubjectRegions: [CGRect]?
+        if recipe.filmBase == .compactDigital {
+            let subjectRegions = source.normalizedSubjectRegions.map {
+                denormalizedSubjectRegions($0, in: previewInput.extent)
+            } ?? FilmRenderer.portraitSubjectRegions(in: previewInput)
+            context = FilmRenderer.CaptureContext(
+                flashFired: flashFired,
+                subjectRegions: subjectRegions
+            )
+            resolvedSubjectRegions = Self.normalizedSubjectRegions(
+                subjectRegions,
+                in: previewInput.extent
+            )
+        } else {
+            context = .standard
+            resolvedSubjectRegions = source.normalizedSubjectRegions
+        }
+        let filtered = FilmRenderer.render(
+            previewInput,
+            recipe: recipe,
+            quality: renderQuality,
+            captureContext: context,
+            grainSeed: grainSeed,
+            grainPhase: grainPhase
+        )
+        guard let output = FilmRenderer.outputCGImage(filtered, from: filtered.extent) else {
+            return nil
+        }
+        return ReviewPreview(
+            image: UIImage(cgImage: output),
+            isFullResolution: prepared.isFullResolution,
+            flashFired: flashFired,
+            normalizedSubjectRegions: resolvedSubjectRegions
+        )
+    }
+
+    private nonisolated static func normalizedSubjectRegions(
+        _ regions: [CGRect],
+        in extent: CGRect
+    ) -> [CGRect] {
+        guard extent.width > 0, extent.height > 0 else { return [] }
+        return regions.compactMap { region in
+            let clipped = region.intersection(extent)
+            guard !clipped.isNull, !clipped.isEmpty else { return nil }
+            return CGRect(
+                x: (clipped.minX - extent.minX) / extent.width,
+                y: (clipped.minY - extent.minY) / extent.height,
+                width: clipped.width / extent.width,
+                height: clipped.height / extent.height
+            )
+        }
+    }
+
+    private nonisolated static func denormalizedSubjectRegions(
+        _ regions: [CGRect],
+        in extent: CGRect
+    ) -> [CGRect] {
+        guard extent.width > 0, extent.height > 0 else { return [] }
+        return regions.map { region in
+            CGRect(
+                x: extent.minX + region.minX * extent.width,
+                y: extent.minY + region.minY * extent.height,
+                width: region.width * extent.width,
+                height: region.height * extent.height
+            )
+        }
+    }
+
+    nonisolated static func renderReviewOriginal(
+        source: ReviewRenderSource
+    ) -> UIImage? {
+        guard let prepared = preparedReviewInput(source: source) else { return nil }
+        let previewInput = boundedReviewPreviewInput(prepared.image)
+        guard let output = FilmRenderer.outputCGImage(previewInput, from: previewInput.extent) else {
+            return nil
+        }
+        return UIImage(cgImage: output)
+    }
+
+    private nonisolated static func preparedReviewInput(
+        source: ReviewRenderSource
+    ) -> (image: CIImage, isFullResolution: Bool)? {
+        guard let imageSource = CGImageSourceCreateWithData(source.data as CFData, nil) else {
+            return nil
+        }
+        let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil)
+            as? [String: Any]
+        let sourceWidth = (properties?[kCGImagePropertyPixelWidth as String] as? NSNumber)?.doubleValue
+        let sourceHeight = (properties?[kCGImagePropertyPixelHeight as String] as? NSNumber)?.doubleValue
+        let thumbnailOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: 1_800,
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(
+            imageSource,
+            0,
+            thumbnailOptions as CFDictionary
+        ) else { return nil }
+        let input = CIImage(cgImage: thumbnail)
+        let extent = input.extent
+        guard !extent.isEmpty, extent.width.isFinite, extent.height.isFinite else {
+            return nil
+        }
+
+        switch source.mode {
+        case .camera(let viewportSize, _, _, _):
+            if viewportSize.width > 0, viewportSize.height > 0 {
+                let crop = CameraFrameLayout.aspectFillCrop(
+                    sourceExtent: extent,
+                    targetSize: viewportSize
+                )
+                return (
+                    input.cropped(to: crop).transformed(by: CGAffineTransform(
+                        translationX: -crop.minX,
+                        y: -crop.minY
+                    )),
+                    true
+                )
+            }
+            return (
+                input.transformed(by: CGAffineTransform(
+                    translationX: -extent.minX,
+                    y: -extent.minY
+                )),
+                true
+            )
+        case .photoLibrary:
+            let sourceArea = (sourceWidth ?? Double(thumbnail.width))
+                * (sourceHeight ?? Double(thumbnail.height))
+            return (
+                input,
+                sourceArea.isFinite && sourceArea <= Double(importPixelBudget)
+            )
+        }
+    }
+
+    private nonisolated static func boundedReviewPreviewInput(_ image: CIImage) -> CIImage {
+        let extent = image.extent
+        let maximumDimension = max(extent.width, extent.height)
+        guard maximumDimension.isFinite, maximumDimension > 1_800,
+              let lanczos = CIFilter(name: "CILanczosScaleTransform") else {
+            return image
+        }
+        let scale = 1_800 / maximumDimension
+        lanczos.setValue(image, forKey: kCIInputImageKey)
+        lanczos.setValue(scale, forKey: kCIInputScaleKey)
+        lanczos.setValue(1.0, forKey: kCIInputAspectRatioKey)
+        let boundedExtent = CGRect(
+            x: 0,
+            y: 0,
+            width: max((extent.width * scale).rounded(.down), 1),
+            height: max((extent.height * scale).rounded(.down), 1)
+        )
+        return lanczos.outputImage?.cropped(to: boundedExtent) ?? image
     }
 
     /// FilmRenderer interprets grain phase in output pixels after scaling the

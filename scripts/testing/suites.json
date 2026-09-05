@@ -1,0 +1,36 @@
+{
+  "classes": {
+    "FilmyCameraTests/CameraServiceAvailabilityTests": "unit",
+    "FilmyCameraTests/CameraViewModelPersistenceTests": "unit",
+    "FilmyCameraTests/RecipeDetailCommitPolicyTests": "unit",
+    "FilmyCameraTests/RecipeInvariantsTests": "unit",
+    "FilmyCameraTests/RecipeReferenceCatalogTests": "unit",
+    "FilmyCameraTests/CameraViewModelRenderingTests": "integration",
+    "FilmyCameraTests/CameraReviewSaveTests": "integration",
+    "FilmyCameraTests/CameraReviewEditingTests": "integration",
+    "FilmyCameraTests/ColorSpaceBoundaryTests": "integration",
+    "FilmyCameraTests/PhotoLibraryMetadataTests": "integration",
+    "FilmyCameraTests/PhotoOutputEncoderTests": "integration",
+    "FilmyCameraTests/RendererOutputBoundsTests": "integration",
+    "FilmyCameraTests/FlashHardwareDeviceTests": "device",
+    "FilmyCameraTests/CameraLensAcceptanceTests": "lens",
+    "FilmyCameraTests/RendererPerformanceTests": "performance",
+    "FilmyCameraTests/RecipeRenderGalleryTests": "fixtures",
+    "FilmyCameraUITests/FilmyCameraUITests": "e2e",
+    "FilmyCameraUITests/NormalPhotoFlowTests": "photos-e2e",
+    "FilmyCameraUITests/StoreScreenshotTests": "store-media"
+  },
+  "overrides": {
+    "FilmyCameraUITests/FilmyCameraUITests/testSimulatorFallbackExposesReadableStateWithoutPreviewAction": "simulator-e2e",
+    "FilmyCameraUITests/FilmyCameraUITests/testViewfinderFirstChromePreviewKeepsCameraQuiet": "simulator-e2e",
+    "FilmyCameraTests/PhotoLibraryMetadataTests/testPhysicalAddOnlySaveCallbackHasReadablePersistentCache": "add-only",
+    "FilmyCameraUITests/FilmyCameraUITests/testPhysicalImportAppliesCurrentRecipeAndSaves": "device",
+    "FilmyCameraUITests/FilmyCameraUITests/testPhysicalCaptureKeepsFrameToPhotos": "device",
+    "FilmyCameraUITests/FilmyCameraUITests/testPhysicalAddOnlySaveAndRelaunchShowsLocalRoll": "add-only",
+    "FilmyCameraUITests/FilmyCameraUITests/testPhysicalRecipeCaptureSheet": "capture-sheet",
+    "FilmyCameraUITests/FilmyCameraUITests/testPhysicalG7XFlashCaptureReachesReview": "device",
+    "FilmyCameraUITests/FilmyCameraUITests/testPhysicalG7XSaveRollDetailAndShareAcceptance": "device",
+    "FilmyCameraUITests/FilmyCameraUITests/testPhysicalRetakeReturnsToALiveViewfinderInstantly": "device",
+    "FilmyCameraUITests/FilmyCameraUITests/testPhysicalLaunchPerformance": "performance"
+  }
+}

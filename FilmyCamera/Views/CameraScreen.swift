@@ -191,9 +191,17 @@ struct CameraScreen: View {
                     isSaving: viewModel.isSaving,
                     saveErrorMessage: viewModel.saveErrorMessage,
                     saveErrorRequiresSettings: viewModel.saveErrorRequiresSettings,
+                    availableRecipes: viewModel.recipes,
+                    pendingReviewRecipeID: viewModel.pendingReviewRecipeID,
+                    isRenderingReview: viewModel.isRenderingReview,
+                    reviewRenderErrorMessage: viewModel.reviewRenderErrorMessage,
+                    reviewOriginalImage: viewModel.reviewOriginalImage,
+                    isPreparingReviewOriginal: viewModel.isPreparingReviewOriginal,
                     onSave: { viewModel.saveReview(photoLibrary: photoLibrary) },
                     onRetake: viewModel.discardReview,
-                    onOpenSettings: openSystemSettings
+                    onOpenSettings: openSystemSettings,
+                    onApplyReviewRecipe: viewModel.applyReviewRecipe,
+                    onPrepareReviewOriginal: viewModel.prepareReviewOriginal
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .zIndex(1)
@@ -435,7 +443,11 @@ struct CameraScreen: View {
             FilteredCameraPreview(camera: camera, recipe: viewModel.selectedRecipe)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
-                .accessibilityElement(children: .ignore)
+                .accessibilityElement(
+                    children: FilteredCameraPreview.exposesRenderStatusForUITesting
+                        ? .contain
+                        : .ignore
+                )
                 .accessibilityLabel("Live camera preview")
                 .accessibilityValue(camera.isRunning ? "Showing the \(viewModel.selectedRecipe.name) look" : camera.statusMessage)
                 .accessibilityHint("Tap the preview to focus at that point. VoiceOver users can use the Focus and expose at center action.")
