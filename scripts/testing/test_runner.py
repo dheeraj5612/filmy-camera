@@ -83,6 +83,17 @@ class SuiteRoutingTests(unittest.TestCase):
         self.assertEqual(env, {"PATH": "/test/bin"})
         self.assertEqual(run.test_environment("photos-e2e", {}),
                          {"TEST_RUNNER_FILMY_RUN_SEEDED_PHOTOS_E2E": "1"})
+        self.assertEqual(
+            run.test_environment("store-media", {
+                "FILMY_STORE_PRIOR_SAVES": "4",
+                "TEST_RUNNER_FILMY_STORE_PRIOR_SAVES": "7",
+                "FILMY_RUN_STORE_MEDIA": "1",
+            }),
+            {
+                "TEST_RUNNER_FILMY_RUN_STORE_MEDIA": "1",
+                "TEST_RUNNER_FILMY_STORE_PRIOR_SAVES": "0",
+            },
+        )
 
     def test_device_writes_fail_before_any_process_without_opt_in(self):
         with patch.object(run.subprocess, "Popen") as process:
@@ -120,6 +131,27 @@ class SuiteRoutingTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 run.create_photos_simulator("platform=iOS Simulator,id=reference")
             destroy.assert_called_once_with("owned")
+
+    def test_photos_and_store_media_destroy_their_owned_simulator_on_exit(self):
+        for phase in ("photos-e2e", "store-media"):
+            with self.subTest(phase=phase), \
+                    patch.object(run, "create_photos_simulator", return_value="owned") as create, \
+                    patch.object(run, "destroy_simulator") as destroy:
+                with self.assertRaisesRegex(RuntimeError, "test stopped"):
+                    with run.isolated_photos_destination(
+                        phase, "platform=iOS Simulator,id=reference"
+                    ) as destination:
+                        self.assertEqual(destination, "platform=iOS Simulator,id=owned")
+                        raise RuntimeError("test stopped")
+                create.assert_called_once_with("platform=iOS Simulator,id=reference")
+                destroy.assert_called_once_with("owned")
+
+        with patch.object(run, "create_photos_simulator") as create:
+            with run.isolated_photos_destination(
+                "e2e", "platform=iOS Simulator,id=reference"
+            ) as destination:
+                self.assertEqual(destination, "platform=iOS Simulator,id=reference")
+            create.assert_not_called()
 
 
 class EvidenceTests(unittest.TestCase):

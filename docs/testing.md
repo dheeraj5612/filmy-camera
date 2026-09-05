@@ -80,7 +80,7 @@ python3 scripts/testing/run.py device \
 | `add-only` | Configure **Add Photos Only** in Settings first; requires `--allow-photos-writes`. Checks readable local Roll/cache after save and relaunch. |
 | `capture-sheet` | Physical device with a stable scene; attaches recipe captures without saving them to Photos. |
 | `fixtures` | Local render fixtures under `FilmyCameraTests/Fixtures`; regenerate the project after adding them. Private fixture files and results stay untracked. Empty fixture sets skip explicitly. |
-| `store-media` | Dedicated simulator seeded with `docs/app-store/screenshots/demo-source/cafe-original.png` using `xcrun simctl addmedia`; grants Photos access during the flow and attaches store-media screenshots to the result bundle. |
+| `store-media` | Pass any reference simulator UUID. The runner creates a fresh simulator with the same device type/runtime, seeds only `docs/app-store/screenshots/demo-source/cafe-original.png`, forces zero prior saves, and destroys its owned simulator afterward. The reference simulator is untouched. Screenshots are attached to the result bundle. |
 
 Optional lanes report prerequisites and skips explicitly. A passing supported subset with skips does not validate the skipped hardware behavior. Physical screenshot attachments may contain personal surroundings or photos; keep them local.
 

@@ -5,10 +5,11 @@ Current candidate: version 1.0.0, build 8, with the [camera UX redesign](design-
 ## Build 8 release gates
 
 - [x] Implement review look switching and Original comparison with bounded previews, deferred full export, exact retry, and independent shooting selection.
-- [x] Pass local 180 unit/integration tests and three normal Photos E2E flows. The test runner has 19 portable checks and selects 201 app tests for routine CI.
+- [x] Pass local 180 unit/integration tests and three normal Photos E2E flows on iPadOS 26.5 and iOS 18.5. The test runner has 20 portable checks and selects 201 app tests for routine CI.
 - [x] Install the signed 1.0.0 (8) app and pass all 23 applicable iPad tests. The strengthened physical capture/compare/look-switch/landscape/save case also passed separately.
 - [ ] Pass required CI on the final commit, archive the clean source, and validate signed archive/IPA parity.
-- [ ] Refresh store screenshots to show current review controls, upload build 8, verify processing, select the matching build/media, and validate the review draft.
+- [x] Refresh and inspect five iPhone and five iPad store screenshots from isolated public-fixture runs, showing current review controls and matching saved treatments.
+- [ ] Upload build 8 and the refreshed media, verify processing, select the matching build/media, and validate the review draft.
 - [ ] Complete the iPhone-specific, controlled image-quality, and submission gates below.
 
 ## Preserved build 7 release gates

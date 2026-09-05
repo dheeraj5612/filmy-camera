@@ -114,7 +114,20 @@ final class NormalPhotoFlowTests: XCTestCase {
 
         lookPicker.tap()
         let monochrome = app.buttons["review-look-acros-monochrome"]
-        XCTAssertTrue(monochrome.waitForExistence(timeout: 5), "Look selection must expose the monochrome treatment")
+        let lookMenu = app.collectionViews.containing(
+            .button,
+            identifier: "review-look-g7x-compact"
+        ).firstMatch
+        XCTAssertTrue(lookMenu.waitForExistence(timeout: 5), "Look selection must present its recipe menu")
+        for _ in 0..<3 {
+            if monochrome.exists, monochrome.isHittable { break }
+            lookMenu.swipeUp()
+        }
+        XCTAssertTrue(
+            monochrome.waitForExistence(timeout: 5) && monochrome.isHittable,
+            "Look selection must expose the exact monochrome treatment after scrolling its menu"
+        )
+        attachScreenshot(named: "review-look-menu-monochrome")
         monochrome.tap()
         XCTAssertTrue(
             waitUntil(timeout: 30) {

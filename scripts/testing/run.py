@@ -6,6 +6,7 @@ simulator; physical Photos writes require an explicit command-line opt-in.
 """
 import argparse
 from collections import Counter
+from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -39,8 +40,9 @@ ENVIRONMENT = {
     "lens": {"FILMY_RUN_LENS_ACCEPTANCE": "1"},
     "add-only": {"FILMY_RUN_PHOTOS_WRITE": "1", "FILMY_RUN_ADD_ONLY_CACHE_QA": "1"},
     "capture-sheet": {"FILMY_RUN_CAPTURE_SHEET": "1"},
-    "store-media": {"FILMY_RUN_STORE_MEDIA": "1"}
+    "store-media": {"FILMY_RUN_STORE_MEDIA": "1", "FILMY_STORE_PRIOR_SAVES": "0"}
 }
+FRESH_PHOTOS_SIMULATOR_PHASES = {"photos-e2e", "store-media"}
 
 
 def inventory(root=ROOT, manifest_path=MANIFEST):
@@ -118,7 +120,9 @@ def test_environment(phase, inherited=None):
     env = dict(os.environ if inherited is None else inherited)
     # A prior benchmark/Photos opt-in in the shell must not widen this lane.
     for key in list(env):
-        if key.startswith("FILMY_RUN_") or key.startswith("TEST_RUNNER_FILMY_RUN_"):
+        if (key.startswith("FILMY_RUN_")
+                or key.startswith("TEST_RUNNER_FILMY_RUN_")
+                or key in {"FILMY_STORE_PRIOR_SAVES", "TEST_RUNNER_FILMY_STORE_PRIOR_SAVES"}):
             del env[key]
     for key, value in ENVIRONMENT.get(phase, {}).items():
         env["TEST_RUNNER_" + key] = value
@@ -202,6 +206,18 @@ def destroy_simulator(owned):
     subprocess.run(["xcrun", "simctl", "delete", owned], check=True)
 
 
+@contextmanager
+def isolated_photos_destination(phase, destination):
+    if phase not in FRESH_PHOTOS_SIMULATOR_PHASES:
+        yield destination
+        return
+    owned = create_photos_simulator(destination)
+    try:
+        yield "platform=iOS Simulator,id=" + owned
+    finally:
+        destroy_simulator(owned)
+
+
 def summarize_result(result, exit_code):
     if not result.exists():
         return {"status": "failed", "reason": "XCTest did not produce a result bundle", "exitCode": exit_code}
@@ -274,13 +290,8 @@ def main(argv=None):
         result = output / f"FilmyCamera{name}.xcresult"
         if result.exists():
             raise ValueError(f"Refusing to overwrite evidence: {result}; choose another --output-dir")
-        owned_simulator = None
-        phase_destination = destination
         started = time.monotonic()
-        try:
-            if phase == "photos-e2e":
-                owned_simulator = create_photos_simulator(destination)
-                phase_destination = "platform=iOS Simulator,id=" + owned_simulator
+        with isolated_photos_destination(phase, destination) as phase_destination:
             command = xcode_command(phase_destination, args.derived_data, args.coverage)
             command += ["-resultBundlePath", str(result)]
             command += ["-only-testing:" + test for test in selectors]
@@ -299,9 +310,6 @@ def main(argv=None):
             print(json.dumps({key: summary.get(key) for key in ("lane", "status", "passed", "failed", "skipped")}), flush=True)
             if summary["status"] != "passed":
                 return code or 1
-        finally:
-            if owned_simulator:
-                destroy_simulator(owned_simulator)
     return 0
 
 
