@@ -19,6 +19,7 @@ Filmy Camera is a native iPhone and iPad camera built around the feeling of choo
 - Failed starts and runtime errors reconnect with backoff, and interruptions explain the cause (background, another app, multitasking, heat). The session supports iPad Split View and stays warm during review and quick tab switches to reduce restart work when returning to the viewfinder.
 - The film pipeline compiles off the main thread while the session configures, and photo cache maintenance runs after the first frame.
 - iPhone and iPad hardware controls for front/back switching and available-lens selection, with simulator-safe preview behavior.
+- Expandable Pro controls for coupled manual ISO and shutter, sensor white balance by Kelvin and tint, and manual focus on supported hardware. The panel reports applied device values, disables still flash during manual exposure, offers one Reset Auto action, and can switch from a virtual camera to an eligible physical lens when advanced controls require it.
 - The live preview renders into a bounded drawable (about 1.3 MP) with a 30 fps target while stills and exports retain their full processing resolution. Sustained frame pacing and thermals require separate device measurement; isolated renderer timing does not establish camera frame rate.
 - sRGB output normalization plus embedded recipe provenance metadata on saved JPEGs.
 - Simulator-safe empty state: the full interface runs without camera hardware and clearly asks for a physical iPhone or iPad for capture.
@@ -44,7 +45,7 @@ The app requires iOS 17 or later. Camera and Photos permissions are requested on
 
 ## Future monetization
 
-The product target is an exceptional film-simulation and G7X-inspired camera with advanced capture and editing tools in a premium monthly subscription, a free trial, and watermarked free exports. Price, trial duration, and the exact feature split remain open. See the [premium camera vision](docs/premium-camera-vision.md) for the staged feature and quality targets and the [monetization roadmap](docs/monetization-roadmap.md) for access and export behavior. These restrictions and future advanced tools are not enabled in build 8.
+The product target is an exceptional film-simulation and G7X-inspired camera with advanced capture and editing tools in a premium monthly subscription, a free trial, and watermarked free exports. Price, trial duration, and the exact feature split remain open. See the [premium camera vision](docs/premium-camera-vision.md) for the staged feature and quality targets and the [monetization roadmap](docs/monetization-roadmap.md) for access and export behavior. Subscription restrictions are not enabled in build 8, and roadmap work beyond the current product slice is not complete.
 
 ## Rendering note
 

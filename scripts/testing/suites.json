@@ -1,6 +1,8 @@
 {
   "classes": {
     "FilmyCameraTests/CameraServiceAvailabilityTests": "unit",
+    "FilmyCameraTests/CameraManualControlsTests": "unit",
+    "FilmyCameraTests/CameraManualHardwareTests": "device",
     "FilmyCameraTests/CameraViewModelPersistenceTests": "unit",
     "FilmyCameraTests/RecipeDetailCommitPolicyTests": "unit",
     "FilmyCameraTests/RecipeInvariantsTests": "unit",

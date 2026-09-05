@@ -355,6 +355,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     @Published public private(set) var selectedLensID: String?
     @Published public private(set) var exposureBias: Float = 0
     @Published public private(set) var isFocusExposureLocked = false
+    @Published public private(set) var manualControls: CameraManualControls = .unavailable
     @Published public private(set) var previewFrameSize: CGSize = .zero
     @Published public private(set) var previewViewportSize: CGSize = .zero
     /// The pixel size of the drawable the viewfinder actually renders into,
@@ -411,6 +412,36 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private var selectedLensOrigins: [CameraPosition: LensSelectionOrigin] = [:]
     private var selectedFlashMode: FlashMode = .off
     private var selectedExposureBias: Float = 0
+    private enum DesiredManualExposure: Equatable {
+        case auto
+        case manual(iso: Float, durationSeconds: Double)
+    }
+    private struct ManualWhiteBalanceValues {
+        let kelvin: Float
+        let tint: Float
+        let gains: AVCaptureDevice.WhiteBalanceGains
+        let gainsDeviceID: String
+    }
+    private enum DesiredManualWhiteBalance {
+        case auto
+        case manual(ManualWhiteBalanceValues)
+    }
+    private enum DesiredManualFocus: Equatable {
+        case auto
+        case manual(lensPosition: Float)
+    }
+    private var desiredManualExposure: DesiredManualExposure = .auto
+    private var desiredManualWhiteBalance: DesiredManualWhiteBalance = .auto
+    private var desiredManualFocus: DesiredManualFocus = .auto
+    private var manualDeviceGeneration: UInt64 = 0
+    private var manualExposureGeneration: UInt64 = 0
+    private var manualWhiteBalanceGeneration: UInt64 = 0
+    private var manualFocusGeneration: UInt64 = 0
+    private var isApplyingManualExposure = false
+    private var isApplyingManualWhiteBalance = false
+    private var isApplyingManualFocus = false
+    private var flashModeBeforeManualExposure: FlashMode?
+    private var pendingManualControlsPhotoCompletion: PhotoCompletion?
     private var flashAvailabilityState: FlashAvailability = .unsupported
     private var pendingPhotoFlashFallback = false
     private var sessionObservers: [NSObjectProtocol] = []
@@ -498,7 +529,9 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 session.stopRunning()
             }
             pendingCompletion = self.pendingPhotoCompletion
+                ?? self.pendingManualControlsPhotoCompletion
             self.pendingPhotoCompletion = nil
+            self.pendingManualControlsPhotoCompletion = nil
             self.pendingPhotoCapturedAt = nil
             self.pendingPhotoUniqueID = nil
             self.pendingPhotoFlashFallback = false
@@ -575,6 +608,12 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private func stopOnQueue() {
         wantsToRun = false
         recoveryAttempt = 0
+        manualExposureGeneration &+= 1
+        manualWhiteBalanceGeneration &+= 1
+        manualFocusGeneration &+= 1
+        isApplyingManualExposure = false
+        isApplyingManualWhiteBalance = false
+        isApplyingManualFocus = false
         let previousAvailability = sessionAvailability
         let nextAvailability = Self.availabilityAfterStopping(
             authorizationStatus: AVCaptureDevice.authorizationStatus(for: .video),
@@ -583,6 +622,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         )
         if let device = self.activeDevice() {
             self.restoreContinuousFocusExposureOnQueue(for: device)
+            self.publishManualControlsOnQueue(for: device)
         }
         if self.session.isRunning {
             self.session.stopRunning()
@@ -838,6 +878,10 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     public func cycleFlashMode() {
         sessionQueue.async { [weak self] in
             guard let self else { return }
+            guard !self.isManualExposureActiveOrRequested else {
+                self.publishStatus("Flash requires Auto exposure.")
+                return
+            }
             guard self.flashAvailabilityState == .available else {
                 if self.flashAvailabilityState == .temporarilyUnavailable {
                     self.publishStatus("Flash is temporarily unavailable.")
@@ -868,7 +912,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 try device.lockForConfiguration()
                 defer { device.unlockForConfiguration() }
 
-                if device.isFocusPointOfInterestSupported {
+                if self.desiredManualFocus == .auto,
+                   device.isFocusPointOfInterestSupported {
                     device.focusPointOfInterest = point
                     if device.isFocusModeSupported(.continuousAutoFocus) {
                         device.focusMode = .continuousAutoFocus
@@ -877,7 +922,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                     }
                 }
 
-                if device.isExposurePointOfInterestSupported {
+                if self.desiredManualExposure == .auto,
+                   device.isExposurePointOfInterestSupported {
                     device.exposurePointOfInterest = point
                     if device.isExposureModeSupported(.continuousAutoExposure) {
                         device.exposureMode = .continuousAutoExposure
@@ -906,38 +952,50 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 defer { device.unlockForConfiguration() }
 
                 if self.focusExposureLocked {
-                    if device.isFocusModeSupported(.continuousAutoFocus) {
+                    if self.desiredManualFocus == .auto,
+                       device.isFocusModeSupported(.continuousAutoFocus) {
                         device.focusMode = .continuousAutoFocus
-                    } else if device.isFocusModeSupported(.autoFocus) {
+                    } else if self.desiredManualFocus == .auto,
+                              device.isFocusModeSupported(.autoFocus) {
                         device.focusMode = .autoFocus
                     }
-                    if device.isExposureModeSupported(.continuousAutoExposure) {
+                    if self.desiredManualExposure == .auto,
+                       device.isExposureModeSupported(.continuousAutoExposure) {
                         device.exposureMode = .continuousAutoExposure
-                    } else if device.isExposureModeSupported(.autoExpose) {
+                    } else if self.desiredManualExposure == .auto,
+                              device.isExposureModeSupported(.autoExpose) {
                         device.exposureMode = .autoExpose
                     }
-                    self.applyExposureBiasOnQueue(to: device)
+                    if self.desiredManualExposure == .auto {
+                        self.applyExposureBiasOnQueue(to: device)
+                    }
                     self.focusExposureLocked = false
                     self.publishFocusExposureLocked(false)
                     self.publishStatus("Focus and exposure unlocked")
                     return
                 }
 
-                if device.isFocusPointOfInterestSupported {
+                if self.desiredManualFocus == .auto,
+                   device.isFocusPointOfInterestSupported {
                     device.focusPointOfInterest = point
                 }
-                if device.isExposurePointOfInterestSupported {
+                if self.desiredManualExposure == .auto,
+                   device.isExposurePointOfInterestSupported {
                     device.exposurePointOfInterest = point
                 }
 
-                let focusMode = Self.preferredFocusLockMode(
-                    supportsAutoFocus: device.isFocusModeSupported(.autoFocus),
-                    supportsLocked: device.isFocusModeSupported(.locked)
-                )
-                let exposureMode = Self.preferredExposureLockMode(
-                    supportsAutoExpose: device.isExposureModeSupported(.autoExpose),
-                    supportsLocked: device.isExposureModeSupported(.locked)
-                )
+                let focusMode = self.desiredManualFocus == .auto
+                    ? Self.preferredFocusLockMode(
+                        supportsAutoFocus: device.isFocusModeSupported(.autoFocus),
+                        supportsLocked: device.isFocusModeSupported(.locked)
+                    )
+                    : nil
+                let exposureMode = self.desiredManualExposure == .auto
+                    ? Self.preferredExposureLockMode(
+                        supportsAutoExpose: device.isExposureModeSupported(.autoExpose),
+                        supportsLocked: device.isExposureModeSupported(.locked)
+                    )
+                    : nil
                 guard focusMode != nil || exposureMode != nil else {
                     self.publishStatus("Focus lock is unavailable right now.")
                     return
@@ -981,6 +1039,10 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 self.publishStatus("Exposure control is available on a physical device.")
                 return
             }
+            guard !self.isManualExposureActiveOrRequested else {
+                self.publishStatus("Exposure compensation requires Auto exposure.")
+                return
+            }
 
             do {
                 try device.lockForConfiguration()
@@ -1003,6 +1065,490 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             } catch {
                 self.publishStatus("Exposure control is unavailable right now.")
             }
+        }
+    }
+
+    /// Locks sensor ISO and shutter duration as one exposure mode. Both values
+    /// are sanitized against the active format and the applied hardware
+    /// readback is published from AVFoundation's completion callback.
+    public func setManualExposure(iso: Float, durationSeconds: Double) {
+        sessionQueue.async { [weak self] in
+            self?.setManualExposureOnQueue(iso: iso, durationSeconds: durationSeconds)
+        }
+    }
+
+    public func setAutoExposure() {
+        sessionQueue.async { [weak self] in
+            self?.setAutoExposureOnQueue()
+        }
+    }
+
+    /// Enters manual exposure without a visible jump by freezing the sensor's
+    /// current metered ISO and shutter duration on the session queue.
+    public func lockCurrentExposure() {
+        sessionQueue.async { [weak self] in
+            guard let self, let device = self.activeDevice() else { return }
+            self.setManualExposureOnQueue(
+                iso: device.iso,
+                durationSeconds: CMTimeGetSeconds(device.exposureDuration)
+            )
+        }
+    }
+
+    public func setManualWhiteBalance(kelvin: Float, tint: Float) {
+        sessionQueue.async { [weak self] in
+            self?.setManualWhiteBalanceOnQueue(kelvin: kelvin, tint: tint)
+        }
+    }
+
+    public func setAutoWhiteBalance() {
+        sessionQueue.async { [weak self] in
+            self?.setAutoWhiteBalanceOnQueue()
+        }
+    }
+
+    /// Enters manual white balance at the sensor's current neutral point.
+    public func lockCurrentWhiteBalance() {
+        sessionQueue.async { [weak self] in
+            guard let self, let device = self.activeDevice() else { return }
+            let current = device.temperatureAndTintValues(
+                for: device.deviceWhiteBalanceGains
+            )
+            self.setManualWhiteBalanceOnQueue(
+                kelvin: current.temperature,
+                tint: current.tint,
+                preferredGains: device.deviceWhiteBalanceGains
+            )
+        }
+    }
+
+    public func setManualFocus(lensPosition: Float) {
+        sessionQueue.async { [weak self] in
+            self?.setManualFocusOnQueue(lensPosition: lensPosition)
+        }
+    }
+
+    public func setAutoFocus() {
+        sessionQueue.async { [weak self] in
+            self?.setAutoFocusOnQueue()
+        }
+    }
+
+    /// Enters manual focus at the current physical lens position.
+    public func lockCurrentFocus() {
+        sessionQueue.async { [weak self] in
+            guard let self, let device = self.activeDevice() else { return }
+            self.setManualFocusOnQueue(lensPosition: device.lensPosition)
+        }
+    }
+
+    /// Restores every sensor control to continuous automatic operation.
+    public func resetManualControlsToAuto() {
+        sessionQueue.async { [weak self] in
+            self?.resetManualControlsToAutoOnQueue()
+        }
+    }
+
+    /// Selects a standalone physical lens for manual sensor control. This is
+    /// distinct from the ordinary lens selector: on a virtual multi-camera,
+    /// choosing a constituent there intentionally keeps seamless zoom active.
+    public func setManualControlLens(id: String) {
+        sessionQueue.async { [weak self] in
+            self?.setManualControlLensOnQueue(id: id)
+        }
+    }
+
+    /// Refreshes the point-in-time sensor readback when the manual panel opens.
+    /// This is intentionally user-driven rather than per-frame polling.
+    public func refreshManualControls() {
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            if let device = self.activeDevice() {
+                self.publishManualControlsOnQueue(for: device)
+            } else {
+                self.publishManualControlsUnavailable()
+            }
+        }
+    }
+
+    private func setManualExposureOnQueue(iso: Float, durationSeconds: Double) {
+        guard let device = activeDevice() else {
+            publishStatus("Manual exposure is available on a physical camera.")
+            return
+        }
+        guard device.isExposureModeSupported(.custom),
+              let bounds = manualExposureBoundsOnQueue(for: device) else {
+            publishManualControlsOnQueue(for: device)
+            publishStatus(manualUnavailableStatus("exposure", for: device))
+            return
+        }
+
+        let currentDuration = CMTimeGetSeconds(device.exposureDuration)
+        let request = CameraManualControls.sanitizedExposureRequest(
+            iso: iso,
+            durationSeconds: durationSeconds,
+            currentISO: device.iso,
+            currentDurationSeconds: currentDuration,
+            isoRange: bounds.iso,
+            durationRange: bounds.duration
+        )
+        guard let maximumDuration = maximumManualExposureDurationOnQueue(for: device),
+              let duration = Self.clampedManualExposureDuration(
+                requestedSeconds: request.durationSeconds,
+                fallback: device.exposureDuration,
+                minimum: device.activeFormat.minExposureDuration,
+                maximum: maximumDuration
+              ) else {
+            publishStatus("That shutter speed is unavailable.")
+            return
+        }
+
+        do {
+            try device.lockForConfiguration()
+            configureFrameDurationForManualExposureOnQueue(
+                request.durationSeconds,
+                device: device
+            )
+            manualExposureGeneration &+= 1
+            let requestGeneration = manualExposureGeneration
+            let deviceGeneration = manualDeviceGeneration
+            let deviceID = device.uniqueID
+            desiredManualExposure = .manual(
+                iso: request.iso,
+                durationSeconds: request.durationSeconds
+            )
+            isApplyingManualExposure = true
+            if selectedFlashMode != .off {
+                flashModeBeforeManualExposure = selectedFlashMode
+                selectedFlashMode = .off
+                publishFlashMode(.off)
+                configureFlashSceneMonitoringOnQueue(
+                    supportedModes: supportedFlashModeRawValuesOnQueue()
+                )
+            }
+            if focusExposureLocked,
+               desiredManualFocus == .auto,
+               let focusMode = Self.preferredFocusUnlockMode(
+                   supportsContinuous: device.isFocusModeSupported(.continuousAutoFocus),
+                   supportsAuto: device.isFocusModeSupported(.autoFocus)
+               ) {
+                device.focusMode = focusMode
+            }
+            focusExposureLocked = false
+            publishFocusExposureLocked(false)
+            publishManualControlsOnQueue(for: device)
+            device.setExposureModeCustom(duration: duration, iso: request.iso) { [weak self] _ in
+                self?.sessionQueue.async { [weak self] in
+                    guard let self,
+                          self.manualDeviceGeneration == deviceGeneration,
+                          self.manualExposureGeneration == requestGeneration,
+                          self.activeDevice()?.uniqueID == deviceID else { return }
+                    self.isApplyingManualExposure = false
+                    let appliedDuration = CMTimeGetSeconds(device.exposureDuration)
+                    self.desiredManualExposure = .manual(
+                        iso: device.iso,
+                        durationSeconds: appliedDuration
+                    )
+                    self.publishManualControlsOnQueue(for: device)
+                    self.publishStatus("Manual exposure applied")
+                    self.captureDeferredPhotoWhenManualControlsSettleOnQueue()
+                }
+            }
+            device.unlockForConfiguration()
+        } catch {
+            publishStatus("Manual exposure is unavailable right now.")
+            failDeferredPhotoForManualControlsOnQueue()
+        }
+    }
+
+    private func setAutoExposureOnQueue() {
+        guard let device = activeDevice() else {
+            desiredManualExposure = .auto
+            publishManualControlsUnavailable()
+            return
+        }
+        do {
+            try device.lockForConfiguration()
+            guard let mode = Self.preferredExposureUnlockMode(
+                supportsContinuous: device.isExposureModeSupported(.continuousAutoExposure),
+                supportsAuto: device.isExposureModeSupported(.autoExpose)
+            ) else {
+                device.unlockForConfiguration()
+                publishStatus("Auto exposure is unavailable on this camera.")
+                return
+            }
+            manualExposureGeneration &+= 1
+            isApplyingManualExposure = false
+            desiredManualExposure = .auto
+            device.exposureMode = mode
+            applyExposureBiasOnQueue(to: device)
+            device.unlockForConfiguration()
+            configurePreviewFrameRate(for: device)
+            restoreFlashAfterManualExposureOnQueue()
+            publishManualControlsOnQueue(for: device)
+            publishStatus("Auto exposure enabled")
+            captureDeferredPhotoWhenManualControlsSettleOnQueue()
+        } catch {
+            publishStatus("Auto exposure is unavailable right now.")
+            failDeferredPhotoForManualControlsOnQueue()
+        }
+    }
+
+    private func setManualWhiteBalanceOnQueue(
+        kelvin: Float,
+        tint: Float,
+        preferredGains: AVCaptureDevice.WhiteBalanceGains? = nil
+    ) {
+        guard let device = activeDevice() else {
+            publishStatus("Manual white balance is available on a physical camera.")
+            return
+        }
+        guard Self.supportsManualWhiteBalance(device) else {
+            publishManualControlsOnQueue(for: device)
+            publishStatus(manualUnavailableStatus("white balance", for: device))
+            return
+        }
+
+        let current = device.temperatureAndTintValues(for: device.deviceWhiteBalanceGains)
+        let request: (kelvin: Float, tint: Float)
+        let converted: AVCaptureDevice.WhiteBalanceGains
+        if let preferredGains {
+            // `lockCurrentWhiteBalance` freezes the legal sensor gains exactly,
+            // even when their temperature/tint conversion sits beyond the
+            // normal editing range.
+            request = (current.temperature, current.tint)
+            converted = preferredGains
+        } else {
+            request = CameraManualControls.sanitizedWhiteBalanceRequest(
+                kelvin: kelvin,
+                tint: tint,
+                currentKelvin: current.temperature,
+                currentTint: current.tint
+            )
+            converted = device.deviceWhiteBalanceGains(
+                for: AVCaptureDevice.WhiteBalanceTemperatureAndTintValues(
+                    temperature: request.kelvin,
+                    tint: request.tint
+                )
+            )
+        }
+        let gains = Self.clampedWhiteBalanceGains(
+            converted,
+            maximumGain: device.maxWhiteBalanceGain
+        )
+
+        do {
+            try device.lockForConfiguration()
+            manualWhiteBalanceGeneration &+= 1
+            let requestGeneration = manualWhiteBalanceGeneration
+            let deviceGeneration = manualDeviceGeneration
+            let deviceID = device.uniqueID
+            desiredManualWhiteBalance = .manual(
+                ManualWhiteBalanceValues(
+                    kelvin: request.kelvin,
+                    tint: request.tint,
+                    gains: gains,
+                    gainsDeviceID: device.uniqueID
+                )
+            )
+            isApplyingManualWhiteBalance = true
+            publishManualControlsOnQueue(for: device)
+            device.setWhiteBalanceModeLocked(with: gains) { [weak self] _ in
+                self?.sessionQueue.async { [weak self] in
+                    guard let self,
+                          self.manualDeviceGeneration == deviceGeneration,
+                          self.manualWhiteBalanceGeneration == requestGeneration,
+                          self.activeDevice()?.uniqueID == deviceID else { return }
+                    self.isApplyingManualWhiteBalance = false
+                    let applied = device.temperatureAndTintValues(
+                        for: device.deviceWhiteBalanceGains
+                    )
+                    self.desiredManualWhiteBalance = .manual(
+                        ManualWhiteBalanceValues(
+                            kelvin: applied.temperature,
+                            tint: applied.tint,
+                            gains: device.deviceWhiteBalanceGains,
+                            gainsDeviceID: device.uniqueID
+                        )
+                    )
+                    self.publishManualControlsOnQueue(for: device)
+                    self.publishStatus("Manual white balance applied")
+                    self.captureDeferredPhotoWhenManualControlsSettleOnQueue()
+                }
+            }
+            device.unlockForConfiguration()
+        } catch {
+            publishStatus("Manual white balance is unavailable right now.")
+            failDeferredPhotoForManualControlsOnQueue()
+        }
+    }
+
+    private func setAutoWhiteBalanceOnQueue() {
+        guard let device = activeDevice() else {
+            desiredManualWhiteBalance = .auto
+            publishManualControlsUnavailable()
+            return
+        }
+        do {
+            try device.lockForConfiguration()
+            if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
+                manualWhiteBalanceGeneration &+= 1
+                isApplyingManualWhiteBalance = false
+                desiredManualWhiteBalance = .auto
+                device.whiteBalanceMode = .continuousAutoWhiteBalance
+            } else if device.isWhiteBalanceModeSupported(.autoWhiteBalance) {
+                manualWhiteBalanceGeneration &+= 1
+                isApplyingManualWhiteBalance = false
+                desiredManualWhiteBalance = .auto
+                device.whiteBalanceMode = .autoWhiteBalance
+            } else {
+                device.unlockForConfiguration()
+                publishStatus("Auto white balance is unavailable on this camera.")
+                return
+            }
+            device.unlockForConfiguration()
+            publishManualControlsOnQueue(for: device)
+            publishStatus("Auto white balance enabled")
+            captureDeferredPhotoWhenManualControlsSettleOnQueue()
+        } catch {
+            publishStatus("Auto white balance is unavailable right now.")
+            failDeferredPhotoForManualControlsOnQueue()
+        }
+    }
+
+    private func setManualFocusOnQueue(lensPosition: Float) {
+        guard let device = activeDevice() else {
+            publishStatus("Manual focus is available on a physical camera.")
+            return
+        }
+        guard Self.supportsManualFocus(device) else {
+            publishManualControlsOnQueue(for: device)
+            publishStatus(manualUnavailableStatus("focus", for: device))
+            return
+        }
+        let position = CameraManualControls.sanitizedLensPosition(
+            lensPosition,
+            current: device.lensPosition
+        )
+        do {
+            try device.lockForConfiguration()
+            manualFocusGeneration &+= 1
+            let requestGeneration = manualFocusGeneration
+            let deviceGeneration = manualDeviceGeneration
+            let deviceID = device.uniqueID
+            desiredManualFocus = .manual(lensPosition: position)
+            isApplyingManualFocus = true
+            if focusExposureLocked,
+               desiredManualExposure == .auto,
+               let exposureMode = Self.preferredExposureUnlockMode(
+                   supportsContinuous: device.isExposureModeSupported(.continuousAutoExposure),
+                   supportsAuto: device.isExposureModeSupported(.autoExpose)
+               ) {
+                device.exposureMode = exposureMode
+                applyExposureBiasOnQueue(to: device)
+            }
+            focusExposureLocked = false
+            publishFocusExposureLocked(false)
+            publishManualControlsOnQueue(for: device)
+            device.setFocusModeLocked(lensPosition: position) { [weak self] _ in
+                self?.sessionQueue.async { [weak self] in
+                    guard let self,
+                          self.manualDeviceGeneration == deviceGeneration,
+                          self.manualFocusGeneration == requestGeneration,
+                          self.activeDevice()?.uniqueID == deviceID else { return }
+                    self.isApplyingManualFocus = false
+                    self.desiredManualFocus = .manual(lensPosition: device.lensPosition)
+                    self.publishManualControlsOnQueue(for: device)
+                    self.publishStatus("Manual focus applied")
+                    self.captureDeferredPhotoWhenManualControlsSettleOnQueue()
+                }
+            }
+            device.unlockForConfiguration()
+        } catch {
+            publishStatus("Manual focus is unavailable right now.")
+            failDeferredPhotoForManualControlsOnQueue()
+        }
+    }
+
+    private func setAutoFocusOnQueue() {
+        guard let device = activeDevice() else {
+            desiredManualFocus = .auto
+            publishManualControlsUnavailable()
+            return
+        }
+        do {
+            try device.lockForConfiguration()
+            guard let mode = Self.preferredFocusUnlockMode(
+                supportsContinuous: device.isFocusModeSupported(.continuousAutoFocus),
+                supportsAuto: device.isFocusModeSupported(.autoFocus)
+            ) else {
+                device.unlockForConfiguration()
+                publishStatus("Auto focus is unavailable on this camera.")
+                return
+            }
+            manualFocusGeneration &+= 1
+            isApplyingManualFocus = false
+            desiredManualFocus = .auto
+            device.focusMode = mode
+            device.unlockForConfiguration()
+            publishManualControlsOnQueue(for: device)
+            publishStatus("Auto focus enabled")
+            captureDeferredPhotoWhenManualControlsSettleOnQueue()
+        } catch {
+            publishStatus("Auto focus is unavailable right now.")
+            failDeferredPhotoForManualControlsOnQueue()
+        }
+    }
+
+    private func resetManualControlsToAutoOnQueue() {
+        guard let device = activeDevice() else {
+            desiredManualExposure = .auto
+            desiredManualWhiteBalance = .auto
+            desiredManualFocus = .auto
+            flashModeBeforeManualExposure = nil
+            publishManualControlsUnavailable()
+            return
+        }
+        do {
+            try device.lockForConfiguration()
+            manualExposureGeneration &+= 1
+            manualWhiteBalanceGeneration &+= 1
+            manualFocusGeneration &+= 1
+            isApplyingManualExposure = false
+            isApplyingManualWhiteBalance = false
+            isApplyingManualFocus = false
+            desiredManualExposure = .auto
+            desiredManualWhiteBalance = .auto
+            desiredManualFocus = .auto
+            if let mode = Self.preferredExposureUnlockMode(
+                supportsContinuous: device.isExposureModeSupported(.continuousAutoExposure),
+                supportsAuto: device.isExposureModeSupported(.autoExpose)
+            ) {
+                device.exposureMode = mode
+                applyExposureBiasOnQueue(to: device)
+            }
+            if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
+                device.whiteBalanceMode = .continuousAutoWhiteBalance
+            } else if device.isWhiteBalanceModeSupported(.autoWhiteBalance) {
+                device.whiteBalanceMode = .autoWhiteBalance
+            }
+            if let mode = Self.preferredFocusUnlockMode(
+                supportsContinuous: device.isFocusModeSupported(.continuousAutoFocus),
+                supportsAuto: device.isFocusModeSupported(.autoFocus)
+            ) {
+                device.focusMode = mode
+            }
+            device.unlockForConfiguration()
+            configurePreviewFrameRate(for: device)
+            restoreFlashAfterManualExposureOnQueue()
+            focusExposureLocked = false
+            publishFocusExposureLocked(false)
+            publishManualControlsOnQueue(for: device)
+            publishStatus("Automatic camera controls restored")
+            captureDeferredPhotoWhenManualControlsSettleOnQueue()
+        } catch {
+            publishStatus("Automatic camera controls are unavailable right now.")
+            failDeferredPhotoForManualControlsOnQueue()
         }
     }
 
@@ -1051,13 +1597,15 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         do {
             try device.lockForConfiguration()
             defer { device.unlockForConfiguration() }
-            if let focusMode = Self.preferredFocusUnlockMode(
+            if desiredManualFocus == .auto,
+               let focusMode = Self.preferredFocusUnlockMode(
                 supportsContinuous: device.isFocusModeSupported(.continuousAutoFocus),
                 supportsAuto: device.isFocusModeSupported(.autoFocus)
             ) {
                 device.focusMode = focusMode
             }
-            if let exposureMode = Self.preferredExposureUnlockMode(
+            if desiredManualExposure == .auto,
+               let exposureMode = Self.preferredExposureUnlockMode(
                 supportsContinuous: device.isExposureModeSupported(.continuousAutoExposure),
                 supportsAuto: device.isExposureModeSupported(.autoExpose)
             ) {
@@ -1107,6 +1655,373 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         let upper = min(hardwareUpper, 2)
         guard lower <= upper else { return nil }
         return (lower, upper)
+    }
+
+    private var isApplyingManualControls: Bool {
+        isApplyingManualExposure || isApplyingManualWhiteBalance || isApplyingManualFocus
+    }
+
+    private var isManualExposureActiveOrRequested: Bool {
+        if desiredManualExposure != .auto { return true }
+        return activeDevice()?.exposureMode == .custom
+    }
+
+    private static func supportsManualWhiteBalance(_ device: AVCaptureDevice) -> Bool {
+        device.isLockingWhiteBalanceWithCustomDeviceGainsSupported
+            && device.isWhiteBalanceModeSupported(.locked)
+            && device.maxWhiteBalanceGain.isFinite
+            && device.maxWhiteBalanceGain >= 1
+    }
+
+    private static func supportsManualFocus(_ device: AVCaptureDevice) -> Bool {
+        device.isLockingFocusWithCustomLensPositionSupported
+            && device.isFocusModeSupported(.locked)
+    }
+
+    private func manualExposureBoundsOnQueue(
+        for device: AVCaptureDevice
+    ) -> (iso: ClosedRange<Float>, duration: ClosedRange<Double>)? {
+        let minimumISO = device.activeFormat.minISO
+        let maximumISO = device.activeFormat.maxISO
+        let minimumDuration = CMTimeGetSeconds(device.activeFormat.minExposureDuration)
+        let formatMaximumDuration = CMTimeGetSeconds(device.activeFormat.maxExposureDuration)
+        let maximumDuration = maximumManualExposureDurationOnQueue(for: device)
+            .map { CMTimeGetSeconds($0) } ?? formatMaximumDuration
+        guard minimumISO.isFinite,
+              maximumISO.isFinite,
+              minimumISO > 0,
+              maximumISO >= minimumISO,
+              minimumDuration.isFinite,
+              maximumDuration.isFinite,
+              minimumDuration > 0,
+              maximumDuration >= minimumDuration else {
+            return nil
+        }
+        return (
+            minimumISO...maximumISO,
+            minimumDuration...maximumDuration
+        )
+    }
+
+    private func maximumManualExposureDurationOnQueue(
+        for device: AVCaptureDevice
+    ) -> CMTime? {
+        let formatMaximum = device.activeFormat.maxExposureDuration
+        let frameMaximum = device.activeFormat.videoSupportedFrameRateRanges
+            .map(\.maxFrameDuration)
+            .filter {
+                let seconds = CMTimeGetSeconds($0)
+                return $0.isValid && seconds.isFinite && seconds > 0
+            }
+            .max(by: { CMTimeCompare($0, $1) < 0 })
+        guard formatMaximum.isValid,
+              CMTimeGetSeconds(formatMaximum).isFinite,
+              CMTimeGetSeconds(formatMaximum) > 0 else { return nil }
+        guard let frameMaximum else { return formatMaximum }
+        return CMTimeCompare(formatMaximum, frameMaximum) <= 0
+            ? formatMaximum
+            : frameMaximum
+    }
+
+    static func clampedManualExposureDuration(
+        requestedSeconds: Double,
+        fallback: CMTime,
+        minimum: CMTime,
+        maximum: CMTime
+    ) -> CMTime? {
+        let minimumSeconds = CMTimeGetSeconds(minimum)
+        let maximumSeconds = CMTimeGetSeconds(maximum)
+        guard minimum.isValid,
+              maximum.isValid,
+              minimumSeconds.isFinite,
+              maximumSeconds.isFinite,
+              minimumSeconds > 0,
+              maximumSeconds >= minimumSeconds else { return nil }
+
+        let fallbackSeconds = CMTimeGetSeconds(fallback)
+        let seconds = requestedSeconds.isFinite
+            ? requestedSeconds
+            : (fallback.isValid && fallbackSeconds.isFinite ? fallbackSeconds : minimumSeconds)
+        let candidate = CMTime(seconds: seconds, preferredTimescale: 1_000_000_000)
+        guard candidate.isValid else { return minimum }
+        if CMTimeCompare(candidate, minimum) < 0 { return minimum }
+        if CMTimeCompare(candidate, maximum) > 0 { return maximum }
+        return candidate
+    }
+
+    private func configureFrameDurationForManualExposureOnQueue(
+        _ exposureDurationSeconds: Double,
+        device: AVCaptureDevice
+    ) {
+        let exposureDuration = CMTime(
+            seconds: exposureDurationSeconds,
+            preferredTimescale: 1_000_000_000
+        )
+        let target = Self.manualFrameDuration(for: exposureDuration)
+        guard target.isValid,
+              target.value > 0,
+              device.activeFormat.videoSupportedFrameRateRanges.contains(where: {
+                  CMTimeCompare(target, $0.minFrameDuration) >= 0
+                      && CMTimeCompare(target, $0.maxFrameDuration) <= 0
+              }) else {
+            // AVFoundation automatically lengthens max frame duration when a
+            // requested exposure needs it. Leave uncommon frame-rate ranges
+            // to that supported behavior rather than assigning an invalid time.
+            return
+        }
+        device.activeVideoMinFrameDuration = target
+        device.activeVideoMaxFrameDuration = target
+    }
+
+    static func manualFrameDuration(for exposureDuration: CMTime) -> CMTime {
+        let thirtyFPS = CMTime(value: 1, timescale: 30)
+        let seconds = CMTimeGetSeconds(exposureDuration)
+        guard exposureDuration.isValid,
+              seconds.isFinite,
+              seconds > 0 else { return thirtyFPS }
+        return CMTimeMaximum(thirtyFPS, exposureDuration)
+    }
+
+    static func clampedWhiteBalanceGains(
+        _ gains: AVCaptureDevice.WhiteBalanceGains,
+        maximumGain: Float
+    ) -> AVCaptureDevice.WhiteBalanceGains {
+        let upper = maximumGain.isFinite ? max(maximumGain, 1) : 1
+        func clamp(_ value: Float) -> Float {
+            guard value.isFinite else { return 1 }
+            return min(max(value, 1), upper)
+        }
+        return AVCaptureDevice.WhiteBalanceGains(
+            redGain: clamp(gains.redGain),
+            greenGain: clamp(gains.greenGain),
+            blueGain: clamp(gains.blueGain)
+        )
+    }
+
+    private func manualUnavailableStatus(_ control: String, for device: AVCaptureDevice) -> String {
+        if device.isVirtualDevice,
+           makePhysicalManualLensOptionsOnQueue(for: device).contains(where: \.supportsAnyManualControl) {
+            return "Choose a physical lens to use manual \(control)."
+        }
+        return "Manual \(control) is unavailable on this camera."
+    }
+
+    private func makePhysicalManualLensOptionsOnQueue(
+        for activeDevice: AVCaptureDevice
+    ) -> [CameraManualControls.PhysicalLensOption] {
+        let position = cameraPosition(for: activeDevice)
+        let devices = discoveredCameraDevicesOnQueue(for: position).filter { !$0.isVirtualDevice }
+        let wideDevice = devices.first(where: { $0.deviceType == .builtInWideAngleCamera })
+        return devices.compactMap { device in
+            let exposure = device.isExposureModeSupported(.custom)
+                && manualExposureBoundsOnQueue(for: device) != nil
+            let whiteBalance = Self.supportsManualWhiteBalance(device)
+            let focus = Self.supportsManualFocus(device)
+            guard exposure || whiteBalance || focus else { return nil }
+            let magnification = Self.standaloneLensMagnification(
+                wideFieldOfView: wideDevice?.activeFormat.videoFieldOfView ?? 0,
+                lensFieldOfView: device.activeFormat.videoFieldOfView
+            ) ?? Self.standaloneFallbackZoomFactor(for: device)
+            return CameraManualControls.PhysicalLensOption(
+                id: device.uniqueID,
+                title: Self.lensTitle(for: device, zoomFactor: magnification),
+                detail: Self.lensDetail(for: device),
+                supportsManualExposure: exposure,
+                supportsManualWhiteBalance: whiteBalance,
+                supportsManualFocus: focus,
+                isActive: device.uniqueID == activeDevice.uniqueID
+            )
+        }
+    }
+
+    private func publishManualControlsOnQueue(for device: AVCaptureDevice) {
+        let bounds = manualExposureBoundsOnQueue(for: device)
+        let exposureSupported = device.isExposureModeSupported(.custom) && bounds != nil
+        let whiteBalanceSupported = Self.supportsManualWhiteBalance(device)
+        let focusSupported = Self.supportsManualFocus(device)
+        let temperatureAndTint = device.temperatureAndTintValues(
+            for: device.deviceWhiteBalanceGains
+        )
+        let physicalLenses = makePhysicalManualLensOptionsOnQueue(for: device)
+        let currentKelvin = temperatureAndTint.temperature.isFinite
+            ? temperatureAndTint.temperature
+            : 0
+        let currentTint = temperatureAndTint.tint.isFinite
+            ? temperatureAndTint.tint
+            : 0
+        let desiredWhiteBalanceIsManual: Bool
+        if case .manual = desiredManualWhiteBalance {
+            desiredWhiteBalanceIsManual = true
+        } else {
+            desiredWhiteBalanceIsManual = false
+        }
+        let desiredFocusIsManual: Bool
+        if case .manual = desiredManualFocus {
+            desiredFocusIsManual = true
+        } else {
+            desiredFocusIsManual = false
+        }
+        let exposureMode = CameraManualControls.resolvedMode(
+            requested: device.exposureMode == .custom ? .manual : .auto,
+            supported: exposureSupported
+        )
+        let whiteBalanceMode = CameraManualControls.resolvedMode(
+            requested: desiredWhiteBalanceIsManual && device.whiteBalanceMode == .locked
+                ? .manual
+                : .auto,
+            supported: whiteBalanceSupported
+        )
+        let focusMode = CameraManualControls.resolvedMode(
+            requested: desiredFocusIsManual && device.focusMode == .locked ? .manual : .auto,
+            supported: focusSupported
+        )
+        let snapshot = CameraManualControls(
+            activeDeviceID: device.uniqueID,
+            activeDeviceName: device.localizedName,
+            isVirtualDevice: device.isVirtualDevice,
+            exposureMode: exposureMode,
+            manualExposureSupported: exposureSupported,
+            iso: device.iso.isFinite ? device.iso : 0,
+            minimumISO: bounds?.iso.lowerBound ?? 0,
+            maximumISO: bounds?.iso.upperBound ?? 0,
+            exposureDurationSeconds: {
+                let value = CMTimeGetSeconds(device.exposureDuration)
+                return value.isFinite ? value : 0
+            }(),
+            minimumExposureDurationSeconds: bounds?.duration.lowerBound ?? 0,
+            maximumExposureDurationSeconds: bounds?.duration.upperBound ?? 0,
+            whiteBalanceMode: whiteBalanceMode,
+            manualWhiteBalanceSupported: whiteBalanceSupported,
+            kelvin: currentKelvin,
+            tint: currentTint,
+            minimumKelvin: min(
+                CameraManualControls.supportedKelvinRange.lowerBound,
+                currentKelvin
+            ),
+            maximumKelvin: max(
+                CameraManualControls.supportedKelvinRange.upperBound,
+                currentKelvin
+            ),
+            minimumTint: min(CameraManualControls.supportedTintRange.lowerBound, currentTint),
+            maximumTint: max(CameraManualControls.supportedTintRange.upperBound, currentTint),
+            focusMode: focusMode,
+            manualFocusSupported: focusSupported,
+            lensPosition: device.lensPosition.isFinite ? device.lensPosition : 0,
+            minimumLensPosition: 0,
+            maximumLensPosition: 1,
+            physicalLensOptions: physicalLenses,
+            requiresPhysicalLensSelection: device.isVirtualDevice
+                && (!exposureSupported || !whiteBalanceSupported || !focusSupported)
+                && physicalLenses.contains(where: \.supportsAnyManualControl),
+            isApplying: isApplyingManualControls,
+            flashRequiresAutoExposure: exposureMode == .manual || {
+                if case .manual = desiredManualExposure { return true }
+                return false
+            }()
+        )
+        publishOnMain { [weak self] in
+            guard let self, self.manualControls != snapshot else { return }
+            self.manualControls = snapshot
+        }
+    }
+
+    private func publishManualControlsUnavailable() {
+        publishOnMain { [weak self] in
+            guard let self, self.manualControls != .unavailable else { return }
+            self.manualControls = .unavailable
+        }
+    }
+
+    private func restoreFlashAfterManualExposureOnQueue() {
+        guard let previous = flashModeBeforeManualExposure else { return }
+        guard let device = activeDevice() else { return }
+        let supportedModes = supportedFlashModeRawValuesOnQueue()
+        let availability = Self.resolveFlashAvailability(
+            hasFlash: device.hasFlash,
+            supportedModeRawValues: supportedModes,
+            flashAvailable: device.isFlashAvailable
+        )
+        flashAvailabilityState = availability
+        publishFlashAvailability(availability)
+        // Restore the user's selection even if the flash is momentarily
+        // unavailable while Auto exposure settles. Availability remains a
+        // separate, truthful hardware signal and capture safely falls back to
+        // Off until the device can fire; the preference must not be lost.
+        guard availability != .unsupported,
+              supportedModes.contains(previous.rawValue) else { return }
+        flashModeBeforeManualExposure = nil
+        selectedFlashMode = previous
+        publishFlashMode(previous)
+        configureFlashSceneMonitoringOnQueue(supportedModes: supportedModes)
+    }
+
+    private func setManualControlLensOnQueue(id: String) {
+        guard let active = activeDevice() else {
+            publishStatus("Manual lens selection is available on a physical device.")
+            return
+        }
+        let position = cameraPosition(for: active)
+        guard let selected = discoveredCameraDevicesOnQueue(for: position).first(where: {
+            $0.uniqueID == id && !$0.isVirtualDevice
+        }),
+        makePhysicalManualLensOptionsOnQueue(for: active).contains(where: { $0.id == id }) else {
+            publishStatus("That physical lens does not support manual controls.")
+            return
+        }
+        if selected.uniqueID != active.uniqueID {
+            guard replaceCameraInputOnQueue(with: selected) else {
+                publishStatus("That physical lens is unavailable right now.")
+                return
+            }
+        }
+        selectedLensIDs[position] = selected.uniqueID
+        selectedLensOrigins[position] = .standalone
+        focusExposureLocked = false
+        publishFocusExposureLocked(false)
+        configureCaptureCapabilitiesOnQueue(for: selected)
+        refreshCameraInventoryOnQueue(for: selected)
+        configurePreviewFrameRate(for: selected)
+        publishStatus("\(Self.lensDetail(for: selected)) manual controls ready")
+    }
+
+    private func reapplyDesiredManualControlsOnQueue(for device: AVCaptureDevice) {
+        switch desiredManualExposure {
+        case .auto:
+            setAutoExposureOnQueue()
+        case let .manual(iso, durationSeconds):
+            setManualExposureOnQueue(iso: iso, durationSeconds: durationSeconds)
+        }
+        switch desiredManualWhiteBalance {
+        case .auto:
+            setAutoWhiteBalanceOnQueue()
+        case let .manual(values):
+            setManualWhiteBalanceOnQueue(
+                kelvin: values.kelvin,
+                tint: values.tint,
+                preferredGains: values.gainsDeviceID == device.uniqueID ? values.gains : nil
+            )
+        }
+        switch desiredManualFocus {
+        case .auto:
+            setAutoFocusOnQueue()
+        case let .manual(lensPosition):
+            setManualFocusOnQueue(lensPosition: lensPosition)
+        }
+        publishManualControlsOnQueue(for: device)
+        captureDeferredPhotoWhenManualControlsSettleOnQueue()
+    }
+
+    private func captureDeferredPhotoWhenManualControlsSettleOnQueue() {
+        guard !isApplyingManualControls,
+              let completion = pendingManualControlsPhotoCompletion else { return }
+        pendingManualControlsPhotoCompletion = nil
+        capturePhotoOnQueue(completion: completion)
+    }
+
+    private func failDeferredPhotoForManualControlsOnQueue() {
+        guard let completion = pendingManualControlsPhotoCompletion else { return }
+        pendingManualControlsPhotoCompletion = nil
+        publishPhoto(nil, completion: completion)
     }
 
     private func requestAuthorizationAndStartOnQueue() {
@@ -1208,6 +2123,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         if isConfigured, let device = activeDevice() {
             refreshCaptureCapabilitiesOnQueue(for: device)
             restoreContinuousFocusExposureOnQueue(for: device)
+            reapplyDesiredManualControlsOnQueue(for: device)
             configureOrientation()
             session.startRunning()
             publishStartOutcomeOnQueue(running: session.isRunning)
@@ -1252,6 +2168,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             return
         }
         session.addInput(input)
+        manualDeviceGeneration &+= 1
 
         guard session.canAddOutput(videoOutput) else {
             session.removeInput(input)
@@ -1350,6 +2267,10 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func tearDownSessionGraphOnQueue() {
+        manualDeviceGeneration &+= 1
+        isApplyingManualExposure = false
+        isApplyingManualWhiteBalance = false
+        isApplyingManualFocus = false
         session.beginConfiguration()
         for input in session.inputs {
             session.removeInput(input)
@@ -1837,7 +2758,12 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             return false
         }
 
+        cancelPendingPhotoOnQueue(status: "Capture canceled while changing lenses.")
         session.addInput(newInput)
+        manualDeviceGeneration &+= 1
+        isApplyingManualExposure = false
+        isApplyingManualWhiteBalance = false
+        isApplyingManualFocus = false
         configurePhotoDimensions(for: device)
         configureOrientation()
         session.commitConfiguration()
@@ -2118,7 +3044,17 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func configurePreviewFrameRate(for device: AVCaptureDevice) {
-        let targetDuration = CMTime(value: 1, timescale: 30)
+        let targetDuration: CMTime
+        if case let .manual(_, durationSeconds) = desiredManualExposure {
+            targetDuration = Self.manualFrameDuration(
+                for: CMTime(
+                    seconds: durationSeconds,
+                    preferredTimescale: 1_000_000_000
+                )
+            )
+        } else {
+            targetDuration = CMTime(value: 1, timescale: 30)
+        }
         let supportsTargetDuration = device.activeFormat.videoSupportedFrameRateRanges.contains {
             CMTimeCompare(targetDuration, $0.minFrameDuration) >= 0
                 && CMTimeCompare(targetDuration, $0.maxFrameDuration) <= 0
@@ -2172,6 +3108,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         refreshFlashCapabilitiesOnQueue(for: device, restoringRememberedSelection: true)
         configureLowLightBoostOnQueue(for: device)
         refreshExposureBiasOnQueue(for: device)
+        reapplyDesiredManualControlsOnQueue(for: device)
     }
 
     private func refreshCaptureCapabilitiesOnQueue(for device: AVCaptureDevice) {
@@ -2185,6 +3122,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         // taking another device configuration lock. A stopped-session reuse
         // restores the physical exposure once in restoreContinuousFocusExposure.
         refreshExposureBiasOnQueue(for: device, applyToDevice: false)
+        publishManualControlsOnQueue(for: device)
     }
 
     private func refreshExposureBiasOnQueue(
@@ -2277,6 +3215,13 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             return
         }
 
+        if isManualExposureActiveOrRequested {
+            selectedFlashMode = .off
+            publishFlashMode(.off)
+            configureFlashSceneMonitoringOnQueue(supportedModes: supportedModes)
+            return
+        }
+
         selectedFlashMode = Self.resolvedFlashSelection(
             current: selectedFlashMode,
             remembered: Self.rememberedFlashMode(),
@@ -2364,6 +3309,15 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func setFlashModeOnQueue(_ mode: FlashMode) {
+        if isManualExposureActiveOrRequested {
+            guard mode == .off else {
+                publishStatus("Flash requires Auto exposure.")
+                return
+            }
+            // An explicit Off choice replaces the pre-manual preference, so
+            // returning to Auto does not unexpectedly turn flash back on.
+            flashModeBeforeManualExposure = nil
+        }
         // The preference outlives the active camera: a choice made while the
         // front camera is up applies as soon as a flash-capable camera returns.
         Self.rememberFlashMode(mode)
@@ -2398,6 +3352,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         publishLowLightBoostState(supported: false, enabled: false)
         selectedExposureBias = 0
         publishExposureBias(0)
+        publishManualControlsUnavailable()
         photoOutput.photoSettingsForSceneMonitoring = nil
         currentLensOptions = []
         publishAvailableCameraPositions([])
@@ -2433,6 +3388,17 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             return
         }
 
+        if isApplyingManualControls {
+            guard pendingManualControlsPhotoCompletion == nil else {
+                publishStatus("Finishing the previous capture…")
+                publishPhoto(nil, completion: completion)
+                return
+            }
+            pendingManualControlsPhotoCompletion = completion
+            publishStatus("Applying camera controls…")
+            return
+        }
+
         guard let device = activeDevice() else {
             publishStatus("The camera is unavailable right now.")
             publishPhoto(nil, completion: completion)
@@ -2461,7 +3427,9 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         case .on:
             settings.flashMode = .on
         }
-        settings.photoQualityPrioritization = .quality
+        settings.photoQualityPrioritization = Self.photoQualityPrioritization(
+            manualExposureEnabled: device.exposureMode == .custom
+        )
         if configuredPhotoDimensions.width > 0, configuredPhotoDimensions.height > 0 {
             settings.maxPhotoDimensions = configuredPhotoDimensions
         }
@@ -2502,13 +3470,24 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func cancelPendingPhotoOnQueue(status: String) {
-        guard let completion = pendingPhotoCompletion else { return }
+        let completion = pendingPhotoCompletion ?? pendingManualControlsPhotoCompletion
+        guard let completion else { return }
         pendingPhotoCompletion = nil
+        pendingManualControlsPhotoCompletion = nil
         pendingPhotoCapturedAt = nil
         pendingPhotoUniqueID = nil
         pendingPhotoFlashFallback = false
         publishStatus(status)
         publishPhoto(nil, completion: completion)
+    }
+
+    static func photoQualityPrioritization(
+        manualExposureEnabled: Bool
+    ) -> AVCapturePhotoOutput.QualityPrioritization {
+        // AVCaptureDevice requires speed prioritization for a still to honor
+        // custom or locked sensor exposure instead of computationally choosing
+        // a different ISO/duration. Auto keeps the existing quality pipeline.
+        manualExposureEnabled ? .speed : .quality
     }
 
     private func publishRunning(_ running: Bool) {

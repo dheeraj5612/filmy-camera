@@ -51,6 +51,79 @@ final class FilmyCameraUITests: XCTestCase {
         }
     }
 
+    func testProControlsAdaptAndReturnToCamera() throws {
+        let pro = app.buttons["pro-controls-button"]
+        let showControls = app.buttons["Show camera controls"]
+        if showControls.waitForExistence(timeout: 2) { showControls.tap() }
+        let rail = app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier IN %@", ["camera-utility-rail", "g7x-capture-controls"]
+        )).firstMatch
+        XCTAssertTrue(rail.waitForExistence(timeout: 8))
+        for _ in 0..<4 where !pro.exists || !pro.isHittable { rail.swipeLeft() }
+        XCTAssertTrue(pro.waitForExistence(timeout: 5))
+        assertMinimumHitTarget(pro, named: "Pro controls")
+        pro.tap()
+        let done = app.buttons["manual-controls-done"]
+        XCTAssertTrue(done.waitForExistence(timeout: 8))
+        assertMinimumHitTarget(done, named: "Done with Pro controls")
+
+        #if targetEnvironment(simulator)
+        XCTAssertTrue(app.descendants(matching: .any)["manual-controls-unavailable"].exists)
+        XCTAssertFalse(app.sliders["manual-iso-slider"].exists,
+                       "Simulator must not pretend to expose real sensor control")
+        XCTAssertFalse(app.buttons["manual-controls-reset"].isEnabled)
+        #else
+        let exposure = app.buttons["manual-exposure-manual"]
+        if !exposure.isEnabled {
+            let lenses = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'manual-lens-'"))
+            for lens in lenses.allElementsBoundByIndex {
+                scrollToHittable(lens, in: app)
+                lens.tap()
+                if waitUntil(timeout: 3, condition: { exposure.exists && exposure.isEnabled }) { break }
+            }
+        }
+        XCTAssertTrue(exposure.isEnabled, "A supported physical lens must expose manual exposure")
+        scrollToHittable(exposure, in: app)
+        exposure.tap()
+        let iso = app.sliders["manual-iso-slider"]
+        XCTAssertTrue(iso.waitForExistence(timeout: 8))
+        scrollToHittable(iso, in: app)
+        XCTAssertTrue(waitUntil(timeout: 5, condition: { iso.isEnabled }))
+        iso.adjust(toNormalizedSliderPosition: 0.25)
+        XCTAssertTrue(waitUntil(timeout: 5, condition: { iso.isEnabled }))
+        let whiteBalance = app.buttons["manual-white-balance-manual"]
+        if whiteBalance.isEnabled {
+            scrollToHittable(whiteBalance, in: app)
+            whiteBalance.tap()
+            XCTAssertTrue(app.sliders["manual-kelvin-slider"].waitForExistence(timeout: 8))
+        }
+        #endif
+
+        attachScreenshot(named: "pro-controls-portrait")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertTrue(done.waitForExistence(timeout: 5))
+        XCTAssertTrue(done.isHittable, "Pro controls must remain dismissible in landscape")
+        attachScreenshot(named: "pro-controls-landscape")
+        #if !targetEnvironment(simulator)
+        let reset = app.buttons["manual-controls-reset"]
+        scrollToHittable(reset, in: app)
+        XCTAssertTrue(waitUntil(timeout: 5, condition: { reset.isEnabled }))
+        reset.tap()
+        XCTAssertTrue(waitUntil(timeout: 8, condition: {
+            app.buttons["manual-exposure-auto"].value as? String == "Selected"
+                && app.buttons["manual-white-balance-auto"].value as? String == "Selected"
+                && app.buttons["manual-focus-auto"].value as? String == "Selected"
+        }))
+        #endif
+        done.tap()
+        XCTAssertFalse(app.buttons["manual-controls-done"].exists)
+        XCUIDevice.shared.orientation = .portrait
+        XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 5))
+        #if !targetEnvironment(simulator)
+        XCTAssertTrue(waitForLiveShutter(in: app), "Closing Pro controls must return to fresh preview frames")
+        #endif
+    }
+
     func testCameraShellAndRecipeDetails() throws {
         #if !targetEnvironment(simulator)
         XCTAssertTrue(waitForLiveShutter(in: app), "The portrait preview must render fresh frames")
