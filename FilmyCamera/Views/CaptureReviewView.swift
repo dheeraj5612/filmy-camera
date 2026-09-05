@@ -14,53 +14,108 @@ struct CaptureReviewView: View {
     let onRetake: () -> Void
     let onOpenSettings: () -> Void
 
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         ZStack {
             FilmyTheme.background.ignoresSafeArea()
 
-            // The frame is sized from the available area so it normally fits
-            // without scrolling, but the page still scrolls on short or
-            // landscape displays and at accessibility text sizes so the save
-            // error and its recovery action can never be pushed offscreen.
             GeometryReader { proxy in
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 0) {
-                        header
-                            .padding(.horizontal, 20)
-                            .padding(.top, 16)
-                            .padding(.bottom, 12)
-
+                if usesSidePanel(for: proxy.size) {
+                    let sideWidth = min(max(proxy.size.width * 0.26, 300), 380)
+                    let photoWidth = max(proxy.size.width - sideWidth - 92, 1)
+                    HStack(alignment: .center, spacing: 28) {
                         framePreview(
-                            maxWidth: max(proxy.size.width - 32, 1),
-                            maxHeight: max(proxy.size.height * 0.64, 160)
+                            maxWidth: photoWidth,
+                            maxHeight: max(proxy.size.height - 48, 160)
                         )
-                        .padding(.horizontal, 16)
+                        .frame(width: photoWidth, alignment: .center)
 
-                        if let saveErrorMessage {
-                            saveError(saveErrorMessage)
+                        sidePanel
+                            .frame(width: sideWidth, alignment: .leading)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.horizontal, 32)
+                    .padding(.vertical, 24)
+                } else {
+                    let isPortraitTablet = proxy.size.width >= 700 && proxy.size.height > proxy.size.width
+                    let previewHeight = proxy.size.height * (isPortraitTablet ? 0.78 : 0.64)
+                    // Keep the photo and its metadata together in a bounded
+                    // scroll view for phone portrait, landscape, and large
+                    // Dynamic Type sizes.
+                    ScrollView(showsIndicators: false) {
+                        VStack(spacing: 0) {
+                            header
+                                .padding(.horizontal, 20)
+                                .padding(.top, 16)
+                                .padding(.bottom, 12)
+
+                            framePreview(
+                                maxWidth: max(proxy.size.width - 32, 1),
+                                maxHeight: max(previewHeight, 160)
+                            )
+                            .padding(.horizontal, 16)
+
+                            metadataBlock
                                 .padding(.horizontal, 20)
                                 .padding(.top, 14)
+
+                            if let saveErrorMessage {
+                                saveError(saveErrorMessage)
+                                    .padding(.horizontal, 20)
+                                    .padding(.top, 14)
+                            }
                         }
+                        .padding(.bottom, 16)
+                        .frame(maxWidth: .infinity)
                     }
-                    .padding(.bottom, 16)
-                    .frame(maxWidth: FilmyLayout.readableMaxWidth)
-                    .frame(maxWidth: .infinity)
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        actionBar
+                            .frame(maxWidth: FilmyLayout.readableMaxWidth)
+                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, 20)
+                            .padding(.top, 14)
+                            .padding(.bottom, 8)
+                            .background(FilmyTheme.background)
+                    }
                 }
             }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            actionBar
-                .frame(maxWidth: FilmyLayout.readableMaxWidth)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 20)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("review-screen")
+    }
+
+    private func usesSidePanel(for size: CGSize) -> Bool {
+        size.width > size.height && size.width >= 700 && size.height >= 500
+    }
+
+    private var sidePanel: some View {
+        VStack(spacing: 0) {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 18) {
+                    header
+                    metadataBlock
+
+                    if let saveErrorMessage {
+                        saveError(saveErrorMessage)
+                    }
+                }
+                .padding(.bottom, 18)
+            }
+
+            VStack(spacing: 10) {
+                retakeButton
+                keepFrameButton
+            }
                 .padding(.top, 14)
-                .padding(.bottom, 8)
-                .background(FilmyTheme.background)
         }
-        .interactiveDismissDisabled(isSaving)
+        .frame(maxHeight: .infinity)
+        .padding(22)
+        .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(FilmyTheme.lineStrong, lineWidth: 1)
+        }
     }
 
     private var header: some View {
@@ -75,23 +130,6 @@ struct CaptureReviewView: View {
             }
 
             Spacer(minLength: 8)
-
-            Button {
-                HapticFeedback.play(.discard)
-                onRetake()
-                dismiss()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(FilmyTheme.primary)
-                    .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
-                    .background(FilmyTheme.panelRaised, in: Circle())
-            }
-            .buttonStyle(.pressable)
-            .accessibilityIdentifier("review-back-to-camera")
-            .accessibilityLabel(isImported ? "Discard imported photo" : "Discard frame")
-            .accessibilityHint("Returns to the camera without saving")
-            .disabled(isSaving)
         }
     }
 
@@ -124,18 +162,30 @@ struct CaptureReviewView: View {
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
                     .strokeBorder(FilmyTheme.lineStrong, lineWidth: 1)
             }
-            .overlay(alignment: .bottomLeading) {
-                recipeChip
-                    .padding(14)
-            }
-            .shadow(color: .black.opacity(0.4), radius: 22, y: 10)
-            .frame(maxWidth: .infinity)
-            .accessibilityElement(children: .combine)
+            .accessibilityElement(children: .ignore)
+            .accessibilityIdentifier("review-image")
             .accessibilityLabel(
                 isImported
                     ? "Imported photo with \(recipe.name), \(resolutionCaption)"
                     : "Captured frame with \(recipe.name), \(resolutionCaption)"
             )
+            .shadow(color: .black.opacity(0.4), radius: 22, y: 10)
+            .frame(maxWidth: .infinity)
+    }
+
+    private var metadataBlock: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(resolutionCaption)
+                .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                .foregroundStyle(FilmyTheme.secondary)
+
+            Text(isImported ? "Ready to save to Photos" : "Captured with the current camera settings")
+                .font(.system(.caption, design: .rounded).weight(.medium))
+                .foregroundStyle(FilmyTheme.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("review-metadata")
     }
 
     /// Largest size with the image's aspect ratio that fits inside `bounds`.
@@ -151,31 +201,6 @@ struct CaptureReviewView: View {
             width: (imageSize.width * scale).rounded(.down),
             height: (imageSize.height * scale).rounded(.down)
         )
-    }
-
-    private var recipeChip: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "camera.aperture")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(FilmyTheme.accent)
-                .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(recipe.name)
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                Text(resolutionCaption)
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.78))
-            }
-            .fixedSize(horizontal: false, vertical: true)
-        }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .viewfinderCapsule()
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Recipe \(recipe.name), \(resolutionCaption)")
     }
 
     private func saveError(_ message: String) -> some View {
@@ -231,7 +256,6 @@ struct CaptureReviewView: View {
         Button {
             HapticFeedback.play(.discard)
             onRetake()
-            dismiss()
         } label: {
             Label(
                 isImported ? "Cancel" : "Retake",

@@ -15,6 +15,7 @@ struct ContentView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab: Tab = .camera
+    @State private var isShowingImporter = false
     @State private var importedPhotoItem: PhotosPickerItem?
     @State private var importTask: Task<Void, Never>?
     @State private var isLoadingImportedPhoto = false
@@ -23,10 +24,8 @@ struct ContentView: View {
         isLoadingImportedPhoto || cameraViewModel.isImporting
     }
 
-    /// The dock and Import entry point must share one busy policy. During a
-    /// capture, save, or review, changing tabs can otherwise open the picker;
-    /// the selected image is then rejected by the view model and appears to
-    /// have disappeared. The review sheet's own actions remain available.
+    /// Navigation and import share the capture/review busy policy so an image
+    /// cannot be replaced while it is still being captured, reviewed, or saved.
     private var isCameraBusy: Bool {
         isImportInProgress
             || cameraViewModel.isCapturing
@@ -49,30 +48,11 @@ struct ContentView: View {
                     importProgressOverlay
                 }
             }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                // Narrow iPad Split View panes (about 320pt) cannot fit the
-                // labelled Import button beside the tab pill; fall back to an
-                // icon-only Import there.
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 10) {
-                        tabBar
-                        importPhotoButton(showsLabel: true)
-                    }
-                    HStack(spacing: 8) {
-                        tabBar
-                        importPhotoButton(showsLabel: false)
-                    }
-                }
-                .padding(.horizontal, FilmyLayout.compactHorizontalMargin)
-                .padding(.top, 8)
-                .padding(.bottom, 2)
-                .frame(maxWidth: .infinity)
-                .disabled(isCameraBusy)
-            }
+            .photosPicker(isPresented: $isShowingImporter, selection: $importedPhotoItem, matching: .images)
             .tint(FilmyTheme.accent)
             .background {
                 // The camera sits on a black body; the Roll and Settings keep
-                // the warm page surface.
+                // the neutral page surface.
                 if selectedTab == .camera {
                     FilmyTheme.viewfinderBand.ignoresSafeArea()
                 } else {
@@ -130,36 +110,6 @@ struct ContentView: View {
         .accessibilityLabel("Applying \(cameraViewModel.selectedRecipe.name) to imported photo")
     }
 
-    /// Opens the system photo picker; the chosen image is rendered with the
-    /// current recipe at full resolution and lands in the same review flow as
-    /// a capture.
-    private func importPhotoButton(showsLabel: Bool) -> some View {
-        PhotosPicker(selection: $importedPhotoItem, matching: .images) {
-            HStack(spacing: 6) {
-                Image(systemName: "photo.badge.plus")
-                    .font(.system(size: 15, weight: .bold))
-
-                if showsLabel {
-                    Text("Import")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .lineLimit(1)
-                        .fixedSize()
-                }
-            }
-            .foregroundStyle(FilmyTheme.background)
-            .padding(.horizontal, showsLabel ? 15 : 0)
-            .frame(minWidth: 48, minHeight: 48)
-            .background(FilmyTheme.accent, in: Capsule())
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.pressable)
-        .shadow(color: .black.opacity(0.3), radius: 12, y: 6)
-        .disabled(isCameraBusy)
-        .accessibilityLabel("Import photo")
-        .accessibilityHint("Choose a photo and apply the current film recipe")
-        .accessibilityIdentifier("import-photo")
-    }
-
     @ViewBuilder
     private var selectedTabContent: some View {
         switch selectedTab {
@@ -169,7 +119,13 @@ struct ContentView: View {
                 viewModel: cameraViewModel,
                 photoLibrary: photoLibrary,
                 isCameraTabActive: selectedTab == .camera,
-                onOpenGallery: { selectedTab = .gallery }
+                onOpenGallery: { open(.gallery) },
+                onOpenSettings: { open(.settings) },
+                onImportPhoto: {
+                    guard !isCameraBusy else { return }
+                    isShowingImporter = true
+                },
+                isImportInProgress: isImportInProgress
             )
         case .gallery:
             GalleryScreen(
@@ -192,59 +148,10 @@ struct ContentView: View {
         }
     }
 
-    /// A compact floating glass pill. The active destination expands to show
-    /// its name; the others stay icon-only so the camera keeps the screen.
-    private var tabBar: some View {
-        HStack(spacing: 2) {
-            tabButton(.camera, title: "Camera", systemImage: "camera.fill")
-            tabButton(.gallery, title: "Roll", systemImage: "square.grid.3x3.fill")
-            tabButton(.settings, title: "Settings", systemImage: "gearshape.fill")
-        }
-        .padding(3)
-        .viewfinderCapsule(fill: Color.black.opacity(0.5))
-        .shadow(color: .black.opacity(0.3), radius: 12, y: 6)
-    }
-
-    private func tabButton(_ tab: Tab, title: String, systemImage: String) -> some View {
-        let isSelected = selectedTab == tab
-
-        return Button {
-            guard selectedTab != tab else { return }
-            HapticFeedback.play(.selection)
-            withAnimation(reduceMotion ? nil : .snappy(duration: 0.24)) {
-                selectedTab = tab
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 15, weight: .bold))
-
-                if isSelected {
-                    Text(title)
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .lineLimit(1)
-                        .fixedSize()
-                }
-            }
-            .foregroundStyle(isSelected ? FilmyTheme.background : FilmyTheme.primary.opacity(0.78))
-            .padding(.horizontal, isSelected ? 16 : 13)
-            .frame(minWidth: 48, minHeight: 44)
-            .background(isSelected ? FilmyTheme.primary : Color.clear, in: Capsule())
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
-        .accessibilityIdentifier(tab.accessibilityIdentifier)
-        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : [.isButton])
-    }
-}
-
-private extension ContentView.Tab {
-    var accessibilityIdentifier: String {
-        switch self {
-        case .camera: "camera-tab"
-        case .gallery: "roll-tab"
-        case .settings: "settings-tab"
+    private func open(_ destination: Tab) {
+        guard !isCameraBusy, selectedTab != destination else { return }
+        withAnimation(reduceMotion ? nil : .snappy(duration: 0.24)) {
+            selectedTab = destination
         }
     }
 }

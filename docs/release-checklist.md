@@ -1,8 +1,18 @@
 # Filmy Camera release checklist
 
-Current candidate: version 1.0.0, build 6, incorporating the post-review local Roll save fix. Build 6 is signed, exported and installed on the test iPad. Build 5 remains the latest Apple upload; it has been removed from the review draft while build 6 upload is blocked on local account access. Historical release notes and older “current” statements are preserved in [release-history.md](release-history.md).
+Current candidate: version 1.0.0, build 7, with the [camera UX redesign](design-pass-20260904.md). Build 7 builds for simulator and physical iOS and is installed on the test iPad; its hardware pass is pending device unlock. Build 5 remains the last verified Apple upload. Build 6's signed artifacts remain preserved, but build 7 supersedes it as the intended release candidate. Historical release notes are in [release-history.md](release-history.md).
 
-## Build 6 release gates
+## Build 7 release gates
+
+- [x] Implement a camera-first layout, on-demand grouped looks, full-screen review/detail, and pinned return navigation.
+- [x] Validate simulator camera portrait/landscape, large text, editor, navigation, and renderer behavior. See [design validation](design-pass-20260904.md#validation) for the full-run and focused rerun evidence.
+- [x] Build for physical iOS and install version 1.0.0 (7) on the connected iPad.
+- [x] Finish refreshed public-photo screenshot packs on iPhone and iPad simulators; all three normal import/save flows and safe-area/interaction checks passed. Matching Apple uploads remain pending.
+- [ ] Complete the redesigned capture/review/save/Retake hardware pass after unlocking the Mac and iPad.
+- [ ] Pass required CI, archive the clean final source, and validate signed archive/IPA parity.
+- [ ] Upload build 7, verify processing, select it with matching screenshots, and validate the review draft. Prior build 5 draft validation does not validate build 7.
+
+## Preserved build 6 baseline
 
 - [x] Make save success await the off-main atomic local JPEG write and Roll index update. Photos write failures retain their existing recovery; a local cache failure after Photos success must not encourage duplicate saving.
 - [x] Validate the new callback-ordering regression and physical add-only save/relaunch flow. The focused simulator suite passed 19 tests with one physical-only skip; all three focused iPad save/callback/flash checks passed without skips or failures.
@@ -10,8 +20,7 @@ Current candidate: version 1.0.0, build 6, incorporating the post-review local R
 - [x] Restore the iPad's original Photos Full Access permission after the add-only tests and verify installed version 1.0.0 (6).
 - [x] Merge the validated source through [PR 80](https://github.com/dheeraj5612/filmy-camera/pull/80). Main commit `b30a4ca85b1ea742ee420713440c365b7c684d8d` has the same tree as archive source `e2837c6`.
 - [x] Required CI passed on exact application source `e2837c6` in [run 33924488772](https://github.com/dheeraj5612/filmy-camera/actions/runs/33924488772), including release validation and full unit/UI suites.
-- [ ] Upload build 6 and verify Apple's processing result. Both upload attempts stopped before transfer with `Failed to Use Accounts`; Computer Use confirmed that the Mac is locked. Unlock the Mac, inspect Xcode account access, and retry the prepared package.
-- [ ] Replace the build 5 draft with build 6 and verify the selected binary after reload.
+Build 6 upload attempts stopped before transfer with `Failed to Use Accounts`. They are preserved as release evidence; build 7 is now the upload target.
 
 ## Verified build 5 baseline
 
@@ -23,7 +32,7 @@ Current candidate: version 1.0.0, build 6, incorporating the post-review local R
 - [x] The production and release-tool audit is recorded in the [MVP audit](mvp-audit-20260904.md).
 - [x] Required CI passed on archived source `d9ef138` in [GitHub Actions run 33914142237](https://github.com/dheeraj5612/filmy-camera/actions/runs/33914142237).
 
-## Current head and media
+## Preserved build 5 media and earlier CI
 
 - [x] Required CI passed on `e4b63da` in [run 33919773477](https://github.com/dheeraj5612/filmy-camera/actions/runs/33919773477), including the current media and screenshot-test isolation fix. Later test changes need their own PR checks; do not attribute an older run to a newer commit.
 - [x] Finish and inspect the five-image current-app packs for the iPhone 6.5-inch and iPad 13-inch slots.
@@ -32,7 +41,7 @@ Current candidate: version 1.0.0, build 6, incorporating the post-review local R
 
 A physical-camera hero can supplement these screenshots after iPhone acceptance. Simulator import/review/Roll images represent those actual app flows; a simulator camera-unavailable screen is not launch media.
 
-The current media workflow uses one public-safe generated original in a fresh simulator. The normal app imports that same original through G7 X Compact, Muted Color, and Fine Monochrome; saves the production outputs; then shows the populated Roll and photo detail. Each device pack contains exactly:
+The media workflow uses one public-safe generated original in a fresh simulator. The normal app imports that same original through G7 X Compact, Muted Color, and Fine Monochrome; saves the production outputs; then shows the populated Roll and photo detail. Each device pack contains exactly:
 
 1. `01-g7x-import`
 2. `02-film-import`

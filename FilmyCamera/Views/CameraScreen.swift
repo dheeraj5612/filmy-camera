@@ -74,16 +74,19 @@ enum ViewfinderLayout {
     }
 }
 
-/// The viewfinder. A slim top bar (flash, camera switch, the recipe name,
-/// status, tools) sits above a letterboxed frame; the recipe rail and the
-/// capture row (Roll, shutter, Tune) sit beneath it. Zoom presets and the
-/// optional tool strip float along the frame's bottom edge.
+/// The viewfinder and its capture controls. The picture keeps a stable frame
+/// while look and camera-tool drawers float above it. Wide layouts put the
+/// primary controls in an edge column; compact layouts keep them below the
+/// frame within thumb reach.
 struct CameraScreen: View {
     @ObservedObject var camera: CameraService
     @ObservedObject var viewModel: CameraViewModel
     @ObservedObject var photoLibrary: PhotoLibraryService
     let isCameraTabActive: Bool
     let onOpenGallery: () -> Void
+    let onOpenSettings: () -> Void
+    let onImportPhoto: () -> Void
+    let isImportInProgress: Bool
 
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -92,6 +95,7 @@ struct CameraScreen: View {
     @StateObject private var livePreviews = LiveRecipePreviewStore()
     @State private var recipeForDetail: FilmRecipe?
     @State private var isShowingTools: Bool
+    @State private var isShowingLookDrawer = false
     @State private var focusPoint: CGPoint?
     @State private var focusNormalizedPoint: CGPoint?
     @State private var pinchStartZoom: CGFloat = 1
@@ -103,13 +107,19 @@ struct CameraScreen: View {
         viewModel: CameraViewModel,
         photoLibrary: PhotoLibraryService,
         isCameraTabActive: Bool,
-        onOpenGallery: @escaping () -> Void
+        onOpenGallery: @escaping () -> Void,
+        onOpenSettings: @escaping () -> Void,
+        onImportPhoto: @escaping () -> Void,
+        isImportInProgress: Bool = false
     ) {
         _camera = ObservedObject(wrappedValue: camera)
         _viewModel = ObservedObject(wrappedValue: viewModel)
         _photoLibrary = ObservedObject(wrappedValue: photoLibrary)
         self.isCameraTabActive = isCameraTabActive
         self.onOpenGallery = onOpenGallery
+        self.onOpenSettings = onOpenSettings
+        self.onImportPhoto = onImportPhoto
+        self.isImportInProgress = isImportInProgress
 
         // The tools strip stays hidden until asked for so the viewfinder
         // opens quiet. UI tests that exercise exposure and zoom launch with
@@ -122,45 +132,72 @@ struct CameraScreen: View {
     }
 
     var body: some View {
-        GeometryReader { proxy in
-            let isLandscape = proxy.size.width > proxy.size.height
+        ZStack {
+            GeometryReader { proxy in
+                let isLandscape = proxy.size.width > proxy.size.height
+                let usesEdgeControlColumn = isLandscape || proxy.size.width >= 720
 
-            Group {
-                if isLandscape {
-                    landscapeShell
-                } else {
-                    portraitShell
+                Group {
+                    if usesEdgeControlColumn {
+                        edgeControlShell(
+                            isLandscape: isLandscape,
+                            availableHeight: proxy.size.height
+                        )
+                    } else {
+                        portraitShell(availableHeight: proxy.size.height)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // The chrome is a constrained shell rather than a scrolling
+                // document. Cap its visual scale one step below the largest
+                // Dynamic Type sizes so every capture, Roll, and Tune action
+                // remains reachable.
+                .dynamicTypeSize(.xSmall ... .accessibility1)
+            }
+            .background(FilmyTheme.viewfinderBand.ignoresSafeArea())
+            .overlay(alignment: .top) {
+                if let toastMessage = viewModel.toastMessage {
+                    ToastView(message: toastMessage, style: viewModel.toastStyle)
+                        .padding(.top, 56)
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // The chrome is a constrained shell rather than a scrolling
-            // document. Cap its visual scale one step below the largest
-            // Dynamic Type sizes so every capture, Roll, and Tune action
-            // remains reachable.
-            .dynamicTypeSize(.xSmall ... .accessibility1)
-        }
-        .background(FilmyTheme.viewfinderBand.ignoresSafeArea())
-        .overlay(alignment: .top) {
-            if let toastMessage = viewModel.toastMessage {
-                ToastView(message: toastMessage, style: viewModel.toastStyle)
-                    .padding(.top, 56)
-                    .transition(.move(edge: .top).combined(with: .opacity))
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: viewModel.toastMessage)
+            .allowsHitTesting(!isReviewing)
+            .disabled(isReviewing)
+            .accessibilityElement(children: .contain)
+            .accessibilityHidden(isReviewing)
+
+            if let image = viewModel.reviewImage, let recipe = viewModel.reviewRecipe {
+                CaptureReviewView(
+                    image: image,
+                    recipe: recipe,
+                    source: viewModel.reviewSource,
+                    isFullResolution: viewModel.reviewIsFullResolution,
+                    flashFired: viewModel.reviewFlashFired,
+                    isSaving: viewModel.isSaving,
+                    saveErrorMessage: viewModel.saveErrorMessage,
+                    saveErrorRequiresSettings: viewModel.saveErrorRequiresSettings,
+                    onSave: { viewModel.saveReview(photoLibrary: photoLibrary) },
+                    onRetake: viewModel.discardReview,
+                    onOpenSettings: openSystemSettings
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .zIndex(1)
             }
         }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: viewModel.toastMessage)
-        // Every swatch under the viewfinder (rail, menu, detail hero) renders
-        // its recipe over the live scene, the way a film simulation picker
-        // should: choosing a look means seeing this scene in that look.
+        // Visible recipe choices render over the live scene. When the drawer
+        // and detail are both closed, their frame consumer is detached so the
+        // renderer does no hidden thumbnail work.
         .environment(\.recipePreviewScene, livePreviews.scene)
-        .onChange(of: camera.isRunning, initial: true) { _, isRunning in
-            if isRunning {
-                livePreviews.attach(to: camera)
-            } else {
-                // A stopped or unavailable camera must not leave the rail
-                // showing an old scene; swatches fall back to the sample.
-                livePreviews.detach()
-                livePreviews.clear()
-            }
+        .onChange(of: camera.isRunning, initial: true) { _, _ in
+            updateLiveRecipePreviews()
+        }
+        .onChange(of: isShowingLookDrawer) { _, _ in
+            updateLiveRecipePreviews()
+        }
+        .onChange(of: recipeForDetail?.id) { _, _ in
+            updateLiveRecipePreviews()
         }
         .sheet(item: $recipeForDetail) { recipe in
             RecipeDetailView(
@@ -181,27 +218,6 @@ struct CameraScreen: View {
             .presentationDragIndicator(.visible)
             .presentationBackground(FilmyTheme.background)
             .presentationCornerRadius(30)
-        }
-        .sheet(isPresented: reviewPresentation) {
-            if let image = viewModel.reviewImage, let recipe = viewModel.reviewRecipe {
-                CaptureReviewView(
-                    image: image,
-                    recipe: recipe,
-                    source: viewModel.reviewSource,
-                    isFullResolution: viewModel.reviewIsFullResolution,
-                    flashFired: viewModel.reviewFlashFired,
-                    isSaving: viewModel.isSaving,
-                    saveErrorMessage: viewModel.saveErrorMessage,
-                    saveErrorRequiresSettings: viewModel.saveErrorRequiresSettings,
-                    onSave: { viewModel.saveReview(photoLibrary: photoLibrary) },
-                    onRetake: viewModel.discardReview,
-                    onOpenSettings: openSystemSettings
-                )
-                .presentationDetents([.large])
-                .presentationDragIndicator(.hidden)
-                .presentationBackground(FilmyTheme.background)
-                .interactiveDismissDisabled(viewModel.reviewImage != nil || viewModel.isSaving)
-            }
         }
         .onAppear {
             updateCameraActivity()
@@ -232,9 +248,12 @@ struct CameraScreen: View {
         .onChange(of: viewModel.reviewImage != nil) { _, hasReview in
             if hasReview {
                 camera.setFrameDeliveryPaused(true)
+                livePreviews.detach()
+                livePreviews.clear()
             }
             updateCameraActivity()
             updateIdleTimer()
+            updateLiveRecipePreviews()
         }
         .onChange(of: viewModel.isCapturing) { _, isCapturing in
             if isCapturing {
@@ -247,6 +266,10 @@ struct CameraScreen: View {
             updateCameraActivity()
             updateIdleTimer()
         }
+        .onChange(of: isImportInProgress) { _, _ in
+            updateCameraActivity()
+            updateIdleTimer()
+        }
         // The simulator placeholder contains a renderer-backed swatch with a
         // non-zero ideal size. Keep that child from expanding the camera shell
         // beyond the window proposal and shifting the chrome offscreen.
@@ -255,7 +278,7 @@ struct CameraScreen: View {
 
     // MARK: - Shells
 
-    private var portraitShell: some View {
+    private func portraitShell(availableHeight: CGFloat) -> some View {
         VStack(spacing: 0) {
             topBar
                 .padding(.horizontal, 12)
@@ -263,53 +286,84 @@ struct CameraScreen: View {
                 .frame(minHeight: 50)
                 .disabled(isChromeDisabled)
 
-            viewfinderStage(isLandscape: false)
+            viewfinderStage(isLandscape: false, overlaysTopBar: false)
                 .padding(.top, 4)
 
-            bottomBand
+            primaryBottomBar
                 .padding(.horizontal, 16)
-                .padding(.top, 12)
+                .padding(.top, 8)
                 .padding(.bottom, 2)
                 .disabled(isChromeDisabled)
         }
+        .overlay(alignment: .bottom) {
+            if isShowingLookDrawer {
+                lookDrawer(
+                    maxHeight: max(
+                        160,
+                        min(360, availableHeight - portraitControlClearance - 60)
+                    )
+                )
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, portraitControlClearance)
+                    .disabled(isChromeDisabled)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
     }
 
-    private var landscapeShell: some View {
+    private func edgeControlShell(isLandscape: Bool, availableHeight: CGFloat) -> some View {
         HStack(spacing: 12) {
-            viewfinderStage(isLandscape: true)
+            viewfinderStage(isLandscape: isLandscape, overlaysTopBar: true)
 
-            landscapeColumn
-                .frame(width: 124)
+            edgeControlColumn
+                .frame(width: 136)
                 .disabled(isChromeDisabled)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+        .overlay(alignment: .bottomLeading) {
+            if isShowingLookDrawer {
+                lookDrawer(
+                    maxHeight: isLandscape
+                        ? max(160, min(240, availableHeight - 130))
+                        : max(180, min(360, availableHeight - 190))
+                )
+                    .padding(.leading, 12)
+                    .padding(.trailing, 160)
+                    .padding(.bottom, 78)
+                    .disabled(isChromeDisabled)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
     }
 
     private var isChromeDisabled: Bool {
-        viewModel.isCapturing || viewModel.isImporting
+        viewModel.isCapturing || isImporting
+    }
+
+    private var portraitControlClearance: CGFloat {
+        dynamicTypeSize.isAccessibilitySize ? 176 : 150
     }
 
     // MARK: - Viewfinder
 
-    private func viewfinderStage(isLandscape: Bool) -> some View {
+    private func viewfinderStage(isLandscape: Bool, overlaysTopBar: Bool) -> some View {
         GeometryReader { proxy in
             let size = ViewfinderLayout.size(available: proxy.size, isLandscape: isLandscape)
 
-            viewfinder(size: size, isLandscape: isLandscape)
+            viewfinder(size: size, overlaysTopBar: overlaysTopBar)
                 .frame(width: size.width, height: size.height)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
-    private func viewfinder(size: CGSize, isLandscape: Bool) -> some View {
+    private func viewfinder(size: CGSize, overlaysTopBar: Bool) -> some View {
         ZStack(alignment: .top) {
             previewSurface
 
             // The session is intentionally stopped while a frame is under
-            // review. On iPad the review is a centered sheet, so the paused
-            // viewfinder stays visible; keep it quiet instead of announcing
-            // "Camera unavailable" behind the user's own photo.
+            // review. Keep the paused frame quiet behind the full-screen
+            // review instead of announcing "Camera unavailable".
             if shouldShowCameraEmptyState, !isReviewing {
                 cameraPlaceholder
             } else if isReviewing {
@@ -347,7 +401,7 @@ struct CameraScreen: View {
                 .accessibilityHidden(true)
         }
         .overlay(alignment: .top) {
-            if isLandscape {
+            if overlaysTopBar {
                 topBar
                     .padding(.horizontal, 10)
                     .padding(.top, 8)
@@ -420,20 +474,20 @@ struct CameraScreen: View {
         }
     }
 
-    /// Controls that float along the bottom edge of the frame: the optional
-    /// tool strip (or the G7 X quick controls) above the zoom presets.
+    /// Controls that float along the bottom edge of the frame. Zoom stays
+    /// immediately available; the broader camera tools appear on demand.
     @ViewBuilder
     private func viewfinderFooter(width: CGFloat) -> some View {
         VStack(spacing: 8) {
             if isShowingTools {
                 toolStrip(minWidth: width - 24)
-            } else if isCompactDigitalMode, !shouldShowCameraEmptyState || isViewfinderChromePreview {
-                compactDigitalQuickRail(minWidth: width - 24)
             }
 
             // The presets need a live camera; the chrome preview shows them
             // so the full capture layout can be verified without hardware.
-            if camera.isRunning || isViewfinderChromePreview, !isReviewing {
+            if !isShowingLookDrawer,
+               camera.isRunning || isViewfinderChromePreview,
+               !isReviewing {
                 ZoomPresetBar(
                     value: camera.zoomFactor,
                     minZoom: camera.minZoomFactor,
@@ -451,9 +505,8 @@ struct CameraScreen: View {
 
     // MARK: - Top bar
 
-    /// The G7 X profile is a camera mode rather than a film stock: its
-    /// header reads "camera profile" and its capture controls stay one tap
-    /// away in the capture path instead of behind the tools toggle.
+    /// The G7 X profile is a camera mode rather than a film stock, so its
+    /// drawer names it as a camera profile.
     private var isCompactDigitalMode: Bool {
         viewModel.selectedRecipe.filmBase == .compactDigital
     }
@@ -474,12 +527,9 @@ struct CameraScreen: View {
                 cameraSwitchButton
             }
 
-            Spacer(minLength: 6)
+            Spacer(minLength: 4)
 
-            recipeIdentity
-                .layoutPriority(1)
-
-            Spacer(minLength: 6)
+            activeCaptureIndicators
 
             if !isLive {
                 CameraStatusPill(
@@ -489,30 +539,56 @@ struct CameraScreen: View {
                 )
             }
 
+            settingsButton
+
             if camera.isRunning || isViewfinderChromePreview {
                 toolsToggle
             }
         }
     }
 
-    /// The selected recipe, named where a camera names its film simulation.
-    private var recipeIdentity: some View {
-        VStack(spacing: 1) {
-            Eyebrow(text: recipeEyebrow, color: FilmyTheme.accent)
-
-            HStack(spacing: 6) {
-                Text(viewModel.selectedRecipe.name)
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
-
-                if viewModel.isCustomized(viewModel.selectedRecipe) {
-                    FilmyTag(text: "EDITED", filled: false)
+    @ViewBuilder
+    private var activeCaptureIndicators: some View {
+        if abs(camera.exposureBias) >= 0.05 || camera.isFocusExposureLocked {
+            Button {
+                withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.82)) {
+                    isShowingLookDrawer = false
+                    isShowingTools = true
                 }
+            } label: {
+                HStack(spacing: 5) {
+                    if abs(camera.exposureBias) >= 0.05 {
+                        Text(String(format: "%+.1f EV", camera.exposureBias))
+                    }
+                    if camera.isFocusExposureLocked {
+                        Label("AE/AF", systemImage: "lock.fill")
+                            .labelStyle(.titleAndIcon)
+                    }
+                }
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .foregroundStyle(FilmyTheme.accent)
+                .padding(.horizontal, 9)
+                .frame(minHeight: FilmyTheme.minimumHitTarget)
+                .background(Color.black.opacity(0.68), in: Capsule())
+                .overlay { Capsule().stroke(FilmyTheme.accent.opacity(0.36), lineWidth: 1) }
             }
+            .buttonStyle(.pressable)
+            .accessibilityIdentifier("camera-active-adjustments")
+            .accessibilityLabel("Active camera adjustments")
+            .accessibilityValue(activeCaptureIndicatorValue)
+            .accessibilityHint("Shows the camera controls")
         }
-        .accessibilityElement(children: .contain)
+    }
+
+    private var activeCaptureIndicatorValue: String {
+        var values: [String] = []
+        if abs(camera.exposureBias) >= 0.05 {
+            values.append(String(format: "%+.1f EV", camera.exposureBias))
+        }
+        if camera.isFocusExposureLocked {
+            values.append("Focus and exposure locked")
+        }
+        return values.joined(separator: ", ")
     }
 
     /// Flash sits in the top corner, icon-only, where every iPhone camera
@@ -549,9 +625,31 @@ struct CameraScreen: View {
         .accessibilityHint("Switches between the front and back cameras.")
     }
 
+    private var settingsButton: some View {
+        Button {
+            HapticFeedback.play(.selection)
+            closeControlDrawers()
+            onOpenSettings()
+        } label: {
+            Image(systemName: "gearshape.fill")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+                .background { ChromeShapeBackground(shape: Circle()) }
+                .contentShape(Circle())
+        }
+        .buttonStyle(.pressable)
+        .accessibilityIdentifier("settings-tab")
+        .accessibilityLabel("Open camera settings")
+        .accessibilityHint("Shows camera preferences")
+    }
+
     private var toolsToggle: some View {
         Button {
             withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.82)) {
+                if !isShowingTools {
+                    isShowingLookDrawer = false
+                }
                 isShowingTools.toggle()
             }
         } label: {
@@ -572,60 +670,118 @@ struct CameraScreen: View {
         )
     }
 
-    // MARK: - Bottom band
+    // MARK: - Primary controls and look drawer
 
-    private var bottomBand: some View {
+    private var primaryBottomBar: some View {
+        VStack(spacing: 4) {
+            currentRecipeButton()
+
+            ZStack {
+                HStack {
+                    rollButton
+                    Spacer(minLength: 0)
+                    importButton
+                }
+
+                captureControl
+            }
+            .frame(minHeight: 80)
+        }
+        .padding(.horizontal, 6)
+        .frame(maxWidth: FilmyLayout.dockMaxWidth)
+        .frame(maxWidth: .infinity)
+    }
+
+    /// Wide iPad layouts use the edge column even in portrait so the picture
+    /// remains visually centered and the primary controls read like a camera
+    /// grip. It also fits an iPhone's compact landscape height.
+    private var edgeControlColumn: some View {
         VStack(spacing: 10) {
-            RecipePickerView(
-                recipes: viewModel.recipes,
-                selectedRecipeID: $viewModel.selectedRecipeID,
-                onOpenDetail: { recipeForDetail = viewModel.recipe(for: $0.id) },
-                compact: isCompactChrome
-            )
-
-            captureRow
-                .frame(maxWidth: FilmyLayout.dockMaxWidth)
-        }
-    }
-
-    private var isCompactChrome: Bool {
-        dynamicTypeSize.isAccessibilitySize
-    }
-
-    private var captureRow: some View {
-        HStack(alignment: .center, spacing: 12) {
-            rollButton
-
             Spacer(minLength: 0)
 
+            currentRecipeButton(compact: true)
             captureControl
 
-            Spacer(minLength: 0)
-
-            tuneButton
-        }
-        .padding(.horizontal, 8)
-    }
-
-    /// The side column must fit an iPhone's landscape height (about 310pt
-    /// beside the dock), so Roll and Tune share one row under the shutter
-    /// instead of stacking.
-    private var landscapeColumn: some View {
-        VStack(spacing: 12) {
-            recipeMenu
-
-            Spacer(minLength: 0)
-
-            captureControl
-
-            HStack(spacing: 4) {
+            HStack(spacing: 8) {
                 rollButton
-                tuneButton
+                importButton
             }
 
             Spacer(minLength: 0)
         }
         .frame(maxHeight: .infinity)
+    }
+
+    private func currentRecipeButton(compact: Bool = false) -> some View {
+        CurrentRecipeButton(
+            recipe: viewModel.selectedRecipe,
+            isCustomized: viewModel.isCustomized(viewModel.selectedRecipe),
+            compactLayout: compact,
+            action: toggleLookDrawer
+        )
+    }
+
+    private func lookDrawer(maxHeight: CGFloat) -> some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Eyebrow(
+                        text: recipeEyebrow,
+                        color: isCompactDigitalMode ? FilmyTheme.accent : FilmyTheme.filmAccent
+                    )
+                    Text("Choose a look")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(FilmyTheme.primary)
+                }
+
+                Spacer(minLength: 8)
+
+                Button {
+                    openRecipeDetail(viewModel.selectedRecipe)
+                } label: {
+                    Label("Tune", systemImage: "slider.horizontal.3")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(FilmyTheme.primary)
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: FilmyTheme.minimumHitTarget)
+                        .background(FilmyTheme.panel, in: Capsule())
+                }
+                .buttonStyle(.pressable)
+                .accessibilityLabel("Tune \(viewModel.selectedRecipe.name)")
+
+                Button(action: toggleLookDrawer) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(FilmyTheme.secondary)
+                        .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+                        .background(FilmyTheme.panel, in: Circle())
+                }
+                .buttonStyle(.pressable)
+                .accessibilityIdentifier("recipe-drawer-close")
+                .accessibilityLabel("Close look picker")
+            }
+            .padding(.horizontal, 8)
+            .layoutPriority(1)
+
+            RecipePickerView(
+                recipes: viewModel.recipes,
+                selectedRecipeID: $viewModel.selectedRecipeID,
+                onOpenDetail: openRecipeDetail,
+                compact: true
+            )
+            .frame(maxHeight: max(maxHeight - 66, 88))
+        }
+        .padding(8)
+        .frame(maxWidth: 640)
+        .frame(maxHeight: maxHeight)
+        .background(Color.black.opacity(0.94), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.38), radius: 18, y: 8)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("recipe-drawer")
     }
 
     @ViewBuilder
@@ -649,7 +805,7 @@ struct CameraScreen: View {
             .lineLimit(2)
             .minimumScaleFactor(0.78)
             .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, minHeight: FilmyTheme.minimumHitTarget)
+            .frame(width: 104, height: 80)
             .accessibilityElement(children: .combine)
             .accessibilityLabel(captureNoticeTitle)
             .accessibilityHint(captureNoticeHint)
@@ -713,23 +869,53 @@ struct CameraScreen: View {
     }
 
     private var rollButton: some View {
-        Button(action: onOpenGallery) {
+        Button {
+            closeControlDrawers()
+            onOpenGallery()
+        } label: {
             RollThumbnail(asset: photoLibrary.galleryAssets.first, photoLibrary: photoLibrary)
                 .frame(width: 52, height: 52)
                 .frame(width: 60, height: 60)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.pressable)
+        .accessibilityIdentifier("roll-tab")
         .accessibilityLabel("Open roll")
         .accessibilityHint("Shows the frames you have kept")
     }
 
-    private var tuneButton: some View {
-        CameraActionButton(
-            systemName: "slider.horizontal.3",
-            accessibilityLabel: "Tune \(viewModel.selectedRecipe.name)",
-            action: { recipeForDetail = viewModel.selectedRecipe }
-        )
+    private var importButton: some View {
+        Button {
+            HapticFeedback.play(.selection)
+            closeControlDrawers()
+            onImportPhoto()
+        } label: {
+            ZStack {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color.black.opacity(0.72))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                    }
+
+                if isImporting {
+                    ProgressView()
+                        .tint(FilmyTheme.accent)
+                } else {
+                    Image(systemName: "photo.badge.plus")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(FilmyTheme.primary)
+                }
+            }
+            .frame(width: 52, height: 52)
+            .frame(width: 60, height: 60)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.pressable)
+        .disabled(isImporting)
+        .accessibilityLabel(isImporting ? "Importing photo" : "Import photo")
+        .accessibilityHint("Choose a photo and apply the current film recipe")
+        .accessibilityIdentifier("import-photo")
     }
 
     // MARK: - Tool strips
@@ -748,7 +934,11 @@ struct CameraScreen: View {
                     }
                 }
 
-                gridToggle(accessibilityIdentifier: "grid-control")
+                gridToggle(
+                    accessibilityIdentifier: isCompactDigitalMode
+                        ? "g7x-grid-control"
+                        : "grid-control"
+                )
 
                 if camera.availableLenses.count > 1 {
                     CameraLensMenu(camera: camera)
@@ -760,36 +950,10 @@ struct CameraScreen: View {
         }
         .scrollClipDisabled()
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("camera-utility-rail")
+        .accessibilityIdentifier(
+            isCompactDigitalMode ? "g7x-capture-controls" : "camera-utility-rail"
+        )
         .accessibilityHint("Swipe horizontally for additional camera controls")
-        .transition(.move(edge: .bottom).combined(with: .opacity))
-    }
-
-    /// Compact-camera mode keeps its most useful controls in the capture
-    /// path. The viewfinder stays dominant while exposure, the grid, and the
-    /// lens remain one tap away.
-    private func compactDigitalQuickRail(minWidth: CGFloat) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ExposureControl(value: camera.exposureBias) { direction in
-                    let delta: Float = direction == .increment ? (1.0 / 3.0) : -(1.0 / 3.0)
-                    camera.setExposureBias(camera.exposureBias + delta)
-                }
-
-                gridToggle(accessibilityIdentifier: "g7x-grid-control")
-
-                if camera.availableLenses.count > 1 {
-                    CameraLensMenu(camera: camera)
-                }
-            }
-            .padding(.horizontal, 4)
-            .padding(.vertical, 4)
-            .frame(minWidth: max(minWidth, 0))
-        }
-        .scrollClipDisabled()
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("g7x-capture-controls")
-        .accessibilityLabel("G7 X quick capture controls")
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 
@@ -817,64 +981,14 @@ struct CameraScreen: View {
         .accessibilityValue(showGrid ? "On" : "Off")
     }
 
-    /// Landscape swaps the rail for a compact recipe menu in the side column.
-    private var recipeMenu: some View {
-        Menu {
-            Section(isCompactDigitalMode ? "Camera profile" : "Recipe") {
-                ForEach(viewModel.recipes) { recipe in
-                    Button {
-                        viewModel.select(recipe: recipe)
-                    } label: {
-                        if recipe.id == viewModel.selectedRecipeID {
-                            Label(recipe.name, systemImage: "checkmark")
-                        } else {
-                            Text(recipe.name)
-                        }
-                    }
-                }
-            }
-
-            Divider()
-
-            Button("Tune \(viewModel.selectedRecipe.name)") {
-                recipeForDetail = viewModel.selectedRecipe
-            }
-        } label: {
-            VStack(spacing: 6) {
-                RecipeSwatch(
-                    recipe: viewModel.selectedRecipe,
-                    isSelected: true,
-                    compact: true,
-                    showsLabel: false
-                )
-                .frame(width: 84, height: 60)
-
-                HStack(spacing: 4) {
-                    Text(viewModel.selectedRecipe.name)
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.7))
-                }
-            }
-            .padding(8)
-            .frame(maxWidth: .infinity)
-            .viewfinderChrome(RoundedRectangle(cornerRadius: 16, style: .continuous), interactive: true)
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("recipe-menu")
-        .accessibilityLabel("Choose film recipe")
-        .accessibilityValue(viewModel.selectedRecipe.name)
-    }
-
     // MARK: - State
 
     private var shouldShowCameraEmptyState: Bool {
         !camera.isRunning
+    }
+
+    private var isImporting: Bool {
+        viewModel.isImporting || isImportInProgress
     }
 
     private var isReviewing: Bool {
@@ -883,18 +997,6 @@ struct CameraScreen: View {
 
     private var isViewfinderChromePreview: Bool {
         ProcessInfo.processInfo.arguments.contains("-ui-testing-viewfinder-chrome")
-    }
-
-    private var reviewPresentation: Binding<Bool> {
-        Binding(
-            get: { viewModel.reviewImage != nil },
-            set: { isPresented in
-                guard !viewModel.isSaving else { return }
-                if !isPresented {
-                    viewModel.discardReview()
-                }
-            }
-        )
     }
 
     @ViewBuilder
@@ -948,7 +1050,40 @@ struct CameraScreen: View {
     // MARK: - Actions
 
     private func capture() {
+        closeControlDrawers()
         viewModel.capture(camera: camera)
+    }
+
+    private func closeControlDrawers() {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) {
+            isShowingLookDrawer = false
+            isShowingTools = false
+        }
+    }
+
+    private func openRecipeDetail(_ recipe: FilmRecipe) {
+        closeControlDrawers()
+        recipeForDetail = viewModel.recipe(for: recipe.id) ?? recipe
+    }
+
+    private func toggleLookDrawer() {
+        withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.84)) {
+            if !isShowingLookDrawer {
+                isShowingTools = false
+            }
+            isShowingLookDrawer.toggle()
+        }
+    }
+
+    private func updateLiveRecipePreviews() {
+        if camera.isRunning,
+           !isReviewing,
+           isShowingLookDrawer || recipeForDetail != nil {
+            livePreviews.attach(to: camera)
+        } else {
+            livePreviews.detach()
+            livePreviews.clear()
+        }
     }
 
     private func blinkShutter() {
@@ -968,7 +1103,7 @@ struct CameraScreen: View {
         // Imports pause frame delivery while the renderer works. Keep that
         // pause authoritative across scene and tab changes so a foreground
         // callback cannot resume the live GPU path halfway through an import.
-        if viewModel.isImporting {
+        if isImporting {
             if scenePhase == .active, isCameraTabActive {
                 camera.setFrameDeliveryPaused(true)
                 camera.stop(after: CameraActivityPolicy.gracePeriod)
@@ -1008,7 +1143,7 @@ struct CameraScreen: View {
             scenePhase == .active
             && isCameraTabActive
             && !isReviewing
-            && !viewModel.isImporting
+            && !isImporting
     }
 
     private func normalizedFocusPoint(

@@ -11,6 +11,7 @@ struct RecipePickerView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     init(
         recipes: [FilmRecipe],
@@ -26,7 +27,9 @@ struct RecipePickerView: View {
 
     private var swatchSize: CGSize {
         if compact {
-            return CGSize(width: 108, height: 64)
+            return dynamicTypeSize.isAccessibilitySize
+                ? CGSize(width: 132, height: 76)
+                : CGSize(width: 108, height: 64)
         }
         // Regular widths (iPad) have room for a slightly larger swatch.
         return horizontalSizeClass == .regular
@@ -38,8 +41,8 @@ struct RecipePickerView: View {
         compact ? 10 : 10
     }
 
-    /// Compact tiles keep the name inside the swatch; standard tiles add a
-    /// caption beneath. Both stay well under the camera chrome's budget.
+    /// Compact tiles keep the name inside the swatch at normal sizes; large
+    /// accessibility text moves it below in a two-line caption.
     private var railHeight: CGFloat {
         compact ? swatchSize.height + 12 : swatchSize.height + 30
     }
@@ -55,7 +58,64 @@ struct RecipePickerView: View {
         return [compactProfile] + recipes.filter { $0.id != compactProfile.id }
     }
 
+    private enum RecipeGroup: String, CaseIterable, Identifiable {
+        case compact
+        case film
+        case monochrome
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .compact: return "Compact"
+            case .film: return "Film"
+            case .monochrome: return "Monochrome"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .compact: return "camera.fill"
+            case .film: return "film"
+            case .monochrome: return "circle.lefthalf.filled"
+            }
+        }
+    }
+
+    private struct RecipeGroupSection: Identifiable {
+        let group: RecipeGroup
+        let recipes: [FilmRecipe]
+        var id: String { group.id }
+    }
+
+    private var groupedRecipes: [RecipeGroupSection] {
+        RecipeGroup.allCases.compactMap { group in
+            let groupRecipes = presentationRecipes.filter { recipe in
+                switch group {
+                case .compact:
+                    return recipe.filmBase == .compactDigital
+                case .monochrome:
+                    return recipe.filmBase.monochromeFilter != nil
+                        || recipe.filmBase == .sepia
+                case .film:
+                    return recipe.filmBase != .compactDigital
+                        && recipe.filmBase.monochromeFilter == nil
+                        && recipe.filmBase != .sepia
+                }
+            }
+            return groupRecipes.isEmpty ? nil : RecipeGroupSection(group: group, recipes: groupRecipes)
+        }
+    }
+
     var body: some View {
+        if compact {
+            expandedPicker
+        } else {
+            standardRail
+        }
+    }
+
+    private var standardRail: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: tileSpacing) {
@@ -89,6 +149,82 @@ struct RecipePickerView: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("recipe-picker")
         .accessibilityLabel("Film recipe picker. Swipe left or right to browse looks.")
+    }
+
+    /// The drawer is intentionally grouped by the kind of camera decision it
+    /// represents. A compact profile and a monochrome look should not be
+    /// hidden in one undifferentiated strip of thumbnails.
+    private var expandedPicker: some View {
+        ScrollViewReader { outerProxy in
+            ScrollView(.vertical, showsIndicators: false) {
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    ForEach(groupedRecipes) { section in
+                        let group = section.group
+                        let recipes = section.recipes
+                        VStack(alignment: .leading, spacing: 7) {
+                        HStack(spacing: 7) {
+                            Image(systemName: group.symbol)
+                                .font(.system(.caption, weight: .bold))
+                                .foregroundStyle(groupAccent(group))
+                                .accessibilityHidden(true)
+                            Text(group.title.uppercased())
+                                .font(.system(.caption, design: .rounded).weight(.bold))
+                                .tracking(0.8)
+                                .foregroundStyle(groupAccent(group))
+                            Text("\(recipes.count)")
+                                .font(.system(.caption2, design: .monospaced).weight(.bold))
+                                .foregroundStyle(FilmyTheme.tertiary)
+                            Spacer(minLength: 0)
+                        }
+
+                            ScrollViewReader { rowProxy in
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    LazyHStack(alignment: .top, spacing: 10) {
+                                        ForEach(recipes) { recipe in
+                                            recipeButton(for: recipe)
+                                                .id(recipe.id)
+                                        }
+                                    }
+                                    .padding(.horizontal, 2)
+                                    .padding(.vertical, 2)
+                                }
+                                .scrollClipDisabled()
+                                .accessibilityIdentifier("recipe-group-\(group.id)")
+                                .onAppear {
+                                    if recipes.contains(where: { $0.id == selectedRecipeID }) {
+                                        rowProxy.scrollTo(selectedRecipeID, anchor: .center)
+                                    }
+                                }
+                            }
+                        }
+                        .id(section.id)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+            }
+            .onAppear {
+                if let section = groupedRecipes.first(where: { $0.recipes.contains(where: { $0.id == selectedRecipeID }) }) {
+                    outerProxy.scrollTo(section.id, anchor: .center)
+                }
+            }
+        }
+        // Landscape phones have very little vertical room once the drawer
+        // header and capture controls are accounted for. Keep the drawer
+        // bounded and let its grouped rows scroll inside that space.
+        .frame(maxHeight: verticalSizeClass == .compact
+            ? (dynamicTypeSize.isAccessibilitySize ? 220 : 190)
+            : (dynamicTypeSize.isAccessibilitySize ? 390 : 330))
+        .accessibilityIdentifier("recipe-picker")
+        .accessibilityLabel("Film recipe picker grouped by compact, film, and monochrome looks")
+    }
+
+    private func groupAccent(_ group: RecipeGroup) -> Color {
+        switch group {
+        case .compact: return FilmyTheme.accent
+        case .film: return FilmyTheme.filmAccent
+        case .monochrome: return FilmyTheme.primary
+        }
     }
 
     private func recipeButton(for recipe: FilmRecipe) -> some View {
@@ -127,23 +263,141 @@ struct RecipePickerView: View {
                 recipe: recipe,
                 isSelected: isSelected,
                 compact: compact,
-                showsLabel: compact
+                showsLabel: compact && !dynamicTypeSize.isAccessibilitySize
             )
             .frame(width: swatchSize.width, height: swatchSize.height)
 
-            if !compact {
+            if !compact || dynamicTypeSize.isAccessibilitySize {
                 Text(recipe.name)
-                    .font(.system(size: 11, weight: isSelected ? .bold : .semibold, design: .rounded))
+                    .font(.system(
+                        dynamicTypeSize.isAccessibilitySize ? .caption : .caption2,
+                        design: .rounded
+                    ).weight(isSelected ? .bold : .semibold))
                     .foregroundStyle(isSelected ? FilmyTheme.accent : Color.white.opacity(0.72))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                    .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 0.82 : 0.78)
+                    .multilineTextAlignment(.center)
                     .frame(width: swatchSize.width + 8)
+                    .fixedSize(horizontal: false, vertical: dynamicTypeSize.isAccessibilitySize)
             }
         }
         .opacity(isSelected ? 1 : 0.8)
         .scaleEffect(isSelected ? 1 : 0.95)
         .contentShape(Rectangle())
         .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: isSelected)
+    }
+}
+
+/// The camera's current look control. It stays useful in both the bottom dock
+/// and the narrow iPad edge column, while exposing the full recipe name to
+/// VoiceOver and Dynamic Type.
+struct CurrentRecipeButton: View {
+    let recipe: FilmRecipe
+    let isCustomized: Bool
+    let compactLayout: Bool
+    let action: () -> Void
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var accentColor: Color {
+        recipe.filmBase == .compactDigital ? FilmyTheme.accent : FilmyTheme.filmAccent
+    }
+
+    private var semanticSubtitle: String {
+        if isCustomized { return "Customized" }
+        if recipe.filmBase == .compactDigital { return "Compact digital" }
+        if recipe.filmBase.monochromeFilter != nil || recipe.filmBase == .sepia {
+            return "Monochrome"
+        }
+        return "Film look"
+    }
+
+    private var recipeIcon: some View {
+        Image(systemName: recipe.filmBase == .compactDigital ? "camera.fill" : "film")
+            .font(.system(size: 14, weight: .bold))
+            .foregroundStyle(accentColor)
+            .accessibilityHidden(true)
+    }
+
+    private var regularLabel: some View {
+        HStack(spacing: 8) {
+            recipeIcon
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(recipe.name)
+                    .font(.system(.subheadline, design: .rounded).weight(.bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                    .minimumScaleFactor(0.72)
+
+                Text(semanticSubtitle)
+                    .font(.system(.caption2, design: .rounded).weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.64))
+                    .lineLimit(1)
+            }
+
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.white.opacity(0.58))
+                .accessibilityHidden(true)
+        }
+    }
+
+    private var narrowLabel: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                recipeIcon
+                Text(recipe.name)
+                    .font(.system(.caption, design: .rounded).weight(.bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.82)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Text(semanticSubtitle)
+                .font(.system(.caption2, design: .rounded).weight(.semibold))
+                .foregroundStyle(.white.opacity(0.64))
+                .lineLimit(2)
+                .minimumScaleFactor(0.82)
+        }
+    }
+
+    init(
+        recipe: FilmRecipe,
+        isCustomized: Bool,
+        compactLayout: Bool = false,
+        action: @escaping () -> Void
+    ) {
+        self.recipe = recipe
+        self.isCustomized = isCustomized
+        self.compactLayout = compactLayout
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Group {
+                if compactLayout {
+                    narrowLabel
+                } else {
+                    regularLabel
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: compactLayout ? 58 : FilmyTheme.minimumHitTarget, alignment: .leading)
+            .padding(.horizontal, 11)
+            .background(Color.black.opacity(0.48), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 15, style: .continuous)
+                    .stroke(accentColor.opacity(0.38), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.pressable)
+        .frame(maxWidth: 190)
+        .accessibilityIdentifier("recipe-menu")
+        .accessibilityLabel("Choose look, current recipe \(recipe.name)")
+        .accessibilityValue(semanticSubtitle)
+        .accessibilityHint("Opens the compact, film, and monochrome look picker")
     }
 }
 
@@ -209,10 +463,12 @@ struct RecipeDetailView: View {
     let onUpdate: ((FilmRecipe) -> Void)?
     let onReset: (() -> Void)?
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var draft: FilmRecipe
     @State private var expandedSections: Set<EditorSection> = [.tone, .color]
+    @State private var isShowingLookInfo = false
 
     init(
         recipe: FilmRecipe,
@@ -243,33 +499,70 @@ struct RecipeDetailView: View {
                     )
 
                     hero
-                    identity
-                    controlSummary
-
-                    if recipe.filmBase == .compactDigital {
-                        compactDigitalProfileCard
-                    }
 
                     if onUpdate != nil {
                         editor
                     }
 
-                    if publicReferenceEntry != nil {
-                        publicReferenceCard
+                    VStack(alignment: .leading, spacing: 0) {
+                        Button {
+                            withAnimation(reduceMotion ? nil : .snappy(duration: 0.22)) {
+                                isShowingLookInfo.toggle()
+                            }
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "info.circle")
+                                    .font(.system(.subheadline, weight: .bold))
+                                    .foregroundStyle(FilmyTheme.accent)
+                                    .accessibilityHidden(true)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("About this look")
+                                        .font(.system(.headline, design: .rounded).weight(.bold))
+                                        .foregroundStyle(FilmyTheme.primary)
+                                    Text(isShowingLookInfo ? "Description and camera reference" : "Description, reference, and provenance")
+                                        .font(.system(.caption, design: .rounded).weight(.medium))
+                                        .foregroundStyle(FilmyTheme.secondary)
+                                }
+                                Spacer(minLength: 8)
+                                Image(systemName: isShowingLookInfo ? "chevron.up" : "chevron.down")
+                                    .font(.system(.caption, weight: .bold))
+                                    .foregroundStyle(FilmyTheme.secondary)
+                                    .accessibilityHidden(true)
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("recipe-info-toggle")
+                        .accessibilityLabel("About this look")
+                        .accessibilityValue(isShowingLookInfo ? "Expanded" : "Collapsed")
+                        .accessibilityHint("Shows the description, camera reference, and provenance")
+
+                        if isShowingLookInfo {
+                            VStack(alignment: .leading, spacing: 18) {
+                                identity
+                                controlSummary
+
+                                if recipe.filmBase == .compactDigital {
+                                    compactDigitalProfileCard
+                                }
+
+                                if publicReferenceEntry != nil {
+                                    publicReferenceCard
+                                }
+
+                                provenanceNote
+                            }
+                            .padding(.top, 10)
+                        }
+                    }
+                    .padding(14)
+                    .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous)
+                            .strokeBorder(FilmyTheme.line, lineWidth: 1)
                     }
 
-                    HStack(alignment: .top, spacing: 9) {
-                        Image(systemName: "camera.aperture")
-                            .font(.system(.caption, weight: .bold))
-                            .foregroundStyle(FilmyTheme.accent)
-                            .frame(width: 24, height: 24)
-
-                        Text("Original camera-inspired looks, interpreted for Filmy Camera. Results vary with light, exposure, and the device camera.")
-                            .font(.system(.caption, design: .rounded).weight(.medium))
-                            .foregroundStyle(FilmyTheme.tertiary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .accessibilityElement(children: .combine)
                 }
                 .frame(maxWidth: FilmyLayout.readableMaxWidth)
                 .frame(maxWidth: .infinity)
@@ -321,6 +614,21 @@ struct RecipeDetailView: View {
         )
     }
 
+    private var provenanceNote: some View {
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: "camera.aperture")
+                .font(.system(.caption, weight: .bold))
+                .foregroundStyle(FilmyTheme.accent)
+                .frame(width: 24, height: 24)
+
+            Text("Original camera-inspired looks, interpreted for Filmy Camera. Results vary with light, exposure, and the device camera.")
+                .font(.system(.caption, design: .rounded).weight(.medium))
+                .foregroundStyle(FilmyTheme.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
     private var hasPendingChanges: Bool {
         draft != recipe
     }
@@ -343,7 +651,7 @@ struct RecipeDetailView: View {
         if isSelected {
             return hasPendingChanges
                 ? "Apply changes to \(recipe.name)"
-                : "\(recipe.name) is selected"
+                : "Done editing \(recipe.name)"
         }
         return "Use \(recipe.name) recipe"
     }
@@ -663,34 +971,6 @@ struct RecipeDetailView: View {
                 }
 
                 Spacer(minLength: 12)
-
-                if onUpdate != nil {
-                    Button(hasPendingChanges ? "Apply" : "Done") {
-                        commitDraft()
-                        HapticFeedback.play(.success)
-                        dismiss()
-                    }
-                    .font(.system(.subheadline, design: .rounded).weight(.bold))
-                    .foregroundStyle(FilmyTheme.background)
-                    .padding(.horizontal, 12)
-                    .frame(minHeight: FilmyTheme.minimumHitTarget)
-                    .background(
-                        FilmyTheme.accent,
-                        in: Capsule()
-                    )
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(
-                        hasPendingChanges
-                            ? "Apply recipe changes"
-                            : "Done editing \(recipe.name)"
-                    )
-                    .accessibilityValue(hasPendingChanges ? "Changes pending" : "No changes")
-                    .accessibilityHint(
-                        hasPendingChanges
-                            ? "Saves the current recipe controls and closes the editor"
-                            : "Closes the editor and returns to the camera"
-                    )
-                }
 
                 Button("Reset") {
                     draft = originalRecipe

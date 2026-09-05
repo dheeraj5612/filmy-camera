@@ -1,13 +1,15 @@
-# Current iPad App Store screenshot pack
+# Current iPad 13-inch App Store screenshot pack
 
-This directory holds five validated 2064×2752 PNGs for the 13-inch iPad App Store Connect slot. Uploaded and read back on September 4, 2026. The numeric prefixes preserve the upload order:
+Five actual 2064×2752 PNGs from version 1.0.0 (7), captured September 4, 2026 after the camera UX redesign and review-inset fix. These replace the build 5 baseline locally; uploading them to App Store Connect is a separate release gate.
 
 1. G7 X Compact import
-2. Film recipe import
-3. Monochrome recipe import
+2. Muted Color import
+3. Fine Monochrome import
 4. Populated Roll
 5. Photo detail
 
-The screenshots are from build 5, whose application source is unchanged from commit `d9ef13836fdacea4929dd60cddb32b8eb0afd785`. The source image is a generated cafe demo imported through Photos, then shown through the normal production import, filter, save, Roll, and detail screens. This pack demonstrates imported media and does not demonstrate live camera capture. The generated source contains no private photos.
+The public generated cafe original in `../demo-source/` was imported through the normal production Photos picker, renderer, review, save, Roll, and detail flows. This demonstrates imported media, not live camera capture. No private photos or composited app UI are included.
 
-Run `scripts/release/validate-store-media.sh` after all five PNGs arrive. Structural checks do not establish visual quality, freshness, or App Store Connect acceptance.
+Evidence: `build/ux-redesign-20260904/ipad-review-accepted.xcresult` and its exported attachment manifest (ignored). The run passed all three treatments, status-bar/bottom-gesture clearance, photo width, covered-camera interaction, saving, and Roll/detail checks. The final narrow camera-look label adjustment is outside the screens represented in this pack.
+
+Run `scripts/release/validate-store-media.sh` for format/dimension checks. Structural validation is separate from visual inspection and App Store Connect acceptance.
