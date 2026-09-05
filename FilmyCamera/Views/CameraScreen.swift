@@ -843,7 +843,13 @@ struct CameraScreen: View {
         } else if shouldShowCameraEmptyState {
             captureNotice
         } else {
-            CaptureButton(isCapturing: viewModel.isCapturing, isEnabled: !camera.manualControls.isApplying, action: capture)
+            CaptureButton(
+                isCapturing: viewModel.isCapturing,
+                isEnabled: !camera.manualControls.isApplying,
+                unavailableLabel: "Applying camera settings",
+                unavailableHint: "Wait for the camera to finish applying your settings",
+                action: capture
+            )
         }
     }
 
@@ -1035,7 +1041,11 @@ struct CameraScreen: View {
         .buttonStyle(.pressable)
         .accessibilityIdentifier("pro-controls-button")
         .accessibilityLabel("Pro controls")
-        .accessibilityValue(camera.manualControls.isAnyManualModeEnabled ? "Manual settings active" : "Auto settings")
+        .accessibilityValue(
+            camera.manualControls.isApplying
+                ? "Applying camera settings"
+                : (camera.manualControls.isAnyManualModeEnabled ? "Manual settings active" : "Auto settings")
+        )
         .accessibilityHint("Adjust ISO, shutter speed, white balance, and focus")
     }
 

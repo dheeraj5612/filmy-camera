@@ -100,8 +100,8 @@ struct ManualCameraControlsView: View {
             return "Camera controls will appear when the camera is ready."
         }
         if isApplying { return "Applying your settings…" }
-        if controls.isVirtualDevice {
-            return "Automatic lens switching is active. Choose a lens below to use its manual controls."
+        if controls.requiresPhysicalLensSelection {
+            return "Automatic lens switching is active. Choose a lens below to access more manual controls."
         }
         if controls.isAnyManualModeEnabled {
             return "Manual settings are applied to the next capture."
