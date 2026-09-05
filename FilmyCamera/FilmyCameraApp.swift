@@ -28,9 +28,8 @@ struct FilmyCameraApp: App {
         // Compile the film pipeline off the main thread while the camera
         // session configures, so the first live frame renders without a
         // shader-compilation stall.
-        let warmUpRecipe = CameraViewModel.launchRecipe()
         Task.detached(priority: .userInitiated) {
-            FilmRenderer.warmUp(recipe: warmUpRecipe)
+            FilmRenderer.warmUp(recipe: CameraViewModel.launchRecipe())
         }
     }
 

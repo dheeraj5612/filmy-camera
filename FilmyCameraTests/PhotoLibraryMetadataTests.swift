@@ -422,4 +422,81 @@ final class PhotoLibraryMetadataTests: XCTestCase {
             1
         )
     }
+
+    func testThumbnailCacheKeyBypassesUnsafeOrDetailSizedRequests() {
+        let base: (CGSize) -> String? = { targetSize in
+            PhotoLibraryThumbnailCachePolicy.key(
+                assetIdentifier: "asset",
+                targetSize: targetSize,
+                contentMode: .aspectFill,
+                authorizationStatus: .authorized,
+                revision: "revision"
+            )
+        }
+
+        XCTAssertNotNil(base(CGSize(width: 600, height: 480)))
+        XCTAssertNil(base(CGSize(width: 601, height: 480)))
+        XCTAssertNil(base(CGSize(width: CGFloat.infinity, height: 480)))
+        XCTAssertNil(base(CGSize(width: CGFloat.nan, height: 480)))
+    }
+
+    func testThumbnailCacheKeySeparatesAssetRevisions() {
+        let key = { revision in
+            PhotoLibraryThumbnailCachePolicy.key(
+                assetIdentifier: "asset",
+                targetSize: CGSize(width: 400, height: 400),
+                contentMode: .aspectFill,
+                authorizationStatus: .authorized,
+                revision: revision
+            )
+        }
+
+        XCTAssertNotEqual(key("2000x1500|1"), key("2000x1500|2"))
+        XCTAssertNotEqual(key("2000x1500|1"), key("3000x2000|1"))
+    }
+
+    @MainActor
+    func testImageRequestStateOnlyCachesConfirmedFinalResults() async {
+        let fallback = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).image { context in
+            UIColor.systemOrange.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        }
+
+        let failedState = PhotoLibraryService.ImageRequestState(
+            imageManager: PHImageManager.default()
+        )
+        failedState.rememberFallback(fallback)
+        let failedResult: UIImage? = await withCheckedContinuation { continuation in
+            failedState.install(continuation)
+            // Models a degraded preview followed by a final nil/error result.
+            failedState.finish(with: nil, allowFallback: true)
+        }
+        XCTAssertEqual(failedResult?.pngData(), fallback.pngData())
+        XCTAssertFalse(failedState.canCacheResult())
+
+        let finalImage = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).image { context in
+            UIColor.systemTeal.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        }
+        let successState = PhotoLibraryService.ImageRequestState(
+            imageManager: PHImageManager.default()
+        )
+        let successResult: UIImage? = await withCheckedContinuation { continuation in
+            successState.install(continuation)
+            successState.finish(with: finalImage, cacheable: true)
+        }
+        XCTAssertEqual(successResult?.pngData(), finalImage.pngData())
+        XCTAssertTrue(successState.canCacheResult())
+
+        let cancelledState = PhotoLibraryService.ImageRequestState(
+            imageManager: PHImageManager.default()
+        )
+        cancelledState.rememberFallback(fallback)
+        let cancelledResult: UIImage? = await withCheckedContinuation { continuation in
+            cancelledState.install(continuation)
+            cancelledState.cancel()
+        }
+        XCTAssertNil(cancelledResult)
+        XCTAssertFalse(cancelledState.canCacheResult())
+    }
 }

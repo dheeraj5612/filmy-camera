@@ -4,6 +4,22 @@ import XCTest
 
 @MainActor
 final class CameraViewModelPersistenceTests: XCTestCase {
+    func testLaunchWarmupResolvesTheSelectedCustomLook() throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        var customized = FilmRecipe.builtIns[1]
+        customized.colorChrome = 0.8
+        customized.whiteBalance.temperature = 0.5
+        defaults.set(customized.id, forKey: CameraViewModel.selectedRecipeIDKey)
+        defaults.set(try JSONEncoder().encode([customized.id: customized]),
+                     forKey: CameraViewModel.recipeOverridesKey)
+
+        let warmed = CameraViewModel.launchRecipe(defaults: defaults)
+        let model = CameraViewModel(defaults: defaults)
+        XCTAssertEqual(warmed, model.selectedRecipe)
+        XCTAssertEqual(warmed.colorChrome, 0.8)
+    }
+
     func testInvalidSelectedRecipeIDIsNormalizedAndRewritten() throws {
         let (defaults, suiteName) = try makeDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }

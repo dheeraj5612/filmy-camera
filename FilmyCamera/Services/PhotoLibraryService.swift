@@ -83,6 +83,35 @@ struct PhotoLibraryImageRequestKey: Hashable, Sendable {
     let authorizationStatusRawValue: Int?
 }
 
+enum PhotoLibraryThumbnailCachePolicy {
+    static let maxPixelSize = 600
+
+    /// Only small, finite requests enter the decoded thumbnail cache. Full
+    /// detail requests and Photos' maximum-size sentinel bypass it entirely.
+    static func key(
+        assetIdentifier: String,
+        targetSize: CGSize,
+        contentMode: PHImageContentMode,
+        authorizationStatus: PHAuthorizationStatus?,
+        revision: String?
+    ) -> String? {
+        guard !assetIdentifier.isEmpty,
+              targetSize.width.isFinite,
+              targetSize.height.isFinite,
+              targetSize.width > 0,
+              targetSize.height > 0,
+              max(targetSize.width, targetSize.height) <= CGFloat(maxPixelSize) else {
+            return nil
+        }
+
+        let width = max(Int(targetSize.width.rounded(.up)), 1)
+        let height = max(Int(targetSize.height.rounded(.up)), 1)
+        let mode = contentMode == .aspectFit ? "fit" : "fill"
+        let status = authorizationStatus?.rawValue ?? -1
+        return "\(assetIdentifier)|\(width)x\(height)|\(mode)|\(status)|\(revision ?? "-")"
+    }
+}
+
 enum PhotoLibraryGalleryImagePolicy {
     static func canLoad(
         isPhotosAsset: Bool,
@@ -320,13 +349,24 @@ final class PhotoLibraryService: ObservableObject {
         let image: UIImage?
     }
 
-    private final class ImageRequestState: @unchecked Sendable {
+    private final class ImageBox: @unchecked Sendable {
+        let image: UIImage
+
+        init(_ image: UIImage) {
+            self.image = image
+        }
+    }
+
+    // Internal so the cacheability state machine can be regression-tested
+    // without requiring Photos permission or a live PHImage request.
+    internal final class ImageRequestState: @unchecked Sendable {
         private let lock = NSLock()
         private let imageManager: PHImageManager
         private var requestID: PHImageRequestID?
         private var continuation: CheckedContinuation<UIImage?, Never>?
         private var fallbackImage: UIImage?
         private var didFinish = false
+        private var didProduceCacheableImage = false
 
         init(imageManager: PHImageManager) {
             self.imageManager = imageManager
@@ -371,7 +411,8 @@ final class PhotoLibraryService: ObservableObject {
         func finish(
             with image: UIImage?,
             cancelRequest: Bool = false,
-            allowFallback: Bool = false
+            allowFallback: Bool = false,
+            cacheable: Bool = false
         ) {
             lock.lock()
             guard !didFinish else {
@@ -379,6 +420,7 @@ final class PhotoLibraryService: ObservableObject {
                 return
             }
             didFinish = true
+            didProduceCacheableImage = cacheable && image != nil
             let resolvedImage = image ?? (allowFallback ? fallbackImage : nil)
             fallbackImage = nil
             let continuation = self.continuation
@@ -393,6 +435,12 @@ final class PhotoLibraryService: ObservableObject {
             continuation?.resume(returning: resolvedImage)
         }
 
+        func canCacheResult() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return didProduceCacheableImage
+        }
+
         func cancel() {
             finish(with: nil, cancelRequest: true)
         }
@@ -404,8 +452,12 @@ final class PhotoLibraryService: ObservableObject {
         let pixelHeight: Int
     }
 
-    @Published private(set) var assets: [PHAsset] = []
-    @Published private(set) var localSavedFrames: [LocalSavedFrame] = []
+    @Published private(set) var assets: [PHAsset] = [] {
+        didSet { galleryAssetsCache = nil }
+    }
+    @Published private(set) var localSavedFrames: [LocalSavedFrame] = [] {
+        didSet { galleryAssetsCache = nil }
+    }
     @Published private(set) var hasLocalCache = false
     @Published private(set) var authorizationStatus: PHAuthorizationStatus
     @Published private(set) var addOnlyAuthorizationStatus: PHAuthorizationStatus
@@ -420,11 +472,24 @@ final class PhotoLibraryService: ObservableObject {
     private let shareDirectoryName = "FilmyCameraShare"
     private let localCacheMaxBytes = 250 * 1024 * 1024
     private let isUITesting: Bool
+    private let thumbnailCache = NSCache<NSString, UIImage>()
+    private var thumbnailCacheGeneration: UInt64 = 0
+    private var savedFrameResourcesCache: [String: SavedFrameResource]?
 
-    private(set) var metadataByAssetIdentifier: [String: SavedFrameMetadata]
+    private func invalidateThumbnailCache() {
+        thumbnailCacheGeneration &+= 1
+        thumbnailCache.removeAllObjects()
+    }
+
+    private(set) var metadataByAssetIdentifier: [String: SavedFrameMetadata] {
+        didSet { galleryAssetsCache = nil }
+    }
+    private var galleryAssetsCache: [PhotoLibraryGalleryAsset]?
 
     init() {
         isUITesting = ProcessInfo.processInfo.arguments.contains("-ui-testing")
+        thumbnailCache.countLimit = 80
+        thumbnailCache.totalCostLimit = 48 * 1024 * 1024
         metadataByAssetIdentifier = Self.loadMetadata(forKey: savedFrameMetadataKey)
         if isUITesting {
             authorizationStatus = .denied
@@ -523,18 +588,24 @@ final class PhotoLibraryService: ObservableObject {
     }
 
     var galleryAssets: [PhotoLibraryGalleryAsset] {
+        if let galleryAssetsCache {
+            return galleryAssetsCache
+        }
+
         let photoIdentifiers = Set(assets.map(\.localIdentifier))
         let combined = assets.map(PhotoLibraryGalleryAsset.photos)
             + localSavedFrames
                 .filter { !photoIdentifiers.contains($0.assetIdentifier) }
                 .map(PhotoLibraryGalleryAsset.cached)
 
-        return combined.sorted { lhs, rhs in
+        let sorted = combined.sorted { lhs, rhs in
             let lhsDate = galleryDate(for: lhs)
             let rhsDate = galleryDate(for: rhs)
             if lhsDate != rhsDate { return lhsDate > rhsDate }
             return lhs.assetIdentifier > rhs.assetIdentifier
         }
+        galleryAssetsCache = sorted
+        return sorted
     }
 
     private func galleryDate(for asset: PhotoLibraryGalleryAsset) -> Date {
@@ -636,8 +707,13 @@ final class PhotoLibraryService: ObservableObject {
     }
 
     private func refreshAuthorizationStatuses() {
+        let previousReadStatus = authorizationStatus
+        let previousAddStatus = addOnlyAuthorizationStatus
         authorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         addOnlyAuthorizationStatus = PHPhotoLibrary.authorizationStatus(for: .addOnly)
+        if authorizationStatus != previousReadStatus || addOnlyAuthorizationStatus != previousAddStatus {
+            invalidateThumbnailCache()
+        }
     }
 
     func save(
@@ -669,8 +745,10 @@ final class PhotoLibraryService: ObservableObject {
             )
             let assetIdentifierBox = IdentifierBox()
             let metadata = SavedFrameMetadata(recipe: recipe, capturedAt: capturedAt)
-            let cacheData = imageData.flatMap { $0.isEmpty ? nil : $0 }
-                ?? image.jpegData(compressionQuality: 0.95)
+            let cacheData = await Self.cacheData(
+                providedData: imageData,
+                image: image
+            )
 
             let photoWriteCompletion = PhotoLibraryCompletionBridge.mainActorAsync { [weak self] success in
                 guard let self else { return }
@@ -686,9 +764,12 @@ final class PhotoLibraryService: ObservableObject {
                     imageData: cacheData,
                     image: image
                 )
+                // The Photos asset and local Roll fallback are durable now.
+                // Album organization is optional and can finish after the
+                // review is dismissed, so it should not extend save latency.
+                self.refresh()
+                completion(.success(()))
                 guard canManageAppAlbum else {
-                    self.refresh()
-                    completion(.success(()))
                     return
                 }
 
@@ -698,7 +779,6 @@ final class PhotoLibraryService: ObservableObject {
                     // fails. Do not report a false save failure or ask the user to
                     // retry and create a duplicate asset.
                     _ = albumSaved
-                    completion(.success(()))
                 }
             }
 
@@ -819,9 +899,18 @@ final class PhotoLibraryService: ObservableObject {
     }
 
     private var savedFrameResources: [String: SavedFrameResource] {
-        get { Self.loadSavedFrameResources() }
+        get {
+            if let savedFrameResourcesCache { return savedFrameResourcesCache }
+            let resources = Self.loadSavedFrameResources()
+            savedFrameResourcesCache = resources
+            return resources
+        }
         set {
             guard let data = try? JSONEncoder().encode(newValue) else { return }
+            // Every app write goes through this main-actor setter. Row/image
+            // lookups reuse the decoded index; background maintenance keeps
+            // using loadSavedFrameResources() for a fresh persisted snapshot.
+            savedFrameResourcesCache = newValue
             UserDefaults.standard.set(data, forKey: savedFrameResourcesKey)
         }
     }
@@ -919,13 +1008,10 @@ final class PhotoLibraryService: ObservableObject {
 
     private func refreshCachedFrames(excluding excludedIdentifiers: Set<String>) {
         let resources = savedFrameResources
-        let regularFilenames: Set<String>
-        if let directoryURL = localFramesDirectoryURL,
-           let regularFiles = PhotoLibraryCachePath.regularFileURLs(in: directoryURL) {
-            regularFilenames = Set(regularFiles.map(\.lastPathComponent))
-        } else {
-            regularFilenames = []
+        let regularFiles = localFramesDirectoryURL.flatMap {
+            PhotoLibraryCachePath.regularFileURLs(in: $0)
         }
+        let regularFilenames = Set(regularFiles?.map(\.lastPathComponent) ?? [])
         localSavedFrames = savedAssetIdentifiers.compactMap { identifier in
             guard !excludedIdentifiers.contains(identifier),
                   let resource = resources[identifier],
@@ -941,7 +1027,7 @@ final class PhotoLibraryService: ObservableObject {
             )
         }
         if let directoryURL = localFramesDirectoryURL {
-            if let regularFiles = PhotoLibraryCachePath.regularFileURLs(in: directoryURL) {
+            if let regularFiles {
                 hasLocalCache = !regularFiles.isEmpty
             } else {
                 hasLocalCache = FileManager.default.fileExists(atPath: directoryURL.path)
@@ -1014,6 +1100,23 @@ final class PhotoLibraryService: ObservableObject {
         }.value
     }
 
+    /// JPEG fallback encoding can be expensive for a large imported frame.
+    /// Keep it off the main actor while preserving the caller-provided output
+    /// bytes whenever the renderer already produced them.
+    private nonisolated static func cacheData(
+        providedData: Data?,
+        image: UIImage
+    ) async -> Data? {
+        if let providedData, !providedData.isEmpty {
+            return providedData
+        }
+
+        let imageBox = ImageBox(image)
+        return await Task.detached(priority: .utility) {
+            imageBox.image.jpegData(compressionQuality: 0.95)
+        }.value
+    }
+
     /// Reads encoded dimensions from ImageIO without decoding the full JPEG.
     /// The UIImage passed by the review flow is deliberately downsampled, so it
     /// is only a fallback when encoded metadata is unavailable.
@@ -1038,6 +1141,7 @@ final class PhotoLibraryService: ObservableObject {
     }
 
     private func removeCachedFrame(identifier: String) {
+        invalidateThumbnailCache()
         var resources = savedFrameResources
         guard let resource = resources.removeValue(forKey: identifier) else { return }
         if let resourceURL = localFrameURL(for: resource.filename) {
@@ -1194,6 +1298,7 @@ final class PhotoLibraryService: ObservableObject {
         // Invalidate writes already running off the main actor so they cannot
         // recreate a cache entry after the user clears it.
         cacheWriteGeneration &+= 1
+        invalidateThumbnailCache()
 
         guard let directoryURL = localFramesDirectoryURL else {
             savedFrameResources = [:]
@@ -1418,11 +1523,28 @@ final class PhotoLibraryService: ObservableObject {
                   let resourceURL = localFrameURL(for: resource.filename) else {
                 return nil
             }
-            return await Task.detached(priority: .utility) {
+            let cacheKey = PhotoLibraryThumbnailCachePolicy.key(
+                assetIdentifier: frame.assetIdentifier,
+                targetSize: targetSize,
+                contentMode: contentMode,
+                authorizationStatus: nil,
+                revision: resource.filename
+            )
+            let nsCacheKey = cacheKey.map { $0 as NSString }
+            if let nsCacheKey, let cached = thumbnailCache.object(forKey: nsCacheKey) {
+                return cached
+            }
+            let cacheGeneration = thumbnailCacheGeneration
+            let loaded = await Task.detached(priority: .utility) {
                 CachedThumbnail(
                     image: Self.cachedImage(at: resourceURL, targetSize: targetSize)
                 )
             }.value.image
+            guard !Task.isCancelled else { return loaded }
+            if cacheGeneration == thumbnailCacheGeneration {
+                storeThumbnail(loaded, forKey: nsCacheKey)
+            }
+            return loaded
         }
     }
 
@@ -1431,10 +1553,24 @@ final class PhotoLibraryService: ObservableObject {
         targetSize: CGSize,
         contentMode: PHImageContentMode = .aspectFill
     ) async -> UIImage? {
+        let revision = "\(asset.pixelWidth)x\(asset.pixelHeight)|\(asset.modificationDate?.timeIntervalSinceReferenceDate ?? -1)"
+        let cacheKey = PhotoLibraryThumbnailCachePolicy.key(
+            assetIdentifier: asset.localIdentifier,
+            targetSize: targetSize,
+            contentMode: contentMode,
+            authorizationStatus: authorizationStatus,
+            revision: revision
+        )
+        let nsCacheKey = cacheKey.map { $0 as NSString }
+        if let nsCacheKey, let cached = thumbnailCache.object(forKey: nsCacheKey) {
+            return cached
+        }
+
         let imageManager = PHImageManager.default()
         let state = ImageRequestState(imageManager: imageManager)
+        let cacheGeneration = thumbnailCacheGeneration
 
-        return await withTaskCancellationHandler(operation: {
+        let loaded = await withTaskCancellationHandler(operation: {
             await withCheckedContinuation { continuation in
                 state.install(continuation)
                 let options = PHImageRequestOptions()
@@ -1463,7 +1599,8 @@ final class PhotoLibraryService: ObservableObject {
 
                     state.finish(
                         with: isCancelled || hasError ? nil : image,
-                        allowFallback: !isCancelled
+                        allowFallback: !isCancelled,
+                        cacheable: !isDegraded && !isCancelled && !hasError && image != nil
                     )
                 }
                 state.install(requestID: requestID)
@@ -1471,6 +1608,41 @@ final class PhotoLibraryService: ObservableObject {
         }, onCancel: {
             state.cancel()
         })
+        if !Task.isCancelled,
+           cacheGeneration == thumbnailCacheGeneration,
+           state.canCacheResult() {
+            storeThumbnail(loaded, forKey: nsCacheKey)
+        }
+        return loaded
+    }
+
+    private func storeThumbnail(
+        _ image: UIImage?,
+        forKey key: NSString?
+    ) {
+        guard let image, let key else {
+            return
+        }
+        let width = max(Int((image.size.width * image.scale).rounded(.up)), 1)
+        let height = max(Int((image.size.height * image.scale).rounded(.up)), 1)
+        let byteCount: Int64
+        if let cgImage = image.cgImage {
+            let result = Int64(cgImage.bytesPerRow).multipliedReportingOverflow(
+                by: Int64(cgImage.height)
+            )
+            guard !result.overflow, result.partialValue > 0 else { return }
+            byteCount = result.partialValue
+        } else {
+            let rowBytes = Int64(width).multipliedReportingOverflow(by: 4)
+            guard !rowBytes.overflow else { return }
+            let result = rowBytes.partialValue.multipliedReportingOverflow(by: Int64(height))
+            guard !result.overflow, result.partialValue > 0 else { return }
+            byteCount = result.partialValue
+        }
+
+        let maximumCost = Int64(48 * 1024 * 1024)
+        guard byteCount <= maximumCost else { return }
+        thumbnailCache.setObject(image, forKey: key, cost: Int(byteCount))
     }
 
     nonisolated static func thumbnailMaxPixelSize(for targetSize: CGSize) -> Int {

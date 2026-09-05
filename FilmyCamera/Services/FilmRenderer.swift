@@ -261,6 +261,7 @@ public final class FilmRenderer {
     private static let cubeCache = CubeCache()
     private static let thumbnailCache = ThumbnailCache()
     private static let immutableResources = ImmutableResources()
+    private static let portraitDetector = PortraitDetector()
     private static let sRGBColorSpace = CGColorSpace(name: CGColorSpace.sRGB)
     private static let spatialReferenceDimension: CGFloat = 1080
 
@@ -570,6 +571,9 @@ public final class FilmRenderer {
         // a transparent input is not multiplied repeatedly by finishing FX.
         let processingImage = opaqueImage(from: image)
         var output = processingImage
+        let subjectMask = safeRecipe.filmBase == .compactDigital
+            ? compactDigitalSubjectMask(for: captureContext, extent: sourceExtent)
+            : nil
 
         output = applyDynamicRange(to: output, recipe: safeRecipe)
         output = applyExposureAndTone(to: output, recipe: safeRecipe)
@@ -586,14 +590,16 @@ public final class FilmRenderer {
         output = applyCompactDigitalSubjectTreatment(
             to: output,
             recipe: safeRecipe,
-            captureContext: captureContext
+            captureContext: captureContext,
+            subjectMask: subjectMask
         )
         output = applyDetailControls(to: output, recipe: safeRecipe)
         output = applyClarity(to: output, recipe: safeRecipe)
         output = applyCompactDigitalSkinSmoothing(
             to: output,
             recipe: safeRecipe,
-            captureContext: captureContext
+            captureContext: captureContext,
+            subjectMask: subjectMask
         )
         // Halation is light scattered inside the film stack, so derive its
         // highlight mask before adding the final grain texture. Otherwise the
@@ -621,15 +627,7 @@ public final class FilmRenderer {
         let extent = image.extent
         guard !extent.isEmpty,
               extent.width.isFinite,
-              extent.height.isFinite,
-              let detector = CIDetector(
-                ofType: CIDetectorTypeFace,
-                context: nil,
-                options: [
-                    CIDetectorAccuracy: CIDetectorAccuracyHigh,
-                    CIDetectorMinFeatureSize: 0.05
-                ]
-              ) else {
+              extent.height.isFinite else {
             return []
         }
 
@@ -640,7 +638,7 @@ public final class FilmRenderer {
             y: detectionScale
         ))
 
-        return detector.features(in: detectionImage).compactMap { feature in
+        return portraitDetector.features(in: detectionImage).compactMap { feature in
             guard feature.type == CIFeatureTypeFace else { return nil }
             let scaledBounds = feature.bounds
             let bounds = CGRect(
@@ -650,6 +648,27 @@ public final class FilmRenderer {
                 height: scaledBounds.height / detectionScale
             ).intersection(extent)
             return bounds.isEmpty ? nil : bounds
+        }
+    }
+
+    /// CIDetector retains expensive analysis state. Keep one lazy detector
+    /// across captures and imports, serializing access to that mutable state.
+    /// No detector is initialized for film-only sessions or the live preview.
+    private final class PortraitDetector: @unchecked Sendable {
+        private let lock = NSLock()
+        private lazy var detector = CIDetector(
+            ofType: CIDetectorTypeFace,
+            context: nil,
+            options: [
+                CIDetectorAccuracy: CIDetectorAccuracyHigh,
+                CIDetectorMinFeatureSize: 0.05
+            ]
+        )
+
+        func features(in image: CIImage) -> [CIFeature] {
+            lock.lock()
+            defer { lock.unlock() }
+            return detector?.features(in: image) ?? []
         }
     }
 
@@ -869,13 +888,11 @@ public final class FilmRenderer {
     private static func applyCompactDigitalSubjectTreatment(
         to image: CIImage,
         recipe: FilmRecipe,
-        captureContext: CaptureContext
+        captureContext: CaptureContext,
+        subjectMask: CIImage?
     ) -> CIImage {
         guard recipe.filmBase == .compactDigital,
-              let mask = compactDigitalSubjectMask(
-                for: captureContext,
-                extent: image.extent
-              ),
+              let mask = subjectMask,
               let blend = CIFilter(name: "CIBlendWithMask") else {
             return image
         }
@@ -921,7 +938,8 @@ public final class FilmRenderer {
     private static func applyCompactDigitalSkinSmoothing(
         to image: CIImage,
         recipe: FilmRecipe,
-        captureContext: CaptureContext
+        captureContext: CaptureContext,
+        subjectMask: CIImage?
     ) -> CIImage {
         let smoothingControl = clamp(recipe.noiseReduction, lower: 0, upper: 1)
         guard recipe.filmBase == .compactDigital,
@@ -942,10 +960,7 @@ public final class FilmRenderer {
             return image
         }
 
-        let subjectMask = compactDigitalSubjectMask(
-            for: captureContext,
-            extent: extent
-        ) ?? CIImage(color: .white).cropped(to: extent)
+        let smoothingMask = subjectMask ?? CIImage(color: .white).cropped(to: extent)
         let amount = clamp(
             smoothingControl * 1.35 + (captureContext.flashFired ? 0.05 : 0),
             lower: 0,
@@ -953,7 +968,7 @@ public final class FilmRenderer {
         )
         return kernel.apply(
             extent: extent,
-            arguments: [image, blurred, subjectMask, amount]
+            arguments: [image, blurred, smoothingMask, amount]
         )?.cropped(to: extent) ?? image
     }
 

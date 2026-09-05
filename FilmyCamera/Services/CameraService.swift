@@ -320,6 +320,15 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 }
             }
         }
+
+        /// Releases a retained camera buffer that has not reached the main
+        /// queue yet. A callback already executing on main is allowed to
+        /// finish; subsequent frames remain blocked by the owner's pause.
+        func cancelPending() {
+            lock.lock()
+            pendingImage = nil
+            lock.unlock()
+        }
     }
 
     public let session: AVCaptureSession
@@ -549,6 +558,9 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         frameHandlersLock.lock()
         frameDeliveryPausedState = paused
         frameHandlersLock.unlock()
+        if paused {
+            frameDeliveryGate.cancelPending()
+        }
     }
 
     /// Stops capture while retaining the configured session for a later start.
@@ -661,10 +673,14 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// Delivered on the main queue by the frame gate. The legacy `onFrame`
     /// property and every installed handler receive the same image.
     fileprivate func deliverFrame(_ image: CIImage) {
-        onFrame?(image)
         frameHandlersLock.lock()
+        guard !frameDeliveryPausedState else {
+            frameHandlersLock.unlock()
+            return
+        }
         let handlers = Array(frameHandlers.values)
         frameHandlersLock.unlock()
+        onFrame?(image)
         for handler in handlers {
             handler(image)
         }
@@ -1729,24 +1745,17 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 for: device,
                 hardwareFactor: nextFactor
             )
-            publishZoomRange(
-                minimum: userFacingZoomFactorOnQueue(
-                    for: device,
-                    hardwareFactor: lowerBound
-                ),
-                maximum: userFacingZoomFactorOnQueue(
-                    for: device,
-                    hardwareFactor: max(lowerBound, upperBound)
-                )
-            )
             publishZoom(userFacingFactor)
             if let selectedID = activeLensOptionIDOnQueue(for: device, options: currentLensOptions) {
                 let position = cameraPosition(for: device)
+                let didChangeSelection = selectedLensIDs[position] != selectedID
                 selectedLensIDs[position] = selectedID
                 selectedLensOrigins[position] = device.isVirtualDevice
                     ? .virtual
                     : .standalone
-                publishSelectedLensID(selectedID)
+                if didChangeSelection {
+                    publishSelectedLensID(selectedID)
+                }
             }
             return true
         } catch {
@@ -2171,10 +2180,17 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             supported: device.isLowLightBoostSupported,
             enabled: device.isLowLightBoostEnabled
         )
-        refreshExposureBiasOnQueue(for: device)
+        // This path runs for a healthy session and immediately before a still.
+        // The app already owns the configured bias; validate/publish it without
+        // taking another device configuration lock. A stopped-session reuse
+        // restores the physical exposure once in restoreContinuousFocusExposure.
+        refreshExposureBiasOnQueue(for: device, applyToDevice: false)
     }
 
-    private func refreshExposureBiasOnQueue(for device: AVCaptureDevice) {
+    private func refreshExposureBiasOnQueue(
+        for device: AVCaptureDevice,
+        applyToDevice: Bool = true
+    ) {
         guard let bounds = Self.exposureBiasBounds(
             lowerBound: device.minExposureTargetBias,
             upperBound: device.maxExposureTargetBias
@@ -2189,13 +2205,15 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             lowerBound: bounds.lower,
             upperBound: bounds.upper
         )
-        do {
-            try device.lockForConfiguration()
-            defer { device.unlockForConfiguration() }
-            applyExposureBiasOnQueue(to: device)
-        } catch {
-            // Exposure compensation is optional; keep the camera session
-            // usable even when a device refuses configuration at startup.
+        if applyToDevice {
+            do {
+                try device.lockForConfiguration()
+                defer { device.unlockForConfiguration() }
+                applyExposureBiasOnQueue(to: device)
+            } catch {
+                // Exposure compensation is optional; keep the camera session
+                // usable even when a device refuses configuration at startup.
+            }
         }
         publishExposureBias(selectedExposureBias)
     }
@@ -2495,39 +2513,49 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
     private func publishRunning(_ running: Bool) {
         publishOnMain { [weak self] in
-            self?.isRunning = running
+            guard let self, self.isRunning != running else { return }
+            self.isRunning = running
         }
     }
 
     private func publishAvailability(_ availability: Availability) {
         sessionAvailability = availability
         publishOnMain { [weak self] in
-            self?.availability = availability
+            guard let self, self.availability != availability else { return }
+            self.availability = availability
         }
     }
 
     private func publishFlashMode(_ mode: FlashMode) {
         publishOnMain { [weak self] in
-            self?.flashMode = mode
+            guard let self, self.flashMode != mode else { return }
+            self.flashMode = mode
         }
     }
 
     private func publishFlashAvailability(_ availability: FlashAvailability) {
         publishOnMain { [weak self] in
-            self?.flashAvailability = availability
+            guard let self, self.flashAvailability != availability else { return }
+            self.flashAvailability = availability
         }
     }
 
     private func publishLowLightBoostState(supported: Bool, enabled: Bool) {
         publishOnMain { [weak self] in
-            self?.lowLightBoostSupported = supported
-            self?.isLowLightBoostEnabled = enabled
+            guard let self else { return }
+            if self.lowLightBoostSupported != supported {
+                self.lowLightBoostSupported = supported
+            }
+            if self.isLowLightBoostEnabled != enabled {
+                self.isLowLightBoostEnabled = enabled
+            }
         }
     }
 
     private func publishZoom(_ factor: CGFloat) {
         publishOnMain { [weak self] in
-            self?.zoomFactor = factor
+            guard let self, self.zoomFactor != factor else { return }
+            self.zoomFactor = factor
         }
     }
 
@@ -2535,81 +2563,98 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         let safeMinimum = minimum.isFinite ? max(minimum, 0.1) : 1
         let safeMaximum = maximum.isFinite ? max(maximum, safeMinimum) : safeMinimum
         publishOnMain { [weak self] in
-            self?.minZoomFactor = safeMinimum
-            self?.maxZoomFactor = safeMaximum
+            guard let self else { return }
+            if self.minZoomFactor != safeMinimum {
+                self.minZoomFactor = safeMinimum
+            }
+            if self.maxZoomFactor != safeMaximum {
+                self.maxZoomFactor = safeMaximum
+            }
         }
     }
 
     private func publishCameraPosition(_ position: CameraPosition) {
         publishOnMain { [weak self] in
-            self?.cameraPosition = position
+            guard let self, self.cameraPosition != position else { return }
+            self.cameraPosition = position
         }
     }
 
     private func publishAvailableCameraPositions(_ positions: [CameraPosition]) {
         publishOnMain { [weak self] in
-            self?.availableCameraPositions = positions
+            guard let self, self.availableCameraPositions != positions else { return }
+            self.availableCameraPositions = positions
         }
     }
 
     private func publishAvailableLenses(_ lenses: [LensOption]) {
         publishOnMain { [weak self] in
-            self?.availableLenses = lenses
+            guard let self, self.availableLenses != lenses else { return }
+            self.availableLenses = lenses
         }
     }
 
     private func publishSelectedLensID(_ id: String?) {
         publishOnMain { [weak self] in
-            self?.selectedLensID = id
+            guard let self, self.selectedLensID != id else { return }
+            self.selectedLensID = id
         }
     }
 
     private func publishExposureBias(_ bias: Float) {
         publishOnMain { [weak self] in
-            self?.exposureBias = bias
+            guard let self, self.exposureBias != bias else { return }
+            self.exposureBias = bias
         }
     }
 
     private func publishFocusExposureLocked(_ locked: Bool) {
         publishOnMain { [weak self] in
-            self?.isFocusExposureLocked = locked
+            guard let self, self.isFocusExposureLocked != locked else { return }
+            self.isFocusExposureLocked = locked
         }
     }
 
     private func publishPreviewFrameSize(_ size: CGSize) {
         publishOnMain { [weak self] in
-            self?.previewFrameSize = size
+            guard let self, self.previewFrameSize != size else { return }
+            self.previewFrameSize = size
         }
     }
 
     private func publishPreviewViewportSize(_ size: CGSize) {
         publishOnMain { [weak self] in
-            self?.previewViewportSize = size
+            guard let self, self.previewViewportSize != size else { return }
+            self.previewViewportSize = size
         }
     }
 
     public func updatePreviewDrawableSize(_ size: CGSize) {
         guard size.width > 0, size.height > 0 else { return }
         publishOnMain { [weak self] in
-            self?.previewDrawableSize = size
+            guard let self, self.previewDrawableSize != size else { return }
+            self.previewDrawableSize = size
         }
     }
 
     private func publishPreviewRotationAngle(_ angle: CGFloat) {
         publishOnMain { [weak self] in
-            self?.previewRotationAngle = angle
+            guard let self, self.previewRotationAngle != angle else { return }
+            self.previewRotationAngle = angle
         }
     }
 
     private func publishPreviewMirroring(_ mirrored: Bool) {
         publishOnMain { [weak self] in
-            self?.previewMirrored = mirrored
+            guard let self, self.previewMirrored != mirrored else { return }
+            self.previewMirrored = mirrored
         }
     }
 
     private func publishStatus(_ message: String) {
         publishOnMain { [weak self] in
-            self?.statusMessage = message
+            guard let self, self.statusMessage != message else { return }
+            self.statusMessage = message
         }
     }
 
@@ -2676,6 +2721,14 @@ extension CameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
             return
         }
 
+        // Nobody is looking (review, import, another tab): skip all preview
+        // bookkeeping and the CIImage/main-queue hop while the session stays
+        // warm. The next visible frame refreshes its dimensions if needed.
+        frameHandlersLock.lock()
+        let shouldDeliver = !frameDeliveryPausedState && (hasOnFrameConsumer || !frameHandlers.isEmpty)
+        frameHandlersLock.unlock()
+        guard shouldDeliver else { return }
+
         let frameSize = CGSize(
             width: CVPixelBufferGetWidth(pixelBuffer),
             height: CVPixelBufferGetHeight(pixelBuffer)
@@ -2685,19 +2738,19 @@ extension CameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
             publishPreviewFrameSize(frameSize)
         }
 
-        // Nobody is looking (review sheet, another tab): skip the CIImage and
-        // the main-queue hop entirely while the session stays warm.
-        frameHandlersLock.lock()
-        let shouldDeliver = !frameDeliveryPausedState && (hasOnFrameConsumer || !frameHandlers.isEmpty)
-        frameHandlersLock.unlock()
-        guard shouldDeliver else { return }
-
         let image = Self.previewImage(from: pixelBuffer)
 
         // CIImage is immutable and the callback is intentionally delivered on
         // main, where SwiftUI/Metal preview views can consume it safely. The
-        // gate drops stale frames if rendering is slower than capture.
-        frameDeliveryGate.submit(image)
+        // gate drops stale frames if rendering is slower than capture. Check
+        // the pause once more while enqueueing so a concurrent capture/review
+        // pause cannot slip a newly retained buffer in after cancelPending().
+        frameHandlersLock.lock()
+        let isStillDeliverable = !frameDeliveryPausedState && (hasOnFrameConsumer || !frameHandlers.isEmpty)
+        if isStillDeliverable {
+            frameDeliveryGate.submit(image)
+        }
+        frameHandlersLock.unlock()
     }
 }
 

@@ -468,6 +468,7 @@ private struct GalleryDetailView: View {
     @State private var isLoadingImage = false
     @State private var imageLoadFailed = false
     @State private var loadGeneration = 0
+    @State private var retryGeneration = 0
     @State private var shareURL: URL?
     @State private var isShowingShareSheet = false
     @State private var isShowingDeleteConfirmation = false
@@ -571,7 +572,7 @@ private struct GalleryDetailView: View {
                         .foregroundStyle(FilmyTheme.secondary)
                     Eyebrow(text: "FRAME COULDN’T LOAD")
                     Button("Try Again") {
-                        Task { await loadImage() }
+                        retryGeneration &+= 1
                     }
                     .buttonStyle(.filmyPrimary)
                     .disabled(isLoadingImage)
@@ -586,7 +587,7 @@ private struct GalleryDetailView: View {
                 }
             }
         }
-        .task(id: imageRequestKey) {
+        .task(id: imageTaskID) {
             await loadImage()
         }
         .safeAreaInset(edge: .top, spacing: 0) {
@@ -635,6 +636,10 @@ private struct GalleryDetailView: View {
         } message: {
             Text(actionErrorMessage ?? "Try again in a moment.")
         }
+    }
+
+    private var imageTaskID: String {
+        "\(imageRequestKey.assetIdentifier)|\(imageRequestKey.authorizationStatusRawValue ?? -1)|\(retryGeneration)"
     }
 
     private func metadataCard(_ metadata: SavedFrameMetadata) -> some View {

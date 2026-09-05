@@ -1,5 +1,6 @@
 import CoreImage
 import Metal
+import UIKit
 import XCTest
 @testable import FilmyCamera
 
@@ -7,6 +8,68 @@ import XCTest
 /// attaches a per-recipe, per-stage millisecond report so pipeline changes
 /// can be judged on real hardware. Run it with `-only-testing` on a device.
 final class RendererPerformanceTests: XCTestCase {
+    @MainActor
+    func testFullResolutionImportTimings() async throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["FILMY_RUN_PERF"] == "1")
+        let scene = FilmRenderer.sampleScene(size: CGSize(width: 4000, height: 3000))
+        let source = try XCTUnwrap(FilmRenderer.outputCGImage(scene))
+        let data = try XCTUnwrap(UIImage(cgImage: source).jpegData(compressionQuality: 0.95))
+        let suite = "RendererPerformanceTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var report = "12 MP import through review; thermal=\(ProcessInfo.processInfo.thermalState.rawValue)\n"
+        for id in ["g7x-compact", "classic-chrome", "provia-standard"] {
+            let model = CameraViewModel(defaults: defaults)
+            model.select(recipe: try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == id }))
+            var samples: [Double] = []
+            for _ in 0..<3 {
+                let start = CFAbsoluteTimeGetCurrent()
+                await model.importPhoto(data: data)
+                samples.append((CFAbsoluteTimeGetCurrent() - start) * 1000)
+                XCTAssertNotNil(model.reviewImage)
+                XCTAssertTrue(model.reviewIsFullResolution)
+                XCTAssertEqual(model.reviewImage!.size.width / model.reviewImage!.size.height, 4.0 / 3, accuracy: 0.01)
+                model.discardReview()
+            }
+            report += "\(id): \(samples) ms\n"
+        }
+        let attachment = XCTAttachment(string: report)
+        attachment.name = "full-resolution-import-timings"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        print("IMPORT PERF\n\(report)")
+    }
+
+    func testPortraitDetectorReuseTimings() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["FILMY_RUN_PERF"] == "1")
+        let scene = FilmRenderer.sampleScene(size: CGSize(width: 640, height: 960))
+        let source = CIImage(cgImage: try XCTUnwrap(FilmRenderer.outputCGImage(scene)))
+        var fresh: [Double] = []
+        var reused: [Double] = []
+        _ = FilmRenderer.portraitSubjectRegions(in: source)
+        for _ in 0..<8 {
+            let start = CFAbsoluteTimeGetCurrent()
+            let expected: [CGRect] = autoreleasepool {
+                let detector = CIDetector(ofType: CIDetectorTypeFace, context: nil, options: [
+                    CIDetectorAccuracy: CIDetectorAccuracyHigh,
+                    CIDetectorMinFeatureSize: 0.05
+                ])
+                return detector?.features(in: source).map(\.bounds) ?? []
+            }
+            fresh.append((CFAbsoluteTimeGetCurrent() - start) * 1000)
+            let reusedStart = CFAbsoluteTimeGetCurrent()
+            let actual = FilmRenderer.portraitSubjectRegions(in: source)
+            reused.append((CFAbsoluteTimeGetCurrent() - reusedStart) * 1000)
+            XCTAssertEqual(actual, expected)
+        }
+        let report = "portrait median ms: fresh=\(fresh.sorted()[4]), reused=\(reused.sorted()[4])"
+        let attachment = XCTAttachment(string: report)
+        attachment.name = "portrait-detector-timings"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        print("PORTRAIT PERF \(report)")
+    }
+
     private struct Variant {
         let name: String
         let mutate: (inout FilmRecipe) -> Void
@@ -21,6 +84,7 @@ final class RendererPerformanceTests: XCTestCase {
         )
         let context = FilmRenderer.sharedContext
         let sizes: [(String, CGSize)] = [
+            ("Production budget 988x1316", CGSize(width: 988, height: 1316)),
             ("iPad 1x 834x1112", CGSize(width: 834, height: 1112)),
             ("iPad 2x 1668x2224", CGSize(width: 1668, height: 2224)),
             ("iPhone 3x 1206x1610", CGSize(width: 1206, height: 1610))
@@ -51,6 +115,7 @@ final class RendererPerformanceTests: XCTestCase {
                 for variant in variants where variant.name == "as-is" || identifier == "g7x-compact" {
                     var recipe = base
                     variant.mutate(&recipe)
+                    print("PERF CASE \(sizeName) / \(identifier) / \(variant.name)")
                     let milliseconds = Self.timeRender(source, recipe: recipe, extent: extent, context: context)
                     line += " \(variant.name)=\(String(format: "%.1f", milliseconds))ms"
                 }
@@ -88,18 +153,25 @@ final class RendererPerformanceTests: XCTestCase {
         }
 
         func renderOnce() {
-            guard let commandBuffer = queue.makeCommandBuffer() else { return }
-            let filtered = FilmRenderer.render(source, recipe: recipe, quality: .preview)
-                .cropped(to: extent)
-            context.render(
-                filtered,
-                to: texture,
-                commandBuffer: commandBuffer,
-                bounds: extent,
-                colorSpace: colorSpace
-            )
-            commandBuffer.commit()
-            commandBuffer.waitUntilCompleted()
+            autoreleasepool {
+                guard let commandBuffer = queue.makeCommandBuffer() else {
+                    XCTFail("Could not allocate a benchmark command buffer")
+                    return
+                }
+                let filtered = FilmRenderer.render(source, recipe: recipe, quality: .preview)
+                    .cropped(to: extent)
+                context.render(
+                    filtered,
+                    to: texture,
+                    commandBuffer: commandBuffer,
+                    bounds: extent,
+                    colorSpace: colorSpace
+                )
+                commandBuffer.commit()
+                commandBuffer.waitUntilCompleted()
+                XCTAssertEqual(commandBuffer.status, .completed,
+                    "Benchmark GPU failure: \(String(describing: commandBuffer.error))")
+            }
         }
 
         for _ in 0..<3 { renderOnce() }

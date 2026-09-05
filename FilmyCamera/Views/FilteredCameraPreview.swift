@@ -160,6 +160,11 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
     private var recipe = FilmRecipe.builtIns[0]
     private var quality: FilmRenderer.Quality = .preview
     private var grainSeed = FilmRenderer.canonicalGrainSeed
+    /// Monotonically identifies the newest frame, recipe, or drawable shape.
+    /// If one of these changes while Metal is busy, completion schedules
+    /// exactly one redraw for the newest state instead of queuing GPU work.
+    private var contentRevision: UInt64 = 0
+    private var isRenderInFlight = false
 
     public override init(frame: CGRect, device: MTLDevice?) {
         let selectedDevice = device ?? FilmRenderer.metalDevice ?? MTLCreateSystemDefaultDevice()
@@ -267,24 +272,23 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
         self.recipe = recipe
         self.quality = quality
         self.grainSeed = grainSeed
-        if latestImage != nil {
-            setNeedsDisplay()
-        }
+        requestDisplay()
     }
 
     func display(image: CIImage) {
         latestImage = image
-        setNeedsDisplay()
+        requestDisplay()
     }
 
     func clearImage() {
         guard latestImage != nil else { return }
         latestImage = nil
-        setNeedsDisplay()
+        contentRevision &+= 1
     }
 
     public func draw(in view: MTKView) {
-        guard let drawable = currentDrawable,
+        guard !isRenderInFlight,
+              let drawable = currentDrawable,
               let image = latestImage,
               let sRGBColorSpace,
               drawableSize.width > 0,
@@ -295,6 +299,8 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
         guard let commandBuffer = commandQueue?.makeCommandBuffer() else {
             return
         }
+        let renderedRevision = contentRevision
+        isRenderInFlight = true
 
         let targetRect = CGRect(origin: .zero, size: drawableSize)
         // Frame before rendering so vignette, halation, and grain use the
@@ -317,6 +323,11 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
             colorSpace: sRGBColorSpace
         )
         commandBuffer.present(drawable)
+        commandBuffer.addCompletedHandler { [weak self] _ in
+            DispatchQueue.main.async { [weak self] in
+                self?.finishRender(revision: renderedRevision)
+            }
+        }
         commandBuffer.commit()
     }
 
@@ -327,8 +338,20 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
         // Keep the last frame visible and recompute its aspect-fill transform
         // immediately after rotation or another drawable-size change.
         if latestImage != nil {
-            setNeedsDisplay()
+            requestDisplay()
         }
+    }
+
+    private func requestDisplay() {
+        contentRevision &+= 1
+        guard latestImage != nil, !isRenderInFlight else { return }
+        setNeedsDisplay()
+    }
+
+    private func finishRender(revision: UInt64) {
+        isRenderInFlight = false
+        guard latestImage != nil, contentRevision != revision else { return }
+        setNeedsDisplay()
     }
 
 }
