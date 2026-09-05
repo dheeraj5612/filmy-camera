@@ -62,7 +62,7 @@ struct CaptureReviewView: View {
                                 .padding(.top, 16)
                                 .padding(.bottom, 12)
 
-                            reviewControls
+                            reviewControls()
                                 .padding(.horizontal, 20)
                                 .padding(.bottom, 14)
 
@@ -137,7 +137,7 @@ struct CaptureReviewView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     header
                     metadataBlock
-                    reviewControls
+                    reviewControls(stacked: true)
 
                     if let saveErrorMessage {
                         saveError(saveErrorMessage)
@@ -272,9 +272,9 @@ struct CaptureReviewView: View {
         ].filter { !$0.recipes.isEmpty }
     }
 
-    private var reviewControls: some View {
+    private func reviewControls(stacked: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            if dynamicTypeSize.isAccessibilitySize {
+            if stacked || dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 10) {
                     lookPicker
                     compareButton

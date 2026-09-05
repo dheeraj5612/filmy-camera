@@ -20,6 +20,8 @@ The final focused iPad simulator run passed all four tests with no skips: large-
 
 The device was unlocked and the current signed 1.0.0 (8) build was installed. All 23 applicable hardware-suite tests passed: two flash service tests and 21 UI tests, with no failures or skips. Both recipe information-panel cases, advancing rendered-preview checks, G7 X capture/save/Roll/detail/share cancellation, large text, and portrait/landscape interactions passed. See [reversible review validation](review-editing-20260904.md) for the new review behavior, local artifacts, and the corrected simulator-only test routing. The original count-mismatch summary is retained alongside the successful XCTest results.
 
+The extended physical capture case also passed separately: compare Original, select Fine Monochrome, rotate to landscape, and save that treatment while Original is visible. This is a strengthened rerun of one of the 23 cases, not a 24th distinct test.
+
 The remaining list below records the earlier September 4 state. App Store upload and comparative visual-quality claims remain unverified; the September 5 results supersede its locked-device and unfinished recipe-test status.
 
 - Complete both recipe information-panel tests with the corrected gestures.
