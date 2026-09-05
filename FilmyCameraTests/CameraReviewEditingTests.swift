@@ -10,10 +10,10 @@ import XCTest
 final class CameraReviewEditingTests: XCTestCase {
     func testLookEditDefersFullRenderUntilSaveAndFreezesSaveDescriptor() async throws {
         let sourceData = try orientedQuadrantJPEG(orientation: 6)
-        let previewProbe = RenderProbe<CameraViewModel.ReviewPreview> { source, recipe in
+        let previewProbe = RenderProbe<CameraViewModel.ReviewPreview> { source, recipe, _ in
             Self.preview(source: source, recipe: recipe)
         }
-        let fullProbe = RenderProbe<CameraViewModel.RenderedPhoto> { source, recipe in
+        let fullProbe = RenderProbe<CameraViewModel.RenderedPhoto> { source, recipe, _ in
             Self.fullRender(source: source, recipe: recipe)
         }
         let (viewModel, defaults, suite) = try makeViewModel(
@@ -178,9 +178,9 @@ final class CameraReviewEditingTests: XCTestCase {
         let initial = try recipe(id: "provia-standard")
         let failingPreview = try recipe(id: "velvia-vivid")
         let successfulPreview = try recipe(id: "classic-chrome")
-        let fullProbe = RenderProbe<CameraViewModel.RenderedPhoto> { _, _ in nil }
+        let fullProbe = RenderProbe<CameraViewModel.RenderedPhoto> { _, _, _ in nil }
         let (viewModel, defaults, suite) = try makeViewModel(
-            previewRenderer: { source, recipe in
+            previewRenderer: { source, recipe, _ in
                 recipe.id == failingPreview.id ? nil : Self.preview(source: source, recipe: recipe)
             },
             fullRenderer: fullProbe.call,
@@ -304,6 +304,129 @@ final class CameraReviewEditingTests: XCTestCase {
         let editedData = try XCTUnwrap(editedSaver.requests.single?.imageData)
 
         XCTAssertEqual(try decodedPixels(from: editedData), try decodedPixels(from: directData))
+    }
+
+    func testInstantPrintUsesFullSourceAndSameRecipeSaveDoesNotReusePlainBytes() async throws {
+        let (model, defaults, suite) = try makeViewModel()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        model.select(recipe: try recipe(id: "provia-standard"))
+        await model.importPhoto(data: try orientedQuadrantJPEG(orientation: 6))
+        let saver = ControlledPhotoSaver()
+        model.saveReview(photoLibrary: saver)
+        let plain = try XCTUnwrap(saver.requests.last?.imageData)
+        saver.completeLast(with: .failure(.writeFailed))
+
+        model.applyReviewFinish(.instantPrint)
+        await model.waitForReviewWorkToDrainForTesting()
+        XCTAssertEqual(model.reviewFinish, .instantPrint)
+        XCTAssertEqual(model.reviewImage?.cgImage?.width, 44)
+        XCTAssertEqual(model.reviewImage?.cgImage?.height, 87)
+        await model.prepareReviewOriginal()
+        XCTAssertEqual(model.reviewOriginalImage?.cgImage?.width, 40)
+        XCTAssertEqual(model.reviewOriginalImage?.cgImage?.height, 80)
+        XCTAssertEqual(model.reviewFinish, .instantPrint, "Original is a comparison, not an export edit")
+
+        model.saveReview(photoLibrary: saver)
+        model.applyReviewFinish(.photo)
+        await model.waitForReviewWorkToDrainForTesting()
+        let printed = try XCTUnwrap(saver.requests.last?.imageData)
+        XCTAssertNotEqual(printed, plain, "The same recipe with a new finish needs new export bytes")
+        try assertUprightDimensions(data: printed, width: 44, height: 87)
+        XCTAssertEqual(model.reviewFinish, .instantPrint, "Save freezes the entire edit descriptor")
+        saver.completeLast(with: .failure(.writeFailed))
+        model.saveReview(photoLibrary: saver)
+        XCTAssertEqual(saver.requests.last?.imageData, printed, "Retry must reuse exact encoded bytes")
+        saver.completeLast(with: .failure(.writeFailed))
+
+        model.applyReviewFinish(.photo)
+        await model.waitForReviewWorkToDrainForTesting()
+        model.saveReview(photoLibrary: saver)
+        await model.waitForReviewWorkToDrainForTesting()
+        let restored = try XCTUnwrap(saver.requests.last?.imageData)
+        try assertUprightDimensions(data: restored, width: 40, height: 80)
+        XCTAssertEqual(try decodedPixels(from: restored), try decodedPixels(from: plain),
+                       "Removing the border must return to the pristine source, never crop a previous JPEG")
+        saver.completeLast(with: .success(()))
+        XCTAssertEqual(model.reviewFinish, .photo)
+        XCTAssertNil(model.pendingReviewFinish)
+        XCTAssertNil(model.reviewImage)
+    }
+
+    func testPendingCustomizedLookAndFinishRemainOneLatestEdit() async throws {
+        let blocker = BlockingPreviewRenderer()
+        let (model, defaults, suite) = try makeViewModel(previewRenderer: blocker.call)
+        defer { blocker.releaseAll(); defaults.removePersistentDomain(forName: suite) }
+        model.select(recipe: try recipe(id: "provia-standard"))
+        await model.importPhoto(data: try orientedQuadrantJPEG(orientation: 1))
+        var customized = try recipe(id: "classic-chrome")
+        customized.saturation = 0.72
+        let started = expectation(description: "first look started")
+        blocker.setOnStart { _ in started.fulfill() }
+        model.applyReviewRecipe(customized)
+        await fulfillment(of: [started], timeout: 2)
+        model.applyReviewFinish(.instantPrint)
+        model.applyReviewFinish(.photo)
+        model.applyReviewFinish(.instantPrint)
+        XCTAssertEqual(model.pendingReviewFinish, .instantPrint)
+        let saver = ControlledPhotoSaver()
+        model.saveReview(photoLibrary: saver)
+        XCTAssertTrue(saver.requests.isEmpty)
+        let latest = expectation(description: "latest pair started")
+        blocker.setOnStart { _ in latest.fulfill() }
+        blocker.releaseNext()
+        await fulfillment(of: [latest], timeout: 2)
+        blocker.releaseNext()
+        await model.waitForReviewWorkToDrainForTesting()
+        XCTAssertEqual(model.reviewRecipe, customized, "Finish changes must retain pending custom recipe values")
+        XCTAssertEqual(model.reviewFinish, .instantPrint)
+        XCTAssertNil(model.pendingReviewFinish)
+        XCTAssertEqual(blocker.recipeIDs.count, 2, "Superseded work must not run")
+        XCTAssertEqual(blocker.maximumConcurrentCalls, 1)
+    }
+
+    func testPrintPreviewFailureKeepsExistingPhotoSavable() async throws {
+        let (model, defaults, suite) = try makeViewModel(
+            previewRenderer: { source, recipe, finish in
+                finish == .instantPrint ? nil : Self.preview(source: source, recipe: recipe)
+            }
+        )
+        defer { defaults.removePersistentDomain(forName: suite) }
+        await model.importPhoto(data: try orientedQuadrantJPEG(orientation: 1))
+        let previous = model.reviewImage
+        model.applyReviewFinish(.instantPrint)
+        await model.waitForReviewWorkToDrainForTesting()
+        XCTAssertTrue(model.reviewImage === previous)
+        XCTAssertEqual(model.reviewFinish, .photo)
+        XCTAssertNil(model.pendingReviewFinish)
+        XCTAssertFalse(model.isRenderingReview)
+        XCTAssertNotNil(model.reviewRenderErrorMessage)
+        let saver = ControlledPhotoSaver()
+        model.saveReview(photoLibrary: saver)
+        XCTAssertEqual(saver.requests.count, 1)
+        saver.completeLast(with: .failure(.writeFailed))
+        model.discardReview()
+        XCTAssertNil(model.reviewImage)
+        XCTAssertEqual(model.reviewFinish, .photo)
+    }
+
+    func testPrintEligibilityUsesNativeMetadataInsteadOfThumbnailDimensions() throws {
+        let cameraMode = CameraViewModel.ReviewRenderSource.Mode.camera(
+            viewportSize: .zero, previewDrawableSize: .zero, flashFired: false, grainSeed: 0)
+        let native = try XCTUnwrap(CameraViewModel.reviewExportExtent(
+            sourceSize: CGSize(width: 10_000, height: 10_000), orientation: 1, mode: cameraMode))
+        XCTAssertNil(PhotoPrintCompositor.layout(for: native, finish: .instantPrint))
+        XCTAssertNotNil(PhotoPrintCompositor.layout(
+            for: CGRect(x: 0, y: 0, width: 1_800, height: 1_800), finish: .instantPrint))
+        let imported = try XCTUnwrap(CameraViewModel.reviewExportExtent(
+            sourceSize: CGSize(width: 10_000, height: 10_000), orientation: 1, mode: .photoLibrary))
+        XCTAssertLessThanOrEqual(imported.width * imported.height, 40_000_000)
+        XCTAssertNotNil(PhotoPrintCompositor.layout(for: imported, finish: .instantPrint))
+        let cropMode = CameraViewModel.ReviewRenderSource.Mode.camera(
+            viewportSize: CGSize(width: 2, height: 3), previewDrawableSize: .zero,
+            flashFired: false, grainSeed: 0)
+        XCTAssertEqual(CameraViewModel.reviewExportExtent(
+            sourceSize: CGSize(width: 80, height: 40), orientation: 6, mode: cropMode),
+                       CGRect(x: 0, y: 0, width: 40, height: 60))
     }
 
     private func makeViewModel(
@@ -535,22 +658,22 @@ final class CameraReviewEditingTests: XCTestCase {
 
 private final class RenderProbe<Output>: @unchecked Sendable {
     private let lock = NSLock()
-    private let renderer: @Sendable (CameraViewModel.ReviewRenderSource, FilmRecipe) -> Output?
+    private let renderer: @Sendable (CameraViewModel.ReviewRenderSource, FilmRecipe, PhotoFinish) -> Output?
     private var recordedRecipeIDs: [String] = []
     private var recordedDates: [Date] = []
 
-    init(renderer: @escaping @Sendable (CameraViewModel.ReviewRenderSource, FilmRecipe) -> Output?) {
+    init(renderer: @escaping @Sendable (CameraViewModel.ReviewRenderSource, FilmRecipe, PhotoFinish) -> Output?) {
         self.renderer = renderer
     }
 
-    var call: @Sendable (CameraViewModel.ReviewRenderSource, FilmRecipe) -> Output? {
-        { [weak self] source, recipe in
+    var call: @Sendable (CameraViewModel.ReviewRenderSource, FilmRecipe, PhotoFinish) -> Output? {
+        { [weak self] source, recipe, finish in
             guard let self else { return nil }
             self.lock.lock()
             self.recordedRecipeIDs.append(recipe.id)
             self.recordedDates.append(source.capturedAt)
             self.lock.unlock()
-            return self.renderer(source, recipe)
+            return self.renderer(source, recipe, finish)
         }
     }
 
@@ -576,7 +699,7 @@ private final class BlockingPreviewRenderer: @unchecked Sendable {
     private var onStart: (@Sendable (String) -> Void)?
 
     var call: CameraViewModel.ReviewPreviewRenderer {
-        { [weak self] source, recipe in
+        { [weak self] source, recipe, finish in
             guard let self else { return nil }
             let gate = DispatchSemaphore(value: 0)
             self.lock.lock()

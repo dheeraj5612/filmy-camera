@@ -6,7 +6,7 @@ Status: final
 
 - **App name:** Filmy Camera
 - **Subtitle:** Film recipes, made for now.
-- **Promotional text:** Choose a look. Press the shutter. Make everyday light feel like a still.
+- **Promotional text:** Film looks, G7 X Compact color, manual camera controls, and an Instant Print border. Every feature is free for this launch.
 - **Primary category:** Photo & Video
 - **Secondary category:** Lifestyle
 - **Age rating:** 4+ (no user-generated content, unrestricted web access, or simulated gambling)
@@ -26,8 +26,12 @@ What you get:
 - Import an existing photo with its framing preserved, at full resolution up to 40 MP
 - Adjustable tone, color, Kelvin white balance, fine-tuning, grain, clarity, and vignette controls
 - Live preview and full-resolution exports with the selected look applied
+- Manual ISO, shutter speed, sensor white balance, and focus on supported cameras
+- Change looks after capture, compare the original, and save the version you love
+- Optional Instant Print borders with the entire photo preserved inside a white frame
 - A review step to retake or explicitly save each finished frame
 - A quiet recent-photo grid for reviewing the moments you just made
+- Every included feature is free: no subscription, trial, paywall, or export watermark
 - No account required
 
 Filmy Camera uses public camera-control terminology and original rendering parameters. It is not affiliated with Fujifilm or any other camera manufacturer, and it does not include proprietary camera firmware, LUTs, or calibration data. Results vary with the camera, exposure, white balance, and lighting.
@@ -46,11 +50,11 @@ The keyword field is below Apple's 100-character limit for this localization.
 
 ## What's New — version 1.0
 
-Meet Filmy Camera: a focused camera experience with curated film-style recipes, live looks, and full-resolution captures.
+Meet Filmy Camera: film and G7 X Compact looks, manual camera controls, reversible photo review, and optional Instant Print borders. All included features are free for this launch.
 
 ## App Review notes
 
-Filmy Camera is a camera-first photo app with an in-app Roll. Camera access is requested when the camera screen is used. Existing-photo import uses Apple's system photo picker, which shares only the photo the user chooses. Photos access is requested when saving a finished photo or when the user taps Allow Photos access in the in-app Roll, and the Roll only reads frames saved by Filmy Camera. The simulator cannot provide camera hardware, so review the capture flow on a physical iPhone or iPad. No account or login is required.
+Filmy Camera is a camera-first photo app with an in-app Roll. Camera access is requested when the camera screen is used. Existing-photo import uses Apple's system photo picker, which shares only the photo the user chooses. Photos access is requested when saving a finished photo or when the user taps Allow Photos access in the in-app Roll, and the Roll only reads frames saved by Filmy Camera. The simulator cannot provide camera hardware, so review the capture flow on a physical iPhone or iPad. No account or login is required. All included features are free and no in-app purchases are required. In photo review, select Instant Print to add a white instant-photo border; select Photo to remove it before saving. Manual controls appear under Pro and follow the active camera’s hardware capabilities.
 
 ## Screenshot plan
 
@@ -58,7 +62,7 @@ Build matching five-image packs for the iPhone 6.5-inch and iPad 13-inch slots:
 
 1. `01-g7x-import` — generated public-safe original in G7 X Compact import review
 2. `02-film-import` — the same original in Muted Color import review
-3. `03-monochrome-import` — the same original in Fine Monochrome import review
+3. `03-monochrome-import` — the same original in Fine Monochrome with Instant Print borders
 4. `04-roll` — the normal app’s populated Roll with the three saved production outputs
 5. `05-photo-detail` — a saved output opened in Roll detail
 

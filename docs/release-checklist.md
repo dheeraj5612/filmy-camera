@@ -1,6 +1,19 @@
 # Filmy Camera release checklist
 
-Current candidate: version 1.0.0, build 10. It carries the [camera UX redesign](design-pass-20260904.md), [reversible photo review](review-editing-20260904.md), Pro manual controls, and an explicit high-detail JPEG quality contract. Build 5 remains the last verified Apple upload; App Store Connect authentication is still pending. Builds 6–9 are preserved historical candidates. Historical release notes are in [release-history.md](release-history.md).
+Current candidate: version 1.0.0, build 11. It adds optional Instant Print borders to the existing camera UX, Pro controls, reversible review, and high-detail JPEG output. Every shipped feature is free for launch, with no trial, paywall, or watermark. Build 10 was uploaded on September 5 and App Store Connect confirms processing Complete and Ready to Submit. App Store pricing is zero in all 175 available countries/regions. Build 11 still needs the validation and release steps below; the saved distribution version currently references build 5 and is Developer Rejected from its prior withdrawal. Historical release notes are in [release-history.md](release-history.md).
+
+## Build 11 release gates
+
+- [x] Implement an optional white Instant Print border with a larger bottom margin, preserving the original photo aspect and native pixels.
+- [x] Keep finish and look together through preview changes, cached exports, save retries, Original comparison, and discard.
+- [x] Verify all currently shipped looks and advanced camera tools are ungated; keep subscription and watermark work deferred.
+- [x] Verify App Store download pricing is zero in all 175 configured storefronts.
+- [ ] Pass final unit/integration, UI, Photos E2E, and required hosted CI on candidate source.
+- [ ] Inspect bordered output and review layouts; install and test the candidate on physical iPad and complete required iPhone hardware checks.
+- [ ] Create and validate the signed archive/IPA, upload build 11, and verify Apple processing.
+- [x] Save matching listing text and both five-image media packs; reload App Store Connect and verify the saved names/order.
+- [ ] Select build 11 and verify the saved release draft after Apple processing.
+- [ ] Submit the validated free app for App Review and verify the authoritative resulting state. Public availability depends on Apple approval.
 
 ## Build 10 release gates
 
@@ -10,9 +23,9 @@ Current candidate: version 1.0.0, build 10. It carries the [camera UX redesign](
 - [x] Pass the physical Pro-sheet portrait/landscape flow, slider adjustment, Reset to Auto, return to live preview, and the 44-point Done target.
 - [x] Pass all 211 local simulator tests (189 core, 19 UI, 3 Photos E2E) and 20 portable runner tests on the candidate source.
 - [ ] Complete a full physical confirmation after the first 24/25 run's UI runner termination. Onboarding and its two neighboring tests passed on unchanged binaries; preserve both results in the [build 10 record](image-quality-build10-20260905.md).
-- [ ] Pass required CI on the exact candidate source.
-- [ ] Produce and validate the signed archive and IPA for build 10, including source, signing, privacy, executable/dSYM, and archive/export parity checks.
-- [ ] Upload build 10, verify processing, select the matching build and media, and validate the saved review draft after App Store Connect authentication is restored.
+- [x] Pass required CI on build 10 source `3bc8e90` (run 33981061238; all 211 app tests passed).
+- [x] Produce and validate the signed archive and IPA for build 10, including source, signing, privacy, executable/dSYM, and archive/export parity checks.
+- [x] Upload build 10 and verify processing Complete / Ready to Submit in App Store Connect. It is superseded by the build 11 candidate and was not selected or submitted for public release.
 - [ ] Complete the iPhone-specific, controlled image-quality, and submission gates below.
 
 ## Preserved build 9 candidate

@@ -812,11 +812,11 @@ final class FilmyCameraUITests: XCTestCase {
     }
     #endif
 
-    /// Opt-in, non-destructive Roll acceptance on a provisioned physical iPad.
+    /// Opt-in, non-destructive Roll acceptance on a provisioned physical iPhone or iPad.
     /// The saved frame is intentionally retained in Photos and the local cache.
     func testPhysicalG7XSaveRollDetailAndShareAcceptance() throws {
         #if targetEnvironment(simulator)
-        throw XCTSkip("Roll capture and share acceptance requires a physical iPad")
+            throw XCTSkip("Roll capture and share acceptance requires a physical iPhone or iPad")
         #else
         try XCTSkipUnless(
             ProcessInfo.processInfo.environment["FILMY_RUN_PHOTOS_WRITE"] == "1",
@@ -835,11 +835,7 @@ final class FilmyCameraUITests: XCTestCase {
         rollApp.launch()
         app = rollApp
         defer { rollApp.terminate() }
-
-        try XCTSkipUnless(
-            rollApp.frame.width >= 700,
-            "The share-popover acceptance path requires a full-screen physical iPad"
-        )
+        defer { XCUIDevice.shared.orientation = .portrait }
 
         let onboarding = rollApp.descendants(matching: .any)["onboarding-screen"]
         if onboarding.waitForExistence(timeout: 3) {
@@ -866,6 +862,96 @@ final class FilmyCameraUITests: XCTestCase {
             "G7 X capture must reach full-resolution review"
         )
         attachScreenshot(named: "roll-qa-g7x-review")
+
+        let reviewImage = rollApp.descendants(matching: .any)["review-image"]
+        let printFinish = rollApp.buttons["review-finish-instantPrint"]
+        let photoFinish = rollApp.buttons["review-finish-photo"]
+        assertMinimumHitTarget(printFinish, named: "Instant Print finish")
+        assertMinimumHitTarget(photoFinish, named: "Photo finish")
+
+        printFinish.tap()
+        XCTAssertTrue(
+            waitUntil(timeout: 30) {
+                reviewImage.label.contains("Instant Print") && keepFrame.isEnabled
+            },
+            "Instant Print must finish rendering before Save is enabled"
+        )
+        photoFinish.tap()
+        XCTAssertTrue(
+            waitUntil(timeout: 30) {
+                !reviewImage.label.contains("Instant Print") && keepFrame.isEnabled
+            },
+            "Photo must remove the border and settle before Save is enabled"
+        )
+        printFinish.tap()
+        XCTAssertTrue(
+            waitUntil(timeout: 30) {
+                reviewImage.label.contains("Instant Print") && keepFrame.isEnabled
+            },
+            "Returning to Instant Print must restore the finished border"
+        )
+        attachScreenshot(named: "roll-qa-instant-print-portrait")
+
+        let compare = rollApp.buttons["review-compare-original"]
+        assertMinimumHitTarget(compare, named: "Original comparison")
+        compare.tap()
+        XCTAssertTrue(waitUntil(timeout: 30) { compare.value as? String == "Original" })
+        XCTAssertEqual(
+            printFinish.value as? String,
+            "Selected",
+            "Original comparison must not change the selected export finish"
+        )
+        compare.tap()
+        XCTAssertTrue(waitUntil(timeout: 15) {
+            compare.value as? String == "Look" && reviewImage.label.contains("Instant Print")
+        })
+
+        let lookPicker = rollApp.buttons["review-look-picker"]
+        lookPicker.tap()
+        let monochrome = revealReviewLook(
+            "review-look-acros-monochrome",
+            in: rollApp,
+            scrollingTowardLowerOptions: true
+        )
+        monochrome.tap()
+        XCTAssertTrue(
+            waitUntil(timeout: 30) {
+                reviewImage.label.contains("Fine Monochrome")
+                    && reviewImage.label.contains("Instant Print")
+                    && keepFrame.isEnabled
+            },
+            "Changing the look must retain Instant Print and finish rendering before Save"
+        )
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertTrue(
+            waitUntil(timeout: 10) { rollApp.frame.width > rollApp.frame.height },
+            "Instant Print review must settle into landscape"
+        )
+        XCTAssertEqual(printFinish.value as? String, "Selected")
+        attachScreenshot(named: "roll-qa-instant-print-landscape")
+
+        XCUIDevice.shared.orientation = .portrait
+        XCTAssertTrue(
+            waitUntil(timeout: 10) { rollApp.frame.height > rollApp.frame.width },
+            "Instant Print review must return to portrait before saving"
+        )
+        lookPicker.tap()
+        let g7x = revealReviewLook(
+            "review-look-g7x-compact",
+            in: rollApp,
+            scrollingTowardLowerOptions: false
+        )
+        g7x.tap()
+        XCTAssertTrue(
+            waitUntil(timeout: 30) {
+                reviewImage.label.contains("G7 X Compact")
+                    && reviewImage.label.contains("Instant Print")
+                    && keepFrame.isEnabled
+            },
+            "Returning to G7 X must retain Instant Print before saving"
+        )
+
         keepFrame.tap()
         // Invokes the permission monitor if add-only Photos access is being
         // requested for this normal-app save.
@@ -941,18 +1027,25 @@ final class FilmyCameraUITests: XCTestCase {
         let copyAction = rollApp.descendants(matching: .any)["Copy"]
         XCTAssertTrue(
             copyAction.waitForExistence(timeout: 30),
-            "Share frame must present the iPad activity popover with system actions"
+            "Share frame must present the activity sheet with system actions"
         )
         let closeShare = rollApp.descendants(matching: .any)["Close"]
+        let activitySheet = rollApp.sheets.firstMatch
         XCTAssertTrue(
-            closeShare.waitForExistence(timeout: 5),
-            "The iPad activity popover must expose its system Close control"
+            waitUntil(timeout: 10) { closeShare.exists || activitySheet.exists },
+            "Share frame must expose a dismissible activity sheet or Close control. Accessibility tree:\n\(rollApp.debugDescription)"
         )
-        attachScreenshot(named: "roll-qa-ipad-share-sheet")
-        closeShare.tap()
+        attachScreenshot(named: "roll-qa-share-sheet")
+        if closeShare.exists {
+            XCTAssertTrue(closeShare.isHittable, "The activity sheet Close control must be tappable")
+            closeShare.tap()
+        } else {
+            XCTAssertTrue(activitySheet.exists, "Activity sheet must remain observable before dismissal")
+            activitySheet.swipeDown()
+        }
         XCTAssertTrue(
             waitForDisappearance(copyAction, timeout: 10),
-            "Cancelling the activity sheet must return to frame detail"
+            "Cancelling the activity sheet must return to frame detail on phone and iPad"
         )
         XCTAssertTrue(share.exists, "Frame detail must remain open after cancelling share")
         #endif
@@ -1299,6 +1392,77 @@ final class FilmyCameraUITests: XCTestCase {
 
     private func scrollBackToHittable(_ element: XCUIElement, in app: XCUIApplication) {
         scrollIntoView(element, in: app, downward: true)
+    }
+
+    /// SwiftUI's review Menu can bridge its options as Button, PopUpButton, or
+    /// another accessibility type depending on the OS. Use the stable
+    /// identifier and mounted, hittable option rows instead of a type-sensitive
+    /// query or a guessed screen coordinate.
+    private func revealReviewLook(
+        _ identifier: String,
+        in app: XCUIApplication,
+        scrollingTowardLowerOptions: Bool
+    ) -> XCUIElement {
+        let option = app.descendants(matching: .any)[identifier]
+        XCTAssertTrue(
+            waitUntil(timeout: 5) { self.visibleReviewLookRows(in: app).count >= 1 },
+            "Review look menu must open"
+        )
+
+        for _ in 0..<6 {
+            if option.exists, option.isHittable {
+                return option
+            }
+
+            let visibleRows = visibleReviewLookRows(in: app)
+            XCTAssertGreaterThanOrEqual(
+                visibleRows.count,
+                2,
+                "Review look menu must expose two rows for a bounded scroll gesture"
+            )
+            guard !visibleRows.isEmpty else {
+                continue
+            }
+
+            // Keep both endpoints comfortably inside the native popup when
+            // several rows are visible. With only two or three mounted rows,
+            // the outer rows are the reliable scroll targets.
+            let upperIndex = visibleRows.count >= 4 ? 1 : 0
+            let lowerIndex = visibleRows.count >= 4 ? visibleRows.count - 2 : visibleRows.count - 1
+            let upperRow = visibleRows[upperIndex]
+            let lowerRow = visibleRows[lowerIndex]
+
+            let targetIsAbove = option.exists && !option.frame.isEmpty
+                && option.frame.maxY < upperRow.frame.minY
+            let scrollDown = targetIsAbove || (!option.exists && !scrollingTowardLowerOptions)
+            // Start and end on mounted, hittable menu rows. The collection
+            // accessibility node reports the whole app frame on iOS 26, and
+            // gestures based on it dismiss the popup instead of scrolling it.
+            let startRow = scrollDown ? upperRow : lowerRow
+            let endRow = scrollDown ? lowerRow : upperRow
+            let start = startRow.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            let end = endRow.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            start.press(forDuration: 0.05, thenDragTo: end)
+        }
+
+        XCTAssertTrue(
+            option.exists && option.isHittable,
+            "Review menu must expose \(identifier) after bounded scrolling"
+        )
+        return option
+    }
+
+    private func visibleReviewLookRows(in app: XCUIApplication) -> [XCUIElement] {
+        app.descendants(matching: .any)
+            .allElementsBoundByIndex
+            .filter {
+                $0.identifier.hasPrefix("review-look-")
+                    && $0.identifier != "review-look-picker"
+                    && $0.exists
+                    && !$0.frame.isEmpty
+                    && $0.isHittable
+            }
+            .sorted { $0.frame.minY < $1.frame.minY }
     }
 
     private func scrollIntoView(_ element: XCUIElement, in app: XCUIApplication, downward: Bool) {

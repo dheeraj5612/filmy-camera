@@ -2,17 +2,21 @@
 
 Status: future product direction recorded September 5, 2026. This is a plan, not implemented behavior. Build 8 has no paywall, subscription trial, or export watermark.
 
+## Current launch
+
+The current launch is fully free. All shipped looks and camera tools, import, review, Save to Photos, and the optional white Instant Print finish are available without a paywall, trial, or export watermark. RAW capture, HDR editing/export, and other advanced items in this roadmap remain future work.
+
 ## Confirmed direction
 
 Most features will require a premium monthly subscription. A free trial will let people experience the premium app, and images exported by the free version will carry a watermark. Camera quality, speed, and an uncluttered shooting experience remain product priorities. The September 5 follow-up confirms monthly billing and a premium tier combining film/G7X tools with advanced camera capabilities; see the [premium camera vision](premium-camera-vision.md) for the staged scope and quality targets.
 
 ## Proposed experience
 
-The following allocation is a starting proposal, not a finalized price or feature catalog.
+The following future allocation is a starting proposal, not a finalized price or feature catalog. It does not describe current launch behavior.
 
 | Access | Proposed features | New image exports |
 | --- | --- | --- |
-| Free | A useful camera, one signature G7 X Compact look and a small starter film selection, basic import/review, and access to existing Roll images | Full-quality image with a small Filmy watermark |
+| Future free tier (proposal) | A useful camera, one signature G7 X Compact look and a small starter film selection, basic import/review, and access to existing Roll images | Full-quality image with a small Filmy watermark |
 | Active trial | All features included in the paid tier, including premium looks and tuning | No watermark |
 | Premium monthly | Full film/G7X collection, advanced recipe tuning, and advanced capture/editing tools as they ship | No watermark |
 

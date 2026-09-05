@@ -2,6 +2,10 @@
 
 Product direction confirmed September 5, 2026: build a camera people choose over Halide for film simulations and the G7X compact-camera look, with advanced photographic controls included in a premium monthly subscription. This is a development target, not a claim that the current app outperforms Halide or reproduces a camera sensor exactly.
 
+## Current launch
+
+The launch is fully free. Every shipped look and camera control, including import, review, Save to Photos, and the optional white Instant Print finish, is available without a paywall, trial, or watermark. The Instant Print finish preserves the complete photo and adds only a white border with a larger bottom margin. The staged premium features below are future work; RAW capture, HDR editing/export, and durable non-destructive originals are not shipped capabilities today.
+
 The everyday flow should stay simple: open the camera, choose a look, shoot, and keep a beautiful image. Experienced photographers should be able to take control without switching apps. Monthly premium should include the full collection and shipped advanced tools; the proposed model has no separate charge for each recipe pack. Price and trial duration remain undecided. Free/trial access and watermark behavior are specified in the [monetization roadmap](monetization-roadmap.md).
 
 ## Competitive baseline
@@ -38,7 +42,7 @@ Stages are ordered by dependency and value. They are not dates or promises that 
 | D — Extend the photographic workflow | Several looks from one retained capture, bounded batch recipe application, recipe import/export, HDR editing/export, priority exposure modes, and native quick-launch/camera controls where supported | Validate demand and prototype cost. Measure each capability on device before adding it to the paid feature list. |
 | E — Research candidates | Exposure/film bracketing, multi-frame low-light or long-exposure capture, depth-assisted local edits, and compatible external-camera RAW workflows | Separate motion/alignment, ghosting, color, latency, memory, and hardware studies. Promote only experiments that improve real photographs. |
 
-Stages B–E are proposed premium scope. Monthly billing and the film/G7X focus are confirmed; individual advanced features and their exact release grouping remain prioritization decisions. RAW, HDR, resolution, flash, and lens capabilities must follow actual hardware support. Do not expose controls that imply unsupported aperture, optical zoom, flash power, or processing choices.
+Stages B–E are proposed premium scope. Monthly billing and the film/G7X focus are confirmed; individual advanced features and their exact release grouping remain prioritization decisions. RAW capture and HDR editing/export in these stages are roadmap items, not current launch behavior. Resolution, flash, and lens capabilities must follow actual hardware support. Do not expose controls that imply unsupported aperture, optical zoom, flash power, or processing choices.
 
 The current source includes EV compensation, point focus, AE/AF lock, lens selection, live film rendering, recipe tuning, review look comparison, and a Pro-control foundation for coupled manual ISO/shutter, sensor Kelvin/tint, manual focus, physical-lens selection, and Reset Auto. Controls follow actual device support and applied values. This is implemented source, not a claim of public availability or completed cross-device acceptance. Focus peaking/loupe, RAW capture, and durable non-destructive editing remain roadmap work.
 

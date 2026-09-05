@@ -194,6 +194,8 @@ struct CameraScreen: View {
                     saveErrorRequiresSettings: viewModel.saveErrorRequiresSettings,
                     availableRecipes: viewModel.recipes,
                     pendingReviewRecipeID: viewModel.pendingReviewRecipeID,
+                    finish: viewModel.reviewFinish,
+                    pendingReviewFinish: viewModel.pendingReviewFinish,
                     isRenderingReview: viewModel.isRenderingReview,
                     reviewRenderErrorMessage: viewModel.reviewRenderErrorMessage,
                     reviewOriginalImage: viewModel.reviewOriginalImage,
@@ -202,7 +204,8 @@ struct CameraScreen: View {
                     onRetake: viewModel.discardReview,
                     onOpenSettings: openSystemSettings,
                     onApplyReviewRecipe: viewModel.applyReviewRecipe,
-                    onPrepareReviewOriginal: viewModel.prepareReviewOriginal
+                    onPrepareReviewOriginal: viewModel.prepareReviewOriginal,
+                    onApplyReviewFinish: viewModel.applyReviewFinish
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .zIndex(1)

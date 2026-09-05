@@ -33,13 +33,6 @@ final class CameraManualHardwareTests: XCTestCase {
             camera.manualControls.activeDeviceID == wide.uniqueID
                 && camera.manualControls.manualExposureSupported
         }
-        let canVerifyFlashPreference = camera.flashAvailability == .available
-        if canVerifyFlashPreference {
-            camera.setFlashMode(.on)
-            try await requireEventually("Remembered flash is On before manual exposure") {
-                camera.flashMode == .on
-            }
-        }
 
         let bounds = camera.manualControls
         let iso1 = min(bounds.maximumISO, max(bounds.minimumISO, 100))
@@ -51,7 +44,20 @@ final class CameraManualHardwareTests: XCTestCase {
         let photoOutput = try XCTUnwrap(camera.session.outputs.compactMap {
             $0 as? AVCapturePhotoOutput
         }.first)
+        let canVerifyFlashPreference = camera.flashAvailability == .available
         var observations: [String] = []
+        let runtimeErrors = StringBox()
+        let runtimeErrorObserver = NotificationCenter.default.addObserver(
+            forName: AVCaptureSession.runtimeErrorNotification,
+            object: camera.session,
+            queue: nil
+        ) { notification in
+            let error = notification.userInfo?[AVCaptureSessionErrorKey] as? NSError
+            runtimeErrors.append(
+                "runtimeError domain=\(error?.domain ?? "none") code=\(error?.code ?? 0) "
+                    + "description=\(error?.localizedDescription ?? "none")"
+            )
+        }
         func recordFlash(_ phase: String) {
             let activeDevice = camera.session.inputs.compactMap {
                 ($0 as? AVCaptureDeviceInput)?.device
@@ -62,14 +68,67 @@ final class CameraManualHardwareTests: XCTestCase {
                 + "hasFlash=\(activeDevice?.hasFlash ?? false) hardwareAvailable=\(activeDevice?.isFlashAvailable ?? false) "
                 + "supportedModes=\(photoOutput.supportedFlashModes.map(\.rawValue))")
         }
-        recordFlash("initial-on")
+        func recordSession(_ phase: String) {
+            let controls = camera.manualControls
+            let activeDevice = camera.session.inputs.compactMap {
+                ($0 as? AVCaptureDeviceInput)?.device
+            }.first
+            observations.append("phase=\(phase) publishedRunning=\(camera.isRunning) "
+                + "sessionRunning=\(camera.session.isRunning) interrupted=\(camera.session.isInterrupted) "
+                + "availability=\(camera.availability.rawValue) status=\(camera.statusMessage) "
+                + "activeID=\(activeDevice?.uniqueID ?? "none") publicDeviceID=\(controls.activeDeviceID ?? "none") "
+                + "publicExposure=\(controls.exposureMode.rawValue) publicWB=\(controls.whiteBalanceMode.rawValue) "
+                + "publicFocus=\(controls.focusMode.rawValue) applying=\(controls.isApplying) "
+                + "hardwareExposure=\(activeDevice?.exposureMode.rawValue ?? -1) "
+                + "hardwareWB=\(activeDevice?.whiteBalanceMode.rawValue ?? -1) "
+                + "hardwareFocus=\(activeDevice?.focusMode.rawValue ?? -1) "
+                + "iso=\(activeDevice?.iso ?? 0) duration=\(activeDevice?.exposureDuration.seconds ?? 0) "
+                + "lensPosition=\(activeDevice?.lensPosition ?? 0)")
+        }
+        recordFlash("initial-auto")
         var capturedISOs: [Double] = []
         defer {
+            NotificationCenter.default.removeObserver(runtimeErrorObserver)
             recordFlash("final")
+            observations.append(contentsOf: runtimeErrors.values)
             let attachment = XCTAttachment(string: observations.joined(separator: "\n"))
             attachment.name = "Manual-capture-request-and-EXIF"
             attachment.lifetime = .keepAlways
             add(attachment)
+        }
+
+        // Auto uses quality prioritization and can resolve the requested 48 MP
+        // maximum. Prove that the production callback and encoded file agree;
+        // a lower resolved size is AVFoundation's decision, not app resizing.
+        camera.resetManualControlsToAuto()
+        camera.setFlashMode(.off)
+        try await requireEventually("Auto quality control capture is ready") {
+            !camera.manualControls.isAnyManualModeEnabled
+                && !camera.manualControls.isApplying
+                && wide.exposureMode != .custom
+                && camera.flashMode == .off
+        }
+        let requestedDimensions = photoOutput.maxPhotoDimensions
+        let autoPhoto = try await capturePhoto(camera, description: "Auto quality photo")
+        let autoProperties = try assertEncodedDimensions(
+            of: autoPhoto,
+            requestedMaximum: requestedDimensions,
+            label: "Auto quality"
+        )
+        observations.append("capture=auto requested=\(requestedDimensions.width)x\(requestedDimensions.height) "
+            + "resolved=\(autoPhoto.dimensions.width)x\(autoPhoto.dimensions.height) "
+            + "encoded=\(autoProperties.width)x\(autoProperties.height)")
+        let autoImage = XCTAttachment(data: autoPhoto.fileData, uniformTypeIdentifier: "public.jpeg")
+        autoImage.name = "Auto-quality-resolution-control"
+        autoImage.lifetime = .keepAlways
+        add(autoImage)
+
+        if canVerifyFlashPreference {
+            camera.setFlashMode(.on)
+            try await requireEventually("Remembered flash is On before manual exposure") {
+                camera.flashMode == .on
+            }
+            recordFlash("initial-on")
         }
 
         let requests = [(iso1, duration1), (iso2, duration1), (iso2, duration2)]
@@ -89,21 +148,16 @@ final class CameraManualHardwareTests: XCTestCase {
             camera.focus(at: CGPoint(x: 0.35, y: 0.6))
             // A following queued capture also establishes that the tap request
             // has reached the session before metadata is evaluated.
-            let delivered = expectation(description: "Manual photo \(index + 1)")
-            let box = PhotoBox()
-            camera.capturePhoto { photo in box.store(photo); delivered.fulfill() }
-            await fulfillment(of: [delivered], timeout: 25)
-            let photo = try XCTUnwrap(box.photo, "Manual photo must be delivered")
-            let source = try XCTUnwrap(CGImageSourceCreateWithData(photo.fileData as CFData, nil))
-            let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
-                as? [String: Any])
-            let pixelWidth = try XCTUnwrap(properties[kCGImagePropertyPixelWidth as String] as? NSNumber).intValue
-            let pixelHeight = try XCTUnwrap(properties[kCGImagePropertyPixelHeight as String] as? NSNumber).intValue
-            let requestedPixels = Int(photoOutput.maxPhotoDimensions.width) * Int(photoOutput.maxPhotoDimensions.height)
-            XCTAssertGreaterThan(requestedPixels, 0)
-            XCTAssertEqual(pixelWidth * pixelHeight, requestedPixels,
-                           "The saved camera file must retain the requested full capture resolution")
-            observations.append("capture=\(index + 1) pixels=\(pixelWidth)x\(pixelHeight) requestedPixels=\(requestedPixels)")
+            let photo = try await capturePhoto(camera, description: "Manual photo \(index + 1)")
+            let decoded = try assertEncodedDimensions(
+                of: photo,
+                requestedMaximum: requestedDimensions,
+                label: "Manual photo \(index + 1)"
+            )
+            let properties = decoded.properties
+            observations.append("capture=\(index + 1) requested=\(requestedDimensions.width)x\(requestedDimensions.height) "
+                + "resolved=\(photo.dimensions.width)x\(photo.dimensions.height) "
+                + "encoded=\(decoded.width)x\(decoded.height)")
             let exif = try XCTUnwrap(properties[kCGImagePropertyExifDictionary as String]
                 as? [String: Any])
             let capturedISO = try XCTUnwrap((exif[kCGImagePropertyExifISOSpeedRatings as String]
@@ -172,16 +226,25 @@ final class CameraManualHardwareTests: XCTestCase {
             }
         }
         let beforePause = camera.manualControls
+        recordSession("before-stop")
         camera.stop()
-        try await requireEventually("Camera stops") { !camera.isRunning }
+        recordSession("stop-requested")
+        try await requireEventually("Camera stops", onTimeout: {
+            recordSession("stop-timeout")
+        }) { !camera.isRunning }
+        recordSession("stopped")
         camera.start()
-        try await requireEventually("Manual modes survive the reused session") {
+        recordSession("start-requested")
+        try await requireEventually("Manual modes survive the reused session", onTimeout: {
+            recordSession("start-timeout")
+        }) {
             camera.isRunning && camera.manualControls.exposureMode == .manual
                 && !camera.manualControls.isApplying
                 && wide.exposureMode == .custom
                 && camera.manualControls.whiteBalanceMode == beforePause.whiteBalanceMode
                 && camera.manualControls.focusMode == beforePause.focusMode
         }
+        recordSession("started")
         recordFlash("session-reused")
         XCTAssertEqual(wide.iso, iso2, accuracy: max(iso2 * 0.05, 1))
         XCTAssertEqual(wide.exposureDuration.seconds, duration2,
@@ -266,12 +329,55 @@ final class CameraManualHardwareTests: XCTestCase {
     private func requireEventually(
         _ description: String,
         timeout: TimeInterval = 15,
+        onTimeout: (@MainActor () -> Void)? = nil,
         condition: @escaping @MainActor () -> Bool
     ) async throws {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition(), Date() < deadline { try await Task.sleep(for: .milliseconds(100)) }
+        if !condition() { onTimeout?() }
         XCTAssertTrue(condition(), description)
         if !condition() { throw AcceptanceError.timeout }
+    }
+
+    private func capturePhoto(
+        _ camera: CameraService,
+        description: String
+    ) async throws -> CameraService.CapturedPhoto {
+        let delivered = expectation(description: description)
+        let box = PhotoBox()
+        camera.capturePhoto { photo in box.store(photo); delivered.fulfill() }
+        await fulfillment(of: [delivered], timeout: 25)
+        return try XCTUnwrap(box.photo, "\(description) must be delivered")
+    }
+
+    private func assertEncodedDimensions(
+        of photo: CameraService.CapturedPhoto,
+        requestedMaximum: CMVideoDimensions,
+        label: String
+    ) throws -> (properties: [String: Any], width: Int, height: Int) {
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(photo.fileData as CFData, nil))
+        let properties = try XCTUnwrap(
+            CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any]
+        )
+        let width = try XCTUnwrap(
+            properties[kCGImagePropertyPixelWidth as String] as? NSNumber
+        ).intValue
+        let height = try XCTUnwrap(
+            properties[kCGImagePropertyPixelHeight as String] as? NSNumber
+        ).intValue
+        let resolvedWidth = Int(photo.dimensions.width)
+        let resolvedHeight = Int(photo.dimensions.height)
+        XCTAssertGreaterThan(width, 0, "\(label) encoded width must be positive")
+        XCTAssertGreaterThan(height, 0, "\(label) encoded height must be positive")
+        XCTAssertGreaterThan(resolvedWidth, 0, "\(label) resolved width must be positive")
+        XCTAssertGreaterThan(resolvedHeight, 0, "\(label) resolved height must be positive")
+        XCTAssertLessThanOrEqual(resolvedWidth, Int(requestedMaximum.width))
+        XCTAssertLessThanOrEqual(resolvedHeight, Int(requestedMaximum.height))
+        XCTAssertEqual(width, resolvedWidth,
+                       "\(label) JPEG width must match AVFoundation's resolved capture")
+        XCTAssertEqual(height, resolvedHeight,
+                       "\(label) JPEG height must match AVFoundation's resolved capture")
+        return (properties, width, height)
     }
 
     private enum AcceptanceError: Error { case timeout }
@@ -281,5 +387,12 @@ final class CameraManualHardwareTests: XCTestCase {
         private var value: CameraService.CapturedPhoto?
         var photo: CameraService.CapturedPhoto? { lock.withLock { value } }
         func store(_ photo: CameraService.CapturedPhoto?) { lock.withLock { value = photo } }
+    }
+
+    private final class StringBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var storage: [String] = []
+        var values: [String] { lock.withLock { storage } }
+        func append(_ value: String) { lock.withLock { storage.append(value) } }
     }
 }

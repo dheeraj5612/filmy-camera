@@ -43,6 +43,19 @@ ENVIRONMENT = {
     "store-media": {"FILMY_RUN_STORE_MEDIA": "1", "FILMY_STORE_PRIOR_SAVES": "0"}
 }
 FRESH_PHOTOS_SIMULATOR_PHASES = {"photos-e2e", "store-media"}
+SIMCTL_DEFAULT_TIMEOUT_SECONDS = 60
+SIMULATOR_BOOT_TIMEOUT_SECONDS = 300
+SIMULATOR_MEDIA_TIMEOUT_SECONDS = 300
+SIMULATOR_SHUTDOWN_TIMEOUT_SECONDS = 60
+SIMULATOR_DELETE_TIMEOUT_SECONDS = 60
+
+
+class PhaseFailure(Exception):
+    """Carries an already-recorded XCTest failure through simulator cleanup."""
+
+    def __init__(self, exit_code):
+        super().__init__(f"Test phase failed with exit code {exit_code}")
+        self.exit_code = exit_code
 
 
 def inventory(root=ROOT, manifest_path=MANIFEST):
@@ -172,8 +185,16 @@ def run_logged(command, path, env=None):
             raise
 
 
-def simctl(*arguments):
-    return subprocess.check_output(["xcrun", "simctl", *arguments], text=True).strip()
+def simctl(*arguments, timeout=SIMCTL_DEFAULT_TIMEOUT_SECONDS):
+    try:
+        return subprocess.check_output(
+            ["xcrun", "simctl", *arguments], text=True, timeout=timeout
+        ).strip()
+    except subprocess.TimeoutExpired as error:
+        operation = arguments[0] if arguments else "command"
+        raise ValueError(
+            f"simctl {operation} timed out after {timeout} seconds"
+        ) from error
 
 
 def create_photos_simulator(destination):
@@ -189,21 +210,50 @@ def create_photos_simulator(destination):
     owned = simctl("create", "Filmy-Photos-E2E-" + uuid.uuid4().hex[:8],
                    device["deviceTypeIdentifier"], runtime)
     try:
-        simctl("boot", owned)
-        simctl("bootstatus", owned, "-b")
+        simctl("boot", owned, timeout=SIMULATOR_BOOT_TIMEOUT_SECONDS)
+        simctl("bootstatus", owned, "-b", timeout=SIMULATOR_BOOT_TIMEOUT_SECONDS)
         # XCTest installs the app; the normal UI flow handles permission
         # prompts after installation instead of relying on pre-install grants.
-        simctl("addmedia", owned, str(ROOT / "docs/app-store/screenshots/demo-source/cafe-original.png"))
+        simctl(
+            "addmedia",
+            owned,
+            str(ROOT / "docs/app-store/screenshots/demo-source/cafe-original.png"),
+            timeout=SIMULATOR_MEDIA_TIMEOUT_SECONDS,
+        )
         return owned
     except BaseException:
-        destroy_simulator(owned)
+        try:
+            destroy_simulator(owned)
+        except Exception as cleanup_error:
+            print(f"Owned simulator cleanup also failed: {cleanup_error}", file=sys.stderr)
         raise
 
 
 def destroy_simulator(owned):
     # Only the UUID returned by this invocation's `simctl create` is deleted.
-    subprocess.run(["xcrun", "simctl", "shutdown", owned], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    subprocess.run(["xcrun", "simctl", "delete", owned], check=True)
+    try:
+        subprocess.run(
+            ["xcrun", "simctl", "shutdown", owned],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=SIMULATOR_SHUTDOWN_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        print(
+            f"Timed out shutting down owned simulator {owned}; attempting bounded deletion",
+            file=sys.stderr,
+        )
+    try:
+        subprocess.run(
+            ["xcrun", "simctl", "delete", owned],
+            check=True,
+            timeout=SIMULATOR_DELETE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise ValueError(
+            f"Timed out deleting owned simulator {owned} after "
+            f"{SIMULATOR_DELETE_TIMEOUT_SECONDS} seconds"
+        ) from error
 
 
 @contextmanager
@@ -214,7 +264,14 @@ def isolated_photos_destination(phase, destination):
     owned = create_photos_simulator(destination)
     try:
         yield "platform=iOS Simulator,id=" + owned
-    finally:
+    except BaseException:
+        try:
+            destroy_simulator(owned)
+        except Exception as cleanup_error:
+            # Preserve the test/setup failure as the primary evidence.
+            print(f"Owned simulator cleanup also failed: {cleanup_error}", file=sys.stderr)
+        raise
+    else:
         destroy_simulator(owned)
 
 
@@ -236,6 +293,84 @@ def require_complete_run(phase, selectors, summary):
     actual_count = sum(summary.get(key, 0) for key in ("passed", "failed", "skipped"))
     if actual_count != len(selectors):
         summary.update(status="failed", reason=f"Selected {len(selectors)} tests but XCTest reported {actual_count}; check target membership/build products")
+
+
+def run_isolated_photos_methods(command, selectors, result, output, environment):
+    """Run each Photos picker case in a fresh XCTest invocation on one simulator."""
+    case_results = []
+    case_logs = []
+    aggregate_exit_code = 0
+
+    for index, selector in enumerate(selectors, start=1):
+        method = re.sub(r"[^A-Za-z0-9_-]", "-", selector.rsplit("/", 1)[-1])
+        artifact_stem = f"photos-e2e-{index:02d}-{method}"
+        case_result = output / f"FilmyCameraPhotosE2E-{index:02d}-{method}.xcresult"
+        case_log = output / f"filmycamera-{artifact_stem}-test.log"
+        if case_result.exists():
+            raise ValueError(
+                f"Refusing to overwrite evidence: {case_result}; choose another --output-dir"
+            )
+
+        case_command = command + ["-resultBundlePath", str(case_result)]
+        case_command += ["-only-testing:" + selector, "test-without-building"]
+        code = run_logged(case_command, case_log, environment)
+        case_summary = summarize_result(case_result, code)
+        require_complete_run("photos-e2e", [selector], case_summary)
+        if case_summary["status"] != "passed" and aggregate_exit_code == 0:
+            aggregate_exit_code = code or 1
+        case_results.append({
+            "test": selector,
+            "status": case_summary["status"],
+            "passed": case_summary.get("passed", 0),
+            "failed": case_summary.get("failed", 0),
+            "skipped": case_summary.get("skipped", 0),
+            "exitCode": code,
+            "resultBundle": case_result.name,
+            "log": case_log.name,
+            "reason": case_summary.get("reason"),
+            "testFailures": case_summary.get("testFailures", []),
+            "devicesAndConfigurations": case_summary.get("devicesAndConfigurations", []),
+        })
+        case_logs.append(case_log)
+
+    aggregate_log = output / "filmycamera-photos-e2e-test.log"
+    with aggregate_log.open("w") as combined:
+        for case, case_log in zip(case_results, case_logs):
+            combined.write(f"===== {case['test']} =====\n")
+            if case_log.exists():
+                contents = case_log.read_text(errors="replace")
+                combined.write(contents)
+                if contents and not contents.endswith("\n"):
+                    combined.write("\n")
+
+    merge_error = None
+    try:
+        subprocess.check_call([
+            "xcrun", "xcresulttool", "merge", "--output-path", str(result),
+            *(str(output / case["resultBundle"]) for case in case_results),
+        ])
+    except (subprocess.CalledProcessError, OSError) as error:
+        merge_error = f"Unable to merge per-method XCTest result bundles: {error}"
+        if aggregate_exit_code == 0:
+            aggregate_exit_code = 1
+
+    reasons = [case["reason"] for case in case_results if case["reason"]]
+    if merge_error:
+        reasons.append(merge_error)
+    return {
+        "status": "passed" if aggregate_exit_code == 0 else "failed",
+        "passed": sum(case["passed"] for case in case_results),
+        "failed": sum(case["failed"] for case in case_results),
+        "skipped": sum(case["skipped"] for case in case_results),
+        "exitCode": aggregate_exit_code,
+        "reason": "; ".join(reasons) if reasons else None,
+        "testFailures": [failure for case in case_results for failure in case["testFailures"]],
+        "devicesAndConfigurations": [
+            device for case in case_results for device in case["devicesAndConfigurations"]
+        ],
+        "mergedResultBundle": result.name if merge_error is None else None,
+        "caseResults": case_results,
+    }, aggregate_exit_code
 
 
 def main(argv=None):
@@ -291,25 +426,39 @@ def main(argv=None):
         if result.exists():
             raise ValueError(f"Refusing to overwrite evidence: {result}; choose another --output-dir")
         started = time.monotonic()
-        with isolated_photos_destination(phase, destination) as phase_destination:
-            command = xcode_command(phase_destination, args.derived_data, args.coverage)
-            command += ["-resultBundlePath", str(result)]
-            command += ["-only-testing:" + test for test in selectors]
-            command += ["test-without-building"]
-            log_name = {"core": "unit", "e2e": "ui"}.get(phase, phase)
-            code = run_logged(command, output / f"filmycamera-{log_name}-test.log", test_environment(phase))
-            summary = summarize_result(result, code)
-            require_complete_run(phase, selectors, summary)
-            summary.update({"lane": phase, "selectedTests": selectors, "destination": phase_destination,
-                            "elapsedSeconds": round(time.monotonic() - started, 2),
-                            "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
-                            "worktreeDirty": bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip()),
-                            "buildInputDigest": input_digest, "toolchain": toolchain,
-                            "coverageEnabled": args.coverage})
-            (output / f"filmycamera-{phase}-summary.json").write_text(json.dumps(summary, indent=2) + "\n")
-            print(json.dumps({key: summary.get(key) for key in ("lane", "status", "passed", "failed", "skipped")}), flush=True)
-            if summary["status"] != "passed":
-                return code or 1
+        try:
+            with isolated_photos_destination(phase, destination) as phase_destination:
+                command = xcode_command(phase_destination, args.derived_data, args.coverage)
+                if phase == "photos-e2e" and len(selectors) > 1:
+                    summary, code = run_isolated_photos_methods(
+                        command, selectors, result, output, test_environment(phase)
+                    )
+                else:
+                    command += ["-resultBundlePath", str(result)]
+                    command += ["-only-testing:" + test for test in selectors]
+                    command += ["test-without-building"]
+                    log_name = {"core": "unit", "e2e": "ui"}.get(phase, phase)
+                    code = run_logged(
+                        command,
+                        output / f"filmycamera-{log_name}-test.log",
+                        test_environment(phase),
+                    )
+                    summary = summarize_result(result, code)
+                require_complete_run(phase, selectors, summary)
+                summary.update({"lane": phase, "selectedTests": selectors, "destination": phase_destination,
+                                "elapsedSeconds": round(time.monotonic() - started, 2),
+                                "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+                                "worktreeDirty": bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip()),
+                                "buildInputDigest": input_digest, "toolchain": toolchain,
+                                "coverageEnabled": args.coverage})
+                (output / f"filmycamera-{phase}-summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+                print(json.dumps({key: summary.get(key) for key in ("lane", "status", "passed", "failed", "skipped")}), flush=True)
+                if summary["status"] != "passed":
+                    # Carry the recorded failure as an exception so context-manager cleanup
+                    # cannot replace its exit code with a secondary timeout.
+                    raise PhaseFailure(code or 1)
+        except PhaseFailure as failure:
+            return failure.exit_code
     return 0
 
 

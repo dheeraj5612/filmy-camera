@@ -20,7 +20,8 @@
     "FilmyCameraTests/RecipeRenderGalleryTests": "fixtures",
     "FilmyCameraUITests/FilmyCameraUITests": "e2e",
     "FilmyCameraUITests/NormalPhotoFlowTests": "photos-e2e",
-    "FilmyCameraUITests/StoreScreenshotTests": "store-media"
+    "FilmyCameraUITests/StoreScreenshotTests": "store-media",
+    "FilmyCameraTests/PhotoPrintCompositorTests": "integration"
   },
   "overrides": {
     "FilmyCameraUITests/FilmyCameraUITests/testSimulatorFallbackExposesReadableStateWithoutPreviewAction": "simulator-e2e",

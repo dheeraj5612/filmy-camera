@@ -8,7 +8,7 @@ Filmy Camera is a native iPhone and iPad camera built around the feeling of choo
 - GPU-backed Core Image processing with a generated 3D color cube, dynamic range, tone curve, temperature/tint, Color Chrome, FX Blue, detail, grain, halation, and vignette stages.
 - Native bi-planar YUV preview buffers when available, with a BGRA fallback, and a session-scoped grain phase shared by preview and capture for a more faithful WYSIWYG frame.
 - A dedicated G7 X Compact profile and curated editable film recipes based on public Fujifilm-style controls: film base, tone curve, color, white-balance shift, dynamic range, Color Chrome, FX Blue, sharpness, noise reduction, clarity, grain, grain size, halation, and vignette.
-- Full-resolution capture review with retake or explicit Save to Photos, so a frame is never committed silently.
+- Full-resolution capture review with retake or explicit Save to Photos, so a frame is never committed silently. Reviews can keep the full photo edge to edge or add the optional white Instant Print border with its generous bottom margin.
 - Try another look on the same capture or import and compare with Original before saving. Review previews are bounded to 1800 pixels, and changed looks export at full resolution on Save without changing the next shot's recipe.
 - System photo picker import that preserves the original framing and applies the selected recipe at full resolution up to the 40 MP processing budget; larger images are resized and labeled in review.
 - First-run recipe-first onboarding with a direct handoff into the camera.
@@ -45,7 +45,9 @@ The app requires iOS 17 or later. Camera and Photos permissions are requested on
 
 ## Future monetization
 
-The product target is an exceptional film-simulation and G7X-inspired camera with advanced capture and editing tools in a premium monthly subscription, a free trial, and watermarked free exports. Price, trial duration, and the exact feature split remain open. See the [premium camera vision](docs/premium-camera-vision.md) for the staged feature and quality targets and the [monetization roadmap](docs/monetization-roadmap.md) for access and export behavior. Subscription restrictions are not enabled in build 8, and roadmap work beyond the current product slice is not complete.
+The current launch is fully free: all shipped looks, camera tools, import, review, Save to Photos, and the optional Instant Print finish are available without a paywall, subscription trial, or export watermark. Existing images remain usable regardless of any future access model.
+
+The product target is an exceptional film-simulation and G7X-inspired camera with additional capture and editing tools in a premium monthly subscription. Price, trial duration, and the exact feature split remain open. See the [premium camera vision](docs/premium-camera-vision.md) for the staged feature and quality targets and the [monetization roadmap](docs/monetization-roadmap.md) for future access and export proposals. Subscription restrictions and watermarking are not enabled in the current launch; RAW and HDR work described in those documents remains roadmap work.
 
 ## Rendering note
 
