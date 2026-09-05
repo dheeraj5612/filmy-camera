@@ -44,6 +44,7 @@ final class LiveRecipePreviewStore: ObservableObject {
     private var frameHandlerID: UUID?
     private var lastSnapshotTime: TimeInterval = 0
     private var isRendering = false
+    private var renderTask: Task<Void, Never>?
     private var version = 0
     /// Bumped by `detach()` and `clear()`; a render that started under an
     /// older generation discards its result instead of publishing it.
@@ -77,12 +78,16 @@ final class LiveRecipePreviewStore: ObservableObject {
     /// while a review sheet is up and the session is stopped. A render still
     /// in flight is discarded so it cannot republish the old scene.
     func clear() {
-        scene = nil
+        if scene != nil {
+            scene = nil
+        }
         invalidatePendingRenders()
     }
 
     private func invalidatePendingRenders() {
         generation &+= 1
+        renderTask?.cancel()
+        renderTask = nil
         isRendering = false
     }
 
@@ -95,12 +100,15 @@ final class LiveRecipePreviewStore: ObservableObject {
         let box = FrameBox(image)
         let size = Self.snapshotSize
         let startedGeneration = generation
-        Task.detached(priority: .utility) { [weak self] in
+        renderTask = Task.detached(priority: .utility) { [weak self] in
+            guard !Task.isCancelled else { return }
             let target = CGRect(origin: .zero, size: size)
             let framed = CameraFrameLayout.aspectFill(box.image, in: target)
             let rendered = FilmRenderer.outputCGImage(framed, from: target)
+            guard !Task.isCancelled else { return }
             await MainActor.run { [weak self] in
                 guard let self, self.generation == startedGeneration else { return }
+                self.renderTask = nil
                 self.isRendering = false
                 guard let rendered else { return }
                 self.version += 1

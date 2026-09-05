@@ -906,7 +906,7 @@ struct RecipeSwatch: View {
                     lineWidth: isSelected ? 2 : 1
                 )
         }
-        .task(id: ThumbnailKey(recipe: recipe, hasLiveScene: previewScene != nil)) {
+        .task(id: ThumbnailKey(recipe: recipe, hasLiveScene: previewScene != nil), priority: .utility) {
             // Clear a prior recipe's image immediately, so a slider change
             // never presents stale settings while the replacement is rendered.
             thumbnailImage = nil
@@ -920,25 +920,20 @@ struct RecipeSwatch: View {
             // predecessor whenever the recipe changes again.
             try? await Task.sleep(for: .milliseconds(150))
             guard !Task.isCancelled else { return }
-            let renderedImage = await Task.detached(priority: .utility) {
-                FilmRenderer.thumbnail(for: recipe)
-            }.value
+            let renderedImage = await RecipeSwatchRenderer.shared.render(recipe: recipe)
             guard !Task.isCancelled else { return }
             thumbnailImage = renderedImage
         }
         // When the viewfinder is live, show this recipe applied to the actual
         // scene, refreshed at the snapshot store's cadence.
-        .task(id: LiveKey(recipe: recipe, sceneVersion: previewScene?.version)) {
+        .task(id: LiveKey(recipe: recipe, sceneVersion: previewScene?.version), priority: .utility) {
             guard let previewScene else {
                 liveThumbnail = nil
                 return
             }
             try? await Task.sleep(for: .milliseconds(120))
             guard !Task.isCancelled else { return }
-            let sceneBox = SceneBox(previewScene.image)
-            let rendered = await Task.detached(priority: .utility) {
-                FilmRenderer.previewThumbnail(for: recipe, over: sceneBox.image)
-            }.value
+            let rendered = await RecipeSwatchRenderer.shared.render(recipe: recipe, scene: previewScene)
             guard !Task.isCancelled else { return }
             if let rendered {
                 liveThumbnail = rendered
@@ -947,11 +942,20 @@ struct RecipeSwatch: View {
     }
 }
 
-private final class SceneBox: @unchecked Sendable {
-    let image: CIImage
+/// One swatch at a time can submit GPU work. Actor calls retain their SwiftUI
+/// task's cancellation, so closed drawers and obsolete slider/scene revisions
+/// are discarded before they render, instead of launching N detached jobs.
+actor RecipeSwatchRenderer {
+    static let shared = RecipeSwatchRenderer()
 
-    init(_ image: CIImage) {
-        self.image = image
+    func render(recipe: FilmRecipe, scene: RecipePreviewScene? = nil) -> UIImage? {
+        guard !Task.isCancelled else { return nil }
+        return autoreleasepool {
+            if let scene {
+                return FilmRenderer.previewThumbnail(for: recipe, over: scene.image)
+            }
+            return FilmRenderer.thumbnail(for: recipe)
+        }
     }
 }
 

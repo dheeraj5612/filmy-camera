@@ -5,6 +5,26 @@ import XCTest
 
 final class CameraViewModelRenderingTests: XCTestCase {
     @MainActor
+    func testCancelledImportDoesNotPublishReviewOrErrorAndCanBeRetried() async throws {
+        let source = UIGraphicsImageRenderer(size: CGSize(width: 80, height: 40)).image { context in
+            UIColor.orange.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 80, height: 40))
+        }
+        let data = try XCTUnwrap(source.jpegData(compressionQuality: 0.9))
+        let model = CameraViewModel()
+        let task = Task { @MainActor in
+            withUnsafeCurrentTask { $0?.cancel() }
+            await model.importPhoto(data: data)
+        }
+        await task.value
+        XCTAssertNil(model.reviewImage)
+        XCTAssertNil(model.toastMessage)
+        XCTAssertFalse(model.isImporting)
+        await model.importPhoto(data: data)
+        XCTAssertNotNil(model.reviewImage)
+    }
+
+    @MainActor
     func testImportedPhotoKeepsItsFramingAndSelectedRecipe() async throws {
         let sourceSize = CGSize(width: 80, height: 40)
         let image = UIGraphicsImageRenderer(size: sourceSize).image { context in

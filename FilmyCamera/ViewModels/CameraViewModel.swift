@@ -114,14 +114,21 @@ final class CameraViewModel: ObservableObject {
         builtInRecipesByID[defaultRecipeID] ?? FilmRecipe.builtIns[0]
     }
 
-    /// The built-in recipe the viewfinder will most likely render first: the
-    /// persisted selection when it is a built-in, else the default. Used to
-    /// warm the renderer before the view model exists.
+    /// Resolve the same persisted controls as the view model so startup warms
+    /// the actual first look, including a customized color cube.
     nonisolated static func launchRecipe(defaults: UserDefaults = .standard) -> FilmRecipe {
         let storedID = defaults.string(forKey: selectedRecipeIDKey) ?? defaultRecipeID
-        return FilmRecipe.builtIns.first { $0.id == storedID }
+        let base = FilmRecipe.builtIns.first { $0.id == storedID }
             ?? FilmRecipe.builtIns.first { $0.id == defaultRecipeID }
             ?? FilmRecipe.builtIns[0]
+        guard let saved = decodeRecipeOverrides(from: defaults.data(forKey: recipeOverridesKey))
+            .recipes.values.first(where: { $0.id == base.id }) else {
+            return base
+        }
+        var resolved = base
+        resolved.applyControlValues(from: saved)
+        resolved.markUserModified(parentRecipeID: base.id)
+        return resolved
     }
 
     enum ReviewSource: Equatable {
@@ -152,7 +159,7 @@ final class CameraViewModel: ObservableObject {
     }
 
     nonisolated static let selectedRecipeIDKey = "selectedRecipeID"
-    static let recipeOverridesKey = "recipeOverrides"
+    nonisolated static let recipeOverridesKey = "recipeOverrides"
 
     /// New installs and unknown persisted selections land on the G7 X profile.
     private static let fallbackRecipeID = CameraViewModel.defaultRecipeID
@@ -409,7 +416,7 @@ final class CameraViewModel: ObservableObject {
         let recipe = selectedRecipe
         let importedAt = Date()
 
-        let renderedPhoto = await Task.detached(priority: .userInitiated) {
+        let renderTask = Task.detached(priority: .userInitiated) {
             autoreleasepool {
                 Self.renderImported(
                     sourceData: data,
@@ -417,7 +424,12 @@ final class CameraViewModel: ObservableObject {
                     importedAt: importedAt
                 )
             }
-        }.value
+        }
+        let renderedPhoto = await withTaskCancellationHandler {
+            await renderTask.value
+        } onCancel: {
+            renderTask.cancel()
+        }
 
         isImporting = false
         guard !Task.isCancelled else {
@@ -631,7 +643,7 @@ final class CameraViewModel: ObservableObject {
         recipe: FilmRecipe,
         importedAt: Date
     ) -> RenderedPhoto? {
-        guard let input = CIImage(
+        guard !Task.isCancelled, let input = CIImage(
             data: sourceData,
             options: [.applyOrientationProperty: true]
         ) else { return nil }
@@ -649,6 +661,7 @@ final class CameraViewModel: ObservableObject {
         ))
         let framedInput = Self.boundedImportInput(unboundedInput)
         let isFullResolution = framedInput.extent.size == unboundedInput.extent.size
+        guard !Task.isCancelled else { return nil }
         let renderContext: FilmRenderer.CaptureContext
         if recipe.filmBase == .compactDigital {
             renderContext = FilmRenderer.CaptureContext(
@@ -657,13 +670,16 @@ final class CameraViewModel: ObservableObject {
         } else {
             renderContext = .standard
         }
+        guard !Task.isCancelled else { return nil }
         let filtered = FilmRenderer.render(
             framedInput,
             recipe: recipe,
             quality: .export,
             captureContext: renderContext
         )
-        guard let output = FilmRenderer.outputCGImage(filtered, from: filtered.extent),
+        guard !Task.isCancelled,
+              let output = FilmRenderer.outputCGImage(filtered, from: filtered.extent),
+              !Task.isCancelled,
               let data = PhotoOutputEncoder.jpegData(
                 for: output,
                 sourceData: sourceData,
@@ -673,6 +689,7 @@ final class CameraViewModel: ObservableObject {
             return nil
         }
 
+        guard !Task.isCancelled else { return nil }
         return RenderedPhoto(
             image: downsampledReviewImage(from: data) ?? UIImage(cgImage: output),
             data: data,
