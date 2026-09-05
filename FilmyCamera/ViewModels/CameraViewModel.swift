@@ -457,7 +457,7 @@ final class CameraViewModel: ObservableObject {
         showToast("That photo could not be opened. Try a different image.", style: .error)
     }
 
-    func saveReview(photoLibrary: PhotoLibraryService) {
+    func saveReview(photoLibrary: any PhotoSaving) {
         guard let reviewImage, let reviewRecipe else { return }
         guard !isSaving else { return }
 

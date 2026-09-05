@@ -167,6 +167,17 @@ enum PhotoLibrarySaveError: LocalizedError, Equatable, Sendable {
     }
 }
 
+@MainActor
+protocol PhotoSaving: AnyObject {
+    func save(
+        image: UIImage,
+        imageData: Data?,
+        recipe: FilmRecipe,
+        capturedAt: Date,
+        completion: @escaping @MainActor (Result<Void, PhotoLibrarySaveError>) -> Void
+    )
+}
+
 enum PhotoLibraryCompletionBridge {
     private final class MainActorCompletionBox: @unchecked Sendable {
         private let completion: @MainActor (Bool) -> Void
@@ -1695,3 +1706,5 @@ final class PhotoLibraryService: ObservableObject {
         }
     }
 }
+
+extension PhotoLibraryService: PhotoSaving {}

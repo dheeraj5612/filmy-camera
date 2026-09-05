@@ -19,6 +19,8 @@ xcuserdata/
 # Swift Package Manager / tooling
 .build/
 .swiftpm/
+__pycache__/
+*.pyc
 Packages/
 FilmyCameraTests/Fixtures/
 

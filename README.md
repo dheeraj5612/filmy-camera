@@ -37,6 +37,8 @@ If that simulator is not installed, replace the destination with any available i
 
 For deterministic simulator tests on CI or a busy development machine, add `-parallel-testing-enabled NO -maximum-parallel-testing-workers 1` to the test invocation.
 
+Run the complete test suite with `python3 scripts/testing/run.py ci --destination 'platform=iOS Simulator,id=YOUR_SIMULATOR_UUID'`. See [the testing guide](docs/testing.md) for unit, integration, Photos E2E, hardware, performance, coverage, and CI commands.
+
 The app requires iOS 17 or later. Camera and Photos permissions are requested only when the relevant feature is used.
 
 ## Rendering note

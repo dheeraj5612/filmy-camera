@@ -3,9 +3,12 @@ import XCTest
 @MainActor
 final class FilmyCameraUITests: XCTestCase {
     private nonisolated(unsafe) var app: XCUIApplication!
+    private nonisolated(unsafe) var defaultsSuiteName = ""
 
     override func setUpWithError() throws {
         continueAfterFailure = false
+        let suiteName = "FilmyCameraUITests.\(UUID().uuidString)"
+        defaultsSuiteName = suiteName
         // The monitor handler is not actor-isolated in the Xcode 16 SDK, but
         // XCTest invokes it on the main thread; hop explicitly so XCUIElement
         // calls compile under Swift 6 on every supported toolchain.
@@ -31,6 +34,7 @@ final class FilmyCameraUITests: XCTestCase {
         let launchedApp = MainActor.assumeIsolated {
             XCUIDevice.shared.orientation = .portrait
             let launchedApp = XCUIApplication()
+            launchedApp.launchEnvironment["FILMY_TEST_DEFAULTS_SUITE"] = suiteName
             launchedApp.launchArguments = [
                 "-ui-testing",
                 "-selectedRecipeID",
@@ -114,7 +118,7 @@ final class FilmyCameraUITests: XCTestCase {
     func testExpandedRecipeCanLaunchSelected() throws {
         app.terminate()
 
-        let expandedApp = XCUIApplication()
+        let expandedApp = makeApplication()
         expandedApp.launchArguments = [
             "-ui-testing",
             "-selectedRecipeID",
@@ -133,7 +137,7 @@ final class FilmyCameraUITests: XCTestCase {
     func testG7XModeExposesDedicatedCompactProfile() throws {
         app.terminate()
 
-        let compactApp = XCUIApplication()
+        let compactApp = makeApplication()
         compactApp.launchArguments = [
             "-ui-testing",
             "-selectedRecipeID",
@@ -204,7 +208,7 @@ final class FilmyCameraUITests: XCTestCase {
     func testG7XModeKeepsCompactCaptureControlsOneTapAway() throws {
         app.terminate()
 
-        let compactApp = XCUIApplication()
+        let compactApp = makeApplication()
         compactApp.launchArguments = [
             "-ui-testing",
             "-ui-testing-viewfinder-chrome",
@@ -234,6 +238,127 @@ final class FilmyCameraUITests: XCTestCase {
 
         XCTAssertFalse(compactApp.descendants(matching: .any)["recipe-picker"].exists)
         attachScreenshot(named: "g7x-quick-capture-controls")
+    }
+
+    func testRecipeEditorBackDiscardsDraftChanges() throws {
+        openRecipeDetail(for: "classic-chrome", in: app, tuneLabel: "Tune Muted Color")
+
+        let exposure = app.sliders["Exposure"]
+        // Native UISlider reports a 31pt accessibility node inside its larger
+        // row. Verify reachability and actual adjustment; the 44pt button
+        // geometry helper does not describe a native slider's touch behavior.
+        XCTAssertTrue(exposure.waitForExistence(timeout: 5))
+        XCTAssertTrue(exposure.isEnabled && exposure.isHittable)
+        let originalValue = try XCTUnwrap(exposure.value as? String)
+        exposure.adjust(toNormalizedSliderPosition: originalValue.contains("-") ? 0.9 : 0.1)
+        XCTAssertNotEqual(
+            exposure.value as? String,
+            originalValue,
+            "Changing a recipe control should create a distinct draft"
+        )
+
+        let back = app.buttons["recipe-back-to-camera"]
+        assertMinimumHitTarget(back, named: "Cancel recipe editing")
+        back.tap()
+        XCTAssertTrue(waitForDisappearance(back, timeout: 5))
+
+        openRecipeDetail(for: "classic-chrome", in: app, tuneLabel: "Tune Muted Color")
+        XCTAssertEqual(
+            app.sliders["Exposure"].value as? String,
+            originalValue,
+            "Leaving recipe details with Back must discard the draft"
+        )
+        app.buttons["recipe-back-to-camera"].tap()
+    }
+
+    func testRecipeEditorResetAndApplyPersistsBuiltInValues() throws {
+        openRecipeDetail(for: "classic-chrome", in: app, tuneLabel: "Tune Muted Color")
+
+        let exposure = app.sliders["Exposure"]
+        XCTAssertTrue(exposure.waitForExistence(timeout: 5))
+        XCTAssertTrue(exposure.isEnabled && exposure.isHittable)
+        let originalValue = try XCTUnwrap(exposure.value as? String)
+        exposure.adjust(toNormalizedSliderPosition: 0.9)
+        let apply = app.buttons["Apply changes to Muted Color"]
+        XCTAssertTrue(apply.waitForExistence(timeout: 5), "A changed recipe should offer Apply")
+        let customizedValue = try XCTUnwrap(exposure.value as? String)
+        XCTAssertNotEqual(customizedValue, originalValue, "The edited value should differ from the built-in baseline")
+        apply.tap()
+        XCTAssertTrue(waitForDisappearance(apply, timeout: 5))
+
+        app.terminate()
+        let relaunchedAfterApply = makeApplication()
+        relaunchedAfterApply.launchArguments = [
+            "-ui-testing",
+            "-selectedRecipeID",
+            "classic-chrome"
+        ]
+        relaunchedAfterApply.launch()
+        app = relaunchedAfterApply
+        app.tap()
+        XCTAssertTrue(app.buttons["Open roll"].waitForExistence(timeout: 10))
+
+        openRecipeDetail(for: "classic-chrome", in: app, tuneLabel: "Tune Muted Color")
+        XCTAssertEqual(
+            app.sliders["Exposure"].value as? String,
+            customizedValue,
+            "Applying a changed recipe must persist its controls across relaunch"
+        )
+
+        let reset = app.buttons["Reset recipe controls"]
+        scrollToHittable(reset, in: app)
+        reset.tap()
+        let resetValue = try XCTUnwrap(app.sliders["Exposure"].value as? String)
+        XCTAssertEqual(resetValue, originalValue, "Reset should restore the built-in control value")
+        let resetApply = app.buttons["Apply changes to Muted Color"]
+        assertMinimumHitTarget(resetApply, named: "Apply reset recipe")
+        resetApply.tap()
+        XCTAssertTrue(waitForDisappearance(resetApply, timeout: 5))
+
+        app.terminate()
+        let relaunchedAfterReset = makeApplication()
+        relaunchedAfterReset.launchArguments = [
+            "-ui-testing",
+            "-selectedRecipeID",
+            "classic-chrome"
+        ]
+        relaunchedAfterReset.launch()
+        app = relaunchedAfterReset
+        app.tap()
+        XCTAssertTrue(app.buttons["Open roll"].waitForExistence(timeout: 10))
+
+        openRecipeDetail(for: "classic-chrome", in: app, tuneLabel: "Tune Muted Color")
+        XCTAssertEqual(
+            app.sliders["Exposure"].value as? String,
+            originalValue,
+            "Applying Reset must persist built-in controls across relaunch"
+        )
+        assertMinimumHitTarget(app.buttons["Done editing Muted Color"], named: "Done recipe editing")
+        app.buttons["Done editing Muted Color"].tap()
+    }
+
+    func testOnboardingSkipReachesCameraWithCompactLookDiscoverable() throws {
+        app.terminate()
+
+        let onboardingApp = makeApplication()
+        onboardingApp.launchArguments = ["-ui-testing-onboarding", "-selectedRecipeID", "g7x-compact"]
+        onboardingApp.launch()
+        defer { onboardingApp.terminate() }
+
+        // The visible label is more stable than the SwiftUI identifier here;
+        // on some OS versions an ancestor replaces the descendant ID.
+        let skip = onboardingApp.buttons["Skip"]
+        assertMinimumHitTarget(skip, named: "Onboarding skip")
+        skip.tap()
+
+        XCTAssertTrue(onboardingApp.buttons["Open roll"].waitForExistence(timeout: 8))
+        assertMinimumHitTarget(onboardingApp.buttons["recipe-menu"], named: "Current look after onboarding")
+        openRecipeDrawer(in: onboardingApp)
+        XCTAssertTrue(onboardingApp.staticTexts["CAMERA PROFILE"].waitForExistence(timeout: 5))
+        XCTAssertTrue(onboardingApp.descendants(matching: .any)["recipe-group-compact"].exists)
+        let g7x = onboardingApp.buttons["recipe-g7x-compact"]
+        assertMinimumAccessibilityFrame(g7x, named: "G7 X recipe after onboarding")
+        XCTAssertTrue(g7x.exists, "G7 X Compact should be discoverable from the first look drawer")
     }
 
     func testLandscapeCameraShell() throws {
@@ -388,7 +513,7 @@ final class FilmyCameraUITests: XCTestCase {
         )
 
         app.terminate()
-        let cacheApp = XCUIApplication()
+        let cacheApp = makeApplication()
         cacheApp.launchArguments = ["-selectedRecipeID", "g7x-compact"]
         cacheApp.launch()
         app = cacheApp
@@ -482,7 +607,7 @@ final class FilmyCameraUITests: XCTestCase {
         ]
 
         for recipeID in recipeIDs {
-            let recipeApp = XCUIApplication()
+            let recipeApp = makeApplication()
             recipeApp.launchArguments = ["-ui-testing", "-selectedRecipeID", recipeID]
             recipeApp.launch()
             recipeApp.tap()
@@ -528,7 +653,7 @@ final class FilmyCameraUITests: XCTestCase {
     func testPhysicalG7XFlashCaptureReachesReview() throws {
         app.terminate()
 
-        let compactApp = XCUIApplication()
+        let compactApp = makeApplication()
         compactApp.launchArguments = [
             "-ui-testing",
             "-selectedRecipeID",
@@ -602,7 +727,7 @@ final class FilmyCameraUITests: XCTestCase {
         )
 
         app.terminate()
-        let rollApp = XCUIApplication()
+        let rollApp = makeApplication()
         // Deliberately omit -ui-testing: this exercises normal Photos access,
         // the real local fallback cache, and the real share controller.
         rollApp.launchArguments = ["-ui-testing-preview-status", "-selectedRecipeID", "g7x-compact"]
@@ -749,7 +874,7 @@ final class FilmyCameraUITests: XCTestCase {
 
     func testAccessibilitySizeCameraShellKeepsRecipeControlsReachable() throws {
         let accessibilityApp = MainActor.assumeIsolated {
-            let accessibilityApp = XCUIApplication()
+            let accessibilityApp = makeApplication()
             accessibilityApp.launchArguments = [
                 "-ui-testing",
                 "-selectedRecipeID",
@@ -786,7 +911,7 @@ final class FilmyCameraUITests: XCTestCase {
     func testMonochromeEditorHidesNoOpColorControls() throws {
         app.terminate()
 
-        let monochromeApp = XCUIApplication()
+        let monochromeApp = makeApplication()
         monochromeApp.launchArguments = [
             "-ui-testing",
             "-selectedRecipeID",
@@ -812,7 +937,7 @@ final class FilmyCameraUITests: XCTestCase {
     #if targetEnvironment(simulator)
     func testViewfinderFirstChromePreviewKeepsCameraQuiet() throws {
         let previewApp = MainActor.assumeIsolated {
-            let previewApp = XCUIApplication()
+            let previewApp = makeApplication()
             previewApp.launchArguments = [
                 "-ui-testing",
                 "-ui-testing-viewfinder-chrome",
@@ -973,7 +1098,7 @@ final class FilmyCameraUITests: XCTestCase {
 
     func testRecipeFirstOnboardingFlow() throws {
         let onboardingApp = MainActor.assumeIsolated {
-            let onboardingApp = XCUIApplication()
+            let onboardingApp = makeApplication()
             onboardingApp.launchArguments = ["-ui-testing-onboarding"]
             onboardingApp.launch()
             return onboardingApp
@@ -994,6 +1119,28 @@ final class FilmyCameraUITests: XCTestCase {
         openCamera.tap()
 
         XCTAssertTrue(onboardingApp.buttons["Open roll"].waitForExistence(timeout: 8))
+    }
+
+    private func openRecipeDetail(
+        for recipeID: String,
+        in target: XCUIApplication,
+        tuneLabel: String
+    ) {
+        openRecipeDrawer(in: target)
+        let recipe = target.buttons["recipe-\(recipeID)"]
+        assertMinimumHitTarget(recipe, named: recipeID + " recipe")
+        recipe.tap()
+
+        let tune = target.buttons[tuneLabel]
+        assertMinimumHitTarget(tune, named: tuneLabel)
+        tune.tap()
+        XCTAssertTrue(target.staticTexts["Recipe controls"].waitForExistence(timeout: 5))
+    }
+
+    private func makeApplication() -> XCUIApplication {
+        let application = XCUIApplication()
+        application.launchEnvironment["FILMY_TEST_DEFAULTS_SUITE"] = defaultsSuiteName
+        return application
     }
 
     private func openRecipeDrawer(in target: XCUIApplication) {
@@ -1319,7 +1466,7 @@ final class FilmyCameraUITests: XCTestCase {
         let options = XCTMeasureOptions()
         options.iterationCount = 5
         measure(metrics: [XCTApplicationLaunchMetric()], options: options) {
-            let launched = XCUIApplication()
+            let launched = makeApplication()
             launched.launchArguments = ["-ui-testing", "-selectedRecipeID", "classic-chrome"]
             launched.launch()
             XCTAssertTrue(launched.buttons["Open roll"].waitForExistence(timeout: 15))
