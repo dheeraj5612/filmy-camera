@@ -580,6 +580,15 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         )
         XCTAssertGreaterThanOrEqual(CameraActivityPolicy.gracePeriod, 30)
         XCTAssertLessThanOrEqual(CameraActivityPolicy.gracePeriod, 120)
+        XCTAssertEqual(
+            CameraActivityPolicy.deferredStopDelay(hasReview: true),
+            CameraActivityPolicy.reviewGracePeriod
+        )
+        XCTAssertEqual(
+            CameraActivityPolicy.deferredStopDelay(hasReview: false),
+            CameraActivityPolicy.inactiveGracePeriod
+        )
+        XCTAssertEqual(CameraActivityPolicy.inactiveGracePeriod, 8)
     }
 
     func testFlashSelectionSurvivesAPreCaptureRefreshWithoutPersistence() {

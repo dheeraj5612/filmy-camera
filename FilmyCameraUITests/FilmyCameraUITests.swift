@@ -950,7 +950,11 @@ final class FilmyCameraUITests: XCTestCase {
             assertMinimumHitTarget(currentLook, named: "Current look")
             currentLook.tap()
         }
-        XCTAssertTrue(drawer.waitForExistence(timeout: 5))
+        let appeared = drawer.waitForExistence(timeout: 5)
+        if !appeared {
+            attachScreenshot(named: "look-picker-did-not-open")
+        }
+        XCTAssertTrue(appeared, "Tapping the current look must open the look picker")
         assertMinimumHitTarget(target.buttons["recipe-drawer-close"], named: "Close look picker")
     }
 
@@ -1114,9 +1118,11 @@ final class FilmyCameraUITests: XCTestCase {
     }
 
     func testPhysicalRetakeReturnsToALiveViewfinderInstantly() throws {
-        guard waitForLiveShutter(in: app, timeout: 20) else {
-            throw XCTSkip("Requires camera hardware")
-        }
+        #if targetEnvironment(simulator)
+        throw XCTSkip("Requires camera hardware")
+        #else
+        XCTAssertTrue(waitForLiveShutter(in: app, timeout: 20),
+                      "Physical Retake acceptance requires a live camera")
         for round in 1...3 {
             app.buttons["Capture photo"].tap()
             let retake = app.buttons["Retake"]
@@ -1127,6 +1133,7 @@ final class FilmyCameraUITests: XCTestCase {
             let elapsed = Date().timeIntervalSince(start)
             XCTAssertLessThan(elapsed, 3, "Round \(round): Retake should reuse the warm session (took \(elapsed) s)")
         }
+        #endif
     }
 
     /// Cold-launch benchmark on hardware. The number lands in the result
