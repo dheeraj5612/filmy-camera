@@ -1,16 +1,47 @@
 # Filmy Camera release checklist
 
-Current candidate: version 1.0.0, build 8, with the [camera UX redesign](design-pass-20260904.md) and [reversible photo review](review-editing-20260904.md). The signed development app is installed on the test iPad. Build 5 remains the last verified Apple upload; App Store Connect requires renewed sign-in for a current readback. Builds 6 and 7 are preserved historical candidates. Historical release notes are in [release-history.md](release-history.md).
+Current candidate: version 1.0.0, build 11. It adds optional Instant Print borders to the existing camera UX, Pro controls, reversible review, and high-detail JPEG output. Every shipped feature is free for launch, with no trial, paywall, or watermark. Build 10 was uploaded on September 5 and App Store Connect confirms processing Complete and Ready to Submit. App Store pricing is zero in all 175 available countries/regions. Build 11 still needs the validation and release steps below; the saved distribution version currently references build 5 and is Developer Rejected from its prior withdrawal. Historical release notes are in [release-history.md](release-history.md).
 
-## Build 8 release gates
+## Build 11 release gates
+
+- [x] Implement an optional white Instant Print border with a larger bottom margin, preserving the original photo aspect and native pixels.
+- [x] Keep finish and look together through preview changes, cached exports, save retries, Original comparison, and discard.
+- [x] Verify all currently shipped looks and advanced camera tools are ungated; keep subscription and watermark work deferred.
+- [x] Verify App Store download pricing is zero in all 175 configured storefronts.
+- [ ] Pass final unit/integration, UI, Photos E2E, and required hosted CI on candidate source.
+- [ ] Inspect bordered output and review layouts; install and test the candidate on physical iPad and complete required iPhone hardware checks.
+- [ ] Create and validate the signed archive/IPA, upload build 11, and verify Apple processing.
+- [x] Save matching listing text and both five-image media packs; reload App Store Connect and verify the saved names/order.
+- [ ] Select build 11 and verify the saved release draft after Apple processing.
+- [ ] Submit the validated free app for App Review and verify the authoritative resulting state. Public availability depends on Apple approval.
+
+## Build 10 release gates
+
+- [x] Implement independent manual ISO and shutter adjustment, sensor white balance, manual focus, physical-lens selection, truthful applied-device state, and Reset Auto behavior.
+- [x] Pass focused iPad hardware acceptance for ISO 100/200, 1/125 and 1/60 shutter, 4032×3024 output, white balance, focus, session reuse, front/back switching, rapid return to Auto, and restored Flash On support.
+- [x] Set JPEG export quality explicitly to 0.95 after measuring improved decoded detail at a bounded file-size increase; pass the encoder contract on device. See [build 10 image-quality evidence](image-quality-build10-20260905.md).
+- [x] Pass the physical Pro-sheet portrait/landscape flow, slider adjustment, Reset to Auto, return to live preview, and the 44-point Done target.
+- [x] Pass all 211 local simulator tests (189 core, 19 UI, 3 Photos E2E) and 20 portable runner tests on the candidate source.
+- [ ] Complete a full physical confirmation after the first 24/25 run's UI runner termination. Onboarding and its two neighboring tests passed on unchanged binaries; preserve both results in the [build 10 record](image-quality-build10-20260905.md).
+- [x] Pass required CI on build 10 source `3bc8e90` (run 33981061238; all 211 app tests passed).
+- [x] Produce and validate the signed archive and IPA for build 10, including source, signing, privacy, executable/dSYM, and archive/export parity checks.
+- [x] Upload build 10 and verify processing Complete / Ready to Submit in App Store Connect. It is superseded by the build 11 candidate and was not selected or submitted for public release.
+- [ ] Complete the iPhone-specific, controlled image-quality, and submission gates below.
+
+## Preserved build 9 candidate
+
+- [x] Build 9 source `2304a2e` passed required CI with 210 app tests. See the [manual-controls acceptance record](manual-controls-acceptance-20260905.md).
+- [x] Produce a signed build 9 archive and IPA.
+- [ ] Upload build 9. Authentication remained unavailable, so its signed IPA is local release evidence rather than an Apple-delivered build.
+
+## Preserved build 8 release gates
 
 - [x] Implement review look switching and Original comparison with bounded previews, deferred full export, exact retry, and independent shooting selection.
 - [x] Pass local 180 unit/integration tests and three normal Photos E2E flows on iPadOS 26.5 and iOS 18.5. The test runner has 20 portable checks and selects 201 app tests for routine CI.
 - [x] Install the signed 1.0.0 (8) app and pass all 23 applicable iPad tests. The strengthened physical capture/compare/look-switch/landscape/save case also passed separately.
 - [x] Pass required CI on app source `1b68673` ([run 33961809201](https://github.com/dheeraj5612/filmy-camera/actions/runs/33961809201)), archive the clean source, and validate signed archive/IPA parity. The run passed 201 app tests and 20 runner checks with zero app failures/skips; its build-input digest matches the local source. See the [final build 8 evidence](review-editing-20260904.md#final-build-8-evidence).
 - [x] Refresh and inspect five iPhone and five iPad store screenshots from isolated public-fixture runs, showing current review controls and matching saved treatments.
-- [ ] Upload build 8 and the refreshed media, verify processing, select the matching build/media, and validate the review draft.
-- [ ] Complete the iPhone-specific, controlled image-quality, and submission gates below.
+- [ ] Upload build 8 and the refreshed media. Build 10 supersedes this unuploaded candidate.
 
 ## Preserved build 7 release gates
 
@@ -30,7 +61,7 @@ Current candidate: version 1.0.0, build 8, with the [camera UX redesign](design-
 - [x] Restore the iPad's original Photos Full Access permission after the add-only tests and verify installed version 1.0.0 (6).
 - [x] Merge the validated source through [PR 80](https://github.com/dheeraj5612/filmy-camera/pull/80). Main commit `b30a4ca85b1ea742ee420713440c365b7c684d8d` has the same tree as archive source `e2837c6`.
 - [x] Required CI passed on exact application source `e2837c6` in [run 33924488772](https://github.com/dheeraj5612/filmy-camera/actions/runs/33924488772), including release validation and full unit/UI suites.
-Build 6 upload attempts stopped before transfer with `Failed to Use Accounts`. They are preserved as release evidence; build 7 is now the upload target.
+Build 6 upload attempts stopped before transfer with `Failed to Use Accounts`. They are preserved as historical release evidence.
 
 ## Verified build 5 baseline
 
@@ -64,7 +95,7 @@ The media workflow uses one public-safe generated original in a fresh simulator.
 - [ ] Complete iPhone hardware acceptance for lens switching, flash, capture/import parity, save, interruption recovery, and sustained thermal behavior. The completed iPad pass cannot prove iPhone 5× telephoto switching.
 - [ ] Complete a controlled portrait and color comparison before making comparative image-quality claims.
 - [x] Verify the saved App Review contact phone and email through the visible native browser form after reload. The text snapshot omits these values and is not evidence that they are blank.
-- [x] Run Add for Review validation for the build 5 baseline. The draft was subsequently removed for replacement; its prior successful validation does not submit or validate build 6.
+- [x] Run Add for Review validation for the build 5 baseline. The draft was subsequently removed for replacement; its prior successful validation does not submit or validate build 10.
 - [x] Confirm saved review notes, age rating, export compliance, free pricing, availability, privacy and public support/privacy URLs; paid-app, banking, tax and Digital Services Act statuses read Active.
 - [x] The updated Free Apps agreement is Active, effective September 4, 2026, with no pending-agreement banner on the subsequent Business-page readback.
 - [x] Select **Manually release this version**, save, and verify after reload. Apple approval must not automatically publish before the remaining iPhone acceptance.
@@ -74,7 +105,7 @@ Do not describe the rendering as camera-exact or claim G7 X superiority without 
 
 ## Repeatable release workflow
 
-Run from a clean checkout of the source being archived. Use the recorded source revision when validating an existing archive; do not restamp build 5 or build 6 from a later documentation or test commit.
+Run from a clean checkout of the source being archived. Use the recorded source revision when validating any existing archive; do not restamp an older build from a later documentation or test commit.
 
 ```sh
 scripts/release/archive-device.sh

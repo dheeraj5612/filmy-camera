@@ -12,6 +12,10 @@ struct CaptureReviewView: View {
     var saveErrorRequiresSettings = false
     let availableRecipes: [FilmRecipe]
     let pendingReviewRecipeID: String?
+    /// The selected export finish. The rendered review image already includes
+    /// the finish, so this control only chooses which result to develop next.
+    var finish: PhotoFinish = .photo
+    var pendingReviewFinish: PhotoFinish? = nil
     let isRenderingReview: Bool
     let reviewRenderErrorMessage: String?
     let reviewOriginalImage: UIImage?
@@ -21,6 +25,7 @@ struct CaptureReviewView: View {
     let onOpenSettings: () -> Void
     let onApplyReviewRecipe: (FilmRecipe) -> Void
     let onPrepareReviewOriginal: () async -> Void
+    var onApplyReviewFinish: (PhotoFinish) -> Void = { _ in }
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var isShowingOriginal = false
@@ -31,7 +36,7 @@ struct CaptureReviewView: View {
 
             GeometryReader { proxy in
                 if usesSidePanel(for: proxy.size) {
-                    let sideWidth = min(max(proxy.size.width * 0.26, 300), 380)
+                    let sideWidth = sidePanelWidth(for: proxy.size)
                     let photoWidth = max(proxy.size.width - sideWidth - 92, 1)
                     HStack(alignment: .center, spacing: 28) {
                         framePreview(
@@ -40,12 +45,12 @@ struct CaptureReviewView: View {
                         )
                         .frame(width: photoWidth, alignment: .center)
 
-                        sidePanel
+                        sidePanel(compact: proxy.size.height <= 500)
                             .frame(width: sideWidth, alignment: .leading)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .padding(.horizontal, 32)
-                    .padding(.vertical, 24)
+                    .padding(.vertical, proxy.size.height <= 500 ? 8 : 24)
                 } else {
                     let isPortraitTablet = proxy.size.width >= 700 && proxy.size.height > proxy.size.width
                     let previewHeight = reviewPreviewHeight(
@@ -62,7 +67,7 @@ struct CaptureReviewView: View {
                                 .padding(.top, 16)
                                 .padding(.bottom, 12)
 
-                            reviewControls()
+                            reviewControls(wide: isPortraitTablet)
                                 .padding(.horizontal, 20)
                                 .padding(.bottom, 14)
 
@@ -72,7 +77,7 @@ struct CaptureReviewView: View {
                             )
                             .padding(.horizontal, 16)
 
-                            metadataBlock
+                            metadataBlock(widePortrait: isPortraitTablet)
                                 .padding(.horizontal, 20)
                                 .padding(.top, 14)
 
@@ -108,6 +113,12 @@ struct CaptureReviewView: View {
         .onChange(of: pendingReviewRecipeID) { _, _ in
             isShowingOriginal = false
         }
+        .onChange(of: finish) { _, _ in
+            isShowingOriginal = false
+        }
+        .onChange(of: pendingReviewFinish) { _, _ in
+            isShowingOriginal = false
+        }
         .onChange(of: reviewOriginalImage != nil) { _, hasOriginal in
             if hasOriginal {
                 isShowingOriginal = true
@@ -116,44 +127,68 @@ struct CaptureReviewView: View {
     }
 
     private func usesSidePanel(for size: CGSize) -> Bool {
-        size.width > size.height && size.width >= 700 && size.height >= 500
+        guard size.width > size.height else { return false }
+
+        // Phones in landscape have enough width for a compact control column,
+        // but not enough height for the portrait review stack. Keeping the
+        // photo and controls side by side prevents the action bar from
+        // covering the fitted image. The wider iPad layout uses the same
+        // arrangement with a more comfortable column.
+        return size.width >= 700 || size.height <= 500
+    }
+
+    private func sidePanelWidth(for size: CGSize) -> CGFloat {
+        if size.height <= 500 {
+            return min(max(size.width * 0.34, 250), 300)
+        }
+        return min(max(size.width * 0.26, 300), 380)
     }
 
     private func reviewPreviewHeight(for size: CGSize, isPortraitTablet: Bool) -> CGFloat {
         let idealHeight = size.height * (isPortraitTablet ? 0.78 : 0.64)
         guard !dynamicTypeSize.isAccessibilitySize else { return idealHeight }
 
-        // Reserve the fixed review chrome: header (76), chooser (68),
-        // metadata (54), pinned actions (82), and their surrounding gaps
-        // (20). This keeps the fitted photo in the normal viewport while
-        // accessibility sizes retain the larger hero and scroll naturally.
-        let fixedChromeHeight: CGFloat = 76 + 68 + 54 + 82 + 20
+        // A wide portrait iPad keeps look, comparison, and finish in one
+        // compact row. Reserve that row's actual footprint so the fitted
+        // photo can use the width available on the tablet. Smaller layouts
+        // retain the taller two-row chooser and scroll naturally at larger
+        // Dynamic Type sizes.
+        let fixedChromeHeight: CGFloat = isPortraitTablet ? 310 : 396
         return min(idealHeight, max(size.height - fixedChromeHeight, 160))
     }
 
-    private var sidePanel: some View {
-        VStack(spacing: 0) {
+    private func sidePanel(compact: Bool = false) -> some View {
+        let actionsInsideScroll = compact && dynamicTypeSize.isAccessibilitySize
+
+        return VStack(spacing: 0) {
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: compact ? 10 : 18) {
                     header
-                    metadataBlock
-                    reviewControls(stacked: true)
+                    if !compact {
+                        metadataBlock()
+                    }
+                    reviewControls(stacked: !compact, compact: compact)
 
                     if let saveErrorMessage {
                         saveError(saveErrorMessage)
                     }
-                }
-                .padding(.bottom, 18)
-            }
 
-            VStack(spacing: 10) {
-                retakeButton
-                keepFrameButton
+                    if actionsInsideScroll {
+                        panelActions(compact: true)
+                            .padding(.top, 14)
+                    }
+                }
+                .padding(.bottom, compact ? 8 : 18)
             }
-                .padding(.top, 14)
+            .accessibilityIdentifier("review-controls-scroll")
+
+            if !actionsInsideScroll {
+                panelActions(compact: compact)
+                    .padding(.top, 14)
+            }
         }
         .frame(maxHeight: .infinity)
-        .padding(22)
+        .padding(compact ? 12 : 22)
         .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -196,23 +231,41 @@ struct CaptureReviewView: View {
             within: CGSize(width: maxWidth, height: maxHeight)
         )
 
-        return Image(uiImage: displayImage)
+        let image = Image(uiImage: displayImage)
             .resizable()
             .scaledToFit()
             .frame(width: fitted.width, height: fitted.height)
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .strokeBorder(FilmyTheme.lineStrong, lineWidth: 1)
-            }
+
+        // An Instant Print finish is a real white border in the rendered
+        // pixels. Keep its outside edge square so the presentation cannot
+        // crop or round the printed frame. Normal photos retain the softer
+        // review treatment.
+        let finishedImage: AnyView
+        if !isShowingOriginal && finish == .instantPrint {
+            finishedImage = AnyView(
+                image
+                    .overlay(Rectangle().strokeBorder(FilmyTheme.lineStrong, lineWidth: 1))
+            )
+        } else {
+            finishedImage = AnyView(
+                image
+                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .strokeBorder(FilmyTheme.lineStrong, lineWidth: 1)
+                    }
+            )
+        }
+
+        return finishedImage
             .accessibilityElement(children: .ignore)
             .accessibilityIdentifier("review-image")
             .accessibilityLabel(
                 isShowingOriginal
                     ? "Original source photo, without the Filmy look"
                     : isImported
-                        ? "Imported photo with \(recipe.name), \(resolutionCaption)"
-                        : "Captured frame with \(recipe.name), \(resolutionCaption)"
+                        ? "Imported photo with \(recipe.name), \(finishTitle(finish)), \(resolutionCaption)"
+                        : "Captured frame with \(recipe.name), \(finishTitle(finish)), \(resolutionCaption)"
             )
             .overlay(alignment: .topLeading) {
                 if isShowingOriginal {
@@ -240,6 +293,28 @@ struct CaptureReviewView: View {
 
     private var selectedReviewRecipeID: String {
         pendingReviewRecipeID ?? recipe.id
+    }
+
+    private var selectedReviewFinish: PhotoFinish {
+        pendingReviewFinish ?? finish
+    }
+
+    private func finishTitle(_ finish: PhotoFinish) -> String {
+        switch finish {
+        case .photo:
+            return "Photo"
+        case .instantPrint:
+            return "Instant Print"
+        }
+    }
+
+    private func finishDescription(_ finish: PhotoFinish) -> String {
+        switch finish {
+        case .photo:
+            return "Full photo, edge to edge"
+        case .instantPrint:
+            return "White border, full photo retained"
+        }
     }
 
     private var pendingReviewRecipeName: String {
@@ -272,9 +347,21 @@ struct CaptureReviewView: View {
         ].filter { !$0.recipes.isEmpty }
     }
 
-    private func reviewControls(stacked: Bool = false) -> some View {
+    private func reviewControls(
+        stacked: Bool = false,
+        compact: Bool = false,
+        wide: Bool = false
+    ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            if stacked || dynamicTypeSize.isAccessibilitySize {
+            if wide && !dynamicTypeSize.isAccessibilitySize {
+                HStack(alignment: .top, spacing: 10) {
+                    lookPicker
+                        .frame(maxWidth: .infinity)
+                    compareButton
+                    finishPicker(stacked: false)
+                        .frame(width: 280, alignment: .leading)
+                }
+            } else if stacked || dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 10) {
                     lookPicker
                     compareButton
@@ -284,6 +371,10 @@ struct CaptureReviewView: View {
                     lookPicker
                     compareButton
                 }
+            }
+
+            if !wide || dynamicTypeSize.isAccessibilitySize {
+                finishPicker(stacked: stacked || dynamicTypeSize.isAccessibilitySize)
             }
 
             if isRenderingReview || isPreparingReviewOriginal {
@@ -311,13 +402,105 @@ struct CaptureReviewView: View {
                     .accessibilityIdentifier("review-render-error")
             }
 
-            Text(isShowingOriginal
-                 ? "Original preview · Save keeps \(recipe.name)"
-                 : "Save \(recipe.name) to Photos")
+            if !compact {
+                Text(isShowingOriginal
+                     ? "Original preview · Save keeps \(recipe.name) · \(finishTitle(finish))"
+                     : "Save \(recipe.name) to Photos")
+                    .font(.system(.caption2, design: .rounded).weight(.medium))
+                    .foregroundStyle(FilmyTheme.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func panelActions(compact: Bool) -> some View {
+        Group {
+            if compact && !dynamicTypeSize.isAccessibilitySize {
+                HStack(spacing: 8) {
+                    retakeButton
+                        .labelStyle(.titleOnly)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                    keepFrameButton
+                        .labelStyle(.titleOnly)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                }
+            } else {
+                VStack(spacing: 10) {
+                    retakeButton
+                    keepFrameButton
+                }
+            }
+        }
+    }
+
+    private func finishPicker(stacked: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Finish")
+                .font(.system(.caption2, design: .rounded).weight(.bold))
+                .foregroundStyle(FilmyTheme.tertiary)
+
+            Group {
+                if stacked {
+                    VStack(spacing: 8) {
+                        finishButton(.photo)
+                        finishButton(.instantPrint)
+                    }
+                } else {
+                    HStack(spacing: 8) {
+                        finishButton(.photo)
+                        finishButton(.instantPrint)
+                    }
+                }
+            }
+
+            Text(finishDescription(selectedReviewFinish))
                 .font(.system(.caption2, design: .rounded).weight(.medium))
                 .foregroundStyle(FilmyTheme.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("review-finish-picker")
+    }
+
+    private func finishButton(_ candidate: PhotoFinish) -> some View {
+        let isSelected = selectedReviewFinish == candidate
+        return Button {
+            guard !isSaving, !isPreparingReviewOriginal else { return }
+            isShowingOriginal = false
+            onApplyReviewFinish(candidate)
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(finishTitle(candidate))
+                    .font(.system(.subheadline, design: .rounded).weight(.bold))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
+                Text(candidate == .instantPrint ? "White border" : "Full frame")
+                    .font(.system(.caption2, design: .rounded).weight(.medium))
+                    .foregroundStyle(isSelected ? FilmyTheme.background.opacity(0.82) : FilmyTheme.tertiary)
+                    .lineLimit(2)
+            }
+            .foregroundStyle(isSelected ? FilmyTheme.background : FilmyTheme.primary)
+            .frame(maxWidth: .infinity, minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
+            .padding(.horizontal, 12)
+            .background(
+                isSelected ? FilmyTheme.filmAccent : FilmyTheme.panel,
+                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(isSelected ? FilmyTheme.filmAccent : FilmyTheme.lineStrong, lineWidth: 1)
+            }
+        }
+        .buttonStyle(.pressable)
+        .disabled(isSaving || isPreparingReviewOriginal)
+        .accessibilityIdentifier(
+            candidate == .photo ? "review-finish-photo" : "review-finish-instantPrint"
+        )
+        .accessibilityLabel("Use \(finishTitle(candidate)) finish")
+        .accessibilityValue(isSelected ? "Selected" : "Available")
+        .accessibilityHint(finishDescription(candidate))
     }
 
     private var lookPicker: some View {
@@ -419,16 +602,18 @@ struct CaptureReviewView: View {
         )
     }
 
-    private var metadataBlock: some View {
+    private func metadataBlock(widePortrait: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             Text(resolutionCaption)
                 .font(.system(.subheadline, design: .rounded).weight(.semibold))
                 .foregroundStyle(FilmyTheme.secondary)
 
-            Text(isImported ? "Ready to save to Photos" : "Captured with the current camera settings")
-                .font(.system(.caption, design: .rounded).weight(.medium))
-                .foregroundStyle(FilmyTheme.tertiary)
-                .fixedSize(horizontal: false, vertical: true)
+            if !widePortrait {
+                Text(isImported ? "Ready to save to Photos" : "Captured with the current camera settings")
+                    .font(.system(.caption, design: .rounded).weight(.medium))
+                    .foregroundStyle(FilmyTheme.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("review-metadata")

@@ -44,6 +44,7 @@ Counts describe declared test methods, not line coverage or proof of hardware be
 | Area | Primary test classes | Behaviors checked |
 | --- | --- | --- |
 | Camera policy and lifecycle | `CameraServiceAvailabilityTests` | Authorization/availability, capture callback identity, preview ownership, recovery backoff, background/review policy, rotation/mirroring, focus and exposure, flash and lens calculations |
+| Manual camera controls | `CameraManualControlsTests`, `CameraManualHardwareTests` | Finite and device-bounded sensor settings, mode policy, physical capture ISO/shutter metadata, independent focus/WB state, session reuse, and return to automatic operation; the hardware class runs only in the explicit device lane |
 | Recipes and preferences | `RecipeInvariantsTests`, `RecipeReferenceCatalogTests`, `CameraViewModelPersistenceTests`, `RecipeDetailCommitPolicyTests` | Built-in identity and bounds, G7 X contract, public reference provenance, legacy migration, corrupt overrides, launch selection, reset/update/discard policy |
 | Renderer and JPEG output | `RendererOutputBoundsTests`, `ColorSpaceBoundaryTests`, `PhotoOutputEncoderTests` | Output extent/alpha, render-stage effects, preview/export equivalence, grain behavior, color-space boundaries, JPEG decoding and embedded provenance, location metadata policy |
 | Import and review | `CameraViewModelRenderingTests`, `CameraReviewSaveTests`, `CameraReviewEditingTests` | Invalid/cancelled import, selected-recipe snapshot, orientation/mirrors, pixel budget, reversible look auditions, source comparison, stale-work rejection, deferred export, denied/write-failed save and exact retry, duplicate Save and in-flight Retake prevention |
@@ -83,6 +84,8 @@ python3 scripts/testing/run.py device \
 | `store-media` | Pass any reference simulator UUID. The runner creates a fresh simulator with the same device type/runtime, seeds only `docs/app-store/screenshots/demo-source/cafe-original.png`, forces zero prior saves, and destroys its owned simulator afterward. The reference simulator is untouched. Screenshots are attached to the result bundle. |
 
 Optional lanes report prerequisites and skips explicitly. A passing supported subset with skips does not validate the skipped hardware behavior. Physical screenshot attachments may contain personal surroundings or photos; keep them local.
+
+The device lane also includes manual-control acceptance on a supported physical wide camera. It captures three controlled combinations through the production photo output (ISO 100/200 at the same shutter, then ISO 200 at a second shutter, within hardware bounds), checks settled sensor settings and JPEG EXIF response, exercises tap focus and supported WB/focus locks, stops/reuses the session, and resets to Auto. Those captures are attached to the local result bundle without writing to Photos. Capability-policy tests and a visible slider alone do not prove that a still image honored a manual setting.
 
 ## Results, coverage, and CI cost
 

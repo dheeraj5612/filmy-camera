@@ -8,7 +8,7 @@ Filmy Camera is a native iPhone and iPad camera built around the feeling of choo
 - GPU-backed Core Image processing with a generated 3D color cube, dynamic range, tone curve, temperature/tint, Color Chrome, FX Blue, detail, grain, halation, and vignette stages.
 - Native bi-planar YUV preview buffers when available, with a BGRA fallback, and a session-scoped grain phase shared by preview and capture for a more faithful WYSIWYG frame.
 - A dedicated G7 X Compact profile and curated editable film recipes based on public Fujifilm-style controls: film base, tone curve, color, white-balance shift, dynamic range, Color Chrome, FX Blue, sharpness, noise reduction, clarity, grain, grain size, halation, and vignette.
-- Full-resolution capture review with retake or explicit Save to Photos, so a frame is never committed silently.
+- Full-resolution capture review with retake or explicit Save to Photos, so a frame is never committed silently. Reviews can keep the full photo edge to edge or add the optional white Instant Print border with its generous bottom margin.
 - Try another look on the same capture or import and compare with Original before saving. Review previews are bounded to 1800 pixels, and changed looks export at full resolution on Save without changing the next shot's recipe.
 - System photo picker import that preserves the original framing and applies the selected recipe at full resolution up to the 40 MP processing budget; larger images are resized and labeled in review.
 - First-run recipe-first onboarding with a direct handoff into the camera.
@@ -19,6 +19,7 @@ Filmy Camera is a native iPhone and iPad camera built around the feeling of choo
 - Failed starts and runtime errors reconnect with backoff, and interruptions explain the cause (background, another app, multitasking, heat). The session supports iPad Split View and stays warm during review and quick tab switches to reduce restart work when returning to the viewfinder.
 - The film pipeline compiles off the main thread while the session configures, and photo cache maintenance runs after the first frame.
 - iPhone and iPad hardware controls for front/back switching and available-lens selection, with simulator-safe preview behavior.
+- Expandable Pro controls for coupled manual ISO and shutter, sensor white balance by Kelvin and tint, and manual focus on supported hardware. The panel reports applied device values, disables still flash during manual exposure, offers one Reset Auto action, and can switch from a virtual camera to an eligible physical lens when advanced controls require it.
 - The live preview renders into a bounded drawable (about 1.3 MP) with a 30 fps target while stills and exports retain their full processing resolution. Sustained frame pacing and thermals require separate device measurement; isolated renderer timing does not establish camera frame rate.
 - sRGB output normalization plus embedded recipe provenance metadata on saved JPEGs.
 - Simulator-safe empty state: the full interface runs without camera hardware and clearly asks for a physical iPhone or iPad for capture.
@@ -41,6 +42,12 @@ For deterministic simulator tests on CI or a busy development machine, add `-par
 Run the complete test suite with `python3 scripts/testing/run.py ci --destination 'platform=iOS Simulator,id=YOUR_SIMULATOR_UUID'`. See [the testing guide](docs/testing.md) for unit, integration, Photos E2E, hardware, performance, coverage, and CI commands.
 
 The app requires iOS 17 or later. Camera and Photos permissions are requested only when the relevant feature is used.
+
+## Future monetization
+
+The current launch is fully free: all shipped looks, camera tools, import, review, Save to Photos, and the optional Instant Print finish are available without a paywall, subscription trial, or export watermark. Existing images remain usable regardless of any future access model.
+
+The product target is an exceptional film-simulation and G7X-inspired camera with additional capture and editing tools in a premium monthly subscription. Price, trial duration, and the exact feature split remain open. See the [premium camera vision](docs/premium-camera-vision.md) for the staged feature and quality targets and the [monetization roadmap](docs/monetization-roadmap.md) for future access and export proposals. Subscription restrictions and watermarking are not enabled in the current launch; RAW and HDR work described in those documents remains roadmap work.
 
 ## Rendering note
 

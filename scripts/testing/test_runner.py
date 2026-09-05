@@ -3,6 +3,7 @@ import contextlib
 import io
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -119,7 +120,7 @@ class SuiteRoutingTests(unittest.TestCase):
             simctl.assert_not_called()
 
     def test_photos_setup_failure_deletes_only_its_own_simulator(self):
-        def fake_simctl(*args):
+        def fake_simctl(*args, timeout=run.SIMCTL_DEFAULT_TIMEOUT_SECONDS):
             if args[0] == "list":
                 return json.dumps({"devices": {"runtime": [{"udid": "reference", "deviceTypeIdentifier": "type"}]}})
             if args[0] == "create":
@@ -131,6 +132,225 @@ class SuiteRoutingTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 run.create_photos_simulator("platform=iOS Simulator,id=reference")
             destroy.assert_called_once_with("owned")
+
+    def test_photos_media_timeout_is_bounded_and_deletes_only_owned_simulator(self):
+        calls = []
+
+        def fake_simctl(*args, timeout=run.SIMCTL_DEFAULT_TIMEOUT_SECONDS):
+            calls.append((args, timeout))
+            if args[0] == "list":
+                return json.dumps({"devices": {"runtime": [{
+                    "udid": "reference", "deviceTypeIdentifier": "type"
+                }]}})
+            if args[0] == "create":
+                return "owned"
+            if args[0] == "addmedia":
+                raise ValueError(
+                    f"simctl addmedia timed out after {timeout} seconds"
+                )
+            return ""
+
+        with patch.object(run, "simctl", side_effect=fake_simctl), \
+                patch.object(run, "destroy_simulator") as destroy:
+            with self.assertRaisesRegex(ValueError, "addmedia timed out after 300 seconds"):
+                run.create_photos_simulator("platform=iOS Simulator,id=reference")
+
+        self.assertIn(
+            (("boot", "owned"), run.SIMULATOR_BOOT_TIMEOUT_SECONDS),
+            calls,
+        )
+        self.assertIn(
+            (("bootstatus", "owned", "-b"), run.SIMULATOR_BOOT_TIMEOUT_SECONDS),
+            calls,
+        )
+        self.assertIn(
+            (
+                ("addmedia", "owned", str(
+                    run.ROOT / "docs/app-store/screenshots/demo-source/cafe-original.png"
+                )),
+                run.SIMULATOR_MEDIA_TIMEOUT_SECONDS,
+            ),
+            calls,
+        )
+        destroy.assert_called_once_with("owned")
+        self.assertFalse(any("reference" in args[1:] for args, _ in calls if args[0] != "list"))
+
+    def test_cleanup_timeout_still_attempts_bounded_owned_delete(self):
+        shutdown_timeout = subprocess.TimeoutExpired(
+            ["xcrun", "simctl", "shutdown", "owned"],
+            run.SIMULATOR_SHUTDOWN_TIMEOUT_SECONDS,
+        )
+        with patch.object(
+            run.subprocess,
+            "run",
+            side_effect=[shutdown_timeout, subprocess.CompletedProcess([], 0)],
+        ) as process, contextlib.redirect_stderr(io.StringIO()):
+            run.destroy_simulator("owned")
+
+        self.assertEqual(process.call_count, 2)
+        shutdown_call, delete_call = process.call_args_list
+        self.assertEqual(shutdown_call.args[0][-1], "owned")
+        self.assertEqual(
+            shutdown_call.kwargs["timeout"], run.SIMULATOR_SHUTDOWN_TIMEOUT_SECONDS
+        )
+        self.assertEqual(delete_call.args[0][-1], "owned")
+        self.assertEqual(delete_call.kwargs["timeout"], run.SIMULATOR_DELETE_TIMEOUT_SECONDS)
+
+    def test_test_failure_is_not_masked_by_owned_cleanup_timeout(self):
+        with patch.object(run, "create_photos_simulator", return_value="owned"), \
+                patch.object(
+                    run,
+                    "destroy_simulator",
+                    side_effect=ValueError("cleanup timed out"),
+                ), contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaisesRegex(RuntimeError, "system picker failed"):
+                with run.isolated_photos_destination(
+                    "photos-e2e", "platform=iOS Simulator,id=reference"
+                ):
+                    raise RuntimeError("system picker failed")
+
+    def test_failed_phase_exit_code_and_summary_survive_cleanup_timeout(self):
+        test_id = "FilmyCameraUITests/Example/testPhotos"
+
+        def command_output(command, **_):
+            if command[:2] == ["xcodebuild", "-version"]:
+                return "Xcode test"
+            if command[:3] == ["git", "rev-parse", "HEAD"]:
+                return "head\n"
+            if command[:3] == ["git", "status", "--porcelain"]:
+                return ""
+            self.fail(f"Unexpected command: {command}")
+
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(run, "inventory", return_value={test_id: "photos-e2e"}), \
+                patch.object(run, "build_input_digest", return_value="digest"), \
+                patch.object(run, "validate_build_stamp"), \
+                patch.object(run, "create_photos_simulator", return_value="owned"), \
+                patch.object(run, "destroy_simulator", side_effect=ValueError("cleanup timed out")), \
+                patch.object(run, "run_logged", return_value=65), \
+                patch.object(run, "summarize_result", return_value={
+                    "status": "failed", "passed": 0, "failed": 1,
+                    "skipped": 0, "exitCode": 65,
+                }), patch.object(run.subprocess, "check_output", side_effect=command_output), \
+                contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            output = Path(directory) / "results"
+            code = run.main([
+                "photos-e2e",
+                "--destination", "platform=iOS Simulator,id=reference",
+                "--derived-data", str(Path(directory) / "derived"),
+                "--output-dir", str(output),
+                "--skip-build",
+            ])
+
+            self.assertEqual(code, 65)
+            summary = json.loads(
+                (output / "filmycamera-photos-e2e-summary.json").read_text()
+            )
+            self.assertEqual(summary["status"], "failed")
+            self.assertEqual(summary["exitCode"], 65)
+
+    def test_photos_methods_run_once_in_isolated_invocations_and_aggregate(self):
+        tests = {
+            f"FilmyCameraUITests/NormalPhotoFlowTests/testCase{index}": "photos-e2e"
+            for index in range(1, 4)
+        }
+        summaries = [
+            {"status": "passed", "passed": 1, "failed": 0, "skipped": 0},
+            {"status": "failed", "passed": 0, "failed": 1, "skipped": 0,
+             "testFailures": [{"message": "picker unavailable"}]},
+            {"status": "passed", "passed": 1, "failed": 0, "skipped": 0},
+        ]
+
+        def command_output(command, **_):
+            if command[:2] == ["xcodebuild", "-version"]:
+                return "Xcode test"
+            if command[:3] == ["git", "rev-parse", "HEAD"]:
+                return "head\n"
+            if command[:3] == ["git", "status", "--porcelain"]:
+                return ""
+            self.fail(f"Unexpected command: {command}")
+
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(run, "inventory", return_value=tests), \
+                patch.object(run, "build_input_digest", return_value="digest"), \
+                patch.object(run, "validate_build_stamp"), \
+                patch.object(run, "create_photos_simulator", return_value="owned"), \
+                patch.object(run, "destroy_simulator") as destroy, \
+                patch.object(run, "run_logged", side_effect=[0, 65, 0]) as execute, \
+                patch.object(run, "summarize_result", side_effect=summaries), \
+                patch.object(run.subprocess, "check_call") as merge, \
+                patch.object(run.subprocess, "check_output", side_effect=command_output), \
+                contextlib.redirect_stdout(io.StringIO()):
+            output = Path(directory) / "results"
+            code = run.main([
+                "photos-e2e",
+                "--destination", "platform=iOS Simulator,id=reference",
+                "--derived-data", str(Path(directory) / "derived"),
+                "--output-dir", str(output),
+                "--skip-build",
+            ])
+
+            self.assertEqual(code, 65)
+            self.assertEqual(execute.call_count, 3)
+            selected = []
+            for call in execute.call_args_list:
+                command = call.args[0]
+                selectors = [argument for argument in command if argument.startswith("-only-testing:")]
+                self.assertEqual(len(selectors), 1)
+                selected.append(selectors[0].removeprefix("-only-testing:"))
+                self.assertEqual(command[-1], "test-without-building")
+                self.assertIn("platform=iOS Simulator,id=owned", command)
+            self.assertCountEqual(selected, tests)
+
+            merge_command = merge.call_args.args[0]
+            self.assertEqual(merge_command[:4], [
+                "xcrun", "xcresulttool", "merge", "--output-path"
+            ])
+            self.assertEqual(len(merge_command[5:]), 3)
+            destroy.assert_called_once_with("owned")
+
+            summary = json.loads(
+                (output / "filmycamera-photos-e2e-summary.json").read_text()
+            )
+            self.assertEqual(summary["status"], "failed")
+            self.assertEqual(summary["exitCode"], 65)
+            self.assertEqual(
+                (summary["passed"], summary["failed"], summary["skipped"]),
+                (2, 1, 0),
+            )
+            self.assertEqual(len(summary["caseResults"]), 3)
+            self.assertEqual(len({case["resultBundle"] for case in summary["caseResults"]}), 3)
+            self.assertEqual(summary["mergedResultBundle"], "FilmyCameraPhotosE2E.xcresult")
+
+    def test_photos_merge_failure_keeps_raw_case_evidence_authoritative(self):
+        selectors = ["Target/Case/testOne", "Target/Case/testTwo"]
+        passed = {"status": "passed", "passed": 1, "failed": 0, "skipped": 0}
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(run, "run_logged", return_value=0) as execute, \
+                patch.object(run, "summarize_result", side_effect=[passed.copy(), passed.copy()]), \
+                patch.object(
+                    run.subprocess,
+                    "check_call",
+                    side_effect=subprocess.CalledProcessError(1, ["xcresulttool", "merge"]),
+                ):
+            output = Path(directory)
+            summary, code = run.run_isolated_photos_methods(
+                ["xcodebuild"], selectors, output / "FilmyCameraPhotosE2E.xcresult",
+                output, {},
+            )
+
+        self.assertEqual(execute.call_count, 2)
+        self.assertEqual(code, 1)
+        self.assertEqual(summary["status"], "failed")
+        self.assertIsNone(summary["mergedResultBundle"])
+        self.assertEqual(
+            [case["resultBundle"] for case in summary["caseResults"]],
+            [
+                "FilmyCameraPhotosE2E-01-testOne.xcresult",
+                "FilmyCameraPhotosE2E-02-testTwo.xcresult",
+            ],
+        )
 
     def test_photos_and_store_media_destroy_their_owned_simulator_on_exit(self):
         for phase in ("photos-e2e", "store-media"):

@@ -381,12 +381,34 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload XCTest result bundle on failure
+      - name: Select result bundles without duplicate Photos attachments
+        id: result-bundles
         if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          merged_photos=false
+          if [[ -f "${RUNNER_TEMP}/filmycamera-photos-e2e-summary.json" ]]; then
+            merged_photos="$(python3 -c 'import json,sys; print("true" if json.load(open(sys.argv[1])).get("mergedResultBundle") else "false")' "${RUNNER_TEMP}/filmycamera-photos-e2e-summary.json")"
+          fi
+          {
+            echo 'paths<<FILMY_RESULT_PATHS'
+            for result_path in "${RUNNER_TEMP}"/FilmyCamera*.xcresult; do
+              if [[ "${merged_photos}" == true && -d "${RUNNER_TEMP}/FilmyCameraPhotosE2E.xcresult" && "$(basename "${result_path}")" == FilmyCameraPhotosE2E-*.xcresult ]]; then
+                continue
+              fi
+              echo "${result_path}"
+            done
+            echo 'FILMY_RESULT_PATHS'
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Upload XCTest result bundle on failure
+        if: failure() && steps.result-bundles.outputs.paths != ''
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: filmycamera-xcresult-${{ github.run_id }}
-          path: "${{ runner.temp }}/FilmyCamera*.xcresult"
+          path: ${{ steps.result-bundles.outputs.paths }}
           if-no-files-found: warn
           retention-days: 7
 
