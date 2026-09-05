@@ -44,7 +44,7 @@ The app requires iOS 17 or later. Camera and Photos permissions are requested on
 
 ## Future monetization
 
-The planned model includes paid access to most features, a free trial, and watermarked free exports. Pricing, trial duration, and the exact feature split remain open. See the [monetization roadmap](docs/monetization-roadmap.md) for the proposed experience and implementation/testing plan. These restrictions are not enabled in build 8.
+The product target is an exceptional film-simulation and G7X-inspired camera with advanced capture and editing tools in a premium monthly subscription, a free trial, and watermarked free exports. Price, trial duration, and the exact feature split remain open. See the [premium camera vision](docs/premium-camera-vision.md) for the staged feature and quality targets and the [monetization roadmap](docs/monetization-roadmap.md) for access and export behavior. These restrictions and future advanced tools are not enabled in build 8.
 
 ## Rendering note
 

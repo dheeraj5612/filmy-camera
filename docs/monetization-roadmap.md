@@ -4,7 +4,7 @@ Status: future product direction recorded September 5, 2026. This is a plan, not
 
 ## Confirmed direction
 
-Most features will require paid access. A free trial will let people experience the premium app, and images exported by the free version will carry a watermark. Camera quality, speed, and an uncluttered shooting experience remain product priorities.
+Most features will require a premium monthly subscription. A free trial will let people experience the premium app, and images exported by the free version will carry a watermark. Camera quality, speed, and an uncluttered shooting experience remain product priorities. The September 5 follow-up confirms monthly billing and a premium tier combining film/G7X tools with advanced camera capabilities; see the [premium camera vision](premium-camera-vision.md) for the staged scope and quality targets.
 
 ## Proposed experience
 
@@ -14,7 +14,7 @@ The following allocation is a starting proposal, not a finalized price or featur
 | --- | --- | --- |
 | Free | A useful camera, one signature G7 X Compact look and a small starter film selection, basic import/review, and access to existing Roll images | Full-quality image with a small Filmy watermark |
 | Active trial | All features included in the paid tier, including premium looks and tuning | No watermark |
-| Paid | Most looks, advanced recipe tuning and future premium tools | No watermark |
+| Premium monthly | Full film/G7X collection, advanced recipe tuning, and advanced capture/editing tools as they ship | No watermark |
 
 Free should demonstrate the signature look well enough to earn an upgrade. Avoid adding a second quality penalty such as deliberately poor resolution or degraded color. Keep already-saved images accessible after a trial or subscription ends.
 
@@ -24,12 +24,12 @@ Use a restrained, readable Filmy mark and show its actual placement in review be
 
 ## Commercial decisions still open
 
-- Subscription, one-time unlock, or a combination; no price, billing cadence, or trial duration has been selected.
+- Monthly billing is confirmed. Price and trial duration remain open. Annual or lifetime alternatives are not part of the confirmed model.
 - Exact free recipe/tool allocation, watermark design, and whether early users receive grandfathered access.
 - Whether upgrading can create a clean version of an earlier free export. The current app retains a source only during review and stores flattened JPEGs in the Roll. Removing a baked-in watermark later requires a retained clean source; do not promise this until a storage and re-export design exists.
-- A continuing feature/content plan if subscriptions are chosen. Apple requires ongoing value for auto-renewable subscriptions, and access must work across the customer's supported devices. [App Review Guidelines, 3.1.2](https://developer.apple.com/app-store/review/guidelines/#subscriptions)
+- The release cadence for continuing feature/content improvements. Apple requires ongoing value for auto-renewable subscriptions, and access must work across the customer's supported devices. [App Review Guidelines, 3.1.2](https://developer.apple.com/app-store/review/guidelines/#subscriptions)
 
-For a subscription model, use an App Store introductory free trial. Apple allows only one introductory offer redemption per subscription group; eligibility comes from Apple, not an installation timer. Display the actual duration, renewal price and period, and automatic renewal terms before redemption. A one-time model needs a separately designed trial mechanism. [Apple introductory offers](https://developer.apple.com/help/app-store-connect/manage-subscriptions/set-up-introductory-offers-for-auto-renewable-subscriptions), [subscription purchase guidance](https://developer.apple.com/app-store/subscriptions/)
+Use an App Store introductory free trial for the monthly subscription. Apple allows only one introductory offer redemption per subscription group; eligibility comes from Apple, not an installation timer. Display the actual duration, monthly renewal price, and automatic renewal terms before redemption. [Apple introductory offers](https://developer.apple.com/help/app-store-connect/manage-subscriptions/set-up-introductory-offers-for-auto-renewable-subscriptions), [subscription purchase guidance](https://developer.apple.com/app-store/subscriptions/)
 
 ## Implementation plan for the monetized release
 
