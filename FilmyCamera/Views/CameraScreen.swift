@@ -191,9 +191,17 @@ struct CameraScreen: View {
                     isSaving: viewModel.isSaving,
                     saveErrorMessage: viewModel.saveErrorMessage,
                     saveErrorRequiresSettings: viewModel.saveErrorRequiresSettings,
+                    availableRecipes: viewModel.recipes,
+                    pendingReviewRecipeID: viewModel.pendingReviewRecipeID,
+                    isRenderingReview: viewModel.isRenderingReview,
+                    reviewRenderErrorMessage: viewModel.reviewRenderErrorMessage,
+                    reviewOriginalImage: viewModel.reviewOriginalImage,
+                    isPreparingReviewOriginal: viewModel.isPreparingReviewOriginal,
                     onSave: { viewModel.saveReview(photoLibrary: photoLibrary) },
                     onRetake: viewModel.discardReview,
-                    onOpenSettings: openSystemSettings
+                    onOpenSettings: openSystemSettings,
+                    onApplyReviewRecipe: viewModel.applyReviewRecipe,
+                    onPrepareReviewOriginal: viewModel.prepareReviewOriginal
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .zIndex(1)

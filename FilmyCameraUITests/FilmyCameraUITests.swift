@@ -477,6 +477,33 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Retake"].exists)
         attachScreenshot(named: "device-capture-review")
 
+        let compare = app.buttons["review-compare-original"]
+        let lookPicker = app.buttons["review-look-picker"]
+        assertMinimumHitTarget(compare, named: "Original comparison")
+        assertMinimumHitTarget(lookPicker, named: "Review look picker")
+        compare.tap()
+        XCTAssertTrue(waitUntil(timeout: 15) { compare.value as? String == "Original" })
+        lookPicker.tap()
+        let monochrome = app.buttons["review-look-acros-monochrome"]
+        XCTAssertTrue(monochrome.waitForExistence(timeout: 5))
+        monochrome.tap()
+        let photo = app.descendants(matching: .any)["review-image"]
+        XCTAssertTrue(waitUntil(timeout: 30) {
+            photo.label.contains("Fine Monochrome") && keepFrame.isEnabled
+        }, "A new look must finish rendering on the captured source before Save")
+        XCTAssertEqual(compare.value as? String, "Look")
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        XCTAssertTrue(waitUntil(timeout: 10) { app.frame.width > app.frame.height })
+        for control in [compare, lookPicker, keepFrame] {
+            assertMinimumHitTarget(control, named: "Landscape review control")
+            XCTAssertTrue(app.frame.contains(control.frame), "Review controls must fit inside the screen")
+        }
+        attachScreenshot(named: "device-review-monochrome-landscape")
+        compare.tap()
+        XCTAssertTrue(waitUntil(timeout: 15) { compare.value as? String == "Original" })
+
         assertMinimumHitTarget(keepFrame, named: "Keep frame")
         keepFrame.tap()
         app.tap()
@@ -488,6 +515,7 @@ final class FilmyCameraUITests: XCTestCase {
             savedToast.waitForExistence(timeout: 20),
             "The kept frame should be committed to Photos"
         )
+        XCTAssertTrue(savedToast.label.contains("Fine Monochrome"), "Save must keep the chosen look while Original is visible")
         XCTAssertTrue(
             waitForDisappearance(keepFrame, timeout: 5),
             "Keeping a frame should dismiss the review screen"

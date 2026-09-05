@@ -10,11 +10,20 @@ struct CaptureReviewView: View {
     let isSaving: Bool
     let saveErrorMessage: String?
     var saveErrorRequiresSettings = false
+    let availableRecipes: [FilmRecipe]
+    let pendingReviewRecipeID: String?
+    let isRenderingReview: Bool
+    let reviewRenderErrorMessage: String?
+    let reviewOriginalImage: UIImage?
+    let isPreparingReviewOriginal: Bool
     let onSave: () -> Void
     let onRetake: () -> Void
     let onOpenSettings: () -> Void
+    let onApplyReviewRecipe: (FilmRecipe) -> Void
+    let onPrepareReviewOriginal: () async -> Void
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var isShowingOriginal = false
 
     var body: some View {
         ZStack {
@@ -39,7 +48,10 @@ struct CaptureReviewView: View {
                     .padding(.vertical, 24)
                 } else {
                     let isPortraitTablet = proxy.size.width >= 700 && proxy.size.height > proxy.size.width
-                    let previewHeight = proxy.size.height * (isPortraitTablet ? 0.78 : 0.64)
+                    let previewHeight = reviewPreviewHeight(
+                        for: proxy.size,
+                        isPortraitTablet: isPortraitTablet
+                    )
                     // Keep the photo and its metadata together in a bounded
                     // scroll view for phone portrait, landscape, and large
                     // Dynamic Type sizes.
@@ -49,6 +61,10 @@ struct CaptureReviewView: View {
                                 .padding(.horizontal, 20)
                                 .padding(.top, 16)
                                 .padding(.bottom, 12)
+
+                            reviewControls
+                                .padding(.horizontal, 20)
+                                .padding(.bottom, 14)
 
                             framePreview(
                                 maxWidth: max(proxy.size.width - 32, 1),
@@ -83,10 +99,36 @@ struct CaptureReviewView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("review-screen")
+        .onAppear {
+            isShowingOriginal = false
+        }
+        .onChange(of: recipe.id) { _, _ in
+            isShowingOriginal = false
+        }
+        .onChange(of: pendingReviewRecipeID) { _, _ in
+            isShowingOriginal = false
+        }
+        .onChange(of: reviewOriginalImage != nil) { _, hasOriginal in
+            if hasOriginal {
+                isShowingOriginal = true
+            }
+        }
     }
 
     private func usesSidePanel(for size: CGSize) -> Bool {
         size.width > size.height && size.width >= 700 && size.height >= 500
+    }
+
+    private func reviewPreviewHeight(for size: CGSize, isPortraitTablet: Bool) -> CGFloat {
+        let idealHeight = size.height * (isPortraitTablet ? 0.78 : 0.64)
+        guard !dynamicTypeSize.isAccessibilitySize else { return idealHeight }
+
+        // Reserve the fixed review chrome: header (76), chooser (68),
+        // metadata (54), pinned actions (82), and their surrounding gaps
+        // (20). This keeps the fitted photo in the normal viewport while
+        // accessibility sizes retain the larger hero and scroll naturally.
+        let fixedChromeHeight: CGFloat = 76 + 68 + 54 + 82 + 20
+        return min(idealHeight, max(size.height - fixedChromeHeight, 160))
     }
 
     private var sidePanel: some View {
@@ -95,6 +137,7 @@ struct CaptureReviewView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     header
                     metadataBlock
+                    reviewControls
 
                     if let saveErrorMessage {
                         saveError(saveErrorMessage)
@@ -149,11 +192,11 @@ struct CaptureReviewView: View {
 
     private func framePreview(maxWidth: CGFloat, maxHeight: CGFloat) -> some View {
         let fitted = Self.fittedSize(
-            for: image.size,
+            for: displayImage.size,
             within: CGSize(width: maxWidth, height: maxHeight)
         )
 
-        return Image(uiImage: image)
+        return Image(uiImage: displayImage)
             .resizable()
             .scaledToFit()
             .frame(width: fitted.width, height: fitted.height)
@@ -165,12 +208,215 @@ struct CaptureReviewView: View {
             .accessibilityElement(children: .ignore)
             .accessibilityIdentifier("review-image")
             .accessibilityLabel(
-                isImported
-                    ? "Imported photo with \(recipe.name), \(resolutionCaption)"
-                    : "Captured frame with \(recipe.name), \(resolutionCaption)"
+                isShowingOriginal
+                    ? "Original source photo, without the Filmy look"
+                    : isImported
+                        ? "Imported photo with \(recipe.name), \(resolutionCaption)"
+                        : "Captured frame with \(recipe.name), \(resolutionCaption)"
             )
+            .overlay(alignment: .topLeading) {
+                if isShowingOriginal {
+                    Text("ORIGINAL")
+                        .font(.system(.caption2, design: .rounded).weight(.bold))
+                        .tracking(0.8)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 6)
+                        .background(Color.black.opacity(0.72), in: Capsule())
+                        .padding(12)
+                        .accessibilityHidden(true)
+                }
+            }
             .shadow(color: .black.opacity(0.4), radius: 22, y: 10)
             .frame(maxWidth: .infinity)
+    }
+
+    private var displayImage: UIImage {
+        if isShowingOriginal, let reviewOriginalImage {
+            return reviewOriginalImage
+        }
+        return image
+    }
+
+    private var selectedReviewRecipeID: String {
+        pendingReviewRecipeID ?? recipe.id
+    }
+
+    private var pendingReviewRecipeName: String {
+        availableRecipes.first(where: { $0.id == pendingReviewRecipeID })?.name
+            ?? recipe.name
+    }
+
+    private struct ReviewRecipeGroup: Identifiable {
+        let title: String
+        let recipes: [FilmRecipe]
+
+        var id: String { title }
+    }
+
+    private var groupedReviewRecipes: [ReviewRecipeGroup] {
+        let compact = availableRecipes.filter { $0.filmBase == .compactDigital }
+        let monochrome = availableRecipes.filter {
+            $0.filmBase.monochromeFilter != nil || $0.filmBase == .sepia
+        }
+        let film = availableRecipes.filter {
+            $0.filmBase != .compactDigital
+                && $0.filmBase.monochromeFilter == nil
+                && $0.filmBase != .sepia
+        }
+
+        return [
+            ReviewRecipeGroup(title: "Compact", recipes: compact),
+            ReviewRecipeGroup(title: "Film", recipes: film),
+            ReviewRecipeGroup(title: "Monochrome", recipes: monochrome)
+        ].filter { !$0.recipes.isEmpty }
+    }
+
+    private var reviewControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 10) {
+                    lookPicker
+                    compareButton
+                }
+            } else {
+                HStack(alignment: .center, spacing: 10) {
+                    lookPicker
+                    compareButton
+                }
+            }
+
+            if isRenderingReview || isPreparingReviewOriginal {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .tint(FilmyTheme.filmAccent)
+                    Text(
+                        isRenderingReview
+                            ? "Developing \(pendingReviewRecipeName)…"
+                            : "Preparing original…"
+                    )
+                        .font(.system(.caption, design: .rounded).weight(.semibold))
+                        .foregroundStyle(FilmyTheme.secondary)
+                }
+                .frame(minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("review-render-status")
+            }
+
+            if let reviewRenderErrorMessage, !reviewRenderErrorMessage.isEmpty {
+                Label(reviewRenderErrorMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(.caption, design: .rounded).weight(.semibold))
+                    .foregroundStyle(FilmyTheme.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("review-render-error")
+            }
+
+            Text(isShowingOriginal
+                 ? "Original preview · Save keeps \(recipe.name)"
+                 : "Save \(recipe.name) to Photos")
+                .font(.system(.caption2, design: .rounded).weight(.medium))
+                .foregroundStyle(FilmyTheme.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var lookPicker: some View {
+        Menu {
+            ForEach(groupedReviewRecipes) { group in
+                Section(group.title) {
+                    ForEach(group.recipes) { candidate in
+                        let isSelected = candidate.id == selectedReviewRecipeID
+                        Button {
+                            guard !isSaving, !isPreparingReviewOriginal else { return }
+                            isShowingOriginal = false
+                            onApplyReviewRecipe(candidate)
+                        } label: {
+                            Label(
+                                candidate.name,
+                                systemImage: isSelected ? "checkmark" : "film"
+                            )
+                        }
+                        .accessibilityIdentifier("review-look-\(candidate.id)")
+                        .accessibilityLabel("Use \(candidate.name) look")
+                        .accessibilityValue(isSelected ? "Selected" : "Available")
+                        .accessibilityHint("Applies this look to the reviewed photo")
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "film")
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Look")
+                        .font(.system(.caption2, design: .rounded).weight(.bold))
+                        .foregroundStyle(FilmyTheme.tertiary)
+                    Text(pendingReviewRecipeName)
+                        .font(.system(.subheadline, design: .rounded).weight(.bold))
+                        .foregroundStyle(FilmyTheme.primary)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.8)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(.caption2, weight: .bold))
+                    .accessibilityHidden(true)
+            }
+            .frame(maxWidth: .infinity, minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
+            .padding(.horizontal, 12)
+            .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.pressable)
+        .disabled(isSaving || isPreparingReviewOriginal)
+        .accessibilityIdentifier("review-look-picker")
+        .accessibilityLabel("Choose review look")
+        .accessibilityValue(pendingReviewRecipeName)
+        .accessibilityHint("Choose a Compact, Film, or Monochrome look for this photo")
+        .frame(maxWidth: .infinity)
+    }
+
+    private var compareButton: some View {
+        Button {
+            if reviewOriginalImage != nil {
+                isShowingOriginal.toggle()
+            } else if !isPreparingReviewOriginal {
+                Task {
+                    await onPrepareReviewOriginal()
+                }
+            }
+        } label: {
+            HStack(spacing: 7) {
+                if isPreparingReviewOriginal {
+                    ProgressView()
+                        .tint(FilmyTheme.primary)
+                } else {
+                    Image(systemName: isShowingOriginal ? "photo" : "photo.on.rectangle")
+                }
+                Text(isShowingOriginal ? "Look" : "Original")
+                    .lineLimit(1)
+            }
+            .font(.system(.caption, design: .rounded).weight(.bold))
+            .foregroundStyle(FilmyTheme.primary)
+            .padding(.horizontal, 12)
+            .frame(minHeight: FilmyTheme.minimumHitTarget)
+            .background(FilmyTheme.backgroundRaised, in: Capsule())
+            .overlay {
+                Capsule().strokeBorder(
+                    isShowingOriginal ? FilmyTheme.filmAccent : FilmyTheme.lineStrong,
+                    lineWidth: 1
+                )
+            }
+        }
+        .buttonStyle(.pressable)
+        .disabled(isSaving || isRenderingReview || isPreparingReviewOriginal)
+        .accessibilityIdentifier("review-compare-original")
+        .accessibilityLabel("Compare with original")
+        .accessibilityValue(isShowingOriginal ? "Original" : "Look")
+        .accessibilityHint(
+            reviewOriginalImage == nil
+                ? "Loads the original source photo for comparison"
+                : "Switches between the original source photo and the applied look"
+        )
     }
 
     private var metadataBlock: some View {
@@ -223,6 +469,7 @@ struct CaptureReviewView: View {
                     .font(.system(.footnote, design: .rounded).weight(.bold))
                     .foregroundStyle(FilmyTheme.accent)
                     .frame(minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
+                    .disabled(isSaving || isRenderingReview || isPreparingReviewOriginal)
                     .accessibilityIdentifier("review-save-error-retry")
                     .accessibilityHint("Retries saving this finished photo")
             }
@@ -266,6 +513,13 @@ struct CaptureReviewView: View {
         .disabled(isSaving)
     }
 
+    private var keepFrameAccessibilityLabel: String {
+        if isSaving { return "Saving photo" }
+        if isPreparingReviewOriginal { return "Preparing original" }
+        if isRenderingReview { return "Rendering selected look" }
+        return isImported ? "Save filtered photo" : "Keep frame"
+    }
+
     private var keepFrameButton: some View {
         Button {
             onSave()
@@ -280,12 +534,8 @@ struct CaptureReviewView: View {
             }
         }
         .buttonStyle(.filmyPrimary)
-        .disabled(isSaving)
-        .accessibilityLabel(
-            isSaving
-                ? "Saving photo"
-                : isImported ? "Save filtered photo" : "Keep frame"
-        )
+        .disabled(isSaving || isRenderingReview || isPreparingReviewOriginal)
+        .accessibilityLabel(keepFrameAccessibilityLabel)
         .accessibilityHint("Saves the finished photo to your Photos library")
     }
 }

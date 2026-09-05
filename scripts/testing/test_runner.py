@@ -20,9 +20,27 @@ class SuiteRoutingTests(unittest.TestCase):
         tests = run.inventory()
         selected = [test for _, identifiers in run.phases("ci", tests) for test in identifiers]
         self.assertCountEqual(selected, [test for test, group in tests.items()
-                                         if group in {"unit", "integration", "e2e", "photos-e2e"}])
+                                         if group in {"unit", "integration", "e2e", "simulator-e2e", "photos-e2e"}])
         self.assertEqual(len(selected), len(set(selected)), "CI should not rerun tests across phases")
         self.assertFalse(any("/testPhysical" in test for test in selected))
+
+    def test_simulator_only_ui_cases_run_in_e2e_and_ci_but_not_on_device(self):
+        tests = run.inventory()
+        expected = {
+            "FilmyCameraUITests/FilmyCameraUITests/testSimulatorFallbackExposesReadableStateWithoutPreviewAction",
+            "FilmyCameraUITests/FilmyCameraUITests/testViewfinderFirstChromePreviewKeepsCameraQuiet",
+        }
+        self.assertEqual({test for test, group in tests.items() if group == "simulator-e2e"}, expected)
+        e2e = set(run.phases("e2e", tests)[0][1])
+        ci = {test for _, selected in run.phases("ci", tests) for test in selected}
+        device = set(run.phases("device", tests)[0][1])
+        self.assertTrue(expected <= e2e)
+        self.assertTrue(expected <= ci)
+        self.assertTrue(expected.isdisjoint(device))
+        self.assertTrue(
+            {test for test, group in tests.items() if group == "e2e"} <= device,
+            "The physical lane must retain every platform-independent UI acceptance",
+        )
 
     def test_unknown_and_stale_tests_fail_inventory(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -42,6 +60,11 @@ class SuiteRoutingTests(unittest.TestCase):
             # would silently omit this class from every selected CI phase.
             manifest.write_text(json.dumps({"classes": {"FilmyCameraTests/Example": "ci"}, "overrides": {}}))
             with self.assertRaisesRegex(ValueError, "Unclassified"):
+                run.inventory(root, manifest)
+            manifest.write_text(json.dumps({
+                "classes": {"FilmyCameraTests/Example": "simulator-e2e"}, "overrides": {}
+            }))
+            with self.assertRaisesRegex(ValueError, "explicit method override"):
                 run.inventory(root, manifest)
 
     def test_nested_helper_class_does_not_steal_test_ownership(self):

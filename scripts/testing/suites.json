@@ -7,6 +7,7 @@
     "FilmyCameraTests/RecipeReferenceCatalogTests": "unit",
     "FilmyCameraTests/CameraViewModelRenderingTests": "integration",
     "FilmyCameraTests/CameraReviewSaveTests": "integration",
+    "FilmyCameraTests/CameraReviewEditingTests": "integration",
     "FilmyCameraTests/ColorSpaceBoundaryTests": "integration",
     "FilmyCameraTests/PhotoLibraryMetadataTests": "integration",
     "FilmyCameraTests/PhotoOutputEncoderTests": "integration",
@@ -20,6 +21,8 @@
     "FilmyCameraUITests/StoreScreenshotTests": "store-media"
   },
   "overrides": {
+    "FilmyCameraUITests/FilmyCameraUITests/testSimulatorFallbackExposesReadableStateWithoutPreviewAction": "simulator-e2e",
+    "FilmyCameraUITests/FilmyCameraUITests/testViewfinderFirstChromePreviewKeepsCameraQuiet": "simulator-e2e",
     "FilmyCameraTests/PhotoLibraryMetadataTests/testPhysicalAddOnlySaveCallbackHasReadablePersistentCache": "add-only",
     "FilmyCameraUITests/FilmyCameraUITests/testPhysicalImportAppliesCurrentRecipeAndSaves": "device",
     "FilmyCameraUITests/FilmyCameraUITests/testPhysicalCaptureKeepsFrameToPhotos": "device",

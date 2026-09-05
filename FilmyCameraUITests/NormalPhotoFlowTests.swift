@@ -71,14 +71,17 @@ final class NormalPhotoFlowTests: XCTestCase {
     }
 
     func testNormalSeededImportCancelDoesNotCreateRollFrame() throws {
-        launchNormalApp()
+        launchNormalApp(contentSizeCategory: "UICTContentSizeCategoryAccessibilityXXXL")
         try ensureRecipe(id: "g7x-compact", name: "G7 X Compact")
         openRoll()
         let countBefore = try waitForRollFrameCount()
         app.buttons["roll-back-to-camera"].tap()
         XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 10))
 
-        try importSeededFixture()
+        try importSeededFixture(newerSavedFrameCount: countBefore)
+        assertReviewControl(app.buttons["review-look-picker"], name: "Large-text review look picker")
+        assertReviewControl(app.buttons["review-compare-original"], name: "Large-text Original comparison")
+        attachScreenshot(named: "review-large-text")
         let cancel = app.buttons["Cancel"]
         XCTAssertTrue(cancel.waitForExistence(timeout: 10), "Imported review must offer Cancel")
         cancel.tap()
@@ -93,11 +96,107 @@ final class NormalPhotoFlowTests: XCTestCase {
         )
     }
 
-    private func launchNormalApp() {
+    func testNormalReviewComparesAndSwitchesLookBeforeSaving() throws {
+        launchNormalApp()
+        try ensureRecipe(id: "g7x-compact", name: "G7 X Compact")
+        try importSeededFixture()
+
+        let compare = app.buttons["review-compare-original"]
+        let lookPicker = app.buttons["review-look-picker"]
+        assertReviewControl(compare, name: "Original comparison")
+        assertReviewControl(lookPicker, name: "Review look picker")
+
+        compare.tap()
+        XCTAssertTrue(waitUntil(timeout: 15) { compare.value as? String == "Original" })
+        let photo = app.descendants(matching: .any)["review-image"]
+        XCTAssertTrue(photo.label.contains("Original"), "Comparison must identify the source photo")
+        attachScreenshot(named: "review-original-portrait")
+
+        lookPicker.tap()
+        let monochrome = app.buttons["review-look-acros-monochrome"]
+        XCTAssertTrue(monochrome.waitForExistence(timeout: 5), "Look selection must expose the monochrome treatment")
+        monochrome.tap()
+        XCTAssertTrue(
+            waitUntil(timeout: 30) {
+                photo.label.contains("Fine Monochrome") && app.buttons["Save filtered photo"].isEnabled
+            },
+            "The finished review must publish the selected look before allowing Save"
+        )
+        XCTAssertEqual(compare.value as? String, "Look", "Changing a look must return from Original to the treatment")
+        XCTAssertFalse(app.descendants(matching: .any)["review-render-error"].exists)
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        XCTAssertTrue(
+            waitUntil(timeout: 10) { app.frame.width > app.frame.height },
+            "The review must settle into landscape before layout assertions"
+        )
+        assertReviewControl(compare, name: "Landscape Original comparison", containedInApp: true)
+        assertReviewControl(lookPicker, name: "Landscape review look picker", containedInApp: true)
+        assertReviewControl(
+            app.buttons["Save filtered photo"],
+            name: "Landscape Save filtered photo",
+            containedInApp: true
+        )
+        attachScreenshot(named: "review-monochrome-landscape")
+
+        // Original is a comparison, never an alternate export. Leave it
+        // visible while saving and verify the chosen look survives relaunch.
+        compare.tap()
+        XCTAssertTrue(waitUntil(timeout: 15) { compare.value as? String == "Original" })
+        app.buttons["Save filtered photo"].tap()
+        app.tap()
+        try waitForSaveCompletion()
+        XCTAssertTrue(
+            app.buttons["recipe-menu"].label.contains("G7 X Compact"),
+            "Trying a review look must not change the next camera shot's look"
+        )
+
+        XCUIDevice.shared.orientation = .portrait
+        app.terminate()
+        launchNormalApp()
+        openRoll()
+        let savedFrame = app.buttons.matching(
+            NSPredicate(format: "label == 'Photo in your gallery, Fine Monochrome'")
+        ).firstMatch
+        XCTAssertTrue(savedFrame.waitForExistence(timeout: 30), "Save must retain the chosen review look's metadata")
+        savedFrame.tap()
+        XCTAssertTrue(app.images["Photo"].waitForExistence(timeout: 30))
+        XCTAssertEqual(app.images["Photo"].value as? String, "Fit to screen")
+    }
+
+    private func assertReviewControl(
+        _ element: XCUIElement,
+        name: String,
+        containedInApp: Bool = false
+    ) {
+        XCTAssertTrue(element.waitForExistence(timeout: 10), "\(name) must be discoverable")
+        XCTAssertTrue(waitUntil(timeout: 5) { element.isHittable }, "\(name) must be reachable without scrolling at normal text size")
+        XCTAssertGreaterThanOrEqual(element.frame.width, 44, "\(name) needs a usable touch width")
+        XCTAssertGreaterThanOrEqual(element.frame.height, 44, "\(name) needs a usable touch height")
+        if containedInApp {
+            XCTAssertTrue(
+                app.frame.insetBy(dx: -1, dy: -1).contains(element.frame),
+                "\(name) must remain entirely inside the landscape app frame"
+            )
+        }
+    }
+
+    private func attachScreenshot(named name: String) {
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    private func launchNormalApp(contentSizeCategory: String? = nil) {
         app?.terminate()
         app = XCUIApplication()
         // Deliberately omit -ui-testing so PhotosPicker and the real save path
         // are exercised against the disposable seeded library.
+        if let contentSizeCategory {
+            app.launchArguments = ["-UIPreferredContentSizeCategoryName", contentSizeCategory]
+        }
         app.launch()
 
         let skip = app.buttons["Skip"]
@@ -136,7 +235,16 @@ final class NormalPhotoFlowTests: XCTestCase {
         XCTAssertTrue(waitForDisappearance(close, timeout: 5), "Selecting a look must leave the camera controls available")
     }
 
-    private func importSeededFixture() throws {
+    private func importSeededFixture(newerSavedFrameCount: Int? = nil) throws {
+        let newerFrames: Int
+        if let newerSavedFrameCount {
+            newerFrames = newerSavedFrameCount
+        } else {
+            openRoll()
+            newerFrames = try waitForRollFrameCount()
+            app.buttons["roll-back-to-camera"].tap()
+            XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 10))
+        }
         let importPhoto = app.buttons["import-photo"]
         XCTAssertTrue(importPhoto.waitForExistence(timeout: 10))
         importPhoto.tap()
@@ -145,14 +253,21 @@ final class NormalPhotoFlowTests: XCTestCase {
             NSPredicate(format: "identifier == 'PXGGridLayout-Info'")
         )
         XCTAssertTrue(
-            waitUntil(timeout: 30) { photos.count > 0 },
-            "The disposable simulator must expose the seeded cafe fixture"
+            waitUntil(timeout: 30) {
+                if photos.count > newerFrames { return true }
+                let dismissNotice = app.buttons["Dismiss"]
+                if dismissNotice.exists, dismissNotice.isHittable {
+                    dismissNotice.tap()
+                }
+                return false
+            },
+            "The disposable simulator must expose the seeded cafe fixture. Picker: \(app.debugDescription)"
         )
 
-        // The disposable runner seeds the public cafe original after boot, so
-        // it is the newest visible fixture. Keep the selection deterministic
-        // even when the simulator already contains stock Photos.
-        let source = photos.element(boundBy: 0)
+        // The cafe source is newer than the simulator's stock photos. Saves
+        // from earlier cases sort ahead of it; skip exactly the app's Roll
+        // count so every case starts from the same unfiltered public fixture.
+        let source = photos.element(boundBy: newerFrames)
         let sourceFrame = source.frame
         let appFrame = app.frame
         app.coordinate(withNormalizedOffset: CGVector(

@@ -13,7 +13,7 @@ python3 scripts/testing/run.py ci \
   --destination 'platform=iOS Simulator,id=YOUR_SIMULATOR_UUID'
 ```
 
-`ci` builds once, then executes every deterministic test without rebuilding between phases. `core` runs unit and integration tests; `unit`, `integration`, and `e2e` select narrower groups. Reuse products built by this runner with `--skip-build --derived-data PATH`. A source/resource/project digest and Xcode/coverage stamp reject stale or unverified products. After changing Swift source or project membership, rebuild first.
+`ci` builds once, then executes every deterministic test without rebuilding between phases. `core` runs unit and integration tests; `unit`, `integration`, and `e2e` select narrower groups. The `e2e` lane includes UI cases compiled only for the simulator. The physical `device` lane excludes those cases while retaining every platform-independent UI acceptance, so selected and reported counts remain exact on both platforms. Reuse products built by this runner with `--skip-build --derived-data PATH`. A source/resource/project digest and Xcode/coverage stamp reject stale or unverified products. After changing Swift source or project membership, rebuild first.
 
 ```sh
 python3 scripts/testing/run.py core \
@@ -27,7 +27,7 @@ python3 scripts/testing/run.py photos-e2e --skip-build \
   --derived-data build/TestSuiteDerivedData
 ```
 
-Photos E2E creates its own simulator using the reference UUID's device type and runtime, seeds the tracked public cafe image, handles the native Photos permission flow, and deletes only that created simulator afterward. It uses normal app launches and real PhotoKit persistence. It never seeds or erases the reference simulator or a physical device's library. Built-in simulator sample images may also be present; the newly seeded image is selected first.
+Photos E2E creates its own simulator using the reference UUID's device type and runtime, seeds the tracked public cafe image, handles the native Photos permission flow, and deletes only that created simulator afterward. It uses normal app launches and real PhotoKit persistence. It never seeds or erases the reference simulator or a physical device's library. Built-in simulator sample images may also be present; each import skips newer saved outputs to select the same unfiltered cafe source.
 
 `--dry-run` prints the exact selection without building or touching a simulator. `inventory` prints every declared test and its assigned group:
 
@@ -46,10 +46,10 @@ Counts describe declared test methods, not line coverage or proof of hardware be
 | Camera policy and lifecycle | `CameraServiceAvailabilityTests` | Authorization/availability, capture callback identity, preview ownership, recovery backoff, background/review policy, rotation/mirroring, focus and exposure, flash and lens calculations |
 | Recipes and preferences | `RecipeInvariantsTests`, `RecipeReferenceCatalogTests`, `CameraViewModelPersistenceTests`, `RecipeDetailCommitPolicyTests` | Built-in identity and bounds, G7 X contract, public reference provenance, legacy migration, corrupt overrides, launch selection, reset/update/discard policy |
 | Renderer and JPEG output | `RendererOutputBoundsTests`, `ColorSpaceBoundaryTests`, `PhotoOutputEncoderTests` | Output extent/alpha, render-stage effects, preview/export equivalence, grain behavior, color-space boundaries, JPEG decoding and embedded provenance, location metadata policy |
-| Import and review | `CameraViewModelRenderingTests`, `CameraReviewSaveTests` | Invalid/cancelled import, selected-recipe snapshot, orientation/mirrors, pixel budget, denied/write-failed save and retry, identical frame/date/data across retry, duplicate Save and in-flight Retake prevention |
+| Import and review | `CameraViewModelRenderingTests`, `CameraReviewSaveTests`, `CameraReviewEditingTests` | Invalid/cancelled import, selected-recipe snapshot, orientation/mirrors, pixel budget, reversible look auditions, source comparison, stale-work rejection, deferred export, denied/write-failed save and exact retry, duplicate Save and in-flight Retake prevention |
 | Photos and local cache | `PhotoLibraryMetadataTests` | Permission policies, app-owned asset IDs, safe paths, atomic cache writes and failure recovery, cleanup/reconciliation, thumbnails, completion ordering and cancellation before callback registration |
 | UI and accessibility | `FilmyCameraUITests` | Camera shell, G7 X controls, tuning and persistence, Back discards edits, Reset+Apply, onboarding and Skip, Roll/Settings navigation, large text, portrait/landscape, foreground/recipe-switch responsiveness |
-| Normal Photos E2E | `NormalPhotoFlowTests` | Public fixture → G7 X review → Photos save → app relaunch → Roll detail; import cancellation leaves Roll count unchanged |
+| Normal Photos E2E | `NormalPhotoFlowTests` | Public fixture → G7 X review → Photos save → app relaunch → Roll detail; Original comparison and monochrome review selection survive save/relaunch without changing the shooting look; large-text import cancellation leaves Roll count unchanged |
 | Test infrastructure | `scripts/testing/test_runner.py` | Complete routing, no duplicate CI selection, opt-in isolation, physical write guards, fresh-simulator cleanup ownership, rejection of zero/missing/skipped deterministic results |
 
 Each deterministic UI case receives a unique preferences suite that persists across its own relaunches. Normal app launches ignore that testing environment variable. The Photos E2E uses its disposable simulator's real preferences and library.

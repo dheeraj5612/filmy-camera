@@ -21,8 +21,9 @@ ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = Path(__file__).with_name("suites.json")
 LANES = {
     "unit": ["unit"], "integration": ["integration"],
-    "core": ["unit", "integration"], "e2e": ["e2e"],
-    "photos-e2e": ["photos-e2e"], "ci": ["unit", "integration", "e2e", "photos-e2e"],
+    "core": ["unit", "integration"], "e2e": ["e2e", "simulator-e2e"],
+    "photos-e2e": ["photos-e2e"],
+    "ci": ["unit", "integration", "e2e", "simulator-e2e", "photos-e2e"],
     "device": ["device", "e2e"], "performance": ["performance"],
     "fixtures": ["fixtures"], "lens": ["lens"], "add-only": ["add-only"],
     "capture-sheet": ["capture-sheet"], "store-media": ["store-media"],
@@ -63,6 +64,10 @@ def inventory(root=ROOT, manifest_path=MANIFEST):
                 group = manifest["overrides"].get(test_id, manifest["classes"].get(class_id))
                 if group not in GROUPS:
                     raise ValueError(f"Unclassified test: {test_id}; update {manifest_path}")
+                if group == "simulator-e2e" and manifest["overrides"].get(test_id) != group:
+                    raise ValueError(
+                        f"Simulator-only test requires an explicit method override: {test_id}"
+                    )
                 if match.group(1).startswith("testPhysical") and group not in {
                     "device", "performance", "add-only", "capture-sheet"
                 }:
@@ -81,7 +86,8 @@ def phases(lane, tests):
     selected = lambda names: sorted(test for test, group in tests.items() if group in names)
     if lane == "ci":
         return [("core", selected({"unit", "integration"})),
-                ("e2e", selected({"e2e"})), ("photos-e2e", selected({"photos-e2e"}))]
+                ("e2e", selected({"e2e", "simulator-e2e"})),
+                ("photos-e2e", selected({"photos-e2e"}))]
     return [(lane, selected(set(groups)))] if groups else []
 
 
