@@ -7,7 +7,7 @@ Current candidate: version 1.0.0, build 8, with the [camera UX redesign](design-
 - [x] Implement review look switching and Original comparison with bounded previews, deferred full export, exact retry, and independent shooting selection.
 - [x] Pass local 180 unit/integration tests and three normal Photos E2E flows on iPadOS 26.5 and iOS 18.5. The test runner has 20 portable checks and selects 201 app tests for routine CI.
 - [x] Install the signed 1.0.0 (8) app and pass all 23 applicable iPad tests. The strengthened physical capture/compare/look-switch/landscape/save case also passed separately.
-- [ ] Pass required CI on the final commit, archive the clean source, and validate signed archive/IPA parity.
+- [x] Pass required CI on app source `1b68673` ([run 33961809201](https://github.com/dheeraj5612/filmy-camera/actions/runs/33961809201)), archive the clean source, and validate signed archive/IPA parity. The run passed 201 app tests and 20 runner checks with zero app failures/skips; its build-input digest matches the local source. See the [final build 8 evidence](review-editing-20260904.md#final-build-8-evidence).
 - [x] Refresh and inspect five iPhone and five iPad store screenshots from isolated public-fixture runs, showing current review controls and matching saved treatments.
 - [ ] Upload build 8 and the refreshed media, verify processing, select the matching build/media, and validate the review draft.
 - [ ] Complete the iPhone-specific, controlled image-quality, and submission gates below.
