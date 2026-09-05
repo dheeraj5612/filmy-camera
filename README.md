@@ -42,6 +42,10 @@ Run the complete test suite with `python3 scripts/testing/run.py ci --destinatio
 
 The app requires iOS 17 or later. Camera and Photos permissions are requested only when the relevant feature is used.
 
+## Future monetization
+
+The planned model includes paid access to most features, a free trial, and watermarked free exports. Pricing, trial duration, and the exact feature split remain open. See the [monetization roadmap](docs/monetization-roadmap.md) for the proposed experience and implementation/testing plan. These restrictions are not enabled in build 8.
+
 ## Rendering note
 
 The recipe controls intentionally model the public vocabulary used by Fujifilm cameras, but this app is not affiliated with Fujifilm and does not ship Fujifilm firmware, LUTs, or proprietary calibration data. Exact camera output varies by sensor generation, exposure, white balance, and lighting; the bundled recipes are transparent, adjustable interpretations rather than claims of identical hardware output.
