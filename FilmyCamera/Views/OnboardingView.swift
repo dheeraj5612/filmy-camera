@@ -95,6 +95,9 @@ struct OnboardingView: View {
             .frame(maxWidth: 680)
         }
         .preferredColorScheme(.dark)
+        // Give the screen its own accessibility node. Without containment,
+        // SwiftUI can propagate this identifier into Back, Skip, and Continue.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("onboarding-screen")
         .onAppear {
             if featuredRecipeID == nil { featuredRecipeID = initialRecipeID }
@@ -107,12 +110,16 @@ struct OnboardingView: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(FilmyTheme.primary)
             Spacer(minLength: 8)
-            Button("Skip", action: onFinish)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(FilmyTheme.secondary)
-                .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
-                .accessibilityIdentifier("onboarding-skip")
-                .accessibilityHint("Open the camera with your current look")
+            Button(action: onFinish) {
+                Text("Skip")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(FilmyTheme.secondary)
+                    .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("onboarding-skip")
+            .accessibilityHint("Open the camera with your current look")
         }
         .padding(.horizontal, 22)
         .padding(.top, 8)
@@ -173,6 +180,7 @@ struct OnboardingView: View {
                 .foregroundStyle(FilmyTheme.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("onboarding-recipe-chooser")
     }
 
@@ -242,15 +250,19 @@ struct OnboardingView: View {
     private var pageControls: some View {
         VStack(spacing: 8) {
             HStack {
-                Button("Back") {
+                Button {
                     withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
                         selectedPage = max(0, selectedPage - 1)
                     }
+                } label: {
+                    Text("Back")
+                        .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
                 .disabled(selectedPage == 0)
                 .opacity(selectedPage == 0 ? 0 : 1)
                 .accessibilityHidden(selectedPage == 0)
-                .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
                 .accessibilityIdentifier("onboarding-back")
                 Spacer()
                 Text("\(selectedPage + 1) of \(Self.pages.count)")
@@ -258,9 +270,14 @@ struct OnboardingView: View {
                     .monospacedDigit()
                     .accessibilityLabel("Introduction page \(selectedPage + 1) of \(Self.pages.count)")
                 Spacer()
-                Button("Skip for now", action: onFinish)
-                    .frame(minHeight: FilmyTheme.minimumHitTarget)
-                    .accessibilityIdentifier("onboarding-skip-for-now")
+                Button(action: onFinish) {
+                    Text("Skip for now")
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("onboarding-skip-for-now")
             }
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(FilmyTheme.secondary)

@@ -264,11 +264,15 @@ struct ContentView: View {
                     .foregroundStyle(FilmyTheme.secondary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
-                Button("Cancel import", action: cancelImport)
-                    .font(.subheadline.weight(.semibold))
-                    .frame(minHeight: FilmyTheme.minimumHitTarget)
-                    .disabled(importSession.phase == .cancelling)
-                    .accessibilityIdentifier("photo-import-cancel")
+                Button(action: cancelImport) {
+                    Text("Cancel import")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(importSession.phase == .cancelling)
+                .accessibilityIdentifier("photo-import-cancel")
             }
             .padding(24)
             .frame(maxWidth: 360)
@@ -277,6 +281,7 @@ struct ContentView: View {
             .accessibilityElement(children: .contain)
             .accessibilityAddTraits(.isModal)
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("photo-import-progress")
     }
 

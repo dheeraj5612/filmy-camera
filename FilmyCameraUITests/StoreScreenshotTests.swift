@@ -221,8 +221,41 @@ final class StoreScreenshotTests: XCTestCase {
 // saves photos. It is deliberately separate from the opt-in media fixture.
 @MainActor
 final class LaunchOnboardingTests: XCTestCase {
+    func testOnboardingControlsKeepSeparateIdentifiersAndFullHitTargets() {
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        app.launchEnvironment["FILMY_TEST_DEFAULTS_SUITE"] = "FilmyCameraUITests.Launch.\(UUID().uuidString)"
+        app.launchArguments = ["-ui-testing", "-ui-testing-onboarding"]
+        app.launch()
+        defer { app.terminate() }
+
+        let screen = app.otherElements["onboarding-screen"]
+        XCTAssertTrue(screen.waitForExistence(timeout: 15))
+        XCTAssertEqual(app.buttons.matching(identifier: "onboarding-screen").count, 0,
+                       "The screen identifier must never replace a button identifier")
+        for identifier in ["onboarding-skip", "onboarding-skip-for-now", "onboarding-continue"] {
+            let button = app.buttons[identifier]
+            XCTAssertTrue(button.waitForExistence(timeout: 5), identifier)
+            XCTAssertTrue(button.isHittable, identifier)
+            XCTAssertGreaterThanOrEqual(button.frame.width, 44, identifier)
+            XCTAssertGreaterThanOrEqual(button.frame.height, 44, identifier)
+        }
+        let firstUse = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        firstUse.name = "launch-interactive-recipe-selection"
+        firstUse.lifetime = .keepAlways
+        add(firstUse)
+        app.buttons["onboarding-continue"].tap()
+        let back = app.buttons["onboarding-back"]
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        XCTAssertTrue(back.isHittable)
+        XCTAssertGreaterThanOrEqual(back.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(back.frame.height, 44)
+    }
+
     func testChosenLookReachesCameraAndSurvivesRelaunch() {
         continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
         app.launchEnvironment["FILMY_TEST_DEFAULTS_SUITE"] = "FilmyCameraUITests.Launch.\(UUID().uuidString)"
         app.launchArguments = ["-ui-testing", "-ui-testing-onboarding"]
@@ -248,6 +281,7 @@ final class LaunchOnboardingTests: XCTestCase {
 
     func testBackNavigationKeepsChosenLookThroughCompletion() {
         continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
         app.launchEnvironment["FILMY_TEST_DEFAULTS_SUITE"] = "FilmyCameraUITests.Launch.\(UUID().uuidString)"
         app.launchArguments = ["-ui-testing", "-ui-testing-onboarding"]
