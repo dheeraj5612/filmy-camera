@@ -216,3 +216,61 @@ final class StoreScreenshotTests: XCTestCase {
         add(attachment)
     }
 }
+
+// Routine first-use acceptance uses an isolated preferences suite and never
+// saves photos. It is deliberately separate from the opt-in media fixture.
+@MainActor
+final class LaunchOnboardingTests: XCTestCase {
+    func testChosenLookReachesCameraAndSurvivesRelaunch() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["FILMY_TEST_DEFAULTS_SUITE"] = "FilmyCameraUITests.Launch.\(UUID().uuidString)"
+        app.launchArguments = ["-ui-testing", "-ui-testing-onboarding"]
+        app.launch()
+        defer { app.terminate() }
+
+        let muted = app.buttons["onboarding-recipe-classic-chrome"]
+        XCTAssertTrue(muted.waitForExistence(timeout: 15))
+        muted.tap()
+        XCTAssertEqual(muted.value as? String, "Selected")
+        app.buttons["onboarding-skip"].tap()
+        let currentLook = app.buttons["recipe-menu"]
+        XCTAssertTrue(currentLook.waitForExistence(timeout: 15))
+        XCTAssertTrue(currentLook.label.contains("Muted Color"))
+
+        app.terminate()
+        // Drop only the forced-onboarding seed, retaining this test's suite.
+        app.launchArguments = ["-ui-testing"]
+        app.launch()
+        XCTAssertTrue(currentLook.waitForExistence(timeout: 15))
+        XCTAssertTrue(currentLook.label.contains("Muted Color"))
+    }
+
+    func testBackNavigationKeepsChosenLookThroughCompletion() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["FILMY_TEST_DEFAULTS_SUITE"] = "FilmyCameraUITests.Launch.\(UUID().uuidString)"
+        app.launchArguments = ["-ui-testing", "-ui-testing-onboarding"]
+        app.launch()
+        defer { app.terminate() }
+
+        let muted = app.buttons["onboarding-recipe-classic-chrome"]
+        XCTAssertTrue(muted.waitForExistence(timeout: 15))
+        muted.tap()
+        let next = app.buttons["onboarding-continue"]
+        next.tap()
+        XCTAssertTrue(app.staticTexts["See the mood as you compose."].waitForExistence(timeout: 5))
+        app.buttons["onboarding-back"].tap()
+        XCTAssertTrue(muted.waitForExistence(timeout: 5))
+        XCTAssertEqual(muted.value as? String, "Selected")
+        XCTAssertEqual(app.buttons["onboarding-recipe-g7x-compact"].value as? String, "Not selected")
+
+        next.tap()
+        next.tap()
+        XCTAssertTrue(app.staticTexts["Save the finished photo."].waitForExistence(timeout: 5))
+        next.tap()
+        let currentLook = app.buttons["recipe-menu"]
+        XCTAssertTrue(currentLook.waitForExistence(timeout: 15))
+        XCTAssertTrue(currentLook.label.contains("Muted Color"))
+    }
+}

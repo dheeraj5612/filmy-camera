@@ -27,8 +27,11 @@ on:
         default: false
 
 concurrency:
-  group: ios-build-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # A docs-only main push must not cancel an app build and then skip its own
+  # build lane. Isolate main/dispatch runs, including pending runs. Only PRs
+  # share a group, since their change scope includes the complete PR diff.
+  group: ios-build-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read

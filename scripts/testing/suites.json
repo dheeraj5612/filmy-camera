@@ -2,6 +2,8 @@
   "classes": {
     "FilmyCameraTests/CameraServiceAvailabilityTests": "unit",
     "FilmyCameraTests/CameraViewModelPersistenceTests": "unit",
+    "FilmyCameraTests/PhotoImportSessionTests": "unit",
+    "FilmyCameraTests/PhotoImportPolicyTests": "unit",
     "FilmyCameraTests/RecipeDetailCommitPolicyTests": "unit",
     "FilmyCameraTests/RecipeInvariantsTests": "unit",
     "FilmyCameraTests/RecipeReferenceCatalogTests": "unit",
@@ -17,6 +19,7 @@
     "FilmyCameraTests/RendererPerformanceTests": "performance",
     "FilmyCameraTests/RecipeRenderGalleryTests": "fixtures",
     "FilmyCameraUITests/FilmyCameraUITests": "e2e",
+    "FilmyCameraUITests/LaunchOnboardingTests": "e2e",
     "FilmyCameraUITests/NormalPhotoFlowTests": "photos-e2e",
     "FilmyCameraUITests/StoreScreenshotTests": "store-media"
   },
