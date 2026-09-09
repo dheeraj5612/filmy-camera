@@ -1,0 +1,84 @@
+name: Release SDK build
+
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+    paths:
+      - "FilmyCamera/**"
+      - "FilmyCameraTests/**"
+      - "FilmyCameraUITests/**"
+      - "FilmyCamera.xcodeproj/**"
+      - "scripts/release/**"
+      - "scripts/testing/**"
+      - "project.yml"
+      - ".github/workflows/release-sdk-build.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-sdk-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  release-sdk-build:
+    runs-on: macos-15
+    timeout-minutes: 15
+    # Verified in the macos-15 hosted image. Keep the compatibility lane on
+    # Xcode 16.4; compile distribution configuration and device-only branches
+    # separately with an explicit App Store-eligible SDK generation.
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Verify distribution SDK and record source provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="${RUNNER_TEMP}/release-sdk"
+          mkdir -p "${evidence}"
+          git rev-parse HEAD > "${evidence}/source-sha.txt"
+          [[ -d "${DEVELOPER_DIR}" ]] || {
+            echo "Pinned Xcode 26.3 is missing from this runner." >&2
+            exit 1
+          }
+          xcodebuild -version | tee "${evidence}/xcode-version.txt"
+          grep -Fxq 'Xcode 26.3' "${evidence}/xcode-version.txt"
+          python3 scripts/release/validate-sdk.py --current | tee "${evidence}/sdk-check.txt"
+
+      - name: Compile Release configuration without signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The primary build-and-test lane independently regenerates and
+          # checks this committed project. No credentials or archive are used.
+          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -derivedDataPath "${RUNNER_TEMP}/FilmyReleaseSDK" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build \
+            > "${RUNNER_TEMP}/release-sdk/release-build.log" 2>&1
+          python3 scripts/release/validate-sdk.py --app-info \
+            "${RUNNER_TEMP}/FilmyReleaseSDK/Build/Products/Release-iphoneos/FilmyCamera.app/Info.plist" \
+            | tee "${RUNNER_TEMP}/release-sdk/built-app-sdk-check.txt"
+
+      - name: Compile all physical-device test branches without running them
+        run: |
+          python3 scripts/testing/run.py device-build \
+            --derived-data "${RUNNER_TEMP}/FilmyReleaseSDKTests" \
+            --output-dir "${RUNNER_TEMP}/release-sdk"
+
+      - name: Preserve distribution SDK compile evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: filmycamera-release-sdk-${{ github.run_id }}
+          path: "${{ runner.temp }}/release-sdk/"
+          if-no-files-found: warn
+          retention-days: 14

@@ -185,8 +185,18 @@ final class NormalPhotoFlowTests: XCTestCase {
         attachScreenshot(named: "review-original-portrait")
 
         lookPicker.tap()
-        let monochrome = revealReviewLook("review-look-acros-monochrome")
-        attachScreenshot(named: "review-look-menu-monochrome")
+        let library = app.descendants(matching: .any)["look-library"]
+        XCTAssertTrue(library.waitForExistence(timeout: 5), "Review must present its visual look library")
+        let search = app.textFields["look-library-search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("Fine Monochrome\n")
+        let monochrome = app.buttons["review-look-acros-monochrome"]
+        XCTAssertTrue(
+            monochrome.waitForExistence(timeout: 5) && monochrome.isHittable,
+            "Search must expose the exact monochrome treatment as a selectable preview"
+        )
+        attachScreenshot(named: "review-look-library-monochrome")
         monochrome.tap()
         XCTAssertTrue(
             waitUntil(timeout: 30) {
@@ -444,52 +454,6 @@ final class NormalPhotoFlowTests: XCTestCase {
     /// Native SwiftUI menus expose an oversized semantic collection frame on
     /// some OS versions. Anchor the gesture to option rows that are visibly
     /// inside the menu so the press cannot land below the popover and dismiss it.
-    private func revealReviewLook(_ identifier: String) -> XCUIElement {
-        let option = app.descendants(matching: .any)[identifier]
-        let menuOptions = app.descendants(matching: .any).matching(
-            NSPredicate(format: "identifier BEGINSWITH 'review-look-' AND identifier != 'review-look-picker'")
-        )
-        XCTAssertTrue(
-            waitUntil(timeout: 5) { visibleMenuOptions(in: menuOptions).count >= 2 },
-            "Look selection must present visible recipe options"
-        )
-
-        for _ in 0..<6 {
-            if option.exists, option.isHittable, app.frame.intersects(option.frame) {
-                return option
-            }
-
-            let visible = visibleMenuOptions(in: menuOptions)
-            guard visible.count >= 2 else {
-                XCTFail("Look menu dismissed before exposing \(identifier)")
-                return option
-            }
-            let upper = visible[visible.count >= 4 ? 1 : 0]
-            let lower = visible[visible.count >= 4 ? visible.count - 2 : visible.count - 1]
-            let appFrame = app.frame
-            let startPoint = CGPoint(x: lower.frame.midX, y: lower.frame.midY)
-            let endPoint = CGPoint(x: upper.frame.midX, y: upper.frame.midY)
-            let start = app.coordinate(withNormalizedOffset: CGVector(
-                dx: (startPoint.x - appFrame.minX) / appFrame.width,
-                dy: (startPoint.y - appFrame.minY) / appFrame.height
-            ))
-            let end = app.coordinate(withNormalizedOffset: CGVector(
-                dx: (endPoint.x - appFrame.minX) / appFrame.width,
-                dy: (endPoint.y - appFrame.minY) / appFrame.height
-            ))
-            let previousTopFrame = visible[0].frame
-            start.press(forDuration: 0.05, thenDragTo: end)
-            _ = waitUntil(timeout: 1.5) {
-                option.exists || visibleMenuOptions(in: menuOptions).first?.frame != previousTopFrame
-            }
-        }
-
-        XCTAssertTrue(
-            option.waitForExistence(timeout: 5) && option.isHittable,
-            "Look selection must expose \(identifier) after bounded menu scrolling"
-        )
-        return option
-    }
 
     private func visibleMenuOptions(in query: XCUIElementQuery) -> [XCUIElement] {
         let appFrame = app.frame

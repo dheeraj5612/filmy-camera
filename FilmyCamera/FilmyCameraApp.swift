@@ -58,7 +58,11 @@ struct FilmyCameraApp: App {
                         photoLibrary: photoLibrary
                     )
                 } else {
-                    OnboardingView {
+                    OnboardingView(
+                        recipes: cameraViewModel.recipes,
+                        initialRecipeID: cameraViewModel.selectedRecipeID,
+                        onSelectRecipe: { cameraViewModel.select(recipe: $0) }
+                    ) {
                         hasCompletedOnboarding = true
                         isShowingOnboarding = false
                     }

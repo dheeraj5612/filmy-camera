@@ -58,6 +58,9 @@ if [[ ! -d "${app_path}" || ! -f "${info_plist}" ]]; then
   exit 1
 fi
 
+# Check the archive's recorded build SDK, not whichever Xcode is selected now.
+python3 "${script_dir}/validate-sdk.py" --app-info "${info_plist}"
+
 plist_value() {
   /usr/libexec/PlistBuddy -c "Print :$1" "${info_plist}" 2>/dev/null
 }

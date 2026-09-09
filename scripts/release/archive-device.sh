@@ -22,6 +22,9 @@ usage() {
 Usage:
   scripts/release/archive-device.sh [--allow-provisioning-updates]
 
+App Store archives require Xcode 26+ with the iOS 26+ SDK. The older CI
+simulator toolchain is for compatibility tests, not distribution archives.
+
 Options:
   --allow-provisioning-updates  Explicitly allow Xcode to contact Apple while archiving.
 
@@ -56,6 +59,9 @@ while [[ "$#" -gt 0 ]]; do
       ;;
   esac
 done
+
+# Reject obsolete SDKs before creating output folders or touching signing.
+python3 "${script_dir}/validate-sdk.py" --current
 
 canonical_existing_path() {
   local path="$1"
