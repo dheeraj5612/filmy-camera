@@ -315,7 +315,6 @@ struct CurrentRecipeButton: View {
 
     private var recipeIcon: some View {
         RecipeSwatch(recipe: recipe, compact: true, showsLabel: false)
-            .environment(\.recipePreviewScene, nil)
             .frame(width: 34, height: 38)
             .clipShape(RoundedRectangle(cornerRadius: 7))
             .accessibilityHidden(true)

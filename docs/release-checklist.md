@@ -1,6 +1,6 @@
 # Filmy Camera release checklist
 
-Current candidate: version 1.0.0, build 12, from [PR #90](https://github.com/dheeraj5612/filmy-camera/pull/90). It adds 128 editable looks, a capture timer, exact framing, and preview composition aids. Review fixes prevent overlapping preview renders across cancellation and discard stale masks after framing changes. Every shipped feature remains free, with no trial, paywall, or watermark.
+Current candidate: version 1.0.0, build 12, from [PR #90](https://github.com/dheeraj5612/filmy-camera/pull/90). It adds 128 editable looks, a capture timer, exact framing, and preview composition aids. The release also preserves the locally committed static café filter previews. Review fixes keep composition analysis serialized across cancellation and discard stale masks after framing changes. Every shipped feature remains free, with no trial, paywall, or watermark.
 
 ## Build 12 release gates
 

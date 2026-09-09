@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		00493D9DE920BF3A134CCF56 /* NormalPhotoFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E79227F5594654480E6C981 /* NormalPhotoFlowTests.swift */; };
+		020D3A1BCF35368AF1D93441 /* CompositionAssistStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DEAF80BF98F3BCC9BB1DBC1 /* CompositionAssistStore.swift */; };
 		1768F2BE69F5DF79C97A1832 /* AppIconSource.svg in Resources */ = {isa = PBXBuildFile; fileRef = B9D2815FF289A04B992AC100 /* AppIconSource.svg */; };
 		1FA4D1311CC59621E8A662B9 /* FilmyCameraApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D59729E8AC667A9120C460CB /* FilmyCameraApp.swift */; };
 		250271E0E5A4918FC7762C91 /* StoreScreenshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EC33B29E08BDF6AF6178EFA /* StoreScreenshotTests.swift */; };
@@ -19,7 +20,6 @@
 		3E434087A6331965A83F900D /* RecipeReferenceCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 348CFAEC84B4CF9E4F843E66 /* RecipeReferenceCatalogTests.swift */; };
 		3F104912E7B0F794D16EC5E3 /* GalleryScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10A0F8269AA5365633E9A3C0 /* GalleryScreen.swift */; };
 		47FDBDD59FA6A75558E422B8 /* FilmRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F56BE8EB7D6BDB867CFD8C3A /* FilmRenderer.swift */; };
-		4C90B51F6CFE219E37FC2FF5 /* LiveRecipePreviewStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A78EE0BDE17DD2170E519D17 /* LiveRecipePreviewStore.swift */; };
 		589A5A125A91DA3228E84E06 /* RendererOutputBoundsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2F0913587D09FEB4D0E8E14 /* RendererOutputBoundsTests.swift */; };
 		58D2691A3560CD81FC291D7D /* FilmRecipeReferenceCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6940256A8100B915539E21CB /* FilmRecipeReferenceCatalog.swift */; };
 		59F0B3BA74FBD1876642993A /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31718B2CA6575E585EA91B06 /* OnboardingView.swift */; };
@@ -97,6 +97,7 @@
 		535194C6145CBC3D755665B3 /* ColorSpaceBoundaryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorSpaceBoundaryTests.swift; sourceTree = "<group>"; };
 		53925B09E478B6CD4AF36BE1 /* CaptureReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureReviewView.swift; sourceTree = "<group>"; };
 		57D96867146ACDDA4F134F19 /* CameraScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraScreen.swift; sourceTree = "<group>"; };
+		5DEAF80BF98F3BCC9BB1DBC1 /* CompositionAssistStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompositionAssistStore.swift; sourceTree = "<group>"; };
 		61617C6B4DB09D291F5DEA10 /* FilmyCameraUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmyCameraUITests.swift; sourceTree = "<group>"; };
 		6940256A8100B915539E21CB /* FilmRecipeReferenceCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmRecipeReferenceCatalog.swift; sourceTree = "<group>"; };
 		6A9AFC52D1FB5ECED33CB2DA /* CameraViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraViewModel.swift; sourceTree = "<group>"; };
@@ -109,7 +110,6 @@
 		99D74C27D238C00120CAABB3 /* RecipeRenderGalleryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeRenderGalleryTests.swift; sourceTree = "<group>"; };
 		A3940D2834957A9E44F66872 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A657E128117A2C10BAD8B761 /* FilmyCamera.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = FilmyCamera.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		A78EE0BDE17DD2170E519D17 /* LiveRecipePreviewStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveRecipePreviewStore.swift; sourceTree = "<group>"; };
 		A89BFC50D79A0FAEB41F1D3C /* ManualCameraControlsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualCameraControlsView.swift; sourceTree = "<group>"; };
 		B9D2815FF289A04B992AC100 /* AppIconSource.svg */ = {isa = PBXFileReference; path = AppIconSource.svg; sourceTree = "<group>"; };
 		C2E9A15C80F9345FFEE2F001 /* CameraManualControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraManualControls.swift; sourceTree = "<group>"; };
@@ -182,8 +182,8 @@
 			children = (
 				8D82A69BBE148C6317A2FA41 /* CameraFrameLayout.swift */,
 				DC1520CC0C54A1860FEB034D /* CameraService.swift */,
+				5DEAF80BF98F3BCC9BB1DBC1 /* CompositionAssistStore.swift */,
 				F56BE8EB7D6BDB867CFD8C3A /* FilmRenderer.swift */,
-				A78EE0BDE17DD2170E519D17 /* LiveRecipePreviewStore.swift */,
 				8433ABA6CF2F34E7F51023B6 /* PhotoLibraryService.swift */,
 				3E54A0716052C16B09DBEF38 /* PhotoOutputEncoder.swift */,
 				51B0F84271C9B08AE6A3D78A /* PhotoPrintCompositor.swift */,
@@ -413,6 +413,7 @@
 				28C6A5B2352ED08BD1E21114 /* CameraViewModel.swift in Sources */,
 				3D00E159DAA3E3944EACD36E /* CaptureReviewView.swift in Sources */,
 				C8D2AB628B416941BA34D460 /* Components.swift in Sources */,
+				020D3A1BCF35368AF1D93441 /* CompositionAssistStore.swift in Sources */,
 				C39D65C13BF730F85F01A8B9 /* ContentView.swift in Sources */,
 				F84D685F791EF68BD232EC02 /* FilmRecipe.swift in Sources */,
 				58D2691A3560CD81FC291D7D /* FilmRecipeReferenceCatalog.swift in Sources */,
@@ -420,7 +421,6 @@
 				1FA4D1311CC59621E8A662B9 /* FilmyCameraApp.swift in Sources */,
 				801054D3CB7F421A0300E64B /* FilteredCameraPreview.swift in Sources */,
 				3F104912E7B0F794D16EC5E3 /* GalleryScreen.swift in Sources */,
-				4C90B51F6CFE219E37FC2FF5 /* LiveRecipePreviewStore.swift in Sources */,
 				64FAFD9C7C571C9D910F8CCE /* ManualCameraControlsView.swift in Sources */,
 				59F0B3BA74FBD1876642993A /* OnboardingView.swift in Sources */,
 				9FB74EFBFC5A955FCF341E7C /* PhotoFinish.swift in Sources */,

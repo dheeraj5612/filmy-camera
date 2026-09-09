@@ -14,7 +14,7 @@ Filmy Camera is a native iPhone and iPad camera built around the feeling of choo
 - Try another look on the same capture or import and compare with Original before saving. Review previews are bounded to 1800 pixels, and changed looks export at full resolution on Save without changing the next shot's recipe.
 - System photo picker import that preserves the original framing and applies the selected recipe at full resolution up to the 40 MP processing budget; larger images are resized and labeled in review.
 - First-run recipe-first onboarding with a direct handoff into the camera.
-- Recipe swatches render the live viewfinder scene through each recipe (a synthetic color scene stands in when no camera is running), so choosing a look means seeing this scene in that look.
+- Recipe swatches apply each look to the same bundled café image, making comparisons consistent while the live viewfinder continues independently.
 - Camera-first SwiftUI UI in the shape of an iPhone camera: a letterboxed 4:3 viewfinder on a black body, flash and camera switch in the top bar, Apple-style zoom presets over the frame, a film-strip recipe rail with renderer-backed swatches, a Roll thumbnail and Tune beside the shutter, Liquid Glass chrome on iOS 26 (material fallback earlier), persistent tuning, a recipe detail sheet, capture review, and a three-column contact-sheet Roll with zoom gestures.
 - Optional semantic haptics for shutter, recipe and camera selections, focus, editor commits, discards, saves, and failures.
 - Flash sits beside zoom in the on-screen controls and in Settings, and the last explicit choice is remembered; the G7 X profile renders flash frames with subject/ambient separation.

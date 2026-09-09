@@ -111,7 +111,6 @@ struct CameraScreen: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @AppStorage("showGrid") private var showGrid = true
-    @StateObject private var livePreviews = LiveRecipePreviewStore()
     @StateObject private var countdown = CaptureCountdown()
     @StateObject private var assists = CompositionAssistStore()
     @State private var isShowingCaptureSetup = false
@@ -249,22 +248,6 @@ struct CameraScreen: View {
                 .presentationDragIndicator(.visible)
                 .presentationBackground(FilmyTheme.background)
         }
-        // Visible recipe choices render over the live scene. When the drawer
-        // and detail are both closed, their frame consumer is detached so the
-        // renderer does no hidden thumbnail work.
-        .environment(\.recipePreviewScene, livePreviews.scene)
-        .onChange(of: camera.isRunning, initial: true) { _, _ in
-            updateLiveRecipePreviews()
-        }
-        .onChange(of: isShowingLookDrawer) { _, _ in
-            updateLiveRecipePreviews()
-        }
-        .onChange(of: recipeForDetail?.id) { _, _ in
-            updateLiveRecipePreviews()
-        }
-        .onChange(of: isShowingLookLibrary) { _, _ in
-            updateLiveRecipePreviews()
-        }
         .sheet(isPresented: $isShowingLookLibrary) {
             LookLibraryView(
                 recipes: viewModel.recipes,
@@ -276,9 +259,6 @@ struct CameraScreen: View {
                 },
                 onClose: { isShowingLookLibrary = false }
             )
-            // Full-library thumbnails use the cached sample, not a second
-            // continuously rendered live viewfinder behind a modal sheet.
-            .environment(\.recipePreviewScene, nil)
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
             .presentationBackground(FilmyTheme.background)
@@ -324,12 +304,8 @@ struct CameraScreen: View {
         // instant; the scene phase handler still stops it when the app leaves
         // the foreground.
         .onDisappear {
-            // The session may stay warm, but nothing here consumes frames any
-            // more: unregister the swatch handler before this view is released.
             countdown.cancel()
             assists.stop()
-            livePreviews.detach()
-            livePreviews.clear()
             camera.stop(after: CameraActivityPolicy.inactiveGracePeriod)
             UIApplication.shared.isIdleTimerDisabled = false
         }
@@ -344,12 +320,9 @@ struct CameraScreen: View {
         .onChange(of: viewModel.reviewImage != nil) { _, hasReview in
             if hasReview {
                 camera.setFrameDeliveryPaused(true)
-                livePreviews.detach()
-                livePreviews.clear()
             }
             updateCameraActivity()
             updateIdleTimer()
-            updateLiveRecipePreviews()
         }
         .onChange(of: viewModel.isCapturing) { _, isCapturing in
             if isCapturing {
@@ -1279,18 +1252,6 @@ struct CameraScreen: View {
                 isShowingTools = false
             }
             isShowingLookDrawer.toggle()
-        }
-    }
-
-    private func updateLiveRecipePreviews() {
-        if camera.isRunning,
-           !isReviewing,
-           !isShowingLookLibrary,
-           isShowingLookDrawer || recipeForDetail != nil {
-            livePreviews.attach(to: camera)
-        } else {
-            livePreviews.detach()
-            livePreviews.clear()
         }
     }
 
