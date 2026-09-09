@@ -1,0 +1,93 @@
+{
+  "version": "1.0.0",
+  "build": "12",
+  "productionSourceCommit": "e73c5eed7487a7024ff9b6097d4f0ccbd48f55fa",
+  "testSourceCommit": "731b285d1e3e9b28f9a960e21466a4a001b23e3e",
+  "productionAppTree": "8d69a430dddf8409a30290a66bbee39ed613c82f",
+  "productionSourceMatchesSignedArchive": true,
+  "fixture": "docs/app-store/screenshots/demo-source/cafe-original.png",
+  "fixtureSHA256": "1cdfc8447bc51dfe7725b5462197333c203852adabbb1e041498d2a021e16434",
+  "imageTransformations": "None; byte-for-byte copies of XCTest PNG attachments",
+  "uploaded": false,
+  "capturedOn": "2026-09-09",
+  "buildInputDigest": "2bedbf23ff30a5073b12b1e1ce716bbef9f660520bf62d240e308d231002db15",
+  "toolchain": "Xcode 26.6 (17F113); iOS Simulator 26.5",
+  "packs": [
+    {
+      "directory": "iphone-6.5-current",
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "images": [
+        {
+          "file": "01-g7x-import.png",
+          "width": 1242,
+          "height": 2688,
+          "sha256": "9b1fae7b1bae369596ed491d011ead50365e27c6cbb96797ef7f54f9c5368677"
+        },
+        {
+          "file": "02-film-import.png",
+          "width": 1242,
+          "height": 2688,
+          "sha256": "d4f3a09d66a3b20513a4ad7e7108698da01b889b365dbcc596ae53ff52ffdd35"
+        },
+        {
+          "file": "03-monochrome-import.png",
+          "width": 1242,
+          "height": 2688,
+          "sha256": "87f2dfe580be39e50f13d71f9ecb97bdf2668a4d36874bc6dc187b72c6a89f5e"
+        },
+        {
+          "file": "04-roll.png",
+          "width": 1242,
+          "height": 2688,
+          "sha256": "3eb90a7334bfd34b34f6a5fbb325ddbffd765d60865972323ca4bea8413497e4"
+        },
+        {
+          "file": "05-photo-detail.png",
+          "width": 1242,
+          "height": 2688,
+          "sha256": "9580b5946d56d8f32c35357c23349e8234fa11c4cde9f16969901bde67797811"
+        }
+      ]
+    },
+    {
+      "directory": "ipad-13-current",
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "images": [
+        {
+          "file": "01-g7x-import.png",
+          "width": 2064,
+          "height": 2752,
+          "sha256": "52b566ec790c845ddf04923bf7a3c33257dbeea32614a8935daa841ab5c8836b"
+        },
+        {
+          "file": "02-film-import.png",
+          "width": 2064,
+          "height": 2752,
+          "sha256": "d2bf2db76252f170326c2468b62791ff0d7feb78a824a9bb2ce9f3075f2d5022"
+        },
+        {
+          "file": "03-monochrome-import.png",
+          "width": 2064,
+          "height": 2752,
+          "sha256": "da5168c2c47b585bc96709d2e7c84393698e5339b152a3052a343b8bff0811c3"
+        },
+        {
+          "file": "04-roll.png",
+          "width": 2064,
+          "height": 2752,
+          "sha256": "e925bd57d3a21688ded74c6831c3705e7017b9d234c2978635b7269ff31ec8fd"
+        },
+        {
+          "file": "05-photo-detail.png",
+          "width": 2064,
+          "height": 2752,
+          "sha256": "d762b0d6ca00203ae15bc02f746607a9b55b6761d823369c248ec49a5d0d24f2"
+        }
+      ]
+    }
+  ]
+}

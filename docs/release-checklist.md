@@ -6,11 +6,16 @@ Current candidate: version 1.0.0, build 12, from [PR #90](https://github.com/dhe
 
 - [x] Review the catalog, capture setup, preview lifecycle, and release path; add regression coverage for canceled preview jobs and persisted aid toggles.
 - [x] Update local listing text for the 128-look catalog and capture tools; validate metadata and media inputs.
-- [ ] Pass final core, UI, Photos E2E, catalog, and iPhone/iPad hosted checks on the candidate source.
-- [ ] Merge the validated PR and verify main checks.
-- [ ] Create and validate the signed build 12 archive and IPA; upload and verify Apple processing.
-- [ ] Run physical-device acceptance for timer/cancel, framing, hardware shutter, preview aids, camera/lens controls, capture/import/save, and interruptions. On September 9, build 12 installed on the paired iPad, but launch was blocked by its lock screen. The paired iPhone also required unlocking before installation. Installation alone does not complete hardware acceptance.
+- [x] Pass final core, UI, Photos E2E, catalog, and iPhone/iPad hosted checks on candidate `e73c5ee`: 407 core/UI/Photos tests, 149 catalog/policy/layout tests, and 14 UI evidence cases on each device; zero failures/skips.
+- [x] Merge PR #90 and verify exact main `35f833b`: all 407 app tests and the Release SDK/physical-test compilation passed. The merged source tree matches the signed candidate.
+- [x] Create and validate the signed build 12 archive and IPA, including source provenance, signing, privacy, executable/dSYM UUIDs, and export parity. Archive source remains `e73c5ee`.
+- [ ] Upload build 12 and verify Apple processing. The attempt stopped before transfer because Xcode's account token was missing; Apple sign-in is required.
+- [ ] Run physical-device acceptance for timer/cancel, framing, hardware shutter, preview aids, camera/lens controls, capture/import/save, and interruptions. An earlier build 12 candidate installed on the iPad but could not launch while locked. Final candidate installation failed when the developer connection dropped; the iPhone was unavailable. Final physical acceptance remains incomplete.
+- [x] Publish and verify the privacy-policy explanation of optional on-device horizon motion processing. The live policy matches legal-site commit `f699bcb` ([deployment](https://github.com/dheeraj5612/filmycam-legal/actions/runs/34379804180)).
+- [x] Refresh and inspect both local five-image screenshot packs for build 12. Clean capture source `731b285` passed both complete import/save/Roll/detail flows with zero failures/skips; all ten unedited PNG attachments passed visual and structural validation. Source, runtime, summaries, and hashes are preserved. Upload remains pending.
+- [ ] Add an owner-approved public direct support contact, as described in Apple's [Support URL requirements](https://developer.apple.com/help/app-store-connect/reference/app-information/platform-version-information/). The current support page links GitHub Issues; no private App Review contact has been republished.
 - [ ] Refresh App Store Connect metadata/build selection and verify the saved draft.
+- [ ] Verify the saved age-rating questionnaire, including Apple's [September 2026 Social Media question](https://developer.apple.com/app-store/whats-new/). The source-based prepared answer is No; saved portal state is unverified.
 - [ ] Submit the validated free app for App Review and verify the resulting state. Public availability depends on Apple approval.
 
 The build 11 and earlier items below are historical candidate checkpoints. Their checked boxes do not validate build 12. The September 5 readback recorded build 10 as processed and Ready to Submit, with build 5 retained on a withdrawn distribution version; current Apple state needs fresh readback. Historical release notes are in [release-history.md](release-history.md).
