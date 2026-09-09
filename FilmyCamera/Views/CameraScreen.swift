@@ -110,6 +110,7 @@ struct CameraScreen: View {
     @State private var isShowingTools: Bool
     @State private var isShowingManualControls = false
     @State private var isShowingLookDrawer = false
+    @State private var isShowingLookLibrary = false
     @State private var focusPoint: CGPoint?
     @State private var focusNormalizedPoint: CGPoint?
     @State private var pinchStartZoom: CGFloat = 1
@@ -224,6 +225,28 @@ struct CameraScreen: View {
         .onChange(of: recipeForDetail?.id) { _, _ in
             updateLiveRecipePreviews()
         }
+        .onChange(of: isShowingLookLibrary) { _, _ in
+            updateLiveRecipePreviews()
+        }
+        .sheet(isPresented: $isShowingLookLibrary) {
+            LookLibraryView(
+                recipes: viewModel.recipes,
+                selectedRecipeID: viewModel.selectedRecipeID,
+                onSelect: { recipe in
+                    viewModel.select(recipe: recipe)
+                    isShowingLookLibrary = false
+                    isShowingLookDrawer = false
+                },
+                onClose: { isShowingLookLibrary = false }
+            )
+            // Full-library thumbnails use the cached sample, not a second
+            // continuously rendered live viewfinder behind a modal sheet.
+            .environment(\.recipePreviewScene, nil)
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(FilmyTheme.background)
+            .presentationCornerRadius(28)
+        }
         .sheet(item: $recipeForDetail) { recipe in
             RecipeDetailView(
                 recipe: recipe,
@@ -233,6 +256,9 @@ struct CameraScreen: View {
                     viewModel.select(recipe: recipe)
                     recipeForDetail = nil
                 },
+                // The presenter owns closing the editor. Cancelling never
+                // commits its local draft or selects a different recipe.
+                onCancel: { recipeForDetail = nil },
                 onUpdate: viewModel.update,
                 onReset: {
                     viewModel.reset(recipeID: recipe.id)
@@ -331,7 +357,7 @@ struct CameraScreen: View {
                 lookDrawer(
                     maxHeight: max(
                         160,
-                        min(360, availableHeight - portraitControlClearance - 60)
+                        min(410, availableHeight - portraitControlClearance - 60)
                     )
                 )
                     .padding(.horizontal, 12)
@@ -564,6 +590,17 @@ struct CameraScreen: View {
 
             Spacer(minLength: 4)
 
+            ViewThatFits(in: .horizontal) {
+                Text("filmy")
+                    .font(.system(.title3, design: .serif).italic())
+                    .foregroundStyle(FilmyTheme.primary)
+                    .accessibilityHidden(true)
+                Color.clear.frame(width: 0, height: 0)
+            }
+            .layoutPriority(-1)
+
+            Spacer(minLength: 4)
+
             activeCaptureIndicators
 
             if !isLive {
@@ -783,7 +820,7 @@ struct CameraScreen: View {
                         color: isCompactDigitalMode ? FilmyTheme.accent : FilmyTheme.filmAccent
                     )
                     Text("Choose a look")
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .font(.system(.title3, design: .serif).weight(.medium))
                         .foregroundStyle(FilmyTheme.primary)
                 }
 
@@ -822,12 +859,33 @@ struct CameraScreen: View {
                 onOpenDetail: openRecipeDetail,
                 compact: true
             )
-            .frame(maxHeight: max(maxHeight - 66, 88))
+            .frame(maxHeight: max(maxHeight - 122, 70))
+
+            Button {
+                HapticFeedback.play(.selection)
+                isShowingLookLibrary = true
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "square.grid.2x2")
+                    Text("Explore all \(viewModel.recipes.count) looks")
+                    Spacer(minLength: 0)
+                    Image(systemName: "arrow.up.right")
+                }
+                .font(.system(.subheadline).weight(.semibold))
+                .foregroundStyle(FilmyTheme.accent)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 48)
+                .background(FilmyTheme.accent.opacity(0.09), in: RoundedRectangle(cornerRadius: 14))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.pressable)
+            .accessibilityIdentifier("look-library-open")
+            .accessibilityHint("Browse larger previews, search looks, and save favorites")
         }
-        .padding(8)
+        .padding(10)
         .frame(maxWidth: 640)
         .frame(maxHeight: maxHeight)
-        .background(Color.black.opacity(0.94), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(FilmyTheme.backgroundRaised, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(Color.white.opacity(0.12), lineWidth: 1)
@@ -1159,7 +1217,7 @@ struct CameraScreen: View {
 
     private func openRecipeDetail(_ recipe: FilmRecipe) {
         closeControlDrawers()
-        recipeForDetail = viewModel.recipe(for: recipe.id) ?? recipe
+        recipeForDetail = viewModel.recipe(for: recipe.id)
     }
 
     private func toggleLookDrawer() {
@@ -1174,6 +1232,7 @@ struct CameraScreen: View {
     private func updateLiveRecipePreviews() {
         if camera.isRunning,
            !isReviewing,
+           !isShowingLookLibrary,
            isShowingLookDrawer || recipeForDetail != nil {
             livePreviews.attach(to: camera)
         } else {

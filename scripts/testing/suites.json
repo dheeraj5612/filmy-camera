@@ -4,6 +4,8 @@
     "FilmyCameraTests/CameraManualControlsTests": "unit",
     "FilmyCameraTests/CameraManualHardwareTests": "device",
     "FilmyCameraTests/CameraViewModelPersistenceTests": "unit",
+    "FilmyCameraTests/PhotoImportSessionTests": "unit",
+    "FilmyCameraTests/PhotoImportPolicyTests": "unit",
     "FilmyCameraTests/RecipeDetailCommitPolicyTests": "unit",
     "FilmyCameraTests/RecipeInvariantsTests": "unit",
     "FilmyCameraTests/RecipeReferenceCatalogTests": "unit",
@@ -19,9 +21,12 @@
     "FilmyCameraTests/RendererPerformanceTests": "performance",
     "FilmyCameraTests/RecipeRenderGalleryTests": "fixtures",
     "FilmyCameraUITests/FilmyCameraUITests": "e2e",
+    "FilmyCameraUITests/LaunchOnboardingTests": "e2e",
     "FilmyCameraUITests/NormalPhotoFlowTests": "photos-e2e",
     "FilmyCameraUITests/StoreScreenshotTests": "store-media",
-    "FilmyCameraTests/PhotoPrintCompositorTests": "integration"
+    "FilmyCameraTests/PhotoPrintCompositorTests": "integration",
+    "FilmyCameraTests/LookLibraryTests": "unit",
+    "FilmyCameraUITests/LookLibraryUITests": "e2e"
   },
   "overrides": {
     "FilmyCameraUITests/FilmyCameraUITests/testSimulatorFallbackExposesReadableStateWithoutPreviewAction": "simulator-e2e",

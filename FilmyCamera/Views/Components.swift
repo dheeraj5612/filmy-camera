@@ -1,3 +1,4 @@
+import CoreImage
 import SwiftUI
 import UIKit
 
@@ -82,16 +83,16 @@ enum HapticFeedback {
 
 // MARK: - Design tokens
 
-/// A quiet camera body: neutral surfaces keep attention on the image.
-/// Amber identifies compact digital looks; muted green identifies film.
+/// Warm ink surfaces and cool, restrained signals keep photographs central.
+/// Color is never the only indication of selection or an actionable state.
 enum FilmyTheme {
     // Surfaces
-    static let background = Color(white: 0.035)
-    static let backgroundRaised = Color(white: 0.065)
-    static let panel = Color(white: 0.10)
-    static let panelRaised = Color(white: 0.15)
-    static let line = Color.white.opacity(0.08)
-    static let lineStrong = Color.white.opacity(0.14)
+    static let background = Color(red: 0.055, green: 0.058, blue: 0.052)
+    static let backgroundRaised = Color(red: 0.082, green: 0.086, blue: 0.076)
+    static let panel = Color(red: 0.115, green: 0.122, blue: 0.108)
+    static let panelRaised = Color(red: 0.165, green: 0.175, blue: 0.157)
+    static let line = Color.white.opacity(0.09)
+    static let lineStrong = Color.white.opacity(0.18)
 
     // Ink
     static let primary = Color(white: 0.96)
@@ -100,9 +101,9 @@ enum FilmyTheme {
     static let tertiary = Color(white: 0.96).opacity(0.56)
 
     // Signal colors
-    static let accent = Color(red: 0.96, green: 0.73, blue: 0.30)
+    static let accent = Color(red: 0.69, green: 0.85, blue: 0.88)
     static let accentWarm = Color(red: 0.95, green: 0.49, blue: 0.36)
-    static let filmAccent = Color(red: 0.64, green: 0.79, blue: 0.66)
+    static let filmAccent = Color(red: 0.74, green: 0.83, blue: 0.73)
     static let mint = Color(red: 0.47, green: 0.86, blue: 0.66)
     static let danger = Color(red: 1.0, green: 0.44, blue: 0.40)
 
@@ -124,7 +125,7 @@ enum FilmyTheme {
     static let toolControlHeight: CGFloat = 48
     static let pageMargin: CGFloat = 20
 
-    static let titleFont = Font.system(.title2, design: .default).weight(.bold)
+    static let titleFont = Font.system(.title2, design: .serif).weight(.medium)
     static let bodyFont = Font.system(.body, design: .default)
     static let metadataFont = Font.system(.caption, design: .default).weight(.medium)
 
@@ -200,7 +201,11 @@ struct CameraReturnBar: View {
     var body: some View {
         HStack {
             BackToCameraButton(accessibilityIdentifier: accessibilityIdentifier, action: action)
-            Spacer(minLength: 0)
+            Spacer(minLength: 12)
+            Text("filmy")
+                .font(.system(.title3, design: .serif).italic())
+                .foregroundStyle(FilmyTheme.secondary)
+                .accessibilityHidden(true)
         }
         .padding(.horizontal, FilmyTheme.pageMargin)
         .padding(.vertical, 6)
@@ -418,7 +423,7 @@ struct SectionHeading: View {
                 Eyebrow(text: eyebrow, color: FilmyTheme.accent)
 
                 Text(title)
-                    .font(.system(.largeTitle, design: .default).weight(.bold))
+                    .font(.system(.largeTitle, design: .serif).weight(.medium))
                     .foregroundStyle(FilmyTheme.primary)
             }
 
@@ -911,7 +916,7 @@ struct RecipeSwatch: View {
             // never presents stale settings while the replacement is rendered.
             thumbnailImage = nil
             // A live scene is the useful source for swatches in the camera
-            // rail. Skip the second synthetic render while it is available;
+            // rail. Skip the sample render while it is available;
             // this keeps a recipe change from doing two full thumbnail passes.
             guard previewScene == nil else { return }
             // Editor sliders mutate the draft many times per second, and each
@@ -948,13 +953,47 @@ struct RecipeSwatch: View {
 actor RecipeSwatchRenderer {
     static let shared = RecipeSwatchRenderer()
 
+    private final class SampleKey: NSObject {
+        let recipe: FilmRecipe
+        init(_ recipe: FilmRecipe) { self.recipe = recipe }
+        override var hash: Int { recipe.hashValue }
+        override func isEqual(_ object: Any?) -> Bool {
+            (object as? SampleKey)?.recipe == recipe
+        }
+    }
+
+    private let sampleCache: NSCache<SampleKey, UIImage> = {
+        let cache = NSCache<SampleKey, UIImage>()
+        cache.countLimit = 48
+        cache.totalCostLimit = 12 * 1024 * 1024
+        return cache
+    }()
+
+    // Original generated demo art already owned by this repository. Prepare
+    // one bounded 384 x 512 source off the main actor, then use the exact
+    // production recipe pipeline. This never reads the user's Photos library.
+    private lazy var sampleScene: CIImage? = {
+        guard let original = UIImage(named: "LookPreviewCafe")?.cgImage else { return nil }
+        let bounds = CGRect(x: 0, y: 0, width: 384, height: 512)
+        let framed = CameraFrameLayout.aspectFill(CIImage(cgImage: original), in: bounds)
+        guard let small = FilmRenderer.outputCGImage(framed, from: bounds) else { return nil }
+        return CIImage(cgImage: small)
+    }()
+
     func render(recipe: FilmRecipe, scene: RecipePreviewScene? = nil) -> UIImage? {
         guard !Task.isCancelled else { return nil }
         return autoreleasepool {
             if let scene {
                 return FilmRenderer.previewThumbnail(for: recipe, over: scene.image)
             }
-            return FilmRenderer.thumbnail(for: recipe)
+            let key = SampleKey(recipe)
+            if let cached = sampleCache.object(forKey: key) { return cached }
+            guard let sampleScene else { return FilmRenderer.thumbnail(for: recipe) }
+            guard let image = FilmRenderer.previewThumbnail(for: recipe, over: sampleScene),
+                  !Task.isCancelled else { return nil }
+            let cost = (image.cgImage?.bytesPerRow ?? 0) * (image.cgImage?.height ?? 0)
+            sampleCache.setObject(image, forKey: key, cost: cost)
+            return image
         }
     }
 }
@@ -1266,7 +1305,7 @@ struct PreviewPlaceholder: View {
 
                 // Keep the simulator and unavailable-camera states visually useful
                 // without presenting a synthetic image as live camera output. This
-                // is the same renderer-backed scene used by the recipe rail, so a
+                // is the same clearly non-live demo used by the recipe rail, so a
                 // user can still see how the selected look is meant to feel before
                 // moving to a physical iPhone.
                 if isSimulator {

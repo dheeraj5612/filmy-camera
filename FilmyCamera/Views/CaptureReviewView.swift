@@ -29,6 +29,7 @@ struct CaptureReviewView: View {
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var isShowingOriginal = false
+    @State private var isShowingLookLibrary = false
 
     var body: some View {
         ZStack {
@@ -67,9 +68,13 @@ struct CaptureReviewView: View {
                                 .padding(.top, 16)
                                 .padding(.bottom, 12)
 
-                            reviewControls(wide: isPortraitTablet)
-                                .padding(.horizontal, 20)
-                                .padding(.bottom, 14)
+                            // Short screens and accessibility text put tools first;
+                            // the photograph must not push Compare below the fold.
+                            if proxy.size.width > proxy.size.height || dynamicTypeSize.isAccessibilitySize {
+                                reviewControls(wide: isPortraitTablet)
+                                    .padding(.horizontal, 20)
+                                    .padding(.bottom, 14)
+                            }
 
                             framePreview(
                                 maxWidth: max(proxy.size.width - 32, 1),
@@ -77,9 +82,15 @@ struct CaptureReviewView: View {
                             )
                             .padding(.horizontal, 16)
 
-                            metadataBlock(widePortrait: isPortraitTablet)
+                            if proxy.size.width <= proxy.size.height && !dynamicTypeSize.isAccessibilitySize {
+                                reviewControls(wide: isPortraitTablet)
+                                    .padding(.horizontal, 20)
+                                    .padding(.top, 16)
+                            }
+
+                            metadataBlock
                                 .padding(.horizontal, 20)
-                                .padding(.top, 14)
+                                .padding(.top, 12)
 
                             if let saveErrorMessage {
                                 saveError(saveErrorMessage)
@@ -98,12 +109,33 @@ struct CaptureReviewView: View {
                             .padding(.top, 14)
                             .padding(.bottom, 8)
                             .background(FilmyTheme.background)
+                            .overlay(alignment: .top) { FilmyTheme.line.frame(height: 1) }
                     }
                 }
             }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("review-screen")
+        .sheet(isPresented: $isShowingLookLibrary) {
+            LookLibraryView(
+                recipes: availableRecipes,
+                selectedRecipeID: selectedReviewRecipeID,
+                selectionIdentifierPrefix: "review-look",
+                subtitle: "Choose a treatment for this photo.",
+                onSelect: { candidate in
+                    guard !isSaving, !isPreparingReviewOriginal else { return }
+                    isShowingOriginal = false
+                    isShowingLookLibrary = false
+                    onApplyReviewRecipe(candidate)
+                },
+                onClose: { isShowingLookLibrary = false }
+            )
+            .environment(\.recipePreviewScene, nil)
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(FilmyTheme.background)
+            .presentationCornerRadius(28)
+        }
         .onAppear {
             isShowingOriginal = false
         }
@@ -148,12 +180,10 @@ struct CaptureReviewView: View {
         let idealHeight = size.height * (isPortraitTablet ? 0.78 : 0.64)
         guard !dynamicTypeSize.isAccessibilitySize else { return idealHeight }
 
-        // A wide portrait iPad keeps look, comparison, and finish in one
-        // compact row. Reserve that row's actual footprint so the fitted
-        // photo can use the width available on the tablet. Smaller layouts
-        // retain the taller two-row chooser and scroll naturally at larger
-        // Dynamic Type sizes.
-        let fixedChromeHeight: CGFloat = isPortraitTablet ? 310 : 396
+        // A wide portrait iPad keeps look, comparison, and finish in one row.
+        // Reserve that row (or the taller phone chooser) plus the pinned save
+        // disclosure so the photo and controls fit without covering each other.
+        let fixedChromeHeight: CGFloat = isPortraitTablet ? 360 : 446
         return min(idealHeight, max(size.height - fixedChromeHeight, 160))
     }
 
@@ -165,7 +195,7 @@ struct CaptureReviewView: View {
                 VStack(alignment: .leading, spacing: compact ? 10 : 18) {
                     header
                     if !compact {
-                        metadataBlock()
+                        metadataBlock
                     }
                     reviewControls(stacked: !compact, compact: compact)
 
@@ -201,7 +231,7 @@ struct CaptureReviewView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Eyebrow(text: isImported ? "IMPORTED PHOTO" : "REVIEW", color: FilmyTheme.accent)
                 Text(recipe.name)
-                    .font(.system(.title2, design: .rounded).weight(.bold))
+                    .font(.system(.title2, design: .serif).weight(.medium))
                     .foregroundStyle(FilmyTheme.primary)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -249,9 +279,9 @@ struct CaptureReviewView: View {
         } else {
             finishedImage = AnyView(
                 image
-                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .overlay {
-                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .strokeBorder(FilmyTheme.lineStrong, lineWidth: 1)
                     }
             )
@@ -322,31 +352,6 @@ struct CaptureReviewView: View {
             ?? recipe.name
     }
 
-    private struct ReviewRecipeGroup: Identifiable {
-        let title: String
-        let recipes: [FilmRecipe]
-
-        var id: String { title }
-    }
-
-    private var groupedReviewRecipes: [ReviewRecipeGroup] {
-        let compact = availableRecipes.filter { $0.filmBase == .compactDigital }
-        let monochrome = availableRecipes.filter {
-            $0.filmBase.monochromeFilter != nil || $0.filmBase == .sepia
-        }
-        let film = availableRecipes.filter {
-            $0.filmBase != .compactDigital
-                && $0.filmBase.monochromeFilter == nil
-                && $0.filmBase != .sepia
-        }
-
-        return [
-            ReviewRecipeGroup(title: "Compact", recipes: compact),
-            ReviewRecipeGroup(title: "Film", recipes: film),
-            ReviewRecipeGroup(title: "Monochrome", recipes: monochrome)
-        ].filter { !$0.recipes.isEmpty }
-    }
-
     private func reviewControls(
         stacked: Bool = false,
         compact: Bool = false,
@@ -414,7 +419,8 @@ struct CaptureReviewView: View {
     }
 
     private func panelActions(compact: Bool) -> some View {
-        Group {
+        VStack(spacing: 10) {
+            saveDisclosure
             if compact && !dynamicTypeSize.isAccessibilitySize {
                 HStack(spacing: 8) {
                     retakeButton
@@ -504,28 +510,9 @@ struct CaptureReviewView: View {
     }
 
     private var lookPicker: some View {
-        Menu {
-            ForEach(groupedReviewRecipes) { group in
-                Section(group.title) {
-                    ForEach(group.recipes) { candidate in
-                        let isSelected = candidate.id == selectedReviewRecipeID
-                        Button {
-                            guard !isSaving, !isPreparingReviewOriginal else { return }
-                            isShowingOriginal = false
-                            onApplyReviewRecipe(candidate)
-                        } label: {
-                            Label(
-                                candidate.name,
-                                systemImage: isSelected ? "checkmark" : "film"
-                            )
-                        }
-                        .accessibilityIdentifier("review-look-\(candidate.id)")
-                        .accessibilityLabel("Use \(candidate.name) look")
-                        .accessibilityValue(isSelected ? "Selected" : "Available")
-                        .accessibilityHint("Applies this look to the reviewed photo")
-                    }
-                }
-            }
+        Button {
+            HapticFeedback.play(.selection)
+            isShowingLookLibrary = true
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "film")
@@ -541,11 +528,11 @@ struct CaptureReviewView: View {
                         .minimumScaleFactor(0.8)
                 }
                 Spacer(minLength: 4)
-                Image(systemName: "chevron.up.chevron.down")
+                Image(systemName: "square.grid.2x2")
                     .font(.system(.caption2, weight: .bold))
                     .accessibilityHidden(true)
             }
-            .frame(maxWidth: .infinity, minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
             .padding(.horizontal, 12)
             .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
@@ -575,7 +562,7 @@ struct CaptureReviewView: View {
                 } else {
                     Image(systemName: isShowingOriginal ? "photo" : "photo.on.rectangle")
                 }
-                Text(isShowingOriginal ? "Look" : "Original")
+                Text(isShowingOriginal ? "Show look" : "Compare")
                     .lineLimit(1)
             }
             .font(.system(.caption, design: .rounded).weight(.bold))
@@ -602,19 +589,12 @@ struct CaptureReviewView: View {
         )
     }
 
-    private func metadataBlock(widePortrait: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text(resolutionCaption)
-                .font(.system(.subheadline, design: .rounded).weight(.semibold))
-                .foregroundStyle(FilmyTheme.secondary)
-
-            if !widePortrait {
-                Text(isImported ? "Ready to save to Photos" : "Captured with the current camera settings")
-                    .font(.system(.caption, design: .rounded).weight(.medium))
-                    .foregroundStyle(FilmyTheme.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
+    private var metadataBlock: some View {
+        Label(resolutionCaption, systemImage: "photo")
+            .font(.system(.caption).weight(.medium))
+            .foregroundStyle(FilmyTheme.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("review-metadata")
     }
@@ -669,7 +649,8 @@ struct CaptureReviewView: View {
     }
 
     private var actionBar: some View {
-        Group {
+        VStack(spacing: 10) {
+            saveDisclosure
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(spacing: 10) {
                     retakeButton
@@ -682,6 +663,18 @@ struct CaptureReviewView: View {
                 }
             }
         }
+    }
+
+    private var saveDisclosure: some View {
+        Text(isShowingOriginal
+             ? "Viewing original. Saves \(recipe.name) with the \(finishTitle(finish)) finish."
+             : isImported
+                ? "Save a new copy. Your original stays unchanged."
+                : "Only the finished photo is saved to Photos.")
+            .font(.caption)
+            .foregroundStyle(FilmyTheme.secondary)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private var retakeButton: some View {
@@ -714,7 +707,7 @@ struct CaptureReviewView: View {
                     ProgressView()
                         .tint(FilmyTheme.background)
                 } else {
-                    Label(isImported ? "Save Photo" : "Keep Frame", systemImage: "checkmark")
+                    Label("Save to Photos", systemImage: "square.and.arrow.down")
                 }
             }
         }

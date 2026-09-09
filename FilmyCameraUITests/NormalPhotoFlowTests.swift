@@ -185,8 +185,18 @@ final class NormalPhotoFlowTests: XCTestCase {
         attachScreenshot(named: "review-original-portrait")
 
         lookPicker.tap()
-        let monochrome = revealReviewLook("review-look-acros-monochrome")
-        attachScreenshot(named: "review-look-menu-monochrome")
+        let library = app.descendants(matching: .any)["look-library"]
+        XCTAssertTrue(library.waitForExistence(timeout: 5), "Review must present its visual look library")
+        let search = app.textFields["look-library-search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("Fine Monochrome\n")
+        let monochrome = app.buttons["review-look-acros-monochrome"]
+        XCTAssertTrue(
+            monochrome.waitForExistence(timeout: 5) && monochrome.isHittable,
+            "Search must expose the exact monochrome treatment as a selectable preview"
+        )
+        attachScreenshot(named: "review-look-library-monochrome")
         monochrome.tap()
         XCTAssertTrue(
             waitUntil(timeout: 30) {
@@ -398,13 +408,28 @@ final class NormalPhotoFlowTests: XCTestCase {
 
         let deadline = Date(timeIntervalSinceNow: timeout)
         repeat {
+            // AX rounds child bounds to display pixels. Allow one point around
+            // the target viewport, retaining at least seven points of vertical
+            // clearance for the complete control at either scroll limit.
             let viewport = scrollView.frame.intersection(app.frame).insetBy(dx: 0, dy: 8)
+            let visibilityBounds = viewport.insetBy(dx: -1, dy: -1)
             let frame = element.frame
             guard viewport.width > 20, viewport.height > 20,
-                  frame.width <= viewport.width, frame.height <= viewport.height else {
+                  frame.width <= visibilityBounds.width, frame.height <= visibilityBounds.height else {
+                let diagnostic = XCTAttachment(string: """
+                Review control cannot fit its scroll viewport.
+                App: \(app.frame)
+                Scroll view: \(scrollView.frame)
+                Visibility bounds (1 pt tolerance around 8 pt vertical inset): \(visibilityBounds)
+                Control: \(frame)
+                \(app.debugDescription)
+                """)
+                diagnostic.name = "review-control-visibility-bounds"
+                diagnostic.lifetime = .keepAlways
+                add(diagnostic)
                 return false
             }
-            if viewport.contains(frame), element.isHittable {
+            if visibilityBounds.contains(frame), element.isHittable {
                 return true
             }
 
@@ -417,12 +442,17 @@ final class NormalPhotoFlowTests: XCTestCase {
                 requiredShift = frame.midY < viewport.midY ? 12 : -12
             }
             let maximumShift = viewport.height * 0.35
-            let boundedShift = min(max(requiredShift, -maximumShift), maximumShift)
+            // A tiny near-edge correction can be recognized as a tap on Save.
+            // Cross the drag threshold even when only a few points are needed.
+            let minimumShift: CGFloat = 24
+            let shiftDistance = min(max(abs(requiredShift), minimumShift), maximumShift)
+            let boundedShift = requiredShift < 0 ? -shiftDistance : shiftDistance
             let startPoint = CGPoint(x: viewport.midX, y: viewport.midY)
             let endPoint = CGPoint(
                 x: startPoint.x,
                 y: min(max(startPoint.y + boundedShift, viewport.minY + 12), viewport.maxY - 12)
             )
+            guard abs(endPoint.y - startPoint.y) >= minimumShift else { return false }
             let appFrame = app.frame
             let start = app.coordinate(withNormalizedOffset: CGVector(
                 dx: (startPoint.x - appFrame.minX) / appFrame.width,
@@ -433,63 +463,35 @@ final class NormalPhotoFlowTests: XCTestCase {
                 dy: (endPoint.y - appFrame.minY) / appFrame.height
             ))
             let previousFrame = frame
-            start.press(forDuration: 0.05, thenDragTo: end)
+            // Hold the endpoint so scroll momentum cannot fling a nearby
+            // control past the opposite edge during the positioning gesture.
+            start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
             _ = waitUntil(timeout: 0.75) { element.frame != previousFrame }
         } while Date() < deadline
 
         let viewport = scrollView.frame.intersection(app.frame).insetBy(dx: 0, dy: 8)
-        return viewport.contains(element.frame) && element.isHittable
+        let visibilityBounds = viewport.insetBy(dx: -1, dy: -1)
+        let frame = element.frame
+        let fullyVisible = visibilityBounds.contains(frame) && element.isHittable
+        if !fullyVisible {
+            let diagnostic = XCTAttachment(string: """
+            Review control did not become fully visible before timeout.
+            App: \(app.frame)
+            Scroll view: \(scrollView.frame)
+            Visibility bounds (1 pt tolerance around 8 pt vertical inset): \(visibilityBounds)
+            Control: \(frame); hittable: \(element.isHittable)
+            \(app.debugDescription)
+            """)
+            diagnostic.name = "review-control-visibility-timeout"
+            diagnostic.lifetime = .keepAlways
+            add(diagnostic)
+        }
+        return fullyVisible
     }
 
     /// Native SwiftUI menus expose an oversized semantic collection frame on
     /// some OS versions. Anchor the gesture to option rows that are visibly
     /// inside the menu so the press cannot land below the popover and dismiss it.
-    private func revealReviewLook(_ identifier: String) -> XCUIElement {
-        let option = app.descendants(matching: .any)[identifier]
-        let menuOptions = app.descendants(matching: .any).matching(
-            NSPredicate(format: "identifier BEGINSWITH 'review-look-' AND identifier != 'review-look-picker'")
-        )
-        XCTAssertTrue(
-            waitUntil(timeout: 5) { visibleMenuOptions(in: menuOptions).count >= 2 },
-            "Look selection must present visible recipe options"
-        )
-
-        for _ in 0..<6 {
-            if option.exists, option.isHittable, app.frame.intersects(option.frame) {
-                return option
-            }
-
-            let visible = visibleMenuOptions(in: menuOptions)
-            guard visible.count >= 2 else {
-                XCTFail("Look menu dismissed before exposing \(identifier)")
-                return option
-            }
-            let upper = visible[visible.count >= 4 ? 1 : 0]
-            let lower = visible[visible.count >= 4 ? visible.count - 2 : visible.count - 1]
-            let appFrame = app.frame
-            let startPoint = CGPoint(x: lower.frame.midX, y: lower.frame.midY)
-            let endPoint = CGPoint(x: upper.frame.midX, y: upper.frame.midY)
-            let start = app.coordinate(withNormalizedOffset: CGVector(
-                dx: (startPoint.x - appFrame.minX) / appFrame.width,
-                dy: (startPoint.y - appFrame.minY) / appFrame.height
-            ))
-            let end = app.coordinate(withNormalizedOffset: CGVector(
-                dx: (endPoint.x - appFrame.minX) / appFrame.width,
-                dy: (endPoint.y - appFrame.minY) / appFrame.height
-            ))
-            let previousTopFrame = visible[0].frame
-            start.press(forDuration: 0.05, thenDragTo: end)
-            _ = waitUntil(timeout: 1.5) {
-                option.exists || visibleMenuOptions(in: menuOptions).first?.frame != previousTopFrame
-            }
-        }
-
-        XCTAssertTrue(
-            option.waitForExistence(timeout: 5) && option.isHittable,
-            "Look selection must expose \(identifier) after bounded menu scrolling"
-        )
-        return option
-    }
 
     private func visibleMenuOptions(in query: XCUIElementQuery) -> [XCUIElement] {
         let appFrame = app.frame
@@ -522,8 +524,19 @@ final class NormalPhotoFlowTests: XCTestCase {
         // disposable simulator was pre-seeded. Resolve the in-app CTA and the
         // subsequent system prompt while waiting for Roll's loaded or empty
         // state; a missing count is never treated as an empty Roll.
+        var requestedReadAccess = false
         let loaded = waitUntil(timeout: 30) {
-            tapPhotosPermissionPromptIfPresent()
+            if rollFrameCount() != nil { return true }
+            if tapPhotosPermissionPromptIfPresent() { return false }
+
+            // Request once, then handle the system alert directly. Repeated
+            // CTA taps can be replayed after XCTest dismisses the alert onto
+            // the newly positioned "Make your first frame" button.
+            let permission = app.buttons["Allow Photos access"]
+            if !requestedReadAccess, permission.exists, permission.isHittable {
+                requestedReadAccess = true
+                permission.tap()
+            }
             return rollFrameCount() != nil
         }
         if !loaded {
@@ -536,12 +549,6 @@ final class NormalPhotoFlowTests: XCTestCase {
 
     @discardableResult
     private func tapPhotosPermissionPromptIfPresent() -> Bool {
-        let appPermissionButton = app.buttons["Allow Photos access"]
-        if appPermissionButton.exists, appPermissionButton.isHittable {
-            appPermissionButton.tap()
-            return true
-        }
-
         let permissionTitles = ["Allow Full Access", "Allow Access to All Photos", "Allow", "OK"]
         let applications: [XCUIApplication] = [
             app,
