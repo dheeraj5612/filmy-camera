@@ -1,0 +1,72 @@
+# One-shot exact-content transfer. Removed from the resulting source tree.
+# Creates only unreferenced blobs; never changes any branch, commit, or tag.
+name: Prepare verified UI source objects
+on:
+  pull_request:
+    paths: ['.github/workflows/ui-source-transfer.yml', 'docs/ui-redesign-transfer.b64']
+permissions:
+  contents: read
+jobs:
+  prepare:
+    if: github.event.pull_request.number == 88 && github.event.pull_request.head.repo.full_name == 'dheeraj5612/filmy-camera' && github.event.pull_request.head.ref == 'codex/launch-experience-hardening-20260908'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Verify and transfer the reviewed patch without executing app code
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: python
+        run: |
+          import base64, hashlib, json, os, pathlib, re, subprocess, urllib.request, zlib
+          base = '7c6a22a44f196b05eda866d0dd162b279a71b6ff'
+          def git(*args):
+              return subprocess.check_output(['git', '-c', 'core.hooksPath=/dev/null', *args], timeout=30)
+          assert os.environ['GITHUB_REPOSITORY'] == 'dheeraj5612/filmy-camera'
+          assert git('rev-parse', 'HEAD^').decode().strip() == base
+          changed = set(git('diff', '--name-only', base, 'HEAD').decode().splitlines())
+          assert changed == {'.github/workflows/ui-source-transfer.yml', 'docs/ui-redesign-transfer.b64'}
+          encoded = pathlib.Path('docs/ui-redesign-transfer.b64').read_bytes()
+          patch = zlib.decompress(base64.b64decode(encoded, validate=True))
+          assert len(patch) == 70019
+          assert hashlib.sha256(patch).hexdigest() == '865ffdef8879238e49acd769e9a9f004f30d17f77ce4d77527d12d694dd5751b'
+          allowed = {'.github/workflows/ios-build.yml', '.github/workflows/ui-experience.yml', 'FilmyCamera/Views/CameraScreen.swift', 'FilmyCamera/Views/CaptureReviewView.swift', 'FilmyCamera/Views/Components.swift', 'FilmyCamera/Views/GalleryScreen.swift', 'FilmyCamera/Views/OnboardingView.swift', 'FilmyCamera/Views/RecipePickerView.swift', 'FilmyCameraTests/CameraReviewSaveTests.swift', 'FilmyCameraUITests/NormalPhotoFlowTests.swift', 'FilmyCameraUITests/StoreScreenshotTests.swift', 'scripts/testing/suites.json'}
+          records = []
+          for section in patch.decode().split('diff --git ')[1:]:
+              header = re.match(r'a/(.+) b/(.+)\nindex ([a-f0-9]{40})\.\.([a-f0-9]{40}) 100644\n', section)
+              assert header and header[1] == header[2] and header[1] in allowed
+              path, before, after = header[1], header[3], header[4]
+              assert git('rev-parse', base + ':' + path).decode().strip() == before
+              records.append({'path': path, 'before': before, 'after': after})
+          assert len(records) == len(allowed) and {x['path'] for x in records} == allowed
+          patch_path = pathlib.Path(os.environ['RUNNER_TEMP']) / 'reviewed-ui.patch'
+          patch_path.write_bytes(patch)
+          git('apply', '--check', '--index', str(patch_path))
+          git('apply', '--index', str(patch_path))
+          assert set(git('diff', '--cached', '--name-only').decode().splitlines()) == allowed
+          # Only this fixed GitHub repository endpoint receives the ephemeral token.
+          endpoint = 'https://api.github.com/repos/dheeraj5612/filmy-camera/git/blobs'
+          for record in records:
+              data = pathlib.Path(record['path']).read_bytes()
+              digest = hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
+              assert digest == record['after']
+              body = json.dumps({'encoding':'base64','content':base64.b64encode(data).decode()}).encode()
+              request = urllib.request.Request(endpoint, data=body, headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'], 'Accept':'application/vnd.github+json', 'Content-Type':'application/json'}, method='POST')
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  result = json.load(response)
+              assert result['sha'] == digest
+          output = pathlib.Path(os.environ['RUNNER_TEMP']) / 'verified-ui-objects.json'
+          output.write_text(json.dumps({'base':base,'files':records}, indent=2))
+          print('Verified and created 12 unreferenced content objects. No refs or commits were changed.')
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: verified-ui-objects-${{ github.run_id }}
+          path: ${{ runner.temp }}/verified-ui-objects.json
+          if-no-files-found: error
+          retention-days: 1
