@@ -10,7 +10,7 @@ Five actual 1242×2688 PNGs from version 1.0.0 (12), captured September 9, 2026 
 
 The public generated cafe original in `../demo-source/` was imported through the normal production Photos picker, renderer, review, save, Roll, and detail flows. These images demonstrate imported media. No private photos, composited app UI, debug overlays, or camera-unavailable placeholders are included.
 
-The runner created and seeded an isolated iPhone 11 Pro Max simulator on iOS 26.5 with zero prior saves. All five images were visually inspected: G7 X is vivid, Muted Color is restrained, Fine Monochrome is grayscale, and the Roll shows the corresponding saved outputs. The test also verifies complete photo bounds, source/Instant Print aspect ratio, reachable Look/Compare/Finish/Save controls, safe areas, and disabled covered-camera controls.
+The runner created and seeded an isolated iPhone 11 Pro Max simulator on iOS 26.5 with zero prior saves. All five images were visually inspected: G7 X is vivid, Muted Color is restrained, Fine Monochrome is grayscale, and the Roll shows the corresponding saved outputs. The test also verifies complete photo bounds, source/Instant Print aspect ratio, reachable Look/Compare/Finish/Save controls, safe areas, and blocked interaction with the covered camera.
 
 Evidence: `build/pr90-evidence/store-media-build12/iphone-pack-run/filmycamera-store-media-summary.json` and `iphone-6.5-attachments/manifest.json` (ignored). The complete store-media flow passed one test with zero failures/skips. Build-input digest: `2bedbf23ff30a5073b12b1e1ce716bbef9f660520bf62d240e308d231002db15`. Toolchain: Xcode 26.6, build 17F113.
 
