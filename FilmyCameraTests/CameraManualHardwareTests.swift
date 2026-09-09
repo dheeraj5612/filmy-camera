@@ -466,6 +466,19 @@ final class CameraManualHardwareTests: XCTestCase {
         }
 
         camera.toggleFocusExposureLock(at: tapPoint)
+        try await waitFor("Combined lock is active before selecting Auto Exposure") {
+            camera.isFocusExposureLocked && matches(wide.focusPointOfInterest, tapPoint)
+                && matches(wide.exposurePointOfInterest, tapPoint)
+        }
+        camera.setAutoExposure()
+        try await waitFor("Auto Exposure clears the combined lock and recenters both automatic controls") {
+            !camera.isFocusExposureLocked && !camera.manualControls.isApplying
+                && wide.focusMode == .continuousAutoFocus && wide.exposureMode == .continuousAutoExposure
+                && matches(wide.focusPointOfInterest, center) && matches(wide.exposurePointOfInterest, center)
+                && !wide.isSubjectAreaChangeMonitoringEnabled
+        }
+
+        camera.toggleFocusExposureLock(at: tapPoint)
         try await waitFor("Combined lock is active before selecting manual focus") {
             camera.isFocusExposureLocked && matches(wide.exposurePointOfInterest, tapPoint)
                 && [.autoExpose, .locked].contains(wide.exposureMode)
@@ -523,7 +536,29 @@ final class CameraManualHardwareTests: XCTestCase {
                 && wide.exposureMode == .custom
                 && camera.manualControls.focusMode == .auto && wide.focusMode == .continuousAutoFocus
                 && matches(wide.focusPointOfInterest, center) && !camera.isFocusExposureLocked
+                && matches(wide.exposurePointOfInterest, tapPoint)
                 && !wide.isSubjectAreaChangeMonitoringEnabled
+        }
+        camera.setAutoExposure()
+        try await waitFor("Auto Exposure clears the old exposure point after combined lock and manual exposure") {
+            camera.manualControls.exposureMode == .auto && !camera.manualControls.isApplying
+                && wide.exposureMode == .continuousAutoExposure && matches(wide.exposurePointOfInterest, center)
+                && wide.focusMode == .continuousAutoFocus && matches(wide.focusPointOfInterest, center)
+                && !camera.isFocusExposureLocked && !wide.isSubjectAreaChangeMonitoringEnabled
+        }
+
+        // Keep the following manual-exposure preservation checks meaningful:
+        // retain an off-center exposure point while focus can move independently.
+        camera.toggleFocusExposureLock(at: tapPoint)
+        try await waitFor("Combined lock restores an off-center exposure point") {
+            camera.isFocusExposureLocked && matches(wide.exposurePointOfInterest, tapPoint)
+        }
+        camera.setManualExposure(iso: iso, durationSeconds: duration)
+        try await waitFor("Manual exposure is restored for independent autofocus checks") {
+            camera.manualControls.exposureMode == .manual && !camera.manualControls.isApplying
+                && wide.exposureMode == .custom && matches(wide.exposurePointOfInterest, tapPoint)
+                && wide.focusMode == .continuousAutoFocus && matches(wide.focusPointOfInterest, center)
+                && !camera.isFocusExposureLocked && !wide.isSubjectAreaChangeMonitoringEnabled
         }
         let manualISO = wide.iso
         let manualDuration = wide.exposureDuration.seconds
@@ -560,6 +595,20 @@ final class CameraManualHardwareTests: XCTestCase {
         XCTAssertEqual(wide.iso, manualISO, accuracy: max(manualISO * 0.05, 1))
         XCTAssertEqual(wide.exposureDuration.seconds, manualDuration, accuracy: max(manualDuration * 0.05, 0.0001))
         record("Subject change preserves both manual controls")
+
+        camera.setAutoExposure()
+        try await waitFor("Auto Exposure recenters metering and preserves manual focus") {
+            camera.manualControls.exposureMode == .auto && !camera.manualControls.isApplying
+                && wide.exposureMode == .continuousAutoExposure && matches(wide.exposurePointOfInterest, center)
+                && camera.manualControls.focusMode == .manual && wide.focusMode == .locked
+                && abs(wide.lensPosition - bothManualPosition) < 0.03
+                && !camera.isFocusExposureLocked && !wide.isSubjectAreaChangeMonitoringEnabled
+        }
+        camera.setManualExposure(iso: iso, durationSeconds: duration)
+        try await waitFor("Both manual modes are restored before Reset Auto") {
+            camera.manualControls.exposureMode == .manual && camera.manualControls.focusMode == .manual
+                && !camera.manualControls.isApplying && wide.exposureMode == .custom && wide.focusMode == .locked
+        }
 
         camera.resetManualControlsToAuto()
         try await waitFor("Reset exits both manual modes") {

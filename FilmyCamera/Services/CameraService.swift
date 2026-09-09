@@ -1252,8 +1252,22 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             manualExposureGeneration &+= 1
             isApplyingManualExposure = false
             desiredManualExposure = .auto
+            let center = CGPoint(x: 0.5, y: 0.5)
+            if device.isExposurePointOfInterestSupported {
+                device.exposurePointOfInterest = center
+            }
             device.exposureMode = mode
             applyExposureBiasOnQueue(to: device)
+            if focusExposureLocked, usesAutoFocusOnQueue(for: device) {
+                applyAutoFocusOnQueue(to: device, at: center)
+            }
+            // Auto exposure releases its old lock target without discarding
+            // a separately selected autofocus point or manual lens position.
+            device.isSubjectAreaChangeMonitoringEnabled = usesAutoFocusOnQueue(for: device)
+                && device.isFocusPointOfInterestSupported
+                && device.focusPointOfInterest != center
+            focusExposureLocked = false
+            publishFocusExposureLocked(false)
             device.unlockForConfiguration()
             configurePreviewFrameRate(for: device)
             restoreFlashAfterManualExposureOnQueue()
