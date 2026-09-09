@@ -843,7 +843,9 @@ struct RecipeSwatch: View {
     }
 
     var body: some View {
-        ZStack {
+        // Let the caller's tile bounds size the labels and border; an
+        // aspect-filled image can otherwise expand them outside the tile.
+        Color.clear.overlay {
             if let thumbnailImage {
                 Image(uiImage: thumbnailImage)
                     .resizable()
