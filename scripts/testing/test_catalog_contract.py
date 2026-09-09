@@ -55,5 +55,14 @@ class CatalogContractTests(unittest.TestCase):
         self.assertNotIn('contents: write', workflow)
 
 
+    def test_hardware_shutter_keeps_the_ios18_guard_and_older_os_fallback(self):
+        source = (ROOT / 'FilmyCamera/Views/CameraScreen.swift').read_text()
+        modifier = source.split('private struct CameraHardwareShutterModifier: ViewModifier {', 1)[1].split('struct CaptureSetupView:', 1)[0]
+        self.assertIn('if #available(iOS 18.0, *)', modifier)
+        self.assertIn('content.onCameraCaptureEvent(isEnabled: enabled)', modifier)
+        self.assertIn('event.phase == .ended', modifier)
+        self.assertIn('} else {\n            content\n', modifier)
+
+
 if __name__ == '__main__':
     unittest.main()
