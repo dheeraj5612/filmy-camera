@@ -406,6 +406,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private var pendingPhotoUniqueID: Int64?
     private var configuredPhotoDimensions = CMVideoDimensions(width: 0, height: 0)
     private var focusExposureLocked = false
+    private var latestFocusPointUpdateUptime: UInt64 = 0
     private var requestedCameraPosition: CameraPosition = .back
     private var currentLensOptions: [LensOption] = []
     private var selectedLensIDs: [CameraPosition: String] = [:]
@@ -922,6 +923,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
                 device.isSubjectAreaChangeMonitoringEnabled =
                     self.usesAutoFocusOnQueue(for: device) || self.desiredManualExposure == .auto
+                self.latestFocusPointUpdateUptime = DispatchTime.now().uptimeNanoseconds
                 self.focusExposureLocked = false
                 self.publishFocusExposureLocked(false)
             } catch {
@@ -2411,10 +2413,9 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 object: nil,
                 queue: nil
             ) { [weak self] notification in
+                let observedAt = DispatchTime.now().uptimeNanoseconds
                 guard let deviceID = (notification.object as? AVCaptureDevice)?.uniqueID else { return }
-                self?.sessionQueue.async { [weak self] in
-                    self?.handleSubjectAreaChangeOnQueue(deviceID: deviceID)
-                }
+                self?.subjectAreaDidChange(deviceID: deviceID, observedAt: observedAt)
             },
             notificationCenter.addObserver(
                 forName: AVCaptureSession.runtimeErrorNotification,
@@ -2465,9 +2466,19 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         ]
     }
 
-    private func handleSubjectAreaChangeOnQueue(deviceID: String) {
+    /// Record observation time before dispatching: a notification from the old
+    /// scene can otherwise queue behind a new tap and erase its focus target.
+    /// Both timestamps use DispatchTime's monotonic uptime in nanoseconds.
+    func subjectAreaDidChange(deviceID: String, observedAt: UInt64) {
+        sessionQueue.async { [weak self] in
+            self?.handleSubjectAreaChangeOnQueue(deviceID: deviceID, observedAt: observedAt)
+        }
+    }
+
+    private func handleSubjectAreaChangeOnQueue(deviceID: String, observedAt: UInt64) {
         guard wantsToRun, isConfigured, session.isRunning, !session.isInterrupted,
               !focusExposureLocked,
+              observedAt > latestFocusPointUpdateUptime,
               let device = activeDevice(), device.uniqueID == deviceID,
               device.isSubjectAreaChangeMonitoringEnabled else { return }
         do {

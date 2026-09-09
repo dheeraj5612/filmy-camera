@@ -419,8 +419,26 @@ final class CameraManualHardwareTests: XCTestCase {
                 && matches(wide.focusPointOfInterest, tapPoint) && matches(wide.exposurePointOfInterest, tapPoint)
                 && wide.isSubjectAreaChangeMonitoringEnabled
         }
+        let olderSubjectChangeTime = DispatchTime.now().uptimeNanoseconds
+        let newerTapPoint = CGPoint(x: 0.72, y: 0.28)
+        camera.focus(at: newerTapPoint)
+        try await waitFor("A newer tap replaces the previous subject target") {
+            matches(wide.focusPointOfInterest, newerTapPoint) && matches(wide.exposurePointOfInterest, newerTapPoint)
+                && wide.focusMode == .continuousAutoFocus && wide.exposureMode == .continuousAutoExposure
+                && wide.isSubjectAreaChangeMonitoringEnabled
+        }
+        camera.subjectAreaDidChange(deviceID: wide.uniqueID, observedAt: olderSubjectChangeTime)
+        // The stale event is a guarded no-op, so it has no state change to await.
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertTrue(matches(wide.focusPointOfInterest, newerTapPoint), "An older event must not discard the newer tap")
+        XCTAssertTrue(matches(wide.exposurePointOfInterest, newerTapPoint))
+        XCTAssertEqual(wide.focusMode, .continuousAutoFocus)
+        XCTAssertEqual(wide.exposureMode, .continuousAutoExposure)
+        XCTAssertTrue(wide.isSubjectAreaChangeMonitoringEnabled)
+        XCTAssertFalse(camera.isFocusExposureLocked)
+        record("Older subject event preserves the newer tap")
         postSubjectChange(from: wide)
-        try await waitFor("Active subject change recenters automatic controls") {
+        try await waitFor("Fresh active subject change recenters automatic controls") {
             matches(wide.focusPointOfInterest, center) && matches(wide.exposurePointOfInterest, center)
                 && wide.focusMode == .continuousAutoFocus && wide.exposureMode == .continuousAutoExposure
                 && !wide.isSubjectAreaChangeMonitoringEnabled
