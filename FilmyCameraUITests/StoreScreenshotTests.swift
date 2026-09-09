@@ -379,7 +379,10 @@ final class LookLibraryUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["look-library-empty"].waitForExistence(timeout: 5))
         snapshot(app, "looks-empty-search")
         app.buttons["look-library-reset"].tap()
-        XCTAssertEqual(search.value as? String, "Search looks")
+        XCTAssertTrue(app.buttons["library-recipe-g7x-compact"].waitForExistence(timeout: 5),
+                      "Clearing search must restore the unfiltered look cards")
+        XCTAssertFalse(app.buttons["look-library-clear-search"].exists,
+                       "The clear action must disappear when the query is empty")
         XCTAssertEqual(app.buttons["look-filter-all"].value as? String, "Selected")
         app.buttons["look-library-close"].tap()
         XCTAssertTrue(app.buttons["recipe-menu"].label.contains("G7 X Compact"))
