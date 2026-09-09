@@ -84,7 +84,8 @@ final class RecipeInvariantsTests: XCTestCase {
     func testExpandedInternetRecipeLibraryIsCompleteAndSelectable() {
         XCTAssertEqual(FilmRecipe.expandedInternetRecipeIDs.count, 18)
         XCTAssertEqual(Set(FilmRecipe.expandedInternetRecipeIDs).count, 18)
-        XCTAssertEqual(FilmRecipe.builtIns.count, 36)
+        XCTAssertEqual(FilmRecipe.legacyBuiltIns.count, 36)
+        XCTAssertEqual(FilmRecipe.builtIns.count, 128)
 
         let builtInIDs = Set(FilmRecipe.builtIns.map(\.id))
         XCTAssertTrue(Set(FilmRecipe.expandedInternetRecipeIDs).isSubset(of: builtInIDs))
@@ -285,6 +286,9 @@ final class RecipeInvariantsTests: XCTestCase {
             case .publicCommunityRecipe:
                 XCTAssertEqual(recipe.provenance.calibration, .notCalibratedToFujifilmHardware, recipe.id)
                 XCTAssertEqual(recipe.provenance.references, FilmRecipe.communityRecipeReferences, recipe.id)
+            case .originalCreativeDesign:
+                XCTAssertEqual(recipe.provenance, FilmRecipe.creativeProvenance, recipe.id)
+                XCTAssertTrue(FilmRecipe.originalCreativeRecipeIDs.contains(recipe.id))
             case .userModified, .legacyRecordWithoutProvenance:
                 XCTFail("Built-in recipe has non-built-in provenance: \(recipe.id)")
             }
@@ -614,5 +618,62 @@ final class RecipeInvariantsTests: XCTestCase {
         XCTAssertTrue(decoded.provenance.isComplete)
         XCTAssertTrue(decoded.validationIssues.contains { $0.code == .provenanceUnavailable })
         XCTAssertFalse(decoded.isValid)
+    }
+}
+
+
+final class ExpandedCreativeCatalogTests: XCTestCase {
+    func testOriginalCollectionsContainEveryAuthoredRecipe() {
+        let expected: [FilmRecipe.Collection: Int] = [.negative:16, .slide:10, .cinema:12, .instant:8, .digital:16, .experimental:6, .monochrome:24]
+        XCTAssertEqual(FilmRecipe.originalCreativeLooks.count, 92)
+        XCTAssertEqual(Array(FilmRecipe.builtIns.prefix(36)), FilmRecipe.legacyBuiltIns)
+        for (collection,count) in expected {
+            XCTAssertEqual(FilmRecipe.originalCreativeLooks.filter { $0.creativeCollection == collection }.count, count)
+        }
+    }
+    func testCreativeProvenanceDoesNotInventManufacturerCalibration() throws {
+        for recipe in FilmRecipe.originalCreativeLooks {
+            XCTAssertEqual(recipe.provenance.source, .originalCreativeDesign)
+            XCTAssertTrue(recipe.provenance.references.isEmpty)
+            XCTAssertFalse(recipe.provenance.disclaimer.contains("inspired by public Fujifilm"))
+            var edited = recipe
+            edited.exposure = 0.25; edited.markUserModified(parentRecipeID: recipe.id)
+            XCTAssertTrue(edited.provenance.isComplete)
+            XCTAssertEqual(edited.creativeCollection, recipe.creativeCollection)
+            XCTAssertEqual(try JSONDecoder().decode(FilmRecipe.self, from: JSONEncoder().encode(edited)), edited)
+        }
+    }
+    func testAllOriginalControlsAreDistinctBeyondNamesAndIDs() throws {
+        var signatures = Set<Data>()
+        for recipe in FilmRecipe.originalCreativeLooks {
+            var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(recipe)) as? [String:Any])
+            for key in ["id","name","subtitle","schemaVersion","provenance"] { object.removeValue(forKey: key) }
+            let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+            XCTAssertTrue(signatures.insert(data).inserted, "Duplicate treatment: \(recipe.id)")
+        }
+    }
+    func testDigitalLooksDoNotUseTheG7XHardwareSpecificFlashTransform() {
+        let digital = FilmRecipe.originalCreativeLooks.filter { $0.isDigitalCameraStyle }
+        XCTAssertEqual(digital.count, 16)
+        XCTAssertTrue(digital.allSatisfy { $0.filmBase != .compactDigital })
+        XCTAssertEqual(FilmRecipe.builtIns.filter { $0.filmBase == .compactDigital }.map(\.id), ["g7x-compact"])
+    }
+    func testFamilySearchAndFiltersResolveTheExpandedCatalog() {
+        XCTAssertEqual(LookLibraryIndex.results(in: FilmRecipe.builtIns, query: "", filter: .compact, favorites: []).count, 17)
+        XCTAssertEqual(LookLibraryIndex.results(in: FilmRecipe.builtIns, query: "cinema", filter: .cinema, favorites: []).count, 12)
+        XCTAssertEqual(LookLibraryIndex.results(in: FilmRecipe.builtIns, query: "CCD Daylight", filter: .all, favorites: []).map(\.id), ["digital-ccd-daylight"])
+        XCTAssertEqual(LookLibraryIndex.results(in: FilmRecipe.builtIns, query: "", filter: .instant, favorites: []).count, 8)
+    }
+    @MainActor func testNewCameraStylePersistsCustomControlsAcrossRelaunch() throws {
+        let suite = "FilmyCatalogTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = CameraViewModel(defaults: defaults)
+        var recipe = try XCTUnwrap(model.recipes.first { $0.id == "digital-ccd-daylight" })
+        recipe.exposure = 0.41; model.update(recipe: recipe); model.select(recipe: recipe)
+        let relaunched = CameraViewModel(defaults: defaults)
+        XCTAssertEqual(relaunched.selectedRecipeID, recipe.id)
+        XCTAssertEqual(relaunched.selectedRecipe.exposure, 0.41, accuracy: 0.0001)
+        XCTAssertEqual(relaunched.selectedRecipe.provenance.source, .userModified)
     }
 }

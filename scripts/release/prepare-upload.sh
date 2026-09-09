@@ -316,6 +316,8 @@ write_export_options() {
 <dict>
   <key>method</key>
   <string>app-store-connect</string>
+  <key>manageAppVersionAndBuildNumber</key>
+  <false/>
   <key>signingStyle</key>
   <string>automatic</string>
   <key>stripSwiftSymbols</key>

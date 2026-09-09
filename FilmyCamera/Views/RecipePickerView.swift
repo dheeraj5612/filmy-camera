@@ -67,7 +67,7 @@ struct RecipePickerView: View {
 
         var title: String {
             switch self {
-            case .compact: return "Compact"
+            case .compact: return "Digital"
             case .film: return "Film"
             case .monochrome: return "Monochrome"
             }
@@ -93,12 +93,12 @@ struct RecipePickerView: View {
             let groupRecipes = presentationRecipes.filter { recipe in
                 switch group {
                 case .compact:
-                    return recipe.filmBase == .compactDigital
+                    return recipe.isDigitalCameraStyle
                 case .monochrome:
                     return recipe.filmBase.monochromeFilter != nil
                         || recipe.filmBase == .sepia
                 case .film:
-                    return recipe.filmBase != .compactDigital
+                    return !recipe.isDigitalCameraStyle
                         && recipe.filmBase.monochromeFilter == nil
                         && recipe.filmBase != .sepia
                 }
@@ -301,12 +301,12 @@ struct CurrentRecipeButton: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var accentColor: Color {
-        recipe.filmBase == .compactDigital ? FilmyTheme.accent : FilmyTheme.filmAccent
+        recipe.isDigitalCameraStyle ? FilmyTheme.accent : FilmyTheme.filmAccent
     }
 
     private var semanticSubtitle: String {
         if isCustomized { return "Customized" }
-        if recipe.filmBase == .compactDigital { return "Compact digital" }
+        if recipe.isDigitalCameraStyle { return "Digital style" }
         if recipe.filmBase.monochromeFilter != nil || recipe.filmBase == .sepia {
             return "Monochrome"
         }
@@ -315,7 +315,6 @@ struct CurrentRecipeButton: View {
 
     private var recipeIcon: some View {
         RecipeSwatch(recipe: recipe, compact: true, showsLabel: false)
-            .environment(\.recipePreviewScene, nil)
             .frame(width: 34, height: 38)
             .clipShape(RoundedRectangle(cornerRadius: 7))
             .accessibilityHidden(true)
@@ -714,7 +713,8 @@ struct RecipeDetailView: View {
                 Text(
                     recipe.filmBase == .compactDigital
                         ? "Camera profile · \(recipe.filmBase.officialName)"
-                        : "Camera reference · \(recipe.filmBase.officialName)"
+                        : recipe.creativeCollection.map { "Original Filmy \($0.title) treatment" }
+                            ?? "Camera reference · \(recipe.filmBase.officialName)"
                 )
                     .font(.system(.caption, design: .rounded).weight(.bold))
                     .fixedSize(horizontal: false, vertical: true)
@@ -1348,7 +1348,7 @@ private struct RecipeSliderRow: View {
 /// Shared by the camera and review. Stable recipe IDs, not names or catalog
 /// positions, own favorites. Searching and filtering never apply a recipe.
 enum LookLibraryFilter: String, CaseIterable, Identifiable {
-    case all, favorites, compact, film, monochrome
+    case all, favorites, compact, film, monochrome, negative, slide, cinema, instant, experimental
 
     var id: String { rawValue }
 
@@ -1356,9 +1356,14 @@ enum LookLibraryFilter: String, CaseIterable, Identifiable {
         switch self {
         case .all: return "All looks"
         case .favorites: return "Favorites"
-        case .compact: return "Compact"
+        case .compact: return "Digital"
         case .film: return "Film"
         case .monochrome: return "Monochrome"
+        case .negative: return "Negative"
+        case .slide: return "Slide"
+        case .cinema: return "Cinema"
+        case .instant: return "Instant"
+        case .experimental: return "Experimental"
         }
     }
 }
@@ -1390,11 +1395,16 @@ enum LookLibraryIndex {
             switch filter {
             case .all: included = true
             case .favorites: included = favorites.contains(recipe.id)
-            case .compact: included = recipe.filmBase == .compactDigital
-            case .film: included = recipe.filmBase != .compactDigital && !monochrome
+            case .compact: included = recipe.isDigitalCameraStyle
+            case .film: included = !recipe.isDigitalCameraStyle && !monochrome
             case .monochrome: included = monochrome
+            case .negative: included = recipe.creativeCollection == .negative
+            case .slide: included = recipe.creativeCollection == .slide
+            case .cinema: included = recipe.creativeCollection == .cinema
+            case .instant: included = recipe.creativeCollection == .instant
+            case .experimental: included = recipe.creativeCollection == .experimental
             }
-            let searchable = "\(recipe.name) \(recipe.descriptor)"
+            let searchable = "\(recipe.name) \(recipe.descriptor) \(recipe.creativeCollection?.title ?? "")"
             return included && words.allSatisfy { searchable.localizedStandardContains($0) }
         }
     }

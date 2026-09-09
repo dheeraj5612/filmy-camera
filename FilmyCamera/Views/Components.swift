@@ -827,6 +827,8 @@ struct FocusLockControl: View {
 
 // MARK: - Recipe visuals
 
+/// Every look uses the same bundled sample so comparisons stay consistent
+/// while the camera's live viewfinder continues to update independently.
 struct RecipeSwatch: View {
     let recipe: FilmRecipe
     var isSelected = false
@@ -834,31 +836,17 @@ struct RecipeSwatch: View {
     var showsLabel = true
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @Environment(\.recipePreviewScene) private var previewScene
     @State private var thumbnailImage: UIImage?
-    @State private var liveThumbnail: UIImage?
 
     private var cornerRadius: CGFloat {
         compact ? 12 : 12
     }
 
-    private struct LiveKey: Equatable {
-        let recipe: FilmRecipe
-        let sceneVersion: Int?
-    }
-
-    private struct ThumbnailKey: Equatable {
-        let recipe: FilmRecipe
-        let hasLiveScene: Bool
-    }
-
     var body: some View {
-        ZStack {
-            if let liveThumbnail {
-                Image(uiImage: liveThumbnail)
-                    .resizable()
-                    .scaledToFill()
-            } else if let thumbnailImage {
+        // Let the caller's tile bounds size the labels and border; an
+        // aspect-filled image can otherwise expand them outside the tile.
+        Color.clear.overlay {
+            if let thumbnailImage {
                 Image(uiImage: thumbnailImage)
                     .resizable()
                     .scaledToFill()
@@ -911,14 +899,10 @@ struct RecipeSwatch: View {
                     lineWidth: isSelected ? 2 : 1
                 )
         }
-        .task(id: ThumbnailKey(recipe: recipe, hasLiveScene: previewScene != nil), priority: .utility) {
+        .task(id: recipe, priority: .utility) {
             // Clear a prior recipe's image immediately, so a slider change
             // never presents stale settings while the replacement is rendered.
             thumbnailImage = nil
-            // A live scene is the useful source for swatches in the camera
-            // rail. Skip the sample render while it is available;
-            // this keeps a recipe change from doing two full thumbnail passes.
-            guard previewScene == nil else { return }
             // Editor sliders mutate the draft many times per second, and each
             // change re-runs this task. Debounce first so a drag cannot queue
             // one full renderer pass per tick; .task(id:) cancels the sleeping
@@ -929,26 +913,11 @@ struct RecipeSwatch: View {
             guard !Task.isCancelled else { return }
             thumbnailImage = renderedImage
         }
-        // When the viewfinder is live, show this recipe applied to the actual
-        // scene, refreshed at the snapshot store's cadence.
-        .task(id: LiveKey(recipe: recipe, sceneVersion: previewScene?.version), priority: .utility) {
-            guard let previewScene else {
-                liveThumbnail = nil
-                return
-            }
-            try? await Task.sleep(for: .milliseconds(120))
-            guard !Task.isCancelled else { return }
-            let rendered = await RecipeSwatchRenderer.shared.render(recipe: recipe, scene: previewScene)
-            guard !Task.isCancelled else { return }
-            if let rendered {
-                liveThumbnail = rendered
-            }
-        }
     }
 }
 
 /// One swatch at a time can submit GPU work. Actor calls retain their SwiftUI
-/// task's cancellation, so closed drawers and obsolete slider/scene revisions
+/// task's cancellation, so closed drawers and obsolete slider revisions
 /// are discarded before they render, instead of launching N detached jobs.
 actor RecipeSwatchRenderer {
     static let shared = RecipeSwatchRenderer()
@@ -980,12 +949,9 @@ actor RecipeSwatchRenderer {
         return CIImage(cgImage: small)
     }()
 
-    func render(recipe: FilmRecipe, scene: RecipePreviewScene? = nil) -> UIImage? {
+    func render(recipe: FilmRecipe) -> UIImage? {
         guard !Task.isCancelled else { return nil }
         return autoreleasepool {
-            if let scene {
-                return FilmRenderer.previewThumbnail(for: recipe, over: scene.image)
-            }
             let key = SampleKey(recipe)
             if let cached = sampleCache.object(forKey: key) { return cached }
             guard let sampleScene else { return FilmRenderer.thumbnail(for: recipe) }

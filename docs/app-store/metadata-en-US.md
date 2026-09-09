@@ -22,7 +22,11 @@ Choose the G7 X Compact look for warm compact-digital color and direct-flash cha
 What you get:
 
 - A focused camera screen designed for one-handed shooting
-- A quick rail of compact-digital, color-film, and monochrome looks
+- 128 editable looks with compact-digital, color-film, cinema, instant, and monochrome collections
+- Search and favorite looks for quick access
+- A 3-, 5-, or 10-second capture timer with a visible cancel action
+- 4:3, square, 3:2, and 16:9 framing with optional composition guides
+- Optional horizon level, live histogram, clipping warnings, and focus peaking
 - Import an existing photo with its framing preserved, at full resolution up to 40 MP
 - Adjustable tone, color, Kelvin white balance, fine-tuning, grain, clarity, and vignette controls
 - Live preview and full-resolution exports with the selected look applied
@@ -50,7 +54,7 @@ The keyword field is below Apple's 100-character limit for this localization.
 
 ## What's New — version 1.0
 
-Meet Filmy Camera: film and G7 X Compact looks, manual camera controls, reversible photo review, and optional Instant Print borders. All included features are free for this launch.
+Meet Filmy Camera: 128 editable looks, a capture timer, framing and composition tools, manual camera controls, reversible photo review, and optional Instant Print borders. All included features are free for this launch.
 
 ## App Review notes
 

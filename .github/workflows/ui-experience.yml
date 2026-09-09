@@ -70,6 +70,7 @@ jobs:
             -only-testing:FilmyCameraUITests/FilmyCameraUITests/testAccessibilitySizeCameraShellKeepsRecipeControlsReachable \
             -only-testing:FilmyCameraUITests/LaunchOnboardingTests \
             -only-testing:FilmyCameraUITests/LookLibraryUITests \
+            -only-testing:FilmyCameraUITests/CaptureSetupUITests \
             test > "$RUNNER_TEMP/ui-evidence/xcodebuild.log" 2>&1
       - name: Export actual screenshots and test results
         if: always()
@@ -79,7 +80,7 @@ jobs:
           if [[ -d "$RUNNER_TEMP/FilmyUI.xcresult" ]]; then
             xcrun xcresulttool export attachments --path "$RUNNER_TEMP/FilmyUI.xcresult" --output-path "$RUNNER_TEMP/ui-evidence/screenshots"
             xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/FilmyUI.xcresult" > "$RUNNER_TEMP/ui-evidence/summary.json"
-            python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert s["passedTests"] == 12 and s["failedTests"] == 0 and s["skippedTests"] == 0, s' "$RUNNER_TEMP/ui-evidence/summary.json"
+            python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert s["passedTests"] == 14 and s["failedTests"] == 0 and s["skippedTests"] == 0, s' "$RUNNER_TEMP/ui-evidence/summary.json"
           fi
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         if: always()

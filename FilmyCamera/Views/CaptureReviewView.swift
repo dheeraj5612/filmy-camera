@@ -130,7 +130,6 @@ struct CaptureReviewView: View {
                 },
                 onClose: { isShowingLookLibrary = false }
             )
-            .environment(\.recipePreviewScene, nil)
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
             .presentationBackground(FilmyTheme.background)

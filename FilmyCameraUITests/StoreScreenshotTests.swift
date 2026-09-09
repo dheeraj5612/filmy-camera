@@ -448,6 +448,8 @@ final class LookLibraryUITests: XCTestCase {
         XCTAssertTrue(look.waitForExistence(timeout: 15))
         look.tap()
         let browse = app.buttons["look-library-open"]
+        XCTAssertTrue(waitForStationaryControl(browse, in: app),
+                      "Explore looks must finish moving before it is tapped")
         assertControl(browse, in: app)
         browse.tap()
         XCTAssertTrue(app.textFields["look-library-search"].waitForExistence(timeout: 5))
@@ -468,4 +470,153 @@ final class LookLibraryUITests: XCTestCase {
         attachment.lifetime = .keepAlways
         add(attachment)
     }
+}
+
+
+@MainActor
+final class CaptureSetupUITests: XCTestCase {
+    func testCaptureSetupOpensAndKeepsAidsAcrossRelaunch() {
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        app.launchEnvironment["FILMY_TEST_DEFAULTS_SUITE"] = "FilmyCameraUITests.Setup.\(UUID().uuidString)"
+        app.launchArguments = ["-ui-testing"]
+        app.launch()
+        defer { app.terminate() }
+        openCaptureSetup(in: app)
+        let aidIdentifiers = [
+            "capture-level-toggle",
+            "capture-histogram-toggle",
+            "capture-zebras-toggle",
+            "capture-peaking-toggle"
+        ]
+        for identifier in aidIdentifiers {
+            let aid = captureAid(identifier, in: app)
+            XCTAssertEqual(aid.value as? String, "0", "A fresh preferences suite starts with aids off")
+            tapCaptureAid(aid, expecting: "1")
+        }
+        attachCaptureSetup(named: "capture-setup-aids-enabled")
+        app.buttons["capture-setup-done"].tap()
+        XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 5))
+        app.terminate()
+        app.launch()
+        openCaptureSetup(in: app)
+        for identifier in aidIdentifiers {
+            XCTAssertEqual(captureAid(identifier, in: app).value as? String, "1", "\(identifier) must persist")
+        }
+        attachCaptureSetup(named: "capture-setup-aids-restored")
+
+        // Cover the reverse transition too: an aid must not become sticky
+        // after its persisted value changes from enabled back to disabled.
+        tapCaptureAid(captureAid("capture-zebras-toggle", in: app), expecting: "0")
+        app.buttons["capture-setup-done"].tap()
+        app.terminate()
+        app.launch()
+        openCaptureSetup(in: app)
+        XCTAssertEqual(captureAid("capture-zebras-toggle", in: app).value as? String, "0")
+        XCTAssertEqual(captureAid("capture-peaking-toggle", in: app).value as? String, "1",
+                       "Disabling zebras must leave the other aids enabled")
+    }
+
+    func testNewDigitalStyleCanBeSearchedSelectedAndPersisted() {
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        app.launchEnvironment["FILMY_TEST_DEFAULTS_SUITE"] = "FilmyCameraUITests.Catalog.\(UUID().uuidString)"
+        app.launchArguments = ["-ui-testing"]
+        app.launch()
+        defer { app.terminate() }
+        let menu = app.buttons["recipe-menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 15))
+        menu.tap()
+        let browse = app.buttons["look-library-open"]
+        XCTAssertTrue(waitForStationaryControl(browse, in: app),
+                      "Explore looks must finish moving before it is tapped")
+        browse.tap()
+        let search = app.textFields["look-library-search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10)); search.tap(); search.typeText("CCD Daylight\n")
+        let style = app.buttons["library-recipe-digital-ccd-daylight"]
+        XCTAssertTrue(style.waitForExistence(timeout: 5)); style.tap()
+        XCTAssertTrue(menu.waitForExistence(timeout: 5)); XCTAssertTrue(menu.label.contains("CCD Daylight"))
+        app.terminate(); app.launch()
+        XCTAssertTrue(menu.waitForExistence(timeout: 15)); XCTAssertTrue(menu.label.contains("CCD Daylight"))
+    }
+
+    private func openCaptureSetup(in app: XCUIApplication) {
+        let setup = app.buttons["capture-setup-open"]
+        XCTAssertTrue(setup.waitForExistence(timeout: 15))
+        setup.tap()
+        XCTAssertTrue(app.buttons["capture-setup-done"].waitForExistence(timeout: 5))
+    }
+
+    private func captureAid(_ identifier: String, in app: XCUIApplication) -> XCUIElement {
+        let aid = app.switches[identifier]
+        let form = app.descendants(matching: .any)["capture-setup-form"]
+        XCTAssertTrue(form.waitForExistence(timeout: 5))
+        for _ in 0..<4 {
+            if aid.exists && aid.isHittable && form.frame.contains(aid.frame) { break }
+            form.swipeUp()
+        }
+        XCTAssertTrue(aid.waitForExistence(timeout: 5))
+        XCTAssertTrue(aid.isHittable, "\(identifier) must be reachable in Capture setup")
+        XCTAssertTrue(form.frame.contains(aid.frame), "\(identifier) must be fully visible before tapping")
+        XCTAssertTrue(aid.isEnabled)
+        return aid
+    }
+
+    private func tapCaptureAid(_ aid: XCUIElement, expecting value: String) {
+        // SwiftUI Form exposes the whole labeled row as the switch frame.
+        // Its center can be inert label space, so tap the actual trailing
+        // switch using the current accessibility bounds on each device.
+        aid.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5))
+            .withOffset(CGVector(dx: -min(25, aid.frame.width / 2), dy: 0))
+            .tap()
+        let updatedValue = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", value), object: aid
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [updatedValue], timeout: 5), .completed,
+                       "Tapping \(aid.identifier) must change its value to \(value)")
+    }
+
+    private func attachCaptureSetup(named name: String) {
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+}
+
+@MainActor
+private func waitForStationaryControl(_ control: XCUIElement, in app: XCUIApplication) -> Bool {
+    // Accessibility queries on a loaded hosted iPad can take several seconds
+    // per observation. Allow enough time to compare two complete samples.
+    let deadline = Date(timeIntervalSinceNow: 15)
+    var previousFrame: CGRect?
+    var stationarySince: Date?
+    // A drawer's accessibility frame can appear before its spring transition
+    // finishes. Wait for stable hit geometry; never retry the navigation tap,
+    // which could instead close the drawer through the control underneath it.
+    repeat {
+        if control.exists && control.isEnabled && control.isHittable {
+            let frame = control.frame
+            if frame.width >= 44 && frame.height >= 44 && app.frame.contains(frame) {
+                if frame == previousFrame {
+                    if let stationarySince, Date().timeIntervalSince(stationarySince) >= 0.3 {
+                        return true
+                    }
+                } else {
+                    stationarySince = Date()
+                }
+                previousFrame = frame
+            } else {
+                previousFrame = nil
+                stationarySince = nil
+            }
+        } else {
+            previousFrame = nil
+            stationarySince = nil
+        }
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+    } while Date() < deadline
+    return false
 }

@@ -175,3 +175,159 @@ public struct CameraManualControls: Equatable, Sendable {
         requested == .manual && supported ? .manual : .auto
     }
 }
+
+// MARK: - Capture workflow policies (independent of camera hardware)
+
+enum CaptureDelay: Int, CaseIterable, Identifiable {
+    case off = 0, three = 3, five = 5, ten = 10
+    var id: Int { rawValue }
+    var title: String { self == .off ? "Off" : "\(rawValue)s" }
+}
+
+enum CaptureAspect: String, CaseIterable, Identifiable {
+    case viewfinder, fourThree, square, threeTwo, sixteenNine
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .viewfinder: return "Fit screen"
+        case .fourThree: return "4:3"
+        case .square: return "1:1"
+        case .threeTwo: return "3:2"
+        case .sixteenNine: return "16:9"
+        }
+    }
+    func ratio(isLandscape: Bool) -> Double? {
+        let ratio: Double
+        switch self {
+        case .viewfinder: return nil
+        case .fourThree: ratio = 4.0 / 3.0
+        case .square: ratio = 1
+        case .threeTwo: ratio = 3.0 / 2.0
+        case .sixteenNine: ratio = 16.0 / 9.0
+        }
+        return isLandscape ? ratio : 1 / ratio
+    }
+}
+
+enum CompositionGuide: String, CaseIterable, Identifiable {
+    case thirds, golden, square, crosshair
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .thirds: return "Rule of thirds"
+        case .golden: return "Golden ratio"
+        case .square: return "Square guide"
+        case .crosshair: return "Center crosshair"
+        }
+    }
+}
+
+/// A canceled countdown's completion cannot consume a new countdown. Integer
+/// ticks are display state; the controller schedules against a monotonic clock.
+struct CaptureTimerState {
+    private(set) var operationID: UUID?
+    private(set) var remaining = 0
+    var isActive: Bool { operationID != nil }
+
+    mutating func begin(seconds: Int) -> UUID? {
+        guard !isActive, [3, 5, 10].contains(seconds) else { return nil }
+        let id = UUID()
+        operationID = id
+        remaining = seconds
+        return id
+    }
+    mutating func tick(_ id: UUID) -> Bool {
+        guard id == operationID, remaining > 0 else { return false }
+        remaining -= 1
+        return remaining == 0
+    }
+    mutating func consume(_ id: UUID) -> Bool {
+        guard id == operationID, remaining == 0 else { return false }
+        cancel()
+        return true
+    }
+    mutating func cancel() { operationID = nil; remaining = 0 }
+}
+
+/// Cancellation invalidates a result, but synchronous GPU work must finish
+/// before another preview operation can begin.
+struct PreviewRenderState {
+    struct Ticket: Equatable, Sendable {
+        let id: UUID
+        let generation: UInt64
+    }
+
+    private(set) var generation: UInt64 = 0
+    private var active: Ticket?
+
+    mutating func begin() -> Ticket? {
+        guard active == nil else { return nil }
+        let ticket = Ticket(id: UUID(), generation: generation)
+        active = ticket
+        return ticket
+    }
+
+    /// Always drains the matching operation; only current results may publish.
+    mutating func finish(_ ticket: Ticket) -> Bool {
+        guard active == ticket else { return false }
+        active = nil
+        return ticket.generation == generation
+    }
+
+    mutating func invalidate() { generation &+= 1 }
+}
+
+/// Display-referred, unfiltered preview analysis. Not a RAW histogram or a
+/// sensor-clipping meter. All input/output is bounded to 192 x 192 pixels.
+enum PreviewAnalysisMath {
+    static let maximumDimension = 192
+    struct Result: Equatable, Sendable {
+        let histogram: [Int]
+        let clippedPixels: Int
+        let pixelCount: Int
+        let overlayRGBA: [UInt8]
+    }
+
+    static func analyze(rgba: [UInt8], width: Int, height: Int, zebras: Bool, peaking: Bool) -> Result? {
+        guard width > 0, height > 0, width <= maximumDimension, height <= maximumDimension,
+              rgba.count == width * height * 4 else { return nil }
+        let count = width * height
+        var luma = [Int](repeating: 0, count: count)
+        var histogram = [Int](repeating: 0, count: 64)
+        var overlay = [UInt8](repeating: 0, count: count * 4)
+        var clipped = 0
+        for index in 0..<count {
+            let offset = index * 4
+            let r = Int(rgba[offset]), g = Int(rgba[offset + 1]), b = Int(rgba[offset + 2])
+            let y = (54 * r + 183 * g + 19 * b) >> 8
+            luma[index] = y
+            histogram[min(y / 4, 63)] += 1
+            // Warn on individual color-channel clipping, not just white pixels.
+            if max(r, g, b) >= 250 {
+                clipped += 1
+                if zebras, ((index % width + index / width) / 3).isMultiple(of: 2) {
+                    overlay[offset] = 180; overlay[offset + 1] = 156; overlay[offset + 3] = 180
+                }
+            }
+        }
+        if peaking, width > 2, height > 2 {
+            for y in 1..<(height - 1) {
+                for x in 1..<(width - 1) {
+                    let index = y * width + x
+                    let edge = abs(luma[index + 1] - luma[index - 1]) + abs(luma[index + width] - luma[index - width])
+                    guard edge > 72, luma[index] > 20, luma[index] < 245 else { continue }
+                    let offset = index * 4
+                    overlay[offset] = 220; overlay[offset + 1] = 55; overlay[offset + 2] = 55; overlay[offset + 3] = 220
+                }
+            }
+        }
+        return Result(histogram: histogram, clippedPixels: clipped, pixelCount: count, overlayRGBA: overlay)
+    }
+
+    static func horizonDegrees(x: Double, y: Double) -> Double? {
+        guard x.isFinite, y.isFinite, x * x + y * y > 0.04 else { return nil }
+        let degrees = atan2(x, -y) * 180 / .pi
+        // The nearest portrait/landscape axis is level in any orientation.
+        return degrees - (degrees / 90).rounded() * 90
+    }
+}

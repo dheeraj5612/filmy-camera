@@ -506,6 +506,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             case publicOfficialRecipe
             case publicCommunityRecipe
             case publicCanonDocumentation
+            case originalCreativeDesign
             case userModified
             case legacyRecordWithoutProvenance
         }
@@ -518,6 +519,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         public enum Calibration: String, CaseIterable, Codable, Hashable, Sendable {
             case notCalibratedToFujifilmHardware
             case notCalibratedToCanonHardware
+            case notCalibratedToCameraHardware
             case unknownLegacyRecord
         }
 
@@ -569,6 +571,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         public var disclaimer: String {
             switch implementation {
             case .originalParametricApproximation:
+                if calibration == .notCalibratedToCameraHardware { return FilmRecipe.creativeApproximationDisclaimer }
                 return calibration == .notCalibratedToCanonHardware
                     ? FilmRecipe.g7XApproximationDisclaimer
                     : FilmRecipe.independentApproximationDisclaimer
@@ -582,6 +585,9 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         public var isComplete: Bool {
             let hasMatchingSourceAndReferences: Bool
             switch (source, calibration) {
+            case (.originalCreativeDesign, .notCalibratedToCameraHardware),
+                 (.userModified, .notCalibratedToCameraHardware):
+                hasMatchingSourceAndReferences = references.isEmpty
             case (.publicOfficialDocumentation, .notCalibratedToFujifilmHardware),
                  (.userModified, .notCalibratedToFujifilmHardware)
                 where references == FilmRecipe.fujifilmPublicReferences:
@@ -1426,7 +1432,10 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
 
     /// The initial recipe library. Names refer to public film-camera
     /// conventions; the app is not affiliated with or calibrated by Fujifilm.
-    public static let builtIns: [FilmRecipe] = [
+    public static let builtIns: [FilmRecipe] = legacyBuiltIns + originalCreativeLooks
+
+    /// The original 36 entries retain their identity, order, and exact controls.
+    static let legacyBuiltIns: [FilmRecipe] = [
         FilmRecipe(
             id: "provia-standard",
             name: "Natural Standard",
@@ -2372,4 +2381,304 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             provenance: communityRecipeProvenance
         )
     ]
+}
+
+
+// MARK: - Original creative collections
+
+extension FilmRecipe {
+    /// Creative recipes are not vendor calibration profiles or RAW processes.
+    static let creativeApproximationDisclaimer =
+        "These are original Filmy creative treatments, not pixel-identical film scans or camera output. Filmy is not affiliated with any camera or film manufacturer. A visual style cannot change the sensor, lens, RAW processing, dynamic range, or capture capability. No proprietary LUTs or calibration data are included."
+
+    static let creativeProvenance = Provenance(
+        source: .originalCreativeDesign,
+        implementation: .originalParametricApproximation,
+        calibration: .notCalibratedToCameraHardware,
+        references: []
+    )
+
+    enum Collection: String, CaseIterable, Sendable {
+        case negative, slide, cinema, instant, digital, experimental, monochrome
+
+        var title: String { rawValue.capitalized }
+    }
+
+    var creativeCollection: Collection? {
+        guard provenance.calibration == .notCalibratedToCameraHardware else { return nil }
+        return Collection(rawValue: String(id.split(separator: "-", maxSplits: 1).first ?? ""))
+    }
+
+    /// Only G7 X uses the compactDigital renderer's camera-specific flash path.
+    /// Other digital aesthetics use a neutral base and their own color controls.
+    var isDigitalCameraStyle: Bool { filmBase == .compactDigital || creativeCollection == .digital }
+
+    static let originalCreativeRecipeIDs = originalCreativeLooks.map(\.id)
+
+    private struct CreativeLook {
+        let slug: String
+        let name: String
+        let description: String
+        let base: FilmBase
+        let exposure: Double
+        let highlight: Double
+        let shadow: Double
+        let saturation: Double
+        let contrast: Double
+        let temperature: Double
+        let tint: Double
+        let grain: Double
+        let vignette: Double
+        let halation: Double
+        let clarity: Double
+
+        init(_ slug: String, _ name: String, _ description: String, _ base: FilmBase,
+             _ exposure: Double, _ highlight: Double, _ shadow: Double, _ saturation: Double,
+             _ contrast: Double, _ temperature: Double, _ tint: Double, _ grain: Double,
+             _ vignette: Double, _ halation: Double, _ clarity: Double) {
+            self.slug = slug; self.name = name; self.description = description; self.base = base
+            self.exposure = exposure; self.highlight = highlight; self.shadow = shadow
+            self.saturation = saturation; self.contrast = contrast; self.temperature = temperature
+            self.tint = tint; self.grain = grain; self.vignette = vignette; self.halation = halation; self.clarity = clarity
+        }
+
+        func recipe(in collection: Collection) -> FilmRecipe {
+            let isMono = collection == .monochrome
+            let toning: MonochromaticColor
+            switch slug {
+            case "warm-fiber": toning = .init(warmCool: 0.12)
+            case "cool-silver": toning = .init(warmCool: -0.10)
+            case "selenium": toning = .init(warmCool: -0.05, greenMagenta: 0.09)
+            case "copper-print": toning = .init(warmCool: 0.20, greenMagenta: 0.03)
+            case "blue-print": toning = .init(warmCool: -0.42, greenMagenta: -0.04)
+            default: toning = .init()
+            }
+            return FilmRecipe(
+                id: "\(collection.rawValue)-\(slug)", name: name, subtitle: description,
+                filmBase: base, exposure: exposure, tone: .init(highlight: highlight, shadow: shadow),
+                saturation: isMono ? 0 : saturation, contrast: contrast,
+                dynamicRange: collection == .cinema || collection == .negative ? .dr200 : .dr100,
+                whiteBalance: .init(temperature: temperature, tint: tint), monochromaticColor: toning,
+                colorChrome: isMono || collection == .digital ? 0 : ColorChromeLevel.weak.scalarValue,
+                blueResponse: isMono ? 0 : (collection == .cinema ? 0.16 : 0.03),
+                sharpness: max(-0.12, min(0.22, clarity * 0.6)), noiseReduction: 0.02,
+                clarity: clarity, grain: GrainEffectLevel(scalarValue: grain).scalarValue,
+                grainSize: grain >= 0.40 ? GrainSizeLevel.large.scalarValue : GrainSizeLevel.small.scalarValue,
+                // Colored highlight scatter is reserved for color looks.
+                vignette: vignette, halation: isMono ? 0 : halation,
+                palette: .init(saturation: isMono ? 0 : 1), provenance: creativeProvenance
+            )
+        }
+    }
+
+    /// Explicit authored settings, not a generated cross-product of names and tints.
+    static let originalCreativeLooks: [FilmRecipe] = {
+        var result: [FilmRecipe] = []
+        let negative: [CreativeLook] = [
+            .init("portrait-160", "Portrait 160", "Gentle skin tones / warm daylight", .proNegStandard,
+                  0.12, -0.20, 0.10, 0.94, 0.96, 0.06, 0.01, 0.16, 0.04, 0.02, -0.06),
+            .init("portrait-400", "Portrait 400", "Soft warm mids / everyday negative", .proNegative,
+                  0.08, -0.28, 0.18, 0.96, 1.02, 0.08, 0.02, 0.30, 0.06, 0.04, -0.04),
+            .init("portrait-800", "Portrait 800", "Warm shadows / textured indoor color", .nostalgicNegative,
+                  0.10, -0.22, 0.23, 0.90, 0.99, 0.11, 0.02, 0.43, 0.10, 0.08, -0.08),
+            .init("gold-200", "Gold 200", "Golden daylight / red accents", .classicNegative,
+                  0.05, -0.12, 0.08, 1.07, 1.05, 0.14, 0.01, 0.25, 0.10, 0.04, 0.01),
+            .init("consumer-400", "Consumer 400", "Lively greens / family snapshots", .realaAce,
+                  0.00, -0.10, 0.12, 1.12, 1.06, 0.03, -0.04, 0.34, 0.09, 0.02, 0.03),
+            .init("coastal-100", "Coastal 100", "Clear blues / open shadows", .provia,
+                  0.10, -0.18, 0.22, 1.08, 0.99, -0.06, -0.02, 0.13, 0.03, 0.01, 0.04),
+            .init("city-200", "City 200", "Brick reds / quiet street color", .classicChrome,
+                  -0.04, -0.05, 0.06, 0.95, 1.09, 0.03, 0.00, 0.22, 0.11, 0.01, 0.08),
+            .init("soft-cream", "Soft Cream", "Cream highlights / muted foliage", .astia,
+                  0.17, -0.30, 0.24, 0.88, 0.92, 0.09, 0.03, 0.17, 0.05, 0.05, -0.10),
+            .init("olive-400", "Olive 400", "Olive greens / warm concrete", .classicNegative,
+                  -0.02, -0.16, 0.13, 0.93, 1.07, 0.04, -0.06, 0.32, 0.12, 0.03, 0.04),
+            .init("rose-200", "Rose 200", "Rose mids / restrained blues", .proNegStandard,
+                  0.08, -0.18, 0.15, 0.98, 0.98, 0.04, 0.07, 0.19, 0.06, 0.04, -0.04),
+            .init("pastel-day", "Pastel Day", "Airy color / soft high key", .astia,
+                  0.22, -0.32, 0.26, 0.84, 0.90, 0.01, 0.02, 0.14, 0.02, 0.03, -0.12),
+            .init("woodland", "Woodland Negative", "Earthy greens / deep mids", .realaAce,
+                  -0.07, -0.20, 0.00, 0.96, 1.10, 0.00, -0.05, 0.24, 0.12, 0.02, 0.07),
+            .init("copper-800", "Copper 800", "Copper warmth / evening grain", .nostalgicNegative,
+                  -0.03, -0.24, 0.17, 0.93, 1.05, 0.16, 0.04, 0.46, 0.13, 0.10, -0.02),
+            .init("winter-200", "Winter 200", "Cool whites / quiet daylight", .provia,
+                  0.08, -0.24, 0.21, 0.83, 0.98, -0.13, 0.01, 0.20, 0.04, 0.02, 0.04),
+            .init("travel-400", "Travel 400", "Balanced color / forgiving contrast", .realaAce,
+                  0.05, -0.18, 0.17, 1.03, 1.02, 0.05, 0.00, 0.27, 0.07, 0.03, 0.02),
+            .init("faded-album", "Faded Album", "Faded dye / warm paper memory", .nostalgicNegative,
+                  0.10, -0.38, 0.32, 0.72, 0.87, 0.14, 0.03, 0.38, 0.18, 0.08, -0.13),
+        ]
+        result += negative.map { $0.recipe(in: .negative) }
+        let slide: [CreativeLook] = [
+            .init("chrome-50", "Chrome 50", "Crisp daylight / saturated primaries", .velvia,
+                  -0.08, 0.06, -0.10, 1.09, 1.15, -0.01, 0.00, 0.10, 0.08, 0.01, 0.12),
+            .init("chrome-100", "Chrome 100", "Clean whites / rich travel color", .provia,
+                  -0.04, 0.02, -0.06, 1.14, 1.12, 0.00, 0.01, 0.12, 0.06, 0.02, 0.10),
+            .init("mountain-50", "Mountain 50", "Deep skies / alpine greens", .velvia,
+                  -0.15, 0.08, -0.16, 1.08, 1.18, -0.08, -0.02, 0.09, 0.12, 0.01, 0.15),
+            .init("warm-projector", "Warm Projector", "Amber transparency / rich mids", .provia,
+                  -0.03, 0.03, -0.06, 1.06, 1.14, 0.13, 0.02, 0.18, 0.14, 0.04, 0.08),
+            .init("cool-chrome", "Cool Chrome", "Cool shadows / precise blues", .realaAce,
+                  -0.06, 0.04, -0.08, 1.08, 1.13, -0.12, 0.02, 0.11, 0.05, 0.01, 0.13),
+            .init("sunset-chrome", "Sunset Chrome", "Glowing reds / dense sunset color", .velvia,
+                  -0.10, -0.05, -0.12, 1.12, 1.16, 0.16, 0.04, 0.14, 0.10, 0.06, 0.08),
+            .init("botanical", "Botanical Slide", "Lush greens / bright floral color", .velvia,
+                  -0.07, -0.06, -0.04, 1.10, 1.11, 0.00, -0.05, 0.10, 0.07, 0.02, 0.10),
+            .init("soft-transparency", "Soft Transparency", "Delicate slide color / broad highlights", .astia,
+                  0.05, -0.24, 0.05, 1.01, 1.04, 0.02, 0.01, 0.09, 0.03, 0.02, -0.03),
+            .init("blue-hour", "Blue Hour Slide", "Cobalt dusk / crisp contrast", .provia,
+                  -0.14, -0.10, -0.06, 1.06, 1.13, -0.17, 0.04, 0.19, 0.13, 0.04, 0.09),
+            .init("archive-projector", "Archive Projector", "Warm reds / aged transparency", .classicChrome,
+                  -0.04, -0.12, 0.10, 0.87, 1.11, 0.12, 0.03, 0.28, 0.19, 0.05, 0.02),
+        ]
+        result += slide.map { $0.recipe(in: .slide) }
+        let cinema: [CreativeLook] = [
+            .init("daylight-250", "Daylight 250", "Restrained daylight / filmic mids", .eterna,
+                  0.05, -0.25, 0.18, 1.02, 1.03, 0.04, 0.01, 0.22, 0.06, 0.05, -0.02),
+            .init("tungsten-500", "Cinema Tungsten 500", "Cool shadows / warm practical lights", .eterna,
+                  -0.04, -0.23, 0.13, 1.00, 1.07, -0.08, 0.03, 0.34, 0.10, 0.13, -0.03),
+            .init("night-neon", "Night Neon", "Electric color / luminous highlights", .standard,
+                  -0.10, -0.18, 0.06, 1.19, 1.12, -0.12, 0.09, 0.25, 0.18, 0.22, 0.06),
+            .init("silver-screen", "Silver Screen Color", "Bleached color / dense blacks", .eternaBleachBypass,
+                  -0.06, -0.04, -0.04, 0.86, 1.10, -0.02, 0.00, 0.33, 0.12, 0.03, 0.12),
+            .init("amber-teal", "Amber and Teal", "Warm mids / blue-green shadows", .eterna,
+                  0.00, -0.20, 0.08, 1.06, 1.10, 0.07, -0.04, 0.21, 0.11, 0.09, 0.01),
+            .init("matinee", "Matinee", "Soft highlights / nostalgic color", .eterna,
+                  0.12, -0.32, 0.25, 0.93, 0.94, 0.08, 0.01, 0.18, 0.06, 0.07, -0.09),
+            .init("noir-color", "Color Noir", "Low saturation / hard street light", .eternaBleachBypass,
+                  -0.14, 0.02, -0.12, 0.57, 1.17, -0.06, 0.02, 0.41, 0.21, 0.07, 0.14),
+            .init("road-movie", "Road Movie", "Dry earth / muted sky", .classicChrome,
+                  0.00, -0.18, 0.14, 0.86, 1.06, 0.10, -0.03, 0.27, 0.12, 0.05, 0.03),
+            .init("rainy-city", "Rainy City", "Cool concrete / restrained neon", .eterna,
+                  -0.08, -0.20, 0.18, 0.82, 1.07, -0.13, 0.03, 0.28, 0.13, 0.08, 0.02),
+            .init("summer-feature", "Summer Feature", "Sunlit warmth / soft greens", .eterna,
+                  0.13, -0.25, 0.22, 1.06, 0.97, 0.12, -0.02, 0.19, 0.05, 0.08, -0.04),
+            .init("velvet-night", "Velvet Night", "Violet dusk / soft highlight bloom", .standard,
+                  -0.09, -0.26, 0.17, 0.92, 1.02, -0.05, 0.11, 0.36, 0.17, 0.18, -0.11),
+            .init("newsreel-color", "Newsreel Color", "Muted reporting / coarse texture", .classicChrome,
+                  -0.03, -0.08, 0.10, 0.72, 1.13, 0.03, -0.01, 0.52, 0.10, 0.02, 0.09),
+        ]
+        result += cinema.map { $0.recipe(in: .cinema) }
+        let instant: [CreativeLook] = [
+            .init("cream-square", "Cream Square", "Cream whites / gentle instant color", .nostalgicNegative,
+                  0.12, -0.34, 0.28, 0.87, 0.91, 0.10, 0.02, 0.28, 0.16, 0.08, -0.11),
+            .init("pastel-square", "Pastel Square", "Pale blue shadows / pink highlights", .astia,
+                  0.20, -0.30, 0.25, 0.79, 0.90, -0.03, 0.05, 0.20, 0.12, 0.07, -0.12),
+            .init("sun-faded", "Sun Faded Instant", "Faded warm print / dusty greens", .classicNegative,
+                  0.08, -0.36, 0.31, 0.71, 0.89, 0.15, -0.02, 0.36, 0.22, 0.10, -0.08),
+            .init("cool-pack", "Cool Pack", "Cool cyan / clean paper whites", .proNegStandard,
+                  0.10, -0.24, 0.22, 0.86, 0.94, -0.13, -0.04, 0.25, 0.13, 0.04, -0.04),
+            .init("party-pack", "Party Pack", "Punchy color / direct-light mood", .standard,
+                  0.05, -0.06, -0.05, 1.20, 1.15, 0.04, 0.04, 0.32, 0.25, 0.08, 0.08),
+            .init("warm-pack", "Warm Pack", "Warm orange / soft indoor color", .nostalgicNegative,
+                  0.07, -0.23, 0.20, 0.95, 0.96, 0.17, 0.03, 0.31, 0.17, 0.11, -0.05),
+            .init("soft-focus", "Soft Focus Instant", "Low clarity / luminous white edges", .astia,
+                  0.19, -0.38, 0.29, 0.85, 0.88, 0.05, 0.02, 0.22, 0.15, 0.19, -0.25),
+            .init("expired-pack", "Expired Pack", "Green cast / aged instant mood", .standard,
+                  0.00, -0.27, 0.23, 0.77, 0.95, 0.08, -0.13, 0.47, 0.30, 0.09, -0.09),
+        ]
+        result += instant.map { $0.recipe(in: .instant) }
+        let digital: [CreativeLook] = [
+            .init("ccd-daylight", "CCD Daylight", "Pocket CCD-inspired / crisp blue skies", .standard,
+                  0.00, -0.03, -0.02, 1.15, 1.12, -0.04, 0.01, 0.05, 0.08, 0.00, 0.14),
+            .init("ccd-twilight", "CCD Twilight", "Early digital mood / cool evening color", .standard,
+                  -0.08, -0.09, 0.05, 1.03, 1.09, -0.12, 0.04, 0.18, 0.12, 0.04, 0.10),
+            .init("pocket-positive", "Pocket Positive", "Street compact-inspired / vivid reds", .standard,
+                  -0.03, -0.04, -0.07, 1.19, 1.16, 0.04, 0.02, 0.04, 0.14, 0.00, 0.16),
+            .init("pocket-negative", "Pocket Negative", "Street compact-inspired / muted earth", .classicChrome,
+                  0.02, -0.21, 0.18, 0.87, 1.00, 0.07, -0.02, 0.12, 0.10, 0.02, 0.04),
+            .init("rangefinder-color", "Rangefinder Color", "Crisp edges / restrained primary color", .standard,
+                  -0.03, -0.08, -0.06, 0.96, 1.14, 0.01, 0.00, 0.03, 0.11, 0.00, 0.18),
+            .init("rangefinder-soft", "Rangefinder Soft", "Gentle mids / warm portrait rendering", .proNegStandard,
+                  0.08, -0.22, 0.14, 0.94, 0.98, 0.06, 0.02, 0.02, 0.08, 0.01, -0.07),
+            .init("mirrorless-clean", "Mirrorless Clean", "Neutral modern color / low texture", .standard,
+                  0.00, -0.10, 0.08, 1.00, 1.03, 0.00, 0.00, 0.00, 0.00, 0.00, 0.07),
+            .init("mirrorless-vivid", "Mirrorless Vivid", "Crisp detail / high color separation", .standard,
+                  -0.03, -0.06, 0.02, 1.22, 1.12, 0.01, -0.01, 0.00, 0.03, 0.00, 0.19),
+            .init("mirrorless-portrait", "Mirrorless Portrait", "Gentle skin / soft local contrast", .standard,
+                  0.10, -0.22, 0.18, 0.95, 0.96, 0.04, 0.03, 0.00, 0.03, 0.01, -0.08),
+            .init("bridge-zoom", "Bridge Zoom", "Early bridge-camera mood / crisp greens", .standard,
+                  -0.01, -0.04, -0.04, 1.10, 1.10, -0.02, -0.04, 0.08, 0.13, 0.00, 0.17),
+            .init("pocket-flash", "Pocket Flash Color", "Direct-flash aesthetic / does not fire flash", .standard,
+                  0.05, 0.03, -0.11, 1.14, 1.19, 0.03, 0.03, 0.10, 0.25, 0.04, 0.13),
+            .init("pocket-soft", "Pocket Soft", "Compact-camera mood / gentle highlights", .standard,
+                  0.12, -0.25, 0.16, 0.98, 0.94, 0.08, 0.01, 0.05, 0.09, 0.06, -0.10),
+            .init("cmos-studio", "CMOS Studio", "Clean neutral whites / precise mids", .standard,
+                  0.04, -0.16, 0.09, 1.02, 1.06, 0.00, 0.01, 0.00, 0.01, 0.00, 0.11),
+            .init("cmos-night", "CMOS Night Color", "Cool low-key mood / no exposure stacking", .standard,
+                  -0.07, -0.19, 0.20, 0.92, 1.04, -0.08, 0.02, 0.04, 0.08, 0.05, -0.02),
+            .init("toy-digital", "Toy Digital", "Punchy low-fi color / heavy corner shade", .standard,
+                  -0.02, 0.08, -0.16, 1.29, 1.24, 0.07, -0.05, 0.23, 0.44, 0.04, 0.09),
+            .init("compact-sunset", "Compact Sunset", "Warm compact style / rich evening color", .standard,
+                  0.01, -0.18, 0.10, 1.10, 1.07, 0.16, 0.03, 0.06, 0.12, 0.06, 0.04),
+        ]
+        result += digital.map { $0.recipe(in: .digital) }
+        let experimental: [CreativeLook] = [
+            .init("cross-process", "Cross Process", "Cyan shadows / shifted warm highlights", .standard,
+                  -0.03, -0.03, -0.05, 1.22, 1.18, -0.05, -0.12, 0.25, 0.17, 0.06, 0.07),
+            .init("red-dusk", "Red Dusk", "Red-cast fantasy / low-key color", .standard,
+                  -0.10, -0.09, 0.10, 0.93, 1.10, 0.27, 0.11, 0.32, 0.23, 0.11, -0.03),
+            .init("mint-dream", "Mint Dream", "Mint shadows / soft pink midtones", .astia,
+                  0.17, -0.33, 0.28, 0.81, 0.90, -0.10, -0.10, 0.20, 0.09, 0.12, -0.14),
+            .init("violet-hour", "Violet Hour", "Purple cast / cool dreamlike color", .standard,
+                  -0.03, -0.20, 0.16, 0.98, 1.04, -0.15, 0.19, 0.27, 0.16, 0.14, -0.08),
+            .init("solar-gold", "Solar Gold", "Hot gold / dense summer reds", .classicNegative,
+                  0.08, 0.04, -0.09, 1.14, 1.16, 0.25, 0.02, 0.22, 0.20, 0.16, 0.03),
+            .init("washed-cyan", "Washed Cyan", "Faded cyan / experimental dye mood", .standard,
+                  0.13, -0.35, 0.31, 0.75, 0.88, -0.16, -0.06, 0.37, 0.17, 0.08, -0.12),
+        ]
+        result += experimental.map { $0.recipe(in: .experimental) }
+        let monochrome: [CreativeLook] = [
+            .init("silver-100", "Silver 100", "Fine neutral grain / everyday monochrome", .acros,
+                  0.02, -0.12, 0.09, 0, 1.06, 0, 0, 0.16, 0.06, 0.01, 0.08),
+            .init("silver-400", "Silver 400", "Classic grain / documentary contrast", .acros,
+                  0.00, -0.04, 0.03, 0, 1.13, 0, 0, 0.34, 0.10, 0.02, 0.12),
+            .init("silver-1600", "Silver 1600", "Pushed texture / dense midtones", .acros,
+                  -0.08, 0.08, -0.06, 0, 1.24, 0, 0, 0.60, 0.15, 0.04, 0.17),
+            .init("fine-25", "Fine 25", "Smooth grayscale / crisp studio light", .monochrome,
+                  0.04, -0.18, 0.12, 0, 1.03, 0, 0, 0.05, 0.02, 0.00, 0.10),
+            .init("street-hard", "Street Hard", "Hard blacks / bold reportage", .acrosRed,
+                  -0.12, 0.11, -0.17, 0, 1.30, 0, 0, 0.47, 0.19, 0.02, 0.23),
+            .init("street-soft", "Street Soft", "Open shadows / gentle reportage", .acros,
+                  0.08, -0.28, 0.24, 0, 0.95, 0, 0, 0.29, 0.09, 0.02, -0.04),
+            .init("portrait-green", "Portrait Green Filter", "Green-channel emphasis / nuanced skin", .acrosGreen,
+                  0.07, -0.22, 0.17, 0, 1.01, 0, 0, 0.18, 0.06, 0.02, -0.06),
+            .init("landscape-red", "Landscape Red Filter", "Dark skies / dramatic cloud contrast", .acrosRed,
+                  -0.07, 0.05, -0.08, 0, 1.20, 0, 0, 0.21, 0.10, 0.01, 0.15),
+            .init("classic-yellow", "Classic Yellow Filter", "Balanced skin / gentle sky separation", .acrosYellow,
+                  0.01, -0.12, 0.07, 0, 1.10, 0, 0, 0.26, 0.07, 0.02, 0.09),
+            .init("matte-paper", "Matte Paper", "Lifted blacks / soft fiber-print mood", .monochrome,
+                  0.12, -0.36, 0.34, 0, 0.87, 0, 0, 0.31, 0.12, 0.05, -0.12),
+            .init("gloss-paper", "Gloss Paper", "Dense blacks / brilliant print whites", .acros,
+                  -0.04, 0.07, -0.12, 0, 1.22, 0, 0, 0.12, 0.08, 0.01, 0.17),
+            .init("noir-rain", "Noir Rain", "Deep cool grayscale / wet streets", .acrosRed,
+                  -0.15, 0.01, -0.13, 0, 1.25, 0, 0, 0.39, 0.24, 0.08, 0.13),
+            .init("high-key", "High Key Silver", "Airy whites / gentle portraits", .acrosGreen,
+                  0.28, -0.35, 0.28, 0, 0.91, 0, 0, 0.14, 0.02, 0.04, -0.10),
+            .init("low-key", "Low Key Silver", "Dense midtones / dark studio mood", .acros,
+                  -0.26, -0.05, -0.18, 0, 1.19, 0, 0, 0.20, 0.22, 0.01, 0.11),
+            .init("warm-fiber", "Warm Fiber", "Warm silver tone / soft paper texture", .monochrome,
+                  0.05, -0.22, 0.20, 0, 0.98, 0, 0, 0.28, 0.12, 0.04, -0.02),
+            .init("cool-silver", "Cool Silver", "Cool silver tone / clean tonal detail", .acros,
+                  0.00, -0.14, 0.08, 0, 1.12, 0, 0, 0.17, 0.08, 0.01, 0.14),
+            .init("selenium", "Selenium Mood", "Subtle purple tone / dense darks", .acros,
+                  -0.04, -0.08, -0.06, 0, 1.16, 0, 0, 0.23, 0.14, 0.02, 0.09),
+            .init("copper-print", "Copper Print", "Warm brown tone / archival print mood", .sepia,
+                  0.06, -0.24, 0.20, 0, 0.97, 0, 0, 0.34, 0.19, 0.05, -0.03),
+            .init("blue-print", "Blue Print", "Blue-toned monochrome / graphic mood", .monochrome,
+                  0.03, -0.14, 0.08, 0, 1.11, 0, 0, 0.12, 0.08, 0.01, 0.12),
+            .init("press-3200", "Press 3200", "Coarse grain / pushed reporting", .acrosYellow,
+                  -0.09, 0.12, -0.05, 0, 1.27, 0, 0, 0.78, 0.16, 0.07, 0.19),
+            .init("night-silver", "Night Silver", "Soft highlight roll-off / textured darks", .acros,
+                  -0.12, -0.22, 0.09, 0, 1.14, 0, 0, 0.51, 0.23, 0.19, -0.05),
+            .init("architecture", "Architectural Silver", "Clean geometry / crisp neutral edges", .monochrome,
+                  -0.03, -0.07, -0.03, 0, 1.18, 0, 0, 0.08, 0.04, 0.00, 0.26),
+            .init("soft-charcoal", "Soft Charcoal", "Muted graphite / gentle texture", .acrosGreen,
+                  0.10, -0.31, 0.30, 0, 0.90, 0, 0, 0.42, 0.11, 0.06, -0.16),
+            .init("silver-rangefinder", "Silver Rangefinder", "Rangefinder-inspired / fine tonal separation", .monochrome,
+                  0.00, -0.10, 0.02, 0, 1.15, 0, 0, 0.09, 0.09, 0.00, 0.18),
+        ]
+        result += monochrome.map { $0.recipe(in: .monochrome) }
+        return result
+    }()
 }
