@@ -26,7 +26,11 @@
     "FilmyCameraUITests/StoreScreenshotTests": "store-media",
     "FilmyCameraTests/PhotoPrintCompositorTests": "integration",
     "FilmyCameraTests/LookLibraryTests": "unit",
-    "FilmyCameraUITests/LookLibraryUITests": "e2e"
+    "FilmyCameraUITests/LookLibraryUITests": "e2e",
+    "FilmyCameraTests/CatalogRenderAcceptanceTests": "integration",
+    "FilmyCameraTests/CaptureWorkflowPolicyTests": "unit",
+    "FilmyCameraTests/ExpandedCreativeCatalogTests": "unit",
+    "FilmyCameraUITests/CaptureSetupUITests": "e2e"
   },
   "overrides": {
     "FilmyCameraUITests/FilmyCameraUITests/testSimulatorFallbackExposesReadableStateWithoutPreviewAction": "simulator-e2e",

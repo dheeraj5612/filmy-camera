@@ -1,4 +1,5 @@
 import Foundation
+import AVKit
 import SwiftUI
 import UIKit
 
@@ -72,7 +73,12 @@ enum ViewfinderLayout {
     /// is what is kept.
     static let fullWidthThreshold: CGFloat = 0.82
 
-    static func size(available: CGSize, isLandscape: Bool) -> CGSize {
+    static func size(available: CGSize, isLandscape: Bool, aspect: CaptureAspect = .viewfinder) -> CGSize {
+        guard available.width.isFinite, available.height.isFinite else { return .zero }
+        if let ratio = aspect.ratio(isLandscape: isLandscape), available.width > 0, available.height > 0 {
+            let width = min(available.width, available.height * CGFloat(ratio))
+            return CGSize(width: width, height: width / CGFloat(ratio))
+        }
         guard available.width > 0, available.height > 0 else { return .zero }
         let aspect = isLandscape ? landscapeAspect : portraitAspect
         let idealHeight = available.width / aspect
@@ -106,6 +112,16 @@ struct CameraScreen: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @AppStorage("showGrid") private var showGrid = true
     @StateObject private var livePreviews = LiveRecipePreviewStore()
+    @StateObject private var countdown = CaptureCountdown()
+    @StateObject private var assists = CompositionAssistStore()
+    @State private var isShowingCaptureSetup = false
+    @AppStorage("captureDelay") private var captureDelay = CaptureDelay.off
+    @AppStorage("captureAspect") private var captureAspect = CaptureAspect.viewfinder
+    @AppStorage("compositionGuide") private var compositionGuide = CompositionGuide.thirds
+    @AppStorage("showHistogram") private var showHistogram = false
+    @AppStorage("showZebras") private var showZebras = false
+    @AppStorage("showFocusPeaking") private var showFocusPeaking = false
+    @AppStorage("showHorizonLevel") private var showHorizonLevel = false
     @State private var recipeForDetail: FilmRecipe?
     @State private var isShowingTools: Bool
     @State private var isShowingManualControls = false
@@ -178,10 +194,12 @@ struct CameraScreen: View {
                 }
             }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: viewModel.toastMessage)
-            .allowsHitTesting(!isReviewing)
-            .disabled(isReviewing)
+            .allowsHitTesting(!isReviewing && !countdown.state.isActive)
+            .disabled(isReviewing || countdown.state.isActive)
             .accessibilityElement(children: .contain)
-            .accessibilityHidden(isReviewing)
+            .accessibilityHidden(isReviewing || countdown.state.isActive)
+
+            if countdown.state.isActive { countdownOverlay.zIndex(2) }
 
             if let image = viewModel.reviewImage, let recipe = viewModel.reviewRecipe {
                 CaptureReviewView(
@@ -211,6 +229,19 @@ struct CameraScreen: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .zIndex(1)
             }
+        }
+        .modifier(CameraHardwareShutterModifier(enabled: canTriggerShutter, action: capture))
+        .onChange(of: assistOptions, initial: true) { _, _ in updateCompositionAssists() }
+        .onChange(of: isCameraVisibleForAssists, initial: true) { _, visible in
+            if !visible { countdown.cancel() }
+            updateCompositionAssists()
+        }
+        .onChange(of: captureAspect) { _, _ in countdown.cancel(); assists.stop(); updateCompositionAssists() }
+        .sheet(isPresented: $isShowingCaptureSetup) {
+            CaptureSetupView()
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(FilmyTheme.background)
         }
         // Visible recipe choices render over the live scene. When the drawer
         // and detail are both closed, their frame consumer is detached so the
@@ -289,6 +320,8 @@ struct CameraScreen: View {
         .onDisappear {
             // The session may stay warm, but nothing here consumes frames any
             // more: unregister the swatch handler before this view is released.
+            countdown.cancel()
+            assists.stop()
             livePreviews.detach()
             livePreviews.clear()
             camera.stop(after: CameraActivityPolicy.inactiveGracePeriod)
@@ -406,7 +439,7 @@ struct CameraScreen: View {
 
     private func viewfinderStage(isLandscape: Bool, overlaysTopBar: Bool) -> some View {
         GeometryReader { proxy in
-            let size = ViewfinderLayout.size(available: proxy.size, isLandscape: isLandscape)
+            let size = ViewfinderLayout.size(available: proxy.size, isLandscape: isLandscape, aspect: captureAspect)
 
             viewfinder(size: size, overlaysTopBar: overlaysTopBar)
                 .frame(width: size.width, height: size.height)
@@ -429,7 +462,12 @@ struct CameraScreen: View {
             }
 
             if showGrid && camera.isRunning {
-                RuleOfThirdsGrid()
+                CompositionGrid(guide: compositionGuide)
+            }
+
+            if camera.isRunning && !isReviewing {
+                CompositionAssistOverlay(store: assists, showHistogram: showHistogram, showLevel: showHorizonLevel)
+                    .allowsHitTesting(false)
             }
 
             if let focusPoint {
@@ -600,6 +638,8 @@ struct CameraScreen: View {
             .layoutPriority(-1)
 
             Spacer(minLength: 4)
+
+            captureSetupButton
 
             activeCaptureIndicators
 
@@ -906,8 +946,8 @@ struct CameraScreen: View {
         } else {
             CaptureButton(
                 isCapturing: viewModel.isCapturing,
-                isEnabled: !camera.manualControls.isApplying,
-                unavailableLabel: "Applying camera settings",
+                isEnabled: !camera.manualControls.isApplying && framingIsReady,
+                unavailableLabel: framingIsReady ? "Applying camera settings" : "Updating framing",
                 unavailableHint: "Wait for the camera to finish applying your settings",
                 action: capture
             )
@@ -1203,9 +1243,16 @@ struct CameraScreen: View {
     // MARK: - Actions
 
     private func capture() {
-        guard !camera.manualControls.isApplying else { return }
+        guard canTriggerShutter else { return }
         closeControlDrawers()
-        viewModel.capture(camera: camera)
+        if captureDelay == .off {
+            viewModel.capture(camera: camera)
+        } else {
+            countdown.start(seconds: captureDelay.rawValue) {
+                guard canTriggerShutter else { return }
+                viewModel.capture(camera: camera)
+            }
+        }
     }
 
     private func closeControlDrawers() {
@@ -1446,5 +1493,225 @@ private struct CameraLensMenu: View {
 
     private var selectedLensTitle: String {
         camera.availableLenses.first(where: { $0.id == camera.selectedLensID })?.title ?? "Lens"
+    }
+}
+
+
+// MARK: - Capture setup and assist presentation
+
+extension CameraScreen {
+    private var isCameraVisibleForAssists: Bool {
+        scenePhase == .active && isCameraTabActive && camera.isRunning && camera.availability == .running && !isReviewing && !isImporting
+            && !viewModel.isCapturing && recipeForDetail == nil && !isShowingLookLibrary
+            && !isShowingManualControls && !isShowingCaptureSetup
+    }
+    private var canTriggerShutter: Bool {
+        isCameraVisibleForAssists && !viewModel.isSaving && !camera.manualControls.isApplying && !countdown.state.isActive && framingIsReady
+    }
+    private var framingIsReady: Bool {
+        guard captureAspect != .viewfinder else { return true }
+        let viewport = camera.previewViewportSize
+        guard viewport.width > 0, viewport.height > 0,
+              let ratio = captureAspect.ratio(isLandscape: viewport.width > viewport.height) else { return false }
+        return abs(Double(viewport.width / viewport.height) - ratio) < 0.015
+    }
+    private var assistOptions: CompositionAssistStore.Options {
+        .init(histogram: showHistogram, zebras: showZebras, peaking: showFocusPeaking, level: showHorizonLevel)
+    }
+    private func updateCompositionAssists() {
+        assists.configure(camera: camera, options: assistOptions, active: isCameraVisibleForAssists)
+    }
+    private var captureSetupButton: some View {
+        Button {
+            closeControlDrawers()
+            isShowingCaptureSetup = true
+        } label: {
+            Image(systemName: captureDelay == .off ? "viewfinder" : "timer")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(captureDelay == .off ? FilmyTheme.primary : FilmyTheme.accent)
+                .frame(width: 44, height: 44)
+                .background { ChromeShapeBackground(shape: Circle()) }
+                .contentShape(Circle())
+        }
+        .buttonStyle(.pressable)
+        .accessibilityIdentifier("capture-setup-open")
+        .accessibilityLabel("Capture setup")
+        .accessibilityValue("Timer \(captureDelay.title), \(captureAspect.title)")
+        .accessibilityHint("Choose a timer, aspect ratio, grid, histogram, zebras, focus peaking, or level")
+    }
+    private var countdownOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.32).ignoresSafeArea()
+            VStack(spacing: 20) {
+                Text("\(countdown.state.remaining)")
+                    .font(.system(size: 84, weight: .medium, design: .rounded))
+                    .monospacedDigit()
+                    .accessibilityLabel("Photo in \(countdown.state.remaining) seconds")
+                    .accessibilityIdentifier("capture-countdown-value")
+                Button { countdown.cancel() } label: {
+                    Label("Cancel timer", systemImage: "xmark")
+                        .padding(.horizontal, 22).frame(minHeight: 52)
+                        .background(FilmyTheme.panel, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("capture-countdown-cancel")
+            }
+            .foregroundStyle(FilmyTheme.primary)
+            .accessibilityElement(children: .contain)
+            .accessibilityAddTraits(.isModal)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("capture-countdown")
+    }
+}
+
+private struct CameraHardwareShutterModifier: ViewModifier {
+    let enabled: Bool
+    let action: () -> Void
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(iOS 17.2, *) {
+            content.onCameraCaptureEvent(isEnabled: enabled) { event in
+                if event.phase == .ended { action() }
+            }
+        } else {
+            content
+        }
+    }
+}
+
+struct CaptureSetupView: View {
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage("captureDelay") private var delay = CaptureDelay.off
+    @AppStorage("captureAspect") private var aspect = CaptureAspect.viewfinder
+    @AppStorage("compositionGuide") private var guide = CompositionGuide.thirds
+    @AppStorage("showGrid") private var showGrid = true
+    @AppStorage("showHistogram") private var histogram = false
+    @AppStorage("showZebras") private var zebras = false
+    @AppStorage("showFocusPeaking") private var peaking = false
+    @AppStorage("showHorizonLevel") private var level = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Picker("Self-timer", selection: $delay) {
+                        ForEach(CaptureDelay.allCases) { Text($0.title).tag($0) }
+                    }.accessibilityIdentifier("capture-delay-picker")
+                    Picker("Photo aspect", selection: $aspect) {
+                        ForEach(CaptureAspect.allCases) { Text($0.title).tag($0) }
+                    }.accessibilityIdentifier("capture-aspect-picker")
+                } header: { Text("Capture") } footer: {
+                    Text("The viewfinder and saved photo use the same crop. Timer cancellation, leaving the camera, or an interruption prevents the shot. Imports keep their original aspect.")
+                }
+                Section("Composition") {
+                    Toggle("Show grid", isOn: $showGrid).accessibilityIdentifier("capture-grid-toggle")
+                    Picker("Grid style", selection: $guide) {
+                        ForEach(CompositionGuide.allCases) { Text($0.title).tag($0) }
+                    }.accessibilityIdentifier("capture-guide-picker")
+                    Toggle("Horizon level", isOn: $level).accessibilityIdentifier("capture-level-toggle")
+                }
+                Section {
+                    Toggle("Luminance histogram", isOn: $histogram).accessibilityIdentifier("capture-histogram-toggle")
+                    Toggle("Highlight zebras", isOn: $zebras).accessibilityIdentifier("capture-zebras-toggle")
+                    Toggle("Focus peaking", isOn: $peaking).accessibilityIdentifier("capture-peaking-toggle")
+                } header: { Text("Live preview aids") } footer: {
+                    Text("Analyzes the unfiltered camera preview, not RAW sensor data or the finished look. Red edges indicate local contrast, not guaranteed focus. All guides are preview-only and never appear in saved photos. Updates are limited to four per second.")
+                }
+                Section {
+                    Text("Use supported volume or Camera Control shutter events while the camera is active. These are disabled during review, imports, countdowns, and setup. Camera Control focus/zoom customization is not included.")
+                        .foregroundStyle(FilmyTheme.secondary)
+                } header: { Text("Hardware shutter") }
+            }
+            .scrollContentBackground(.hidden)
+            .background(FilmyTheme.background)
+            .navigationTitle("Capture setup")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }.accessibilityIdentifier("capture-setup-done")
+                }
+            }
+        }
+        .tint(FilmyTheme.accent)
+        .preferredColorScheme(.dark)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("capture-setup")
+    }
+}
+
+private struct CompositionGrid: View {
+    let guide: CompositionGuide
+    var body: some View {
+        GeometryReader { proxy in
+            Path { path in
+                let w = proxy.size.width, h = proxy.size.height
+                switch guide {
+                case .thirds, .golden:
+                    let positions: [CGFloat] = guide == .thirds ? [1.0 / 3, 2.0 / 3] : [0.382, 0.618]
+                    for p in positions {
+                        path.move(to: CGPoint(x: w * p, y: 0)); path.addLine(to: CGPoint(x: w * p, y: h))
+                        path.move(to: CGPoint(x: 0, y: h * p)); path.addLine(to: CGPoint(x: w, y: h * p))
+                    }
+                case .square:
+                    let edge = min(w, h)
+                    path.addRect(CGRect(x: (w - edge) / 2, y: (h - edge) / 2, width: edge, height: edge))
+                case .crosshair:
+                    path.move(to: CGPoint(x: w / 2 - 14, y: h / 2)); path.addLine(to: CGPoint(x: w / 2 + 14, y: h / 2))
+                    path.move(to: CGPoint(x: w / 2, y: h / 2 - 14)); path.addLine(to: CGPoint(x: w / 2, y: h / 2 + 14))
+                }
+            }
+            .stroke(.white.opacity(0.38), lineWidth: 0.7)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct CompositionAssistOverlay: View {
+    @ObservedObject var store: CompositionAssistStore
+    let showHistogram: Bool
+    let showLevel: Bool
+    var body: some View {
+        ZStack {
+            if let image = store.overlay {
+                Image(uiImage: image).resizable().interpolation(.none)
+                    .accessibilityHidden(true)
+            }
+            if showLevel, let degrees = store.horizon {
+                HStack(spacing: 6) {
+                    Rectangle().frame(width: 26, height: 2)
+                    Text(abs(degrees) < 1 ? "Level" : String(format: "%+.0f°", degrees))
+                        .font(.caption.monospacedDigit().weight(.semibold))
+                    Rectangle().frame(width: 26, height: 2)
+                }
+                .foregroundStyle(abs(degrees) < 1 ? FilmyTheme.accent : .white)
+                .padding(8).background(.black.opacity(0.55), in: Capsule())
+                .accessibilityLabel("Horizon \(String(format: "%.0f", degrees)) degrees")
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            if showHistogram, !store.histogram.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("PREVIEW LUMA").font(.system(size: 9, weight: .bold))
+                    Canvas { context, size in
+                        let maximum = max(store.histogram.max() ?? 1, 1)
+                        let step = size.width / CGFloat(store.histogram.count)
+                        var path = Path()
+                        for (index, value) in store.histogram.enumerated() {
+                            let height = size.height * CGFloat(value) / CGFloat(maximum)
+                            path.addRect(CGRect(x: CGFloat(index) * step, y: size.height - height,
+                                                width: max(step - 0.5, 0.5), height: height))
+                        }
+                        context.fill(path, with: .color(.white))
+                    }.frame(width: 102, height: 36)
+                    Text(String(format: "Highlights %.1f%%", store.clippingPercent)).font(.system(size: 9))
+                }
+                .foregroundStyle(.white).padding(8)
+                .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 10))
+                .padding(.leading, 8).padding(.top, 62)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Preview luminance histogram. \(String(format: "%.1f", store.clippingPercent)) percent highlight warning")
+            }
+        }
     }
 }

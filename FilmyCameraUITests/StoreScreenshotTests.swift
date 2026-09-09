@@ -469,3 +469,49 @@ final class LookLibraryUITests: XCTestCase {
         add(attachment)
     }
 }
+
+
+@MainActor
+final class CaptureSetupUITests: XCTestCase {
+    func testCaptureSetupOpensAndKeepsAidsAcrossRelaunch() {
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        app.launchEnvironment["FILMY_TEST_DEFAULTS_SUITE"] = "FilmyCameraUITests.Setup.\(UUID().uuidString)"
+        app.launchArguments = ["-ui-testing"]
+        app.launch()
+        defer { app.terminate() }
+        let setup = app.buttons["capture-setup-open"]
+        XCTAssertTrue(setup.waitForExistence(timeout: 15)); setup.tap()
+        let zebra = app.switches["capture-zebras-toggle"]
+        if !zebra.isHittable { app.swipeUp() }
+        XCTAssertTrue(zebra.waitForExistence(timeout: 5)); zebra.tap()
+        XCTAssertEqual(zebra.value as? String, "1")
+        app.buttons["capture-setup-done"].tap()
+        XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 5))
+        app.terminate(); app.launch()
+        XCTAssertTrue(setup.waitForExistence(timeout: 15)); setup.tap()
+        if !zebra.isHittable { app.swipeUp() }
+        XCTAssertTrue(zebra.waitForExistence(timeout: 5)); XCTAssertEqual(zebra.value as? String, "1")
+    }
+
+    func testNewDigitalStyleCanBeSearchedSelectedAndPersisted() {
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        app.launchEnvironment["FILMY_TEST_DEFAULTS_SUITE"] = "FilmyCameraUITests.Catalog.\(UUID().uuidString)"
+        app.launchArguments = ["-ui-testing"]
+        app.launch()
+        defer { app.terminate() }
+        let menu = app.buttons["recipe-menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 15)); menu.tap()
+        app.buttons["look-library-open"].tap()
+        let search = app.textFields["look-library-search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10)); search.tap(); search.typeText("CCD Daylight\n")
+        let style = app.buttons["library-recipe-digital-ccd-daylight"]
+        XCTAssertTrue(style.waitForExistence(timeout: 5)); style.tap()
+        XCTAssertTrue(menu.waitForExistence(timeout: 5)); XCTAssertTrue(menu.label.contains("CCD Daylight"))
+        app.terminate(); app.launch()
+        XCTAssertTrue(menu.waitForExistence(timeout: 15)); XCTAssertTrue(menu.label.contains("CCD Daylight"))
+    }
+}

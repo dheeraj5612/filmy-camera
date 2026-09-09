@@ -226,3 +226,232 @@ final class RecipeRenderGalleryTests: XCTestCase {
         }
     }
 }
+
+
+import ImageIO
+
+/// Always-on catalog acceptance. Uses bundled/synthetic fixtures, never skips
+/// for absent private photographs and never writes to the user's Photos.
+final class CatalogRenderAcceptanceTests: XCTestCase {
+    func testRender_provia_standard() throws { try verifyRecipe("provia-standard") }
+    func testRender_classic_chrome() throws { try verifyRecipe("classic-chrome") }
+    func testRender_velvia_vivid() throws { try verifyRecipe("velvia-vivid") }
+    func testRender_astia_soft() throws { try verifyRecipe("astia-soft") }
+    func testRender_pro_neg_high() throws { try verifyRecipe("pro-neg-high") }
+    func testRender_eterna_cinema() throws { try verifyRecipe("eterna-cinema") }
+    func testRender_acros_monochrome() throws { try verifyRecipe("acros-monochrome") }
+    func testRender_sepia_archive() throws { try verifyRecipe("sepia-archive") }
+    func testRender_acros_neutral_filter() throws { try verifyRecipe("acros-neutral-filter") }
+    func testRender_acros_yellow_filter() throws { try verifyRecipe("acros-yellow-filter") }
+    func testRender_acros_red_filter() throws { try verifyRecipe("acros-red-filter") }
+    func testRender_acros_green_filter() throws { try verifyRecipe("acros-green-filter") }
+    func testRender_classic_negative() throws { try verifyRecipe("classic-negative") }
+    func testRender_nostalgic_negative() throws { try verifyRecipe("nostalgic-negative") }
+    func testRender_eterna_bleach_bypass() throws { try verifyRecipe("eterna-bleach-bypass") }
+    func testRender_pro_neg_standard() throws { try verifyRecipe("pro-neg-standard") }
+    func testRender_reala_ace() throws { try verifyRecipe("reala-ace") }
+    func testRender_g7x_compact() throws { try verifyRecipe("g7x-compact") }
+    func testRender_nostalgic_summer() throws { try verifyRecipe("nostalgic-summer") }
+    func testRender_aurea_golden() throws { try verifyRecipe("aurea-golden") }
+    func testRender_eternal_pastel() throws { try verifyRecipe("eternal-pastel") }
+    func testRender_crepuscolo_blue() throws { try verifyRecipe("crepuscolo-blue") }
+    func testRender_black_ice() throws { try verifyRecipe("black-ice") }
+    func testRender_matter_monochrome() throws { try verifyRecipe("matter-monochrome") }
+    func testRender_honey_portrait() throws { try verifyRecipe("honey-portrait") }
+    func testRender_pacifica_100() throws { try verifyRecipe("pacifica-100") }
+    func testRender_desert_daydream() throws { try verifyRecipe("desert-daydream") }
+    func testRender_quiet_provia() throws { try verifyRecipe("quiet-provia") }
+    func testRender_velvet_haze() throws { try verifyRecipe("velvet-haze") }
+    func testRender_pastel_400() throws { try verifyRecipe("pastel-400") }
+    func testRender_archive_64() throws { try verifyRecipe("archive-64") }
+    func testRender_tungsten_800() throws { try verifyRecipe("tungsten-800") }
+    func testRender_pushed_tungsten() throws { try verifyRecipe("pushed-tungsten") }
+    func testRender_pacific_blues() throws { try verifyRecipe("pacific-blues") }
+    func testRender_green_800() throws { try verifyRecipe("green-800") }
+    func testRender_hp5_texture() throws { try verifyRecipe("hp5-texture") }
+    func testRender_negative_portrait_160() throws { try verifyRecipe("negative-portrait-160") }
+    func testRender_negative_portrait_400() throws { try verifyRecipe("negative-portrait-400") }
+    func testRender_negative_portrait_800() throws { try verifyRecipe("negative-portrait-800") }
+    func testRender_negative_gold_200() throws { try verifyRecipe("negative-gold-200") }
+    func testRender_negative_consumer_400() throws { try verifyRecipe("negative-consumer-400") }
+    func testRender_negative_coastal_100() throws { try verifyRecipe("negative-coastal-100") }
+    func testRender_negative_city_200() throws { try verifyRecipe("negative-city-200") }
+    func testRender_negative_soft_cream() throws { try verifyRecipe("negative-soft-cream") }
+    func testRender_negative_olive_400() throws { try verifyRecipe("negative-olive-400") }
+    func testRender_negative_rose_200() throws { try verifyRecipe("negative-rose-200") }
+    func testRender_negative_pastel_day() throws { try verifyRecipe("negative-pastel-day") }
+    func testRender_negative_woodland() throws { try verifyRecipe("negative-woodland") }
+    func testRender_negative_copper_800() throws { try verifyRecipe("negative-copper-800") }
+    func testRender_negative_winter_200() throws { try verifyRecipe("negative-winter-200") }
+    func testRender_negative_travel_400() throws { try verifyRecipe("negative-travel-400") }
+    func testRender_negative_faded_album() throws { try verifyRecipe("negative-faded-album") }
+    func testRender_slide_chrome_50() throws { try verifyRecipe("slide-chrome-50") }
+    func testRender_slide_chrome_100() throws { try verifyRecipe("slide-chrome-100") }
+    func testRender_slide_mountain_50() throws { try verifyRecipe("slide-mountain-50") }
+    func testRender_slide_warm_projector() throws { try verifyRecipe("slide-warm-projector") }
+    func testRender_slide_cool_chrome() throws { try verifyRecipe("slide-cool-chrome") }
+    func testRender_slide_sunset_chrome() throws { try verifyRecipe("slide-sunset-chrome") }
+    func testRender_slide_botanical() throws { try verifyRecipe("slide-botanical") }
+    func testRender_slide_soft_transparency() throws { try verifyRecipe("slide-soft-transparency") }
+    func testRender_slide_blue_hour() throws { try verifyRecipe("slide-blue-hour") }
+    func testRender_slide_archive_projector() throws { try verifyRecipe("slide-archive-projector") }
+    func testRender_cinema_daylight_250() throws { try verifyRecipe("cinema-daylight-250") }
+    func testRender_cinema_tungsten_500() throws { try verifyRecipe("cinema-tungsten-500") }
+    func testRender_cinema_night_neon() throws { try verifyRecipe("cinema-night-neon") }
+    func testRender_cinema_silver_screen() throws { try verifyRecipe("cinema-silver-screen") }
+    func testRender_cinema_amber_teal() throws { try verifyRecipe("cinema-amber-teal") }
+    func testRender_cinema_matinee() throws { try verifyRecipe("cinema-matinee") }
+    func testRender_cinema_noir_color() throws { try verifyRecipe("cinema-noir-color") }
+    func testRender_cinema_road_movie() throws { try verifyRecipe("cinema-road-movie") }
+    func testRender_cinema_rainy_city() throws { try verifyRecipe("cinema-rainy-city") }
+    func testRender_cinema_summer_feature() throws { try verifyRecipe("cinema-summer-feature") }
+    func testRender_cinema_velvet_night() throws { try verifyRecipe("cinema-velvet-night") }
+    func testRender_cinema_newsreel_color() throws { try verifyRecipe("cinema-newsreel-color") }
+    func testRender_instant_cream_square() throws { try verifyRecipe("instant-cream-square") }
+    func testRender_instant_pastel_square() throws { try verifyRecipe("instant-pastel-square") }
+    func testRender_instant_sun_faded() throws { try verifyRecipe("instant-sun-faded") }
+    func testRender_instant_cool_pack() throws { try verifyRecipe("instant-cool-pack") }
+    func testRender_instant_party_pack() throws { try verifyRecipe("instant-party-pack") }
+    func testRender_instant_warm_pack() throws { try verifyRecipe("instant-warm-pack") }
+    func testRender_instant_soft_focus() throws { try verifyRecipe("instant-soft-focus") }
+    func testRender_instant_expired_pack() throws { try verifyRecipe("instant-expired-pack") }
+    func testRender_digital_ccd_daylight() throws { try verifyRecipe("digital-ccd-daylight") }
+    func testRender_digital_ccd_twilight() throws { try verifyRecipe("digital-ccd-twilight") }
+    func testRender_digital_pocket_positive() throws { try verifyRecipe("digital-pocket-positive") }
+    func testRender_digital_pocket_negative() throws { try verifyRecipe("digital-pocket-negative") }
+    func testRender_digital_rangefinder_color() throws { try verifyRecipe("digital-rangefinder-color") }
+    func testRender_digital_rangefinder_soft() throws { try verifyRecipe("digital-rangefinder-soft") }
+    func testRender_digital_mirrorless_clean() throws { try verifyRecipe("digital-mirrorless-clean") }
+    func testRender_digital_mirrorless_vivid() throws { try verifyRecipe("digital-mirrorless-vivid") }
+    func testRender_digital_mirrorless_portrait() throws { try verifyRecipe("digital-mirrorless-portrait") }
+    func testRender_digital_bridge_zoom() throws { try verifyRecipe("digital-bridge-zoom") }
+    func testRender_digital_pocket_flash() throws { try verifyRecipe("digital-pocket-flash") }
+    func testRender_digital_pocket_soft() throws { try verifyRecipe("digital-pocket-soft") }
+    func testRender_digital_cmos_studio() throws { try verifyRecipe("digital-cmos-studio") }
+    func testRender_digital_cmos_night() throws { try verifyRecipe("digital-cmos-night") }
+    func testRender_digital_toy_digital() throws { try verifyRecipe("digital-toy-digital") }
+    func testRender_digital_compact_sunset() throws { try verifyRecipe("digital-compact-sunset") }
+    func testRender_experimental_cross_process() throws { try verifyRecipe("experimental-cross-process") }
+    func testRender_experimental_red_dusk() throws { try verifyRecipe("experimental-red-dusk") }
+    func testRender_experimental_mint_dream() throws { try verifyRecipe("experimental-mint-dream") }
+    func testRender_experimental_violet_hour() throws { try verifyRecipe("experimental-violet-hour") }
+    func testRender_experimental_solar_gold() throws { try verifyRecipe("experimental-solar-gold") }
+    func testRender_experimental_washed_cyan() throws { try verifyRecipe("experimental-washed-cyan") }
+    func testRender_monochrome_silver_100() throws { try verifyRecipe("monochrome-silver-100") }
+    func testRender_monochrome_silver_400() throws { try verifyRecipe("monochrome-silver-400") }
+    func testRender_monochrome_silver_1600() throws { try verifyRecipe("monochrome-silver-1600") }
+    func testRender_monochrome_fine_25() throws { try verifyRecipe("monochrome-fine-25") }
+    func testRender_monochrome_street_hard() throws { try verifyRecipe("monochrome-street-hard") }
+    func testRender_monochrome_street_soft() throws { try verifyRecipe("monochrome-street-soft") }
+    func testRender_monochrome_portrait_green() throws { try verifyRecipe("monochrome-portrait-green") }
+    func testRender_monochrome_landscape_red() throws { try verifyRecipe("monochrome-landscape-red") }
+    func testRender_monochrome_classic_yellow() throws { try verifyRecipe("monochrome-classic-yellow") }
+    func testRender_monochrome_matte_paper() throws { try verifyRecipe("monochrome-matte-paper") }
+    func testRender_monochrome_gloss_paper() throws { try verifyRecipe("monochrome-gloss-paper") }
+    func testRender_monochrome_noir_rain() throws { try verifyRecipe("monochrome-noir-rain") }
+    func testRender_monochrome_high_key() throws { try verifyRecipe("monochrome-high-key") }
+    func testRender_monochrome_low_key() throws { try verifyRecipe("monochrome-low-key") }
+    func testRender_monochrome_warm_fiber() throws { try verifyRecipe("monochrome-warm-fiber") }
+    func testRender_monochrome_cool_silver() throws { try verifyRecipe("monochrome-cool-silver") }
+    func testRender_monochrome_selenium() throws { try verifyRecipe("monochrome-selenium") }
+    func testRender_monochrome_copper_print() throws { try verifyRecipe("monochrome-copper-print") }
+    func testRender_monochrome_blue_print() throws { try verifyRecipe("monochrome-blue-print") }
+    func testRender_monochrome_press_3200() throws { try verifyRecipe("monochrome-press-3200") }
+    func testRender_monochrome_night_silver() throws { try verifyRecipe("monochrome-night-silver") }
+    func testRender_monochrome_architecture() throws { try verifyRecipe("monochrome-architecture") }
+    func testRender_monochrome_soft_charcoal() throws { try verifyRecipe("monochrome-soft-charcoal") }
+    func testRender_monochrome_silver_rangefinder() throws { try verifyRecipe("monochrome-silver-rangefinder") }
+
+    private func verifyRecipe(_ id: String) throws {
+        try autoreleasepool {
+            let recipe = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == id })
+            XCTAssertTrue(recipe.isValid, id)
+            let data = try JSONEncoder().encode(recipe)
+            XCTAssertEqual(try JSONDecoder().decode(FilmRecipe.self, from: data), recipe)
+            let sample = try XCTUnwrap(UIImage(named: "LookPreviewCafe")?.cgImage, "Bundled public-safe sample required")
+            let bounds = CGRect(x: 0, y: 0, width: 96, height: 128)
+            let cafe = CameraFrameLayout.aspectFill(CIImage(cgImage: sample), in: bounds)
+            let dark = cafe.applyingFilter("CIExposureAdjust", parameters: [kCIInputEVKey: -2.5])
+            let chart = Self.chart(in: bounds)
+            let context = FilmRenderer.sharedContext
+            let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+            var previews: [CGImage] = []
+            for (name, input) in [("color-chart", chart), ("daylight", cafe), ("low-light", dark)] {
+                for quality in [FilmRenderer.Quality.preview, .photo] {
+                    let output = FilmRenderer.render(input, recipe: recipe, quality: quality, grainSeed: 42)
+                    XCTAssertEqual(output.extent, input.extent, "\(id) \(name)")
+                    var pixels = [Float](repeating: 0, count: 96 * 128 * 4)
+                    context.render(output, toBitmap: &pixels, rowBytes: 96 * 4 * MemoryLayout<Float>.size,
+                                   bounds: bounds, format: .RGBAf, colorSpace: colorSpace)
+                    XCTAssertTrue(pixels.allSatisfy { $0.isFinite }, "Nonfinite pixels: \(id) \(name)")
+                    let alpha = stride(from: 3, to: pixels.count, by: 4).map { pixels[$0] }
+                    XCTAssertTrue(alpha.allSatisfy { abs($0 - 1) < 0.002 }, "Opaque source alpha changed: \(id)")
+                    let bitmap = try XCTUnwrap(FilmRenderer.outputCGImage(output, from: bounds), id)
+                    XCTAssertEqual(bitmap.width, 96); XCTAssertEqual(bitmap.height, 128)
+                    if name == "color-chart" {
+                        let values = stride(from: 0, to: pixels.count, by: 4).map { pixels[$0] }
+                        XCTAssertGreaterThan((values.max() ?? 0) - (values.min() ?? 0), 0.05, "Collapsed tonal range: \(id)")
+                    }
+                    if recipe.creativeCollection == .monochrome, recipe.filmBase.monochromeFilter != nil,
+                       recipe.monochromaticColor.warmCool == 0, recipe.monochromaticColor.greenMagenta == 0 {
+                        let chroma = stride(from: 0, to: pixels.count, by: 4).map {
+                            max(abs(pixels[$0] - pixels[$0 + 1]), abs(pixels[$0 + 1] - pixels[$0 + 2]))
+                        }.max() ?? 0
+                        XCTAssertLessThan(chroma, 0.01, "Neutral monochrome contains unintended color: \(id)")
+                    }
+                    if quality == .photo {
+                        let encoded = try XCTUnwrap(PhotoOutputEncoder.jpegData(
+                            for: bitmap, sourceData: Data(), capturedAt: Date(timeIntervalSince1970: 0), recipe: recipe))
+                        let source = try XCTUnwrap(CGImageSourceCreateWithData(encoded as CFData, nil))
+                        let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any])
+                        XCTAssertEqual(properties[kCGImagePropertyPixelWidth as String] as? Int, 96)
+                        XCTAssertEqual(properties[kCGImagePropertyPixelHeight as String] as? Int, 128)
+                        XCTAssertNil(properties[kCGImagePropertyGPSDictionary as String])
+                        let exif = try XCTUnwrap(properties[kCGImagePropertyExifDictionary as String] as? [String: Any])
+                        let comment = try XCTUnwrap(exif[kCGImagePropertyExifUserComment as String] as? String)
+                        let metadata = try JSONDecoder().decode(PhotoOutputEncoder.RecipeProvenanceMetadata.self,
+                                                              from: Data(comment.utf8))
+                        XCTAssertEqual(metadata.recipeID, id)
+                        XCTAssertEqual(metadata.provenance, recipe.provenance)
+                        previews.append(bitmap)
+                    }
+                }
+            }
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1; format.opaque = true
+            let sheet = UIGraphicsImageRenderer(size: CGSize(width: 288, height: 156), format: format).image { context in
+                UIColor.black.setFill(); context.fill(CGRect(x: 0, y: 0, width: 288, height: 156))
+                for (index, bitmap) in previews.enumerated() {
+                    UIImage(cgImage: bitmap).draw(in: CGRect(x: index * 96, y: 28, width: 96, height: 128))
+                }
+                (recipe.name as NSString).draw(at: CGPoint(x: 5, y: 5), withAttributes: [
+                    .font: UIFont.systemFont(ofSize: 12), .foregroundColor: UIColor.white
+                ])
+            }
+            let attachment = XCTAttachment(image: sheet)
+            attachment.name = "catalog-\(id)-chart-daylight-lowlight"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+    }
+
+    private static func chart(in bounds: CGRect) -> CIImage {
+        let width = Int(bounds.width), height = Int(bounds.height)
+        var bytes = [UInt8](repeating: 255, count: width * height * 4)
+        for y in 0..<height {
+            for x in 0..<width {
+                let offset = (y * width + x) * 4
+                if y < height / 2 {
+                    let value = UInt8(x * 255 / (width - 1))
+                    bytes[offset] = value; bytes[offset + 1] = value; bytes[offset + 2] = value
+                } else {
+                    bytes[offset] = UInt8(x * 255 / (width - 1))
+                    bytes[offset + 1] = UInt8((y - height / 2) * 255 / (height / 2 - 1))
+                    bytes[offset + 2] = UInt8(255 - x * 255 / (width - 1))
+                }
+            }
+        }
+        return CIImage(bitmapData: Data(bytes), bytesPerRow: width * 4,
+                       size: bounds.size, format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+    }
+}

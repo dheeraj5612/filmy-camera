@@ -227,7 +227,7 @@ final class LookLibraryTests: XCTestCase {
         let allIDs = (compact + film + mono).map(\.id)
         XCTAssertEqual(Set(allIDs), Set(FilmRecipe.builtIns.map(\.id)))
         XCTAssertEqual(allIDs.count, Set(allIDs).count)
-        XCTAssertTrue(compact.allSatisfy { $0.filmBase == .compactDigital })
+        XCTAssertTrue(compact.allSatisfy { $0.isDigitalCameraStyle })
         XCTAssertTrue(mono.contains { $0.filmBase == .sepia })
         XCTAssertFalse(film.contains { $0.filmBase.monochromeFilter != nil || $0.filmBase == .sepia })
     }

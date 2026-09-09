@@ -583,7 +583,7 @@ public enum FilmRecipeReferenceCatalog {
         disclosure: disclosure,
         entries: entries,
         intentionallyUnlistedBuiltInRecipeIDs: ["sepia-archive", "g7x-compact"]
-            + FilmRecipe.expandedInternetRecipeIDs
+            + FilmRecipe.expandedInternetRecipeIDs + FilmRecipe.originalCreativeRecipeIDs
     )
 
     /// Exports the catalog without exposing any non-catalog renderer state.
