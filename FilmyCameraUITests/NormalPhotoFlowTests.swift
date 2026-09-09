@@ -408,18 +408,19 @@ final class NormalPhotoFlowTests: XCTestCase {
 
         let deadline = Date(timeIntervalSinceNow: timeout)
         repeat {
-            // AX rounds child bounds to display pixels while the panel width
-            // can be fractional. Allow one point at each horizontal edge;
-            // retain the vertical clearance needed to reveal the whole control.
-            let viewport = scrollView.frame.intersection(app.frame).insetBy(dx: -1, dy: 8)
+            // AX rounds child bounds to display pixels. Allow one point around
+            // the target viewport, retaining at least seven points of vertical
+            // clearance for the complete control at either scroll limit.
+            let viewport = scrollView.frame.intersection(app.frame).insetBy(dx: 0, dy: 8)
+            let visibilityBounds = viewport.insetBy(dx: -1, dy: -1)
             let frame = element.frame
             guard viewport.width > 20, viewport.height > 20,
-                  frame.width <= viewport.width, frame.height <= viewport.height else {
+                  frame.width <= visibilityBounds.width, frame.height <= visibilityBounds.height else {
                 let diagnostic = XCTAttachment(string: """
                 Review control cannot fit its scroll viewport.
                 App: \(app.frame)
                 Scroll view: \(scrollView.frame)
-                Visibility viewport (1 pt horizontal tolerance, 8 pt vertical inset): \(viewport)
+                Visibility bounds (1 pt tolerance around 8 pt vertical inset): \(visibilityBounds)
                 Control: \(frame)
                 \(app.debugDescription)
                 """)
@@ -428,7 +429,7 @@ final class NormalPhotoFlowTests: XCTestCase {
                 add(diagnostic)
                 return false
             }
-            if viewport.contains(frame), element.isHittable {
+            if visibilityBounds.contains(frame), element.isHittable {
                 return true
             }
 
@@ -441,12 +442,17 @@ final class NormalPhotoFlowTests: XCTestCase {
                 requiredShift = frame.midY < viewport.midY ? 12 : -12
             }
             let maximumShift = viewport.height * 0.35
-            let boundedShift = min(max(requiredShift, -maximumShift), maximumShift)
+            // A tiny near-edge correction can be recognized as a tap on Save.
+            // Cross the drag threshold even when only a few points are needed.
+            let minimumShift: CGFloat = 24
+            let shiftDistance = min(max(abs(requiredShift), minimumShift), maximumShift)
+            let boundedShift = requiredShift < 0 ? -shiftDistance : shiftDistance
             let startPoint = CGPoint(x: viewport.midX, y: viewport.midY)
             let endPoint = CGPoint(
                 x: startPoint.x,
                 y: min(max(startPoint.y + boundedShift, viewport.minY + 12), viewport.maxY - 12)
             )
+            guard abs(endPoint.y - startPoint.y) >= minimumShift else { return false }
             let appFrame = app.frame
             let start = app.coordinate(withNormalizedOffset: CGVector(
                 dx: (startPoint.x - appFrame.minX) / appFrame.width,
@@ -457,12 +463,30 @@ final class NormalPhotoFlowTests: XCTestCase {
                 dy: (endPoint.y - appFrame.minY) / appFrame.height
             ))
             let previousFrame = frame
-            start.press(forDuration: 0.05, thenDragTo: end)
+            // Hold the endpoint so scroll momentum cannot fling a nearby
+            // control past the opposite edge during the positioning gesture.
+            start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
             _ = waitUntil(timeout: 0.75) { element.frame != previousFrame }
         } while Date() < deadline
 
-        let viewport = scrollView.frame.intersection(app.frame).insetBy(dx: -1, dy: 8)
-        return viewport.contains(element.frame) && element.isHittable
+        let viewport = scrollView.frame.intersection(app.frame).insetBy(dx: 0, dy: 8)
+        let visibilityBounds = viewport.insetBy(dx: -1, dy: -1)
+        let frame = element.frame
+        let fullyVisible = visibilityBounds.contains(frame) && element.isHittable
+        if !fullyVisible {
+            let diagnostic = XCTAttachment(string: """
+            Review control did not become fully visible before timeout.
+            App: \(app.frame)
+            Scroll view: \(scrollView.frame)
+            Visibility bounds (1 pt tolerance around 8 pt vertical inset): \(visibilityBounds)
+            Control: \(frame); hittable: \(element.isHittable)
+            \(app.debugDescription)
+            """)
+            diagnostic.name = "review-control-visibility-timeout"
+            diagnostic.lifetime = .keepAlways
+            add(diagnostic)
+        }
+        return fullyVisible
     }
 
     /// Native SwiftUI menus expose an oversized semantic collection frame on
