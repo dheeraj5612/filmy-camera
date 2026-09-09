@@ -1,6 +1,6 @@
 # Filmy Camera release checklist
 
-Current candidate: version 1.0.0, build 12, from [PR #90](https://github.com/dheeraj5612/filmy-camera/pull/90). It adds 128 editable looks, a capture timer, exact framing, and preview composition aids. The release also preserves the locally committed static café filter previews. Review fixes keep composition analysis serialized across cancellation and discard stale masks after framing changes. Every shipped feature remains free, with no trial, paywall, or watermark.
+Current candidate: version 1.0.0, build 12, from [PR #90](https://github.com/dheeraj5612/filmy-camera/pull/90). It adds 128 editable looks, a capture timer, exact framing, and preview composition aids. The release also preserves the locally committed static café filter previews. Review fixes keep composition analysis serialized across cancellation, discard stale masks after framing changes, and move camera adjustment badges onto a second row when the controls need the available width. Every shipped feature remains free, with no trial, paywall, or watermark.
 
 ## Build 12 release gates
 
@@ -9,7 +9,7 @@ Current candidate: version 1.0.0, build 12, from [PR #90](https://github.com/dhe
 - [ ] Pass final core, UI, Photos E2E, catalog, and iPhone/iPad hosted checks on the candidate source.
 - [ ] Merge the validated PR and verify main checks.
 - [ ] Create and validate the signed build 12 archive and IPA; upload and verify Apple processing.
-- [ ] Run physical-device acceptance for timer/cancel, framing, hardware shutter, preview aids, camera/lens controls, capture/import/save, and interruptions. Both paired devices were unavailable during the September 9 preflight.
+- [ ] Run physical-device acceptance for timer/cancel, framing, hardware shutter, preview aids, camera/lens controls, capture/import/save, and interruptions. On September 9, build 12 installed on the paired iPad, but launch was blocked by its lock screen. The paired iPhone also required unlocking before installation. Installation alone does not complete hardware acceptance.
 - [ ] Refresh App Store Connect metadata/build selection and verify the saved draft.
 - [ ] Submit the validated free app for App Review and verify the resulting state. Public availability depends on Apple approval.
 
@@ -133,4 +133,4 @@ scripts/release/prepare-upload.sh --upload --export-path build/upload-export
 
 The check mode is read-only. Export and upload require explicit modes plus valid external signing/App Store credentials. Never commit certificates, profiles, API keys, or upload credentials.
 
-Archive and export destinations must be fresh. Upload performs a new export, so it needs a separate empty directory after a local export. For subsequent releases, set `FILMY_ARCHIVE_PATH` and use matching `--archive` paths and fresh export directories.
+Archive and export destinations must be fresh. Upload performs a new export, so it needs a separate empty directory after a local export. For subsequent releases, set `FILMY_ARCHIVE_PATH`, pass that path as the positional argument to `validate-archive.sh`, and pass it through `--archive` to `prepare-upload.sh` and `validate-ipa.sh`. Replace each export directory with a fresh destination.

@@ -402,14 +402,16 @@ final class CatalogRenderAcceptanceTests: XCTestCase {
                                           rowBytes: width * 4 * MemoryLayout<Float>.size,
                                           bounds: bounds, format: .RGBAf, colorSpace: colorSpace)
         XCTAssertTrue(pixels.allSatisfy { $0.isFinite }, "Nonfinite pixels: \(recipe.id) \(fixture)")
-        var minimum: Float = .greatestFiniteMagnitude
-        var maximum: Float = -.greatestFiniteMagnitude
+        var minimum = [Float](repeating: .greatestFiniteMagnitude, count: 3)
+        var maximum = [Float](repeating: -.greatestFiniteMagnitude, count: 3)
         var chroma: Float = 0
         var alphaError: Float = 0
         for offset in stride(from: 0, to: pixels.count, by: 4) {
             let r = pixels[offset], g = pixels[offset + 1], b = pixels[offset + 2]
-            minimum = min(minimum, r)
-            maximum = max(maximum, r)
+            for channel in 0..<3 {
+                minimum[channel] = min(minimum[channel], pixels[offset + channel])
+                maximum[channel] = max(maximum[channel], pixels[offset + channel])
+            }
             let redGreen: Float = abs(r - g)
             let greenBlue: Float = abs(g - b)
             chroma = max(chroma, max(redGreen, greenBlue))
@@ -417,7 +419,12 @@ final class CatalogRenderAcceptanceTests: XCTestCase {
         }
         XCTAssertLessThan(alphaError, 0.002, "Opaque source alpha changed: \(recipe.id)")
         if fixture == "color-chart" {
-            XCTAssertGreaterThan(maximum - minimum, 0.05, "Collapsed tonal range: \(recipe.id)")
+            // The chart includes a grayscale ramp; toned and monochrome
+            // looks must also retain luminance detail in every RGB channel.
+            for (channel, name) in ["red", "green", "blue"].enumerated() {
+                XCTAssertGreaterThan(maximum[channel] - minimum[channel], 0.05,
+                                     "Collapsed \(name) tonal range: \(recipe.id) \(fixture)")
+            }
         }
         let neutralMonochrome = recipe.creativeCollection == .monochrome
             && recipe.filmBase.monochromeFilter != nil

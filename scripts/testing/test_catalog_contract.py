@@ -47,9 +47,9 @@ class CatalogContractTests(unittest.TestCase):
         self.assertIn('kCGImagePropertyGPSDictionary', self.render_tests)
         self.assertIn('CatalogRenderAcceptanceTests', (ROOT / 'scripts/testing/suites.json').read_text())
 
-    def test_render_workflow_requires_all_148_cases_without_skips(self):
+    def test_render_workflow_requires_all_149_cases_without_skips(self):
         workflow = (ROOT / '.github/workflows/catalog-acceptance.yml').read_text()
-        self.assertIn('s["passedTests"] == 148', workflow)
+        self.assertIn('s["passedTests"] == 149', workflow)
         self.assertIn('s["failedTests"] == 0 and s["skippedTests"] == 0', workflow)
         self.assertIn('Catalog result bundle is required', workflow)
         self.assertNotIn('contents: write', workflow)

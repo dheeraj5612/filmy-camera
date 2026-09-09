@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'FilmyCamera/**'
+      - 'FilmyCamera.xcodeproj/**'
+      - 'project.yml'
       - 'FilmyCameraTests/**'
       - 'FilmyCameraUITests/**'
       - 'scripts/testing/**'
@@ -95,7 +97,7 @@ jobs:
           if [[ -d "$RUNNER_TEMP/FilmyCatalog.xcresult" ]]; then
             xcrun xcresulttool export attachments --path "$RUNNER_TEMP/FilmyCatalog.xcresult" --output-path "$RUNNER_TEMP/render-evidence/contact-sheets"
             xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/FilmyCatalog.xcresult" > "$RUNNER_TEMP/render-evidence/summary.json"
-            python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert s["passedTests"] == 148 and s["failedTests"] == 0 and s["skippedTests"] == 0, s' "$RUNNER_TEMP/render-evidence/summary.json"
+            python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert s["passedTests"] == 149 and s["failedTests"] == 0 and s["skippedTests"] == 0, s' "$RUNNER_TEMP/render-evidence/summary.json"
           else
             echo "Catalog result bundle is required" >&2
             exit 1

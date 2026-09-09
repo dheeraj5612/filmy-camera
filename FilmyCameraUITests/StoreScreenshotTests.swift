@@ -588,7 +588,9 @@ final class CaptureSetupUITests: XCTestCase {
 
 @MainActor
 private func waitForStationaryControl(_ control: XCUIElement, in app: XCUIApplication) -> Bool {
-    let deadline = Date(timeIntervalSinceNow: 5)
+    // Accessibility queries on a loaded hosted iPad can take several seconds
+    // per observation. Allow enough time to compare two complete samples.
+    let deadline = Date(timeIntervalSinceNow: 15)
     var previousFrame: CGRect?
     var stationarySince: Date?
     // A drawer's accessibility frame can appear before its spring transition

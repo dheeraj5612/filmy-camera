@@ -1,4 +1,5 @@
 import AVFoundation
+import SwiftUI
 import XCTest
 @testable import FilmyCamera
 
@@ -188,6 +189,101 @@ final class CameraManualControlsTests: XCTestCase {
 
 
 final class CaptureWorkflowPolicyTests: XCTestCase {
+    @MainActor
+    func testTopBarKeepsFiveControlsAndAdjustmentBadgeInsideNarrowWidths() async throws {
+        for width: CGFloat in [296, 351, 406, 700] {
+            let measurements = TopBarMeasurements()
+            let content = CameraTopBarLayout {
+                HStack(spacing: 8) {
+                    ForEach(0..<5) { index in
+                        Button {} label: {
+                            Image(systemName: "camera")
+                                .frame(width: 44, height: 44)
+                        }
+                        .recordTopBarFrame("control-\(index)")
+                    }
+                    Spacer(minLength: 0)
+                }
+            } indicators: {
+                Button {} label: {
+                    HStack(spacing: 5) {
+                        Text("+3.0 EV")
+                        Label("AE/AF", systemImage: "lock.fill").labelStyle(.titleAndIcon)
+                        Text("MANUAL")
+                    }
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .padding(.horizontal, 9)
+                    .frame(minHeight: 44)
+                }
+                .recordTopBarFrame("indicators")
+            }
+            .foregroundStyle(.white)
+            .background(.black)
+            .coordinateSpace(name: "camera-topbar-test")
+            .onPreferenceChange(TopBarFramePreference.self) { frames in
+                MainActor.assumeIsolated { measurements.frames = frames }
+            }
+
+            let host = UIHostingController(rootView: content)
+            // This fixture is a camera chrome region, not a full-screen app.
+            // Device safe-area insets can otherwise push its content outside
+            // the 44/92pt bitmap while local layout measurements still pass.
+            host.safeAreaRegions = []
+            let fitted = host.sizeThatFits(in: CGSize(width: width, height: 300))
+            let window = UIWindow(frame: CGRect(origin: .zero, size: fitted))
+            window.rootViewController = host
+            host.view.frame = window.bounds
+            host.view.backgroundColor = .black
+            window.isHidden = false
+            host.view.layoutIfNeeded()
+            for _ in 0..<20 where measurements.frames.count < 6 {
+                try await Task.sleep(for: .milliseconds(10))
+                host.view.layoutIfNeeded()
+            }
+            try await Task.sleep(for: .milliseconds(100))
+            host.view.layoutIfNeeded()
+            defer { window.isHidden = true }
+
+            XCTAssertEqual(measurements.frames.count, 6)
+            let visibleBounds = CGRect(origin: .zero, size: CGSize(width: width, height: fitted.height))
+                .insetBy(dx: -0.5, dy: -0.5)
+            for (name, frame) in measurements.frames {
+                XCTAssertTrue(visibleBounds.contains(frame), "\(name) is clipped at width \(width): \(frame)")
+                XCTAssertGreaterThanOrEqual(frame.width, 44)
+                XCTAssertGreaterThanOrEqual(frame.height, 44)
+            }
+            let badge = try XCTUnwrap(measurements.frames["indicators"])
+            for index in 0..<5 {
+                let control = try XCTUnwrap(measurements.frames["control-\(index)"])
+                XCTAssertFalse(badge.intersects(control), "The badge must not cover a control")
+            }
+            XCTAssertEqual(fitted.height, width < 700 ? 92 : 44, accuracy: 0.5)
+            var drewHierarchy = false
+            let snapshot = UIGraphicsImageRenderer(size: fitted).image { _ in
+                drewHierarchy = host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
+            }
+            XCTAssertTrue(drewHierarchy, "The attachment must contain the settled UIKit hierarchy")
+            let bitmap = try XCTUnwrap(snapshot.cgImage)
+            for (name, frame) in measurements.frames {
+                let pixelRect = frame.applying(CGAffineTransform(scaleX: snapshot.scale, y: snapshot.scale)).integral
+                let region = try XCTUnwrap(bitmap.cropping(to: pixelRect))
+                var rgba = [UInt8](repeating: 0, count: region.width * region.height * 4)
+                try rgba.withUnsafeMutableBytes { bytes in
+                    let context = try XCTUnwrap(CGContext(data: bytes.baseAddress, width: region.width, height: region.height,
+                        bitsPerComponent: 8, bytesPerRow: region.width * 4,
+                        space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+                    context.draw(region, in: CGRect(x: 0, y: 0, width: region.width, height: region.height))
+                }
+                let visibleChannels = rgba.enumerated().filter { $0.offset % 4 != 3 && $0.element > 128 }.count
+                XCTAssertGreaterThan(visibleChannels, 6, "\(name) must actually render in the attachment at width \(width)")
+            }
+            let attachment = XCTAttachment(image: snapshot)
+            attachment.name = "camera-topbar-\(Int(width))pt"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+    }
+
     func testPreviewCancellationWaitsForTheOldRenderToDrain() throws {
         var state = PreviewRenderState()
         let stale = try XCTUnwrap(state.begin())
@@ -311,5 +407,28 @@ final class CaptureWorkflowPolicyTests: XCTestCase {
     func testInvalidViewfinderSizeCannotPublishNaN() {
         XCTAssertEqual(ViewfinderLayout.size(available: CGSize(width: CGFloat.nan,height: 2), isLandscape: false), .zero)
         XCTAssertEqual(ViewfinderLayout.size(available: .zero, isLandscape: true, aspect: .square), .zero)
+    }
+}
+
+@MainActor
+private final class TopBarMeasurements {
+    var frames: [String: CGRect] = [:]
+}
+
+private struct TopBarFramePreference: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, latest in latest })
+    }
+}
+
+private extension View {
+    func recordTopBarFrame(_ name: String) -> some View {
+        background {
+            GeometryReader { proxy in
+                Color.clear.preference(key: TopBarFramePreference.self,
+                                       value: [name: proxy.frame(in: .named("camera-topbar-test"))])
+            }
+        }
     }
 }

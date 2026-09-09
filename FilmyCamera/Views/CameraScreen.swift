@@ -93,6 +93,31 @@ enum ViewfinderLayout {
     }
 }
 
+/// Keep every shutter-adjacent control reachable when adjustment badges need
+/// more width than the camera's top row can provide.
+struct CameraTopBarLayout<Controls: View, Indicators: View>: View {
+    let controls: Controls
+    let indicators: Indicators
+
+    init(@ViewBuilder controls: () -> Controls, @ViewBuilder indicators: () -> Indicators) {
+        self.controls = controls()
+        self.indicators = indicators()
+    }
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                controls
+                indicators.fixedSize(horizontal: true, vertical: false)
+            }
+            VStack(alignment: .trailing, spacing: 4) {
+                controls
+                indicators.fixedSize(horizontal: true, vertical: false)
+            }
+        }
+    }
+}
+
 /// The viewfinder and its capture controls. The picture keeps a stable frame
 /// while look and camera-tool drawers float above it. Wide layouts put the
 /// primary controls in an edge column; compact layouts keep them below the
@@ -598,42 +623,45 @@ struct CameraScreen: View {
     }
 
     private var topBar: some View {
-        HStack(spacing: 8) {
-            flashControl
+        CameraTopBarLayout {
+            HStack(spacing: 8) {
+                flashControl
 
-            if camera.availableCameraPositions.count > 1 {
-                cameraSwitchButton
+                if camera.availableCameraPositions.count > 1 {
+                    cameraSwitchButton
+                }
+
+                Spacer(minLength: 4)
+
+                ViewThatFits(in: .horizontal) {
+                    Text("filmy")
+                        .font(.system(.title3, design: .serif).italic())
+                        .foregroundStyle(FilmyTheme.primary)
+                        .accessibilityHidden(true)
+                    Color.clear.frame(width: 0, height: 0)
+                }
+                .layoutPriority(-1)
+
+                Spacer(minLength: 4)
+
+                captureSetupButton
+                settingsButton
+
+                if camera.isRunning || isViewfinderChromePreview {
+                    toolsToggle
+                }
             }
+        } indicators: {
+            HStack(spacing: 8) {
+                activeCaptureIndicators
 
-            Spacer(minLength: 4)
-
-            ViewThatFits(in: .horizontal) {
-                Text("filmy")
-                    .font(.system(.title3, design: .serif).italic())
-                    .foregroundStyle(FilmyTheme.primary)
-                    .accessibilityHidden(true)
-                Color.clear.frame(width: 0, height: 0)
-            }
-            .layoutPriority(-1)
-
-            Spacer(minLength: 4)
-
-            captureSetupButton
-
-            activeCaptureIndicators
-
-            if !isLive {
-                CameraStatusPill(
-                    isRunning: camera.isRunning,
-                    availability: camera.availability,
-                    message: camera.statusMessage
-                )
-            }
-
-            settingsButton
-
-            if camera.isRunning || isViewfinderChromePreview {
-                toolsToggle
+                if !isLive {
+                    CameraStatusPill(
+                        isRunning: camera.isRunning,
+                        availability: camera.availability,
+                        message: camera.statusMessage
+                    )
+                }
             }
         }
     }
