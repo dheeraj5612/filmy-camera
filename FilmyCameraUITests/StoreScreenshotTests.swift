@@ -448,6 +448,8 @@ final class LookLibraryUITests: XCTestCase {
         XCTAssertTrue(look.waitForExistence(timeout: 15))
         look.tap()
         let browse = app.buttons["look-library-open"]
+        XCTAssertTrue(waitForStationaryControl(browse, in: app),
+                      "Explore looks must finish moving before it is tapped")
         assertControl(browse, in: app)
         browse.tap()
         XCTAssertTrue(app.textFields["look-library-search"].waitForExistence(timeout: 5))
@@ -525,8 +527,12 @@ final class CaptureSetupUITests: XCTestCase {
         app.launch()
         defer { app.terminate() }
         let menu = app.buttons["recipe-menu"]
-        XCTAssertTrue(menu.waitForExistence(timeout: 15)); menu.tap()
-        app.buttons["look-library-open"].tap()
+        XCTAssertTrue(menu.waitForExistence(timeout: 15))
+        menu.tap()
+        let browse = app.buttons["look-library-open"]
+        XCTAssertTrue(waitForStationaryControl(browse, in: app),
+                      "Explore looks must finish moving before it is tapped")
+        browse.tap()
         let search = app.textFields["look-library-search"]
         XCTAssertTrue(search.waitForExistence(timeout: 10)); search.tap(); search.typeText("CCD Daylight\n")
         let style = app.buttons["library-recipe-digital-ccd-daylight"]
@@ -578,4 +584,37 @@ final class CaptureSetupUITests: XCTestCase {
         attachment.lifetime = .keepAlways
         add(attachment)
     }
+}
+
+@MainActor
+private func waitForStationaryControl(_ control: XCUIElement, in app: XCUIApplication) -> Bool {
+    let deadline = Date(timeIntervalSinceNow: 5)
+    var previousFrame: CGRect?
+    var stationarySince: Date?
+    // A drawer's accessibility frame can appear before its spring transition
+    // finishes. Wait for stable hit geometry; never retry the navigation tap,
+    // which could instead close the drawer through the control underneath it.
+    repeat {
+        if control.exists && control.isEnabled && control.isHittable {
+            let frame = control.frame
+            if frame.width >= 44 && frame.height >= 44 && app.frame.contains(frame) {
+                if frame == previousFrame {
+                    if let stationarySince, Date().timeIntervalSince(stationarySince) >= 0.3 {
+                        return true
+                    }
+                } else {
+                    stationarySince = Date()
+                }
+                previousFrame = frame
+            } else {
+                previousFrame = nil
+                stationarySince = nil
+            }
+        } else {
+            previousFrame = nil
+            stationarySince = nil
+        }
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+    } while Date() < deadline
+    return false
 }
