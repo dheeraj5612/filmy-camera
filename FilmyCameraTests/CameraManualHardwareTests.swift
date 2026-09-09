@@ -79,6 +79,9 @@ final class CameraManualHardwareTests: XCTestCase {
                 + "activeID=\(activeDevice?.uniqueID ?? "none") publicDeviceID=\(controls.activeDeviceID ?? "none") "
                 + "publicExposure=\(controls.exposureMode.rawValue) publicWB=\(controls.whiteBalanceMode.rawValue) "
                 + "publicFocus=\(controls.focusMode.rawValue) applying=\(controls.isApplying) "
+                + "publicISO=\(controls.iso) publicDuration=\(controls.exposureDurationSeconds) "
+                + "publicISOBounds=\(controls.minimumISO)...\(controls.maximumISO) "
+                + "publicDurationBounds=\(controls.minimumExposureDurationSeconds)...\(controls.maximumExposureDurationSeconds) "
                 + "hardwareExposure=\(activeDevice?.exposureMode.rawValue ?? -1) "
                 + "hardwareWB=\(activeDevice?.whiteBalanceMode.rawValue ?? -1) "
                 + "hardwareFocus=\(activeDevice?.focusMode.rawValue ?? -1) "
@@ -134,14 +137,19 @@ final class CameraManualHardwareTests: XCTestCase {
         let requests = [(iso1, duration1), (iso2, duration1), (iso2, duration2)]
         for (index, request) in requests.enumerated() {
             let (iso, duration) = request
+            observations.append("request=manual-\(index + 1) ISO=\(iso) duration=\(duration)")
+            recordSession("manual-\(index + 1)-before-request")
             camera.setManualExposure(iso: iso, durationSeconds: duration)
-            try await requireEventually("Hardware applies custom exposure \(index + 1)") {
+            try await requireEventually("Hardware applies custom exposure \(index + 1)", onTimeout: {
+                recordSession("manual-\(index + 1)-apply-timeout")
+            }) {
                 camera.manualControls.exposureMode == .manual
                     && !camera.manualControls.isApplying
                     && wide.exposureMode == .custom
                     && abs(Double(wide.iso - iso)) <= max(Double(iso) * 0.05, 1)
                     && abs(wide.exposureDuration.seconds - duration) <= max(duration * 0.05, 0.0001)
             }
+            recordSession("manual-\(index + 1)-applied")
             recordFlash("manual-\(index + 1)")
             let settledISO = wide.iso
             let settledDuration = wide.exposureDuration.seconds
