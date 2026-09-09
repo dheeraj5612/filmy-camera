@@ -54,7 +54,8 @@ final class StoreScreenshotTests: XCTestCase {
             recipeID: "acros-monochrome",
             recipeName: "Fine Monochrome",
             minimumPhotoCount: 3,
-            screenshotName: "03-monochrome-import"
+            screenshotName: "03-monochrome-import",
+            instantPrint: true
         )
 
         let openRoll = app.buttons["Open roll"]
@@ -87,7 +88,8 @@ final class StoreScreenshotTests: XCTestCase {
         recipeID: String,
         recipeName: String,
         minimumPhotoCount: Int,
-        screenshotName: String
+        screenshotName: String,
+        instantPrint: Bool = false
     ) throws {
         launchNormalApp(recipeID: recipeID)
 
@@ -137,6 +139,14 @@ final class StoreScreenshotTests: XCTestCase {
         XCTAssertTrue(review.waitForExistence(timeout: 5))
         XCTAssertTrue(photo.waitForExistence(timeout: 5))
         let save = app.buttons["Save filtered photo"]
+        if instantPrint {
+            let finish = app.buttons["review-finish-instantPrint"]
+            XCTAssertTrue(finish.waitForExistence(timeout: 5))
+            finish.tap()
+            XCTAssertTrue(waitUntil(timeout: 30) {
+                photo.label.contains("Instant Print") && save.isEnabled
+            }, "Store media must show the rendered Instant Print output")
+        }
         let heading = app.staticTexts["IMPORTED PHOTO"]
         XCTAssertTrue(save.waitForExistence(timeout: 5))
         // These seeded media devices have a visible status bar and bottom

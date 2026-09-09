@@ -985,15 +985,21 @@ struct RecipeEditorSectionLabel: View {
 struct CaptureButton: View {
     let isCapturing: Bool
     let isEnabled: Bool
+    let unavailableLabel: String
+    let unavailableHint: String
     let action: () -> Void
 
     init(
         isCapturing: Bool,
         isEnabled: Bool = true,
+        unavailableLabel: String = "Capture unavailable in Preview mode",
+        unavailableHint: String = "Capture is available on a physical device",
         action: @escaping () -> Void
     ) {
         self.isCapturing = isCapturing
         self.isEnabled = isEnabled
+        self.unavailableLabel = unavailableLabel
+        self.unavailableHint = unavailableHint
         self.action = action
     }
 
@@ -1025,12 +1031,12 @@ struct CaptureButton: View {
         .accessibilityLabel(
             isCapturing
                 ? "Processing photo"
-                : (isEnabled ? "Capture photo" : "Capture unavailable in Preview mode")
+                : (isEnabled ? "Capture photo" : unavailableLabel)
         )
         .accessibilityHint(
             isEnabled
                 ? (isCapturing ? "Applying the selected recipe" : "Captures the current frame using the selected recipe")
-                : "Capture is available on a physical device"
+                : unavailableHint
         )
     }
 }

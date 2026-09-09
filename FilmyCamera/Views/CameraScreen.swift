@@ -108,6 +108,7 @@ struct CameraScreen: View {
     @StateObject private var livePreviews = LiveRecipePreviewStore()
     @State private var recipeForDetail: FilmRecipe?
     @State private var isShowingTools: Bool
+    @State private var isShowingManualControls = false
     @State private var isShowingLookDrawer = false
     @State private var focusPoint: CGPoint?
     @State private var focusNormalizedPoint: CGPoint?
@@ -193,6 +194,8 @@ struct CameraScreen: View {
                     saveErrorRequiresSettings: viewModel.saveErrorRequiresSettings,
                     availableRecipes: viewModel.recipes,
                     pendingReviewRecipeID: viewModel.pendingReviewRecipeID,
+                    finish: viewModel.reviewFinish,
+                    pendingReviewFinish: viewModel.pendingReviewFinish,
                     isRenderingReview: viewModel.isRenderingReview,
                     reviewRenderErrorMessage: viewModel.reviewRenderErrorMessage,
                     reviewOriginalImage: viewModel.reviewOriginalImage,
@@ -201,7 +204,8 @@ struct CameraScreen: View {
                     onRetake: viewModel.discardReview,
                     onOpenSettings: openSystemSettings,
                     onApplyReviewRecipe: viewModel.applyReviewRecipe,
-                    onPrepareReviewOriginal: viewModel.prepareReviewOriginal
+                    onPrepareReviewOriginal: viewModel.prepareReviewOriginal,
+                    onApplyReviewFinish: viewModel.applyReviewFinish
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .zIndex(1)
@@ -239,6 +243,12 @@ struct CameraScreen: View {
             .presentationDragIndicator(.visible)
             .presentationBackground(FilmyTheme.background)
             .presentationCornerRadius(30)
+        }
+        .sheet(isPresented: $isShowingManualControls) {
+            ManualCameraControlsView(camera: camera)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(FilmyTheme.background)
         }
         .onAppear {
             updateCameraActivity()
@@ -574,20 +584,29 @@ struct CameraScreen: View {
 
     @ViewBuilder
     private var activeCaptureIndicators: some View {
-        if abs(camera.exposureBias) >= 0.05 || camera.isFocusExposureLocked {
+        if (abs(camera.exposureBias) >= 0.05 && camera.manualControls.exposureMode == .auto)
+            || camera.isFocusExposureLocked
+            || camera.manualControls.isAnyManualModeEnabled {
             Button {
+                if camera.manualControls.isAnyManualModeEnabled {
+                    isShowingManualControls = true
+                    return
+                }
                 withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.82)) {
                     isShowingLookDrawer = false
                     isShowingTools = true
                 }
             } label: {
                 HStack(spacing: 5) {
-                    if abs(camera.exposureBias) >= 0.05 {
+                    if abs(camera.exposureBias) >= 0.05 && camera.manualControls.exposureMode == .auto {
                         Text(String(format: "%+.1f EV", camera.exposureBias))
                     }
                     if camera.isFocusExposureLocked {
                         Label("AE/AF", systemImage: "lock.fill")
                             .labelStyle(.titleAndIcon)
+                    }
+                    if camera.manualControls.isAnyManualModeEnabled {
+                        Text("MANUAL")
                     }
                 }
                 .font(.system(size: 10, weight: .bold, design: .rounded))
@@ -607,11 +626,20 @@ struct CameraScreen: View {
 
     private var activeCaptureIndicatorValue: String {
         var values: [String] = []
-        if abs(camera.exposureBias) >= 0.05 {
+        if abs(camera.exposureBias) >= 0.05 && camera.manualControls.exposureMode == .auto {
             values.append(String(format: "%+.1f EV", camera.exposureBias))
         }
         if camera.isFocusExposureLocked {
             values.append("Focus and exposure locked")
+        }
+        if camera.manualControls.exposureMode == .manual {
+            values.append("Manual exposure")
+        }
+        if camera.manualControls.whiteBalanceMode == .manual {
+            values.append("Manual white balance")
+        }
+        if camera.manualControls.focusMode == .manual {
+            values.append("Manual focus")
         }
         return values.joined(separator: ", ")
     }
@@ -818,7 +846,13 @@ struct CameraScreen: View {
         } else if shouldShowCameraEmptyState {
             captureNotice
         } else {
-            CaptureButton(isCapturing: viewModel.isCapturing, action: capture)
+            CaptureButton(
+                isCapturing: viewModel.isCapturing,
+                isEnabled: !camera.manualControls.isApplying,
+                unavailableLabel: "Applying camera settings",
+                unavailableHint: "Wait for the camera to finish applying your settings",
+                action: capture
+            )
         }
     }
 
@@ -952,8 +986,13 @@ struct CameraScreen: View {
                     let delta: Float = direction == .increment ? (1.0 / 3.0) : -(1.0 / 3.0)
                     camera.setExposureBias(camera.exposureBias + delta)
                 }
+                .opacity(camera.manualControls.exposureMode == .manual ? 0.45 : 1)
+                .disabled(camera.manualControls.exposureMode == .manual || camera.manualControls.isApplying)
 
-                if (focusPoint != nil || camera.isFocusExposureLocked), let focusNormalizedPoint {
+                if (focusPoint != nil || camera.isFocusExposureLocked),
+                   let focusNormalizedPoint,
+                   camera.manualControls.exposureMode != .manual,
+                   camera.manualControls.focusMode != .manual {
                     FocusLockControl(isLocked: camera.isFocusExposureLocked) {
                         camera.toggleFocusExposureLock(at: focusNormalizedPoint)
                     }
@@ -968,6 +1007,8 @@ struct CameraScreen: View {
                 if camera.availableLenses.count > 1 {
                     CameraLensMenu(camera: camera)
                 }
+
+                proControlsButton
             }
             .padding(.horizontal, 4)
             .padding(.vertical, 4)
@@ -980,6 +1021,35 @@ struct CameraScreen: View {
         )
         .accessibilityHint("Swipe horizontally for additional camera controls")
         .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    private var proControlsButton: some View {
+        Button {
+            HapticFeedback.play(.selection)
+            isShowingManualControls = true
+        } label: {
+            Label("Pro", systemImage: "slider.horizontal.3")
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(camera.manualControls.isAnyManualModeEnabled ? FilmyTheme.background : .white)
+                .padding(.horizontal, 12)
+                .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.toolControlHeight)
+                .background {
+                    if camera.manualControls.isAnyManualModeEnabled {
+                        Capsule().fill(FilmyTheme.filmAccent)
+                    } else {
+                        ChromeShapeBackground(shape: Capsule())
+                    }
+                }
+        }
+        .buttonStyle(.pressable)
+        .accessibilityIdentifier("pro-controls-button")
+        .accessibilityLabel("Pro controls")
+        .accessibilityValue(
+            camera.manualControls.isApplying
+                ? "Applying camera settings"
+                : (camera.manualControls.isAnyManualModeEnabled ? "Manual settings active" : "Auto settings")
+        )
+        .accessibilityHint("Adjust ISO, shutter speed, white balance, and focus")
     }
 
     private func gridToggle(accessibilityIdentifier: String) -> some View {
@@ -1075,6 +1145,7 @@ struct CameraScreen: View {
     // MARK: - Actions
 
     private func capture() {
+        guard !camera.manualControls.isApplying else { return }
         closeControlDrawers()
         viewModel.capture(camera: camera)
     }
