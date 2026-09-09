@@ -63,9 +63,9 @@ struct CaptureReviewView: View {
                                 .padding(.top, 16)
                                 .padding(.bottom, 12)
 
-                            // Short landscape screens keep the tools above the
-                            // scrollable photo so Compare and Save stay reachable.
-                            if proxy.size.width > proxy.size.height {
+                            // Short screens and accessibility text put tools first;
+                            // the photograph must not push Compare below the fold.
+                            if proxy.size.width > proxy.size.height || dynamicTypeSize.isAccessibilitySize {
                                 reviewControls()
                                     .padding(.horizontal, 20)
                                     .padding(.bottom, 14)
@@ -77,7 +77,7 @@ struct CaptureReviewView: View {
                             )
                             .padding(.horizontal, 16)
 
-                            if proxy.size.width <= proxy.size.height {
+                            if proxy.size.width <= proxy.size.height && !dynamicTypeSize.isAccessibilitySize {
                                 reviewControls()
                                     .padding(.horizontal, 20)
                                     .padding(.top, 16)
@@ -156,10 +156,10 @@ struct CaptureReviewView: View {
         guard !dynamicTypeSize.isAccessibilitySize else { return idealHeight }
 
         // Reserve the fixed review chrome: header (76), chooser (68),
-        // metadata (54), pinned actions (82), and their surrounding gaps
-        // (20). This keeps the fitted photo in the normal viewport while
+        // metadata (54), pinned actions plus save disclosure (112), and gaps
+        // (40). This keeps the fitted photo in the normal viewport while
         // accessibility sizes retain the larger hero and scroll naturally.
-        let fixedChromeHeight: CGFloat = 76 + 68 + 54 + 82 + 20
+        let fixedChromeHeight: CGFloat = 76 + 68 + 54 + 112 + 40
         return min(idealHeight, max(size.height - fixedChromeHeight, 160))
     }
 

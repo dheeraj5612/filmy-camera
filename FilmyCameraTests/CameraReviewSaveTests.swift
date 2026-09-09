@@ -1,3 +1,4 @@
+import CoreImage
 import UIKit
 import XCTest
 @testable import FilmyCamera
@@ -157,6 +158,38 @@ final class ControlledPhotoSaver: PhotoSaving {
 }
 
 final class LookLibraryTests: XCTestCase {
+    @MainActor
+    func testSamplePreviewUsesTheBundledDemoAndActualRecipeRenderer() async throws {
+        let original = try XCTUnwrap(UIImage(named: "LookPreviewCafe")?.cgImage)
+        let bounds = CGRect(x: 0, y: 0, width: 384, height: 512)
+        let framed = CameraFrameLayout.aspectFill(CIImage(cgImage: original), in: bounds)
+        let small = try XCTUnwrap(FilmRenderer.outputCGImage(framed, from: bounds))
+        let recipe = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == "classic-chrome" })
+        let expected = try XCTUnwrap(FilmRenderer.previewThumbnail(for: recipe, over: CIImage(cgImage: small)))
+        let renderer = RecipeSwatchRenderer()
+        let rendered = await renderer.render(recipe: recipe)
+        let actual = try XCTUnwrap(rendered)
+        XCTAssertEqual(actual.cgImage?.width, 384)
+        XCTAssertEqual(actual.cgImage?.height, 512)
+        XCTAssertEqual(actual.pngData(), expected.pngData(), "A swatch must show the real recipe, not a decorative grade")
+    }
+
+    @MainActor
+    func testSamplePreviewCacheSeparatesCustomizedRecipes() async throws {
+        let renderer = RecipeSwatchRenderer()
+        let recipe = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == "classic-chrome" })
+        let firstRender = await renderer.render(recipe: recipe)
+        let first = try XCTUnwrap(firstRender)
+        let repeated = await renderer.render(recipe: recipe)
+        XCTAssertTrue(first === repeated)
+        var edited = recipe
+        edited.exposure = 1.5
+        let editedRender = await renderer.render(recipe: edited)
+        let changed = try XCTUnwrap(editedRender)
+        XCTAssertFalse(first === changed)
+        XCTAssertNotEqual(first.pngData(), changed.pngData())
+    }
+
     func testFavoritesRoundTripStableIDsAndDeterministicEncoding() {
         let ids: Set<String> = ["g7x-compact", "classic-chrome", "acros-monochrome"]
         XCTAssertEqual(LookLibraryIndex.favorites(from: LookLibraryIndex.encodeFavorites(ids)), ids)

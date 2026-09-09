@@ -266,6 +266,7 @@ struct RecipePickerView: View {
                 showsLabel: compact && !dynamicTypeSize.isAccessibilitySize
             )
             .frame(width: swatchSize.width, height: swatchSize.height)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
             if !compact || dynamicTypeSize.isAccessibilitySize {
                 Text(recipe.name)
@@ -937,25 +938,35 @@ struct RecipeDetailView: View {
 
     private var editor: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .center, spacing: 12) {
+            let headerLayout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+                : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
+            headerLayout {
                 VStack(alignment: .leading, spacing: 4) {
                     Eyebrow(text: "ADJUST", color: FilmyTheme.accent)
 
                     Text("Recipe controls")
                         .font(.system(.title3, design: .rounded).weight(.bold))
                         .foregroundStyle(FilmyTheme.primary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
-                Spacer(minLength: 12)
+                if !dynamicTypeSize.isAccessibilitySize {
+                    Spacer(minLength: 12)
+                }
 
-                Button("Reset") {
+                Button {
                     draft = originalRecipe
                     HapticFeedback.play(.warning)
+                } label: {
+                    Text("Reset")
+                        .font(.system(.subheadline, design: .rounded).weight(.bold))
+                        .foregroundStyle(FilmyTheme.accent)
+                        .padding(.horizontal, 14)
+                        .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
+                        .background(FilmyTheme.accent.opacity(0.08), in: Capsule())
+                        .contentShape(Capsule())
                 }
-                .font(.system(.subheadline, design: .rounded).weight(.bold))
-                .foregroundStyle(FilmyTheme.accent)
-                .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
-                .contentShape(Rectangle())
                 .buttonStyle(.plain)
                 .accessibilityLabel("Reset recipe controls")
             }
@@ -1413,7 +1424,7 @@ struct LookLibraryView: View {
     var body: some View {
         GeometryReader { geometry in
             let singleColumn = geometry.size.width < 350 || dynamicTypeSize.isAccessibilitySize
-            let compactHeader = geometry.size.height < 480
+            let compactHeader = geometry.size.height < 480 || dynamicTypeSize.isAccessibilitySize
             VStack(spacing: 0) {
                 libraryHeader(compact: compactHeader)
                 searchField
@@ -1586,7 +1597,7 @@ struct LookLibraryView: View {
             } label: {
                 VStack(alignment: .leading, spacing: 0) {
                     Color.clear
-                        .aspectRatio(4.0 / 3.0, contentMode: .fit)
+                        .aspectRatio(dynamicTypeSize.isAccessibilitySize ? 2 : 4.0 / 3.0, contentMode: .fit)
                         .overlay {
                             RecipeSwatch(recipe: recipe, compact: false, showsLabel: false)
                         }
@@ -1638,7 +1649,7 @@ struct LookLibraryView: View {
                 HapticFeedback.play(.selection)
             } label: {
                 Image(systemName: favorite ? "heart.fill" : "heart")
-                    .font(.system(.subheadline).weight(.semibold))
+                    .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(favorite ? FilmyTheme.accent : .white)
                     .frame(width: 48, height: 48)
                     .background(Color.black.opacity(0.78), in: Circle())

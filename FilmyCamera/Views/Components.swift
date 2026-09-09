@@ -1,3 +1,4 @@
+import CoreImage
 import SwiftUI
 import UIKit
 
@@ -915,7 +916,7 @@ struct RecipeSwatch: View {
             // never presents stale settings while the replacement is rendered.
             thumbnailImage = nil
             // A live scene is the useful source for swatches in the camera
-            // rail. Skip the second synthetic render while it is available;
+            // rail. Skip the sample render while it is available;
             // this keeps a recipe change from doing two full thumbnail passes.
             guard previewScene == nil else { return }
             // Editor sliders mutate the draft many times per second, and each
@@ -952,13 +953,47 @@ struct RecipeSwatch: View {
 actor RecipeSwatchRenderer {
     static let shared = RecipeSwatchRenderer()
 
+    private final class SampleKey: NSObject {
+        let recipe: FilmRecipe
+        init(_ recipe: FilmRecipe) { self.recipe = recipe }
+        override var hash: Int { recipe.hashValue }
+        override func isEqual(_ object: Any?) -> Bool {
+            (object as? SampleKey)?.recipe == recipe
+        }
+    }
+
+    private let sampleCache: NSCache<SampleKey, UIImage> = {
+        let cache = NSCache<SampleKey, UIImage>()
+        cache.countLimit = 48
+        cache.totalCostLimit = 12 * 1024 * 1024
+        return cache
+    }()
+
+    // Original generated demo art already owned by this repository. Prepare
+    // one bounded 384 x 512 source off the main actor, then use the exact
+    // production recipe pipeline. This never reads the user's Photos library.
+    private lazy var sampleScene: CIImage? = {
+        guard let original = UIImage(named: "LookPreviewCafe")?.cgImage else { return nil }
+        let bounds = CGRect(x: 0, y: 0, width: 384, height: 512)
+        let framed = CameraFrameLayout.aspectFill(CIImage(cgImage: original), in: bounds)
+        guard let small = FilmRenderer.outputCGImage(framed, from: bounds) else { return nil }
+        return CIImage(cgImage: small)
+    }()
+
     func render(recipe: FilmRecipe, scene: RecipePreviewScene? = nil) -> UIImage? {
         guard !Task.isCancelled else { return nil }
         return autoreleasepool {
             if let scene {
                 return FilmRenderer.previewThumbnail(for: recipe, over: scene.image)
             }
-            return FilmRenderer.thumbnail(for: recipe)
+            let key = SampleKey(recipe)
+            if let cached = sampleCache.object(forKey: key) { return cached }
+            guard let sampleScene else { return FilmRenderer.thumbnail(for: recipe) }
+            guard let image = FilmRenderer.previewThumbnail(for: recipe, over: sampleScene),
+                  !Task.isCancelled else { return nil }
+            let cost = (image.cgImage?.bytesPerRow ?? 0) * (image.cgImage?.height ?? 0)
+            sampleCache.setObject(image, forKey: key, cost: cost)
+            return image
         }
     }
 }
@@ -1264,7 +1299,7 @@ struct PreviewPlaceholder: View {
 
                 // Keep the simulator and unavailable-camera states visually useful
                 // without presenting a synthetic image as live camera output. This
-                // is the same renderer-backed scene used by the recipe rail, so a
+                // is the same clearly non-live demo used by the recipe rail, so a
                 // user can still see how the selected look is meant to feel before
                 // moving to a physical iPhone.
                 if isSimulator {

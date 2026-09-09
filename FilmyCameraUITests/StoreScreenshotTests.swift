@@ -397,6 +397,11 @@ final class LookLibraryUITests: XCTestCase {
         assertControl(app.buttons["look-library-close"], in: app)
         assertControl(app.buttons["look-filter-all"], in: app)
         XCTAssertTrue(app.textFields["look-library-search"].isHittable)
+        let favorite = app.buttons["look-favorite-g7x-compact"]
+        assertControl(favorite, in: app)
+        favorite.tap()
+        XCTAssertEqual(favorite.value as? String, "Favorite")
+        XCTAssertTrue(app.textFields["look-library-search"].exists, "Favoriting must not apply or dismiss")
         snapshot(app, "looks-accessibility-large-text")
     }
 
