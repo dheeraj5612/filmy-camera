@@ -27,11 +27,17 @@ python3 scripts/release/validate-sdk.py --app-info /path/to/FilmyCamera.app/Info
 
 The checker rejects obsolete Xcode/SDK versions, simulator platform metadata, missing or malformed build stamps, inconsistent SDK stamps, unavailable tools, and command timeouts. It reads XML and binary plists, avoids shell interpolation, and does not echo arbitrary subprocess diagnostics. It does not change the app's iOS 17 deployment target. The stamp check verifies recorded SDK metadata, not authenticity by itself; the existing strict signature, provisioning, source provenance, executable/dSYM, and IPA checks remain necessary. Passing this minimum check is not proof that Apple accepts a particular beta, signs the app, processes an upload, or approves a submission.
 
+## Separate modern-SDK compile lane
+
+The `release-sdk-build` CI job selects Xcode 26.3 explicitly on the documented `macos-15` image, verifies its version and iOS SDK, compiles the app in Release configuration for generic physical iOS, validates the resulting app's SDK metadata, and compiles all physical-device test branches through the existing runner. The primary compatibility job still verifies XcodeGen reproducibility and executes simulator tests. The new lane needs neither signing nor Apple credentials, performs no Photos writes, and does not create or upload a distribution archive. Source SHA, actual Xcode version, SDK checks, and compiler logs are retained even on failure. Compilation is not on-device test execution or signing acceptance.
+
+The runner's installed Xcode 26.3/iOS 26.2 SDK pairing was checked against the [official hosted-image manifest](https://github.com/actions/runner-images/blob/main/images/macos/macos-15-arm64-Readme.md). The lane fails explicitly when the pinned toolchain is missing instead of silently selecting an older or beta Xcode.
+
 ## Tests and verification boundaries
 
-There are 25 new portable SDK tests. They cover version boundaries, malformed/missing inputs, simulator rejection, matching SDK stamps, older deployment targets, subprocess errors/timeouts, XML/binary/corrupt plists, CLI modes, archive wiring, and an actual archive-script invocation with mocked old tools that verifies no output folder is created. All 25 passed locally, as did the three existing concurrency tests. Both modified shell scripts passed `bash -n`. The local working copy is a source subset, so those 28 local tests are not represented as the complete repository suite.
+There are 25 new portable SDK tests. They cover version boundaries, malformed/missing inputs, simulator rejection, matching SDK stamps, older deployment targets, subprocess errors/timeouts, XML/binary/corrupt plists, CLI modes, archive wiring, and an actual archive-script invocation with mocked old tools that verifies no output folder is created. All 25 passed locally, along with five modern-SDK workflow contract checks and the three existing concurrency tests. Both modified shell scripts passed `bash -n`. The local working copy is a source subset, so those 33 local tests are not represented as the complete repository suite.
 
-The new SDK test file is under the existing `scripts/testing/test_*.py` CI discovery path. It needs no Apple credentials, network, signing identity, additional Python packages, or real Photos writes. The portable tests verify behavior with controlled tool/plist fixtures; they are not a new signed archive or a device run.
+The SDK and workflow test files are under the existing `scripts/testing/test_*.py` CI discovery path. They need no Apple credentials, network, signing identity, additional Python packages, or real Photos writes. The portable tests verify behavior with controlled tool/plist fixtures; they are not a new signed archive or a device run.
 
 ## Still required for public release
 
