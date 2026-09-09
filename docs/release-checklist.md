@@ -1,6 +1,19 @@
 # Filmy Camera release checklist
 
-Current candidate: version 1.0.0, build 11. It adds optional Instant Print borders to the existing camera UX, Pro controls, reversible review, and high-detail JPEG output. Every shipped feature is free for launch, with no trial, paywall, or watermark. Build 10 was uploaded on September 5 and App Store Connect confirms processing Complete and Ready to Submit. App Store pricing is zero in all 175 available countries/regions. Build 11 still needs the validation and release steps below; the saved distribution version currently references build 5 and is Developer Rejected from its prior withdrawal. Historical release notes are in [release-history.md](release-history.md).
+Current candidate: version 1.0.0, build 12, from [PR #90](https://github.com/dheeraj5612/filmy-camera/pull/90). It adds 128 editable looks, a capture timer, exact framing, and preview composition aids. Review fixes prevent overlapping preview renders across cancellation and discard stale masks after framing changes. Every shipped feature remains free, with no trial, paywall, or watermark.
+
+## Build 12 release gates
+
+- [x] Review the catalog, capture setup, preview lifecycle, and release path; add regression coverage for canceled preview jobs and persisted aid toggles.
+- [x] Update local listing text for the 128-look catalog and capture tools; validate metadata and media inputs.
+- [ ] Pass final core, UI, Photos E2E, catalog, and iPhone/iPad hosted checks on the candidate source.
+- [ ] Merge the validated PR and verify main checks.
+- [ ] Create and validate the signed build 12 archive and IPA; upload and verify Apple processing.
+- [ ] Run physical-device acceptance for timer/cancel, framing, hardware shutter, preview aids, camera/lens controls, capture/import/save, and interruptions. Both paired devices were unavailable during the September 9 preflight.
+- [ ] Refresh App Store Connect metadata/build selection and verify the saved draft.
+- [ ] Submit the validated free app for App Review and verify the resulting state. Public availability depends on Apple approval.
+
+The build 11 and earlier items below are historical candidate checkpoints. Their checked boxes do not validate build 12. The September 5 readback recorded build 10 as processed and Ready to Submit, with build 5 retained on a withdrawn distribution version; current Apple state needs fresh readback. Historical release notes are in [release-history.md](release-history.md).
 
 ## Build 11 release gates
 
@@ -109,13 +122,15 @@ Run from a clean checkout of the source being archived. Use the recorded source 
 
 ```sh
 scripts/release/archive-device.sh
-scripts/release/validate-archive.sh build/FilmyCamera-<source-sha>-signed.xcarchive
+scripts/release/validate-archive.sh build/FilmyCamera.xcarchive
 scripts/release/prepare-upload.sh --check
 scripts/release/prepare-upload.sh --export
 scripts/release/validate-ipa.sh \
-  --ipa build/export-<source-sha>/FilmyCamera.ipa \
-  --archive build/FilmyCamera-<source-sha>-signed.xcarchive
-scripts/release/prepare-upload.sh --upload
+  --ipa build/export/FilmyCamera.ipa \
+  --archive build/FilmyCamera.xcarchive
+scripts/release/prepare-upload.sh --upload --export-path build/upload-export
 ```
 
 The check mode is read-only. Export and upload require explicit modes plus valid external signing/App Store credentials. Never commit certificates, profiles, API keys, or upload credentials.
+
+Archive and export destinations must be fresh. Upload performs a new export, so it needs a separate empty directory after a local export. For subsequent releases, set `FILMY_ARCHIVE_PATH` and use matching `--archive` paths and fresh export directories.

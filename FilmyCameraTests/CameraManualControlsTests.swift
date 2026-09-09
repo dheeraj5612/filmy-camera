@@ -188,6 +188,38 @@ final class CameraManualControlsTests: XCTestCase {
 
 
 final class CaptureWorkflowPolicyTests: XCTestCase {
+    func testPreviewCancellationWaitsForTheOldRenderToDrain() throws {
+        var state = PreviewRenderState()
+        let stale = try XCTUnwrap(state.begin())
+        state.invalidate()
+        XCTAssertNil(state.begin(), "Canceling a GPU job does not stop its synchronous work")
+        XCTAssertFalse(state.finish(stale), "The old crop cannot publish after invalidation")
+        let current = try XCTUnwrap(state.begin())
+        XCTAssertTrue(state.finish(current))
+    }
+
+    func testStalePreviewCompletionCannotReleaseANewerRender() throws {
+        var state = PreviewRenderState()
+        let first = try XCTUnwrap(state.begin())
+        XCTAssertTrue(state.finish(first))
+        let current = try XCTUnwrap(state.begin())
+        XCTAssertFalse(state.finish(first))
+        XCTAssertNil(state.begin(), "A duplicate completion must not admit overlapping work")
+        XCTAssertTrue(state.finish(current))
+    }
+
+    func testRepeatedPreviewInvalidationStillDrainsExactlyOneOperation() throws {
+        var state = PreviewRenderState()
+        let canceledBeforeStarting = try XCTUnwrap(state.begin())
+        state.invalidate()
+        state.invalidate()
+        XCTAssertNil(state.begin())
+        XCTAssertFalse(state.finish(canceledBeforeStarting))
+        XCTAssertFalse(state.finish(canceledBeforeStarting))
+        let current = try XCTUnwrap(state.begin())
+        XCTAssertTrue(state.finish(current))
+    }
+
     func testCountdownRejectsDuplicateAndUnsupportedStarts() throws {
         var state = CaptureTimerState()
         for seconds in [-1, 0, 1, 4, 30] { XCTAssertNil(state.begin(seconds: seconds)) }

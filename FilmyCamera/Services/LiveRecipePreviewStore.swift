@@ -42,25 +42,30 @@ final class LiveRecipePreviewStore: ObservableObject {
 
     private weak var camera: CameraService?
     private var frameHandlerID: UUID?
+    private var attachmentID = UUID()
     private var lastSnapshotTime: TimeInterval = 0
-    private var isRendering = false
+    private var rendering = PreviewRenderState()
     private var renderTask: Task<Void, Never>?
     private var version = 0
-    /// Bumped by `detach()` and `clear()`; a render that started under an
-    /// older generation discards its result instead of publishing it.
-    private var generation = 0
 
     func attach(to camera: CameraService) {
         guard frameHandlerID == nil || self.camera !== camera else { return }
         detach()
         self.camera = camera
+        let attachmentID = self.attachmentID
         frameHandlerID = camera.installFrameHandler { [weak self] image in
             guard let self else { return }
             if Thread.isMainThread {
-                MainActor.assumeIsolated { self.receive(image) }
+                MainActor.assumeIsolated {
+                    guard self.attachmentID == attachmentID else { return }
+                    self.receive(image)
+                }
             } else {
                 let box = FrameBox(image)
-                Task { @MainActor in self.receive(box.image) }
+                Task { @MainActor in
+                    guard self.attachmentID == attachmentID else { return }
+                    self.receive(box.image)
+                }
             }
         }
     }
@@ -71,6 +76,7 @@ final class LiveRecipePreviewStore: ObservableObject {
         }
         frameHandlerID = nil
         camera = nil
+        attachmentID = UUID()
         invalidatePendingRenders()
     }
 
@@ -85,32 +91,31 @@ final class LiveRecipePreviewStore: ObservableObject {
     }
 
     private func invalidatePendingRenders() {
-        generation &+= 1
+        rendering.invalidate()
         renderTask?.cancel()
-        renderTask = nil
-        isRendering = false
     }
 
     private func receive(_ image: CIImage) {
         let now = CACurrentMediaTime()
-        guard !isRendering, now - lastSnapshotTime >= Self.snapshotInterval else { return }
-        isRendering = true
+        guard now - lastSnapshotTime >= Self.snapshotInterval,
+              let ticket = rendering.begin() else { return }
         lastSnapshotTime = now
 
         let box = FrameBox(image)
         let size = Self.snapshotSize
-        let startedGeneration = generation
         renderTask = Task.detached(priority: .utility) { [weak self] in
-            guard !Task.isCancelled else { return }
-            let target = CGRect(origin: .zero, size: size)
-            let framed = CameraFrameLayout.aspectFill(box.image, in: target)
-            let rendered = FilmRenderer.outputCGImage(framed, from: target)
-            guard !Task.isCancelled else { return }
+            let rendered: CGImage?
+            if Task.isCancelled {
+                rendered = nil
+            } else {
+                let target = CGRect(origin: .zero, size: size)
+                let framed = CameraFrameLayout.aspectFill(box.image, in: target)
+                rendered = FilmRenderer.outputCGImage(framed, from: target)
+            }
             await MainActor.run { [weak self] in
-                guard let self, self.generation == startedGeneration else { return }
+                guard let self else { return }
                 self.renderTask = nil
-                self.isRendering = false
-                guard let rendered else { return }
+                guard self.rendering.finish(ticket), let rendered else { return }
                 self.version += 1
                 self.scene = RecipePreviewScene(
                     image: CIImage(cgImage: rendered),
@@ -172,8 +177,7 @@ final class CompositionAssistStore: ObservableObject {
     private let motion = CMMotionManager()
     private weak var camera: CameraService?
     private var handlerID: UUID?
-    private var generation = 0
-    private var busy = false
+    private var rendering = PreviewRenderState()
     private var lastSample: TimeInterval = 0
     private var options = Options()
     private var task: Task<Void, Never>?
@@ -196,19 +200,22 @@ final class CompositionAssistStore: ObservableObject {
         stop()
         self.options = desired
         self.camera = camera
+        let current = rendering.generation
         if desired.usesFrames {
             handlerID = camera.installFrameHandler { [weak self] image in
                 // CameraService delivers immutable preview frames on main.
-                MainActor.assumeIsolated { self?.receive(image) }
+                MainActor.assumeIsolated {
+                    guard let self, self.rendering.generation == current else { return }
+                    self.receive(image)
+                }
             }
         }
         if desired.level, motion.isDeviceMotionAvailable {
             motion.deviceMotionUpdateInterval = 0.1
-            let current = generation
             motion.startDeviceMotionUpdates(to: .main) { [weak self] motion, _ in
                 let x = motion?.gravity.x, y = motion?.gravity.y
                 MainActor.assumeIsolated {
-                    guard let self, self.generation == current else { return }
+                    guard let self, self.rendering.generation == current else { return }
                     self.horizon = x.flatMap { x in y.flatMap { PreviewAnalysisMath.horizonDegrees(x: x, y: $0) } }
                 }
             }
@@ -217,31 +224,32 @@ final class CompositionAssistStore: ObservableObject {
 
     func stop() {
         if let handlerID, let camera { camera.removeFrameHandler(handlerID) }
-        handlerID = nil; camera = nil; generation &+= 1
+        handlerID = nil; camera = nil; rendering.invalidate()
         task?.cancel(); task = nil
         motion.stopDeviceMotionUpdates()
         histogram = []; overlay = nil; horizon = nil; clippingPercent = 0
         options = Options()
-        // Do not clear `busy`: a canceled GPU operation must drain before the
-        // next frame can start, even across a detach/reattach generation.
     }
 
     private func receive(_ image: CIImage) {
         let now = CACurrentMediaTime()
-        guard !busy, now - lastSample >= 0.25, let camera else { return }
+        guard now - lastSample >= 0.25, let camera else { return }
         let viewport = camera.previewViewportSize
-        guard viewport.width > 0, viewport.height > 0 else { return }
-        busy = true; lastSample = now
-        let current = generation, options = options
+        guard viewport.width > 0, viewport.height > 0,
+              let ticket = rendering.begin() else { return }
+        lastSample = now
+        let options = options
         let box = FrameBox(image)
         task = Task.detached(priority: .utility) { [weak self] in
             let output = Self.analyze(box.image, viewport: viewport, options: options)
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                self.busy = false
-                guard self.generation == current else { return }
                 self.task = nil
-                guard let output else { self.overlay = nil; self.histogram = []; return }
+                guard self.rendering.finish(ticket), self.camera?.previewViewportSize == viewport else { return }
+                guard let output else {
+                    self.overlay = nil; self.histogram = []; self.clippingPercent = 0
+                    return
+                }
                 self.histogram = output.result.histogram
                 self.clippingPercent = 100 * Double(output.result.clippedPixels) / Double(output.result.pixelCount)
                 self.overlay = output.overlay.map { UIImage(cgImage: $0) }

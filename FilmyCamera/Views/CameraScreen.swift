@@ -237,6 +237,12 @@ struct CameraScreen: View {
             updateCompositionAssists()
         }
         .onChange(of: captureAspect) { _, _ in countdown.cancel(); assists.stop(); updateCompositionAssists() }
+        .onChange(of: camera.previewViewportSize) { _, _ in
+            // A mask from the previous crop must not stretch over a newly
+            // rotated or resized viewfinder while its replacement renders.
+            assists.stop()
+            updateCompositionAssists()
+        }
         .sheet(isPresented: $isShowingCaptureSetup) {
             CaptureSetupView()
                 .presentationDetents([.large])
@@ -1623,6 +1629,7 @@ struct CaptureSetupView: View {
                 } header: { Text("Hardware shutter") }
             }
             .scrollContentBackground(.hidden)
+            .accessibilityIdentifier("capture-setup-form")
             .background(FilmyTheme.background)
             .navigationTitle("Capture setup")
             .navigationBarTitleDisplayMode(.inline)

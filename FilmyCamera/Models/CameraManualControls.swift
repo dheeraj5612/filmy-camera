@@ -249,6 +249,34 @@ struct CaptureTimerState {
     mutating func cancel() { operationID = nil; remaining = 0 }
 }
 
+/// Cancellation invalidates a result, but synchronous GPU work must finish
+/// before another preview operation can begin.
+struct PreviewRenderState {
+    struct Ticket: Equatable, Sendable {
+        let id: UUID
+        let generation: UInt64
+    }
+
+    private(set) var generation: UInt64 = 0
+    private var active: Ticket?
+
+    mutating func begin() -> Ticket? {
+        guard active == nil else { return nil }
+        let ticket = Ticket(id: UUID(), generation: generation)
+        active = ticket
+        return ticket
+    }
+
+    /// Always drains the matching operation; only current results may publish.
+    mutating func finish(_ ticket: Ticket) -> Bool {
+        guard active == ticket else { return false }
+        active = nil
+        return ticket.generation == generation
+    }
+
+    mutating func invalidate() { generation &+= 1 }
+}
+
 /// Display-referred, unfiltered preview analysis. Not a RAW histogram or a
 /// sensor-clipping meter. All input/output is bounded to 192 x 192 pixels.
 enum PreviewAnalysisMath {

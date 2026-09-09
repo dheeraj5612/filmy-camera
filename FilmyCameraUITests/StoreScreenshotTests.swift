@@ -481,18 +481,39 @@ final class CaptureSetupUITests: XCTestCase {
         app.launchArguments = ["-ui-testing"]
         app.launch()
         defer { app.terminate() }
-        let setup = app.buttons["capture-setup-open"]
-        XCTAssertTrue(setup.waitForExistence(timeout: 15)); setup.tap()
-        let zebra = app.switches["capture-zebras-toggle"]
-        if !zebra.isHittable { app.swipeUp() }
-        XCTAssertTrue(zebra.waitForExistence(timeout: 5)); zebra.tap()
-        XCTAssertEqual(zebra.value as? String, "1")
+        openCaptureSetup(in: app)
+        let aidIdentifiers = [
+            "capture-level-toggle",
+            "capture-histogram-toggle",
+            "capture-zebras-toggle",
+            "capture-peaking-toggle"
+        ]
+        for identifier in aidIdentifiers {
+            let aid = captureAid(identifier, in: app)
+            XCTAssertEqual(aid.value as? String, "0", "A fresh preferences suite starts with aids off")
+            tapCaptureAid(aid, expecting: "1")
+        }
+        attachCaptureSetup(named: "capture-setup-aids-enabled")
         app.buttons["capture-setup-done"].tap()
         XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 5))
-        app.terminate(); app.launch()
-        XCTAssertTrue(setup.waitForExistence(timeout: 15)); setup.tap()
-        if !zebra.isHittable { app.swipeUp() }
-        XCTAssertTrue(zebra.waitForExistence(timeout: 5)); XCTAssertEqual(zebra.value as? String, "1")
+        app.terminate()
+        app.launch()
+        openCaptureSetup(in: app)
+        for identifier in aidIdentifiers {
+            XCTAssertEqual(captureAid(identifier, in: app).value as? String, "1", "\(identifier) must persist")
+        }
+        attachCaptureSetup(named: "capture-setup-aids-restored")
+
+        // Cover the reverse transition too: an aid must not become sticky
+        // after its persisted value changes from enabled back to disabled.
+        tapCaptureAid(captureAid("capture-zebras-toggle", in: app), expecting: "0")
+        app.buttons["capture-setup-done"].tap()
+        app.terminate()
+        app.launch()
+        openCaptureSetup(in: app)
+        XCTAssertEqual(captureAid("capture-zebras-toggle", in: app).value as? String, "0")
+        XCTAssertEqual(captureAid("capture-peaking-toggle", in: app).value as? String, "1",
+                       "Disabling zebras must leave the other aids enabled")
     }
 
     func testNewDigitalStyleCanBeSearchedSelectedAndPersisted() {
@@ -513,5 +534,48 @@ final class CaptureSetupUITests: XCTestCase {
         XCTAssertTrue(menu.waitForExistence(timeout: 5)); XCTAssertTrue(menu.label.contains("CCD Daylight"))
         app.terminate(); app.launch()
         XCTAssertTrue(menu.waitForExistence(timeout: 15)); XCTAssertTrue(menu.label.contains("CCD Daylight"))
+    }
+
+    private func openCaptureSetup(in app: XCUIApplication) {
+        let setup = app.buttons["capture-setup-open"]
+        XCTAssertTrue(setup.waitForExistence(timeout: 15))
+        setup.tap()
+        XCTAssertTrue(app.buttons["capture-setup-done"].waitForExistence(timeout: 5))
+    }
+
+    private func captureAid(_ identifier: String, in app: XCUIApplication) -> XCUIElement {
+        let aid = app.switches[identifier]
+        let form = app.descendants(matching: .any)["capture-setup-form"]
+        XCTAssertTrue(form.waitForExistence(timeout: 5))
+        for _ in 0..<4 {
+            if aid.exists && aid.isHittable && form.frame.contains(aid.frame) { break }
+            form.swipeUp()
+        }
+        XCTAssertTrue(aid.waitForExistence(timeout: 5))
+        XCTAssertTrue(aid.isHittable, "\(identifier) must be reachable in Capture setup")
+        XCTAssertTrue(form.frame.contains(aid.frame), "\(identifier) must be fully visible before tapping")
+        XCTAssertTrue(aid.isEnabled)
+        return aid
+    }
+
+    private func tapCaptureAid(_ aid: XCUIElement, expecting value: String) {
+        // SwiftUI Form exposes the whole labeled row as the switch frame.
+        // Its center can be inert label space, so tap the actual trailing
+        // switch using the current accessibility bounds on each device.
+        aid.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5))
+            .withOffset(CGVector(dx: -min(25, aid.frame.width / 2), dy: 0))
+            .tap()
+        let updatedValue = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", value), object: aid
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [updatedValue], timeout: 5), .completed,
+                       "Tapping \(aid.identifier) must change its value to \(value)")
+    }
+
+    private func attachCaptureSetup(named name: String) {
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 }
