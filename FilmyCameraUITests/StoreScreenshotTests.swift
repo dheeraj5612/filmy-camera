@@ -199,14 +199,14 @@ final class StoreScreenshotTests: XCTestCase {
         // -ui-testing is intentionally absent because it denies Photos reads.
         app.launchArguments = ["-selectedRecipeID", recipeID]
         app.launch()
-        app.tap()
 
+        // A generic app-center tap selects a look in the interactive chooser.
+        // Dismiss onboarding explicitly so the requested recipe stays active.
         let onboarding = app.descendants(matching: .any)["onboarding-screen"]
         if onboarding.waitForExistence(timeout: 3) {
-            let skip = app.buttons["Skip"]
+            let skip = app.buttons["onboarding-skip"]
             XCTAssertTrue(skip.waitForExistence(timeout: 5))
             skip.tap()
-            app.tap()
         }
     }
 
