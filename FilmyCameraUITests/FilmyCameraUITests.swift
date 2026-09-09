@@ -557,8 +557,11 @@ final class FilmyCameraUITests: XCTestCase {
         compare.tap()
         XCTAssertTrue(waitUntil(timeout: 15) { compare.value as? String == "Original" })
         lookPicker.tap()
-        let monochrome = app.buttons["review-look-acros-monochrome"]
-        XCTAssertTrue(monochrome.waitForExistence(timeout: 5))
+        let monochrome = revealReviewLook(
+            "review-look-acros-monochrome",
+            named: "Fine Monochrome",
+            in: app
+        )
         monochrome.tap()
         let photo = app.descendants(matching: .any)["review-image"]
         XCTAssertTrue(waitUntil(timeout: 30) {
@@ -910,8 +913,8 @@ final class FilmyCameraUITests: XCTestCase {
         lookPicker.tap()
         let monochrome = revealReviewLook(
             "review-look-acros-monochrome",
-            in: rollApp,
-            scrollingTowardLowerOptions: true
+            named: "Fine Monochrome",
+            in: rollApp
         )
         monochrome.tap()
         XCTAssertTrue(
@@ -939,8 +942,8 @@ final class FilmyCameraUITests: XCTestCase {
         lookPicker.tap()
         let g7x = revealReviewLook(
             "review-look-g7x-compact",
-            in: rollApp,
-            scrollingTowardLowerOptions: false
+            named: "G7 X Compact",
+            in: rollApp
         )
         g7x.tap()
         XCTAssertTrue(
@@ -1394,75 +1397,31 @@ final class FilmyCameraUITests: XCTestCase {
         scrollIntoView(element, in: app, downward: true)
     }
 
-    /// SwiftUI's review Menu can bridge its options as Button, PopUpButton, or
-    /// another accessibility type depending on the OS. Use the stable
-    /// identifier and mounted, hittable option rows instead of a type-sensitive
-    /// query or a guessed screen coordinate.
+    /// Search the visual library so recipe selection works with every grid
+    /// column count and does not depend on an offscreen card being mounted.
     private func revealReviewLook(
         _ identifier: String,
-        in app: XCUIApplication,
-        scrollingTowardLowerOptions: Bool
+        named name: String,
+        in app: XCUIApplication
     ) -> XCUIElement {
-        let option = app.descendants(matching: .any)[identifier]
+        let library = app.descendants(matching: .any)["look-library"]
         XCTAssertTrue(
-            waitUntil(timeout: 5) { self.visibleReviewLookRows(in: app).count >= 1 },
-            "Review look menu must open"
+            library.waitForExistence(timeout: 5),
+            "Review must present its visual look library"
         )
-
-        for _ in 0..<6 {
-            if option.exists, option.isHittable {
-                return option
-            }
-
-            let visibleRows = visibleReviewLookRows(in: app)
-            XCTAssertGreaterThanOrEqual(
-                visibleRows.count,
-                2,
-                "Review look menu must expose two rows for a bounded scroll gesture"
-            )
-            guard !visibleRows.isEmpty else {
-                continue
-            }
-
-            // Keep both endpoints comfortably inside the native popup when
-            // several rows are visible. With only two or three mounted rows,
-            // the outer rows are the reliable scroll targets.
-            let upperIndex = visibleRows.count >= 4 ? 1 : 0
-            let lowerIndex = visibleRows.count >= 4 ? visibleRows.count - 2 : visibleRows.count - 1
-            let upperRow = visibleRows[upperIndex]
-            let lowerRow = visibleRows[lowerIndex]
-
-            let targetIsAbove = option.exists && !option.frame.isEmpty
-                && option.frame.maxY < upperRow.frame.minY
-            let scrollDown = targetIsAbove || (!option.exists && !scrollingTowardLowerOptions)
-            // Start and end on mounted, hittable menu rows. The collection
-            // accessibility node reports the whole app frame on iOS 26, and
-            // gestures based on it dismiss the popup instead of scrolling it.
-            let startRow = scrollDown ? upperRow : lowerRow
-            let endRow = scrollDown ? lowerRow : upperRow
-            let start = startRow.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            let end = endRow.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            start.press(forDuration: 0.05, thenDragTo: end)
-        }
-
+        let search = app.textFields["look-library-search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        let clearSearch = app.buttons["look-library-clear-search"]
+        if clearSearch.exists { clearSearch.tap() }
+        app.buttons["look-filter-all"].tap()
+        search.tap()
+        search.typeText(name + "\n")
+        let option = app.buttons[identifier]
         XCTAssertTrue(
-            option.exists && option.isHittable,
-            "Review menu must expose \(identifier) after bounded scrolling"
+            option.waitForExistence(timeout: 5) && option.isHittable,
+            "Search must expose \(name) as a selectable preview"
         )
         return option
-    }
-
-    private func visibleReviewLookRows(in app: XCUIApplication) -> [XCUIElement] {
-        app.descendants(matching: .any)
-            .allElementsBoundByIndex
-            .filter {
-                $0.identifier.hasPrefix("review-look-")
-                    && $0.identifier != "review-look-picker"
-                    && $0.exists
-                    && !$0.frame.isEmpty
-                    && $0.isHittable
-            }
-            .sorted { $0.frame.minY < $1.frame.minY }
     }
 
     private func scrollIntoView(_ element: XCUIElement, in app: XCUIApplication, downward: Bool) {
