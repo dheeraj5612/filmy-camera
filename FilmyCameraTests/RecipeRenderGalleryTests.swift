@@ -363,76 +363,112 @@ final class CatalogRenderAcceptanceTests: XCTestCase {
     func testRender_monochrome_silver_rangefinder() throws { try verifyRecipe("monochrome-silver-rangefinder") }
 
     private func verifyRecipe(_ id: String) throws {
-        try autoreleasepool {
-            let recipe = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == id })
-            XCTAssertTrue(recipe.isValid, id)
-            let data = try JSONEncoder().encode(recipe)
-            XCTAssertEqual(try JSONDecoder().decode(FilmRecipe.self, from: data), recipe)
-            let sample = try XCTUnwrap(UIImage(named: "LookPreviewCafe")?.cgImage, "Bundled public-safe sample required")
-            let bounds = CGRect(x: 0, y: 0, width: 96, height: 128)
-            let cafe = CameraFrameLayout.aspectFill(CIImage(cgImage: sample), in: bounds)
-            let dark = cafe.applyingFilter("CIExposureAdjust", parameters: [kCIInputEVKey: -2.5])
-            let chart = Self.chart(in: bounds)
-            let context = FilmRenderer.sharedContext
-            let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
-            var previews: [CGImage] = []
-            for (name, input) in [("color-chart", chart), ("daylight", cafe), ("low-light", dark)] {
-                for quality in [FilmRenderer.Quality.preview, .photo] {
-                    let output = FilmRenderer.render(input, recipe: recipe, quality: quality, grainSeed: 42)
-                    XCTAssertEqual(output.extent, input.extent, "\(id) \(name)")
-                    var pixels = [Float](repeating: 0, count: 96 * 128 * 4)
-                    context.render(output, toBitmap: &pixels, rowBytes: 96 * 4 * MemoryLayout<Float>.size,
-                                   bounds: bounds, format: .RGBAf, colorSpace: colorSpace)
-                    XCTAssertTrue(pixels.allSatisfy { $0.isFinite }, "Nonfinite pixels: \(id) \(name)")
-                    let alpha = stride(from: 3, to: pixels.count, by: 4).map { pixels[$0] }
-                    XCTAssertTrue(alpha.allSatisfy { abs($0 - 1) < 0.002 }, "Opaque source alpha changed: \(id)")
-                    let bitmap = try XCTUnwrap(FilmRenderer.outputCGImage(output, from: bounds), id)
-                    XCTAssertEqual(bitmap.width, 96); XCTAssertEqual(bitmap.height, 128)
-                    if name == "color-chart" {
-                        let values = stride(from: 0, to: pixels.count, by: 4).map { pixels[$0] }
-                        XCTAssertGreaterThan((values.max() ?? 0) - (values.min() ?? 0), 0.05, "Collapsed tonal range: \(id)")
-                    }
-                    if recipe.creativeCollection == .monochrome, recipe.filmBase.monochromeFilter != nil,
-                       recipe.monochromaticColor.warmCool == 0, recipe.monochromaticColor.greenMagenta == 0 {
-                        let chroma = stride(from: 0, to: pixels.count, by: 4).map {
-                            max(abs(pixels[$0] - pixels[$0 + 1]), abs(pixels[$0 + 1] - pixels[$0 + 2]))
-                        }.max() ?? 0
-                        XCTAssertLessThan(chroma, 0.01, "Neutral monochrome contains unintended color: \(id)")
-                    }
-                    if quality == .photo {
-                        let encoded = try XCTUnwrap(PhotoOutputEncoder.jpegData(
-                            for: bitmap, sourceData: Data(), capturedAt: Date(timeIntervalSince1970: 0), recipe: recipe))
-                        let source = try XCTUnwrap(CGImageSourceCreateWithData(encoded as CFData, nil))
-                        let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any])
-                        XCTAssertEqual(properties[kCGImagePropertyPixelWidth as String] as? Int, 96)
-                        XCTAssertEqual(properties[kCGImagePropertyPixelHeight as String] as? Int, 128)
-                        XCTAssertNil(properties[kCGImagePropertyGPSDictionary as String])
-                        let exif = try XCTUnwrap(properties[kCGImagePropertyExifDictionary as String] as? [String: Any])
-                        let comment = try XCTUnwrap(exif[kCGImagePropertyExifUserComment as String] as? String)
-                        let metadata = try JSONDecoder().decode(PhotoOutputEncoder.RecipeProvenanceMetadata.self,
-                                                              from: Data(comment.utf8))
-                        XCTAssertEqual(metadata.recipeID, id)
-                        XCTAssertEqual(metadata.provenance, recipe.provenance)
-                        previews.append(bitmap)
-                    }
-                }
-            }
-            let format = UIGraphicsImageRendererFormat()
-            format.scale = 1; format.opaque = true
-            let sheet = UIGraphicsImageRenderer(size: CGSize(width: 288, height: 156), format: format).image { context in
-                UIColor.black.setFill(); context.fill(CGRect(x: 0, y: 0, width: 288, height: 156))
-                for (index, bitmap) in previews.enumerated() {
-                    UIImage(cgImage: bitmap).draw(in: CGRect(x: index * 96, y: 28, width: 96, height: 128))
-                }
-                (recipe.name as NSString).draw(at: CGPoint(x: 5, y: 5), withAttributes: [
-                    .font: UIFont.systemFont(ofSize: 12), .foregroundColor: UIColor.white
-                ])
-            }
-            let attachment = XCTAttachment(image: sheet)
-            attachment.name = "catalog-\(id)-chart-daylight-lowlight"
-            attachment.lifetime = .keepAlways
-            add(attachment)
+        try autoreleasepool { () throws -> Void in
+            try renderAndVerifyRecipe(id)
         }
+    }
+
+    private func renderAndVerifyRecipe(_ id: String) throws {
+        let recipe = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == id })
+        XCTAssertTrue(recipe.isValid, id)
+        let data = try JSONEncoder().encode(recipe)
+        XCTAssertEqual(try JSONDecoder().decode(FilmRecipe.self, from: data), recipe)
+        let sample = try XCTUnwrap(UIImage(named: "LookPreviewCafe")?.cgImage, "Bundled public-safe sample required")
+        let bounds = CGRect(x: 0, y: 0, width: 96, height: 128)
+        let cafe = CameraFrameLayout.aspectFill(CIImage(cgImage: sample), in: bounds)
+        let dark = cafe.applyingFilter("CIExposureAdjust", parameters: [kCIInputEVKey: -2.5])
+        let fixtures: [(String, CIImage)] = [("color-chart", Self.chart(in: bounds)), ("daylight", cafe), ("low-light", dark)]
+        let qualities: [FilmRenderer.Quality] = [FilmRenderer.Quality.preview, .photo]
+        var previews: [CGImage] = []
+        for (name, input) in fixtures {
+            for quality in qualities {
+                let output = FilmRenderer.render(input, recipe: recipe, quality: quality, grainSeed: 42)
+                XCTAssertEqual(output.extent, input.extent, "\(id) \(name)")
+                let bitmap = try verifyPixels(output, recipe: recipe, fixture: name, bounds: bounds)
+                if quality == .photo {
+                    try verifyJPEG(bitmap, recipe: recipe)
+                    previews.append(bitmap)
+                }
+            }
+        }
+        attachContactSheet(previews, recipe: recipe)
+    }
+
+    private func verifyPixels(_ output: CIImage, recipe: FilmRecipe, fixture: String, bounds: CGRect) throws -> CGImage {
+        let width = Int(bounds.width), height = Int(bounds.height)
+        var pixels = [Float](repeating: 0, count: width * height * 4)
+        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+        FilmRenderer.sharedContext.render(output, toBitmap: &pixels,
+                                          rowBytes: width * 4 * MemoryLayout<Float>.size,
+                                          bounds: bounds, format: .RGBAf, colorSpace: colorSpace)
+        XCTAssertTrue(pixels.allSatisfy { $0.isFinite }, "Nonfinite pixels: \(recipe.id) \(fixture)")
+        var minimum: Float = .greatestFiniteMagnitude
+        var maximum: Float = -.greatestFiniteMagnitude
+        var chroma: Float = 0
+        var alphaError: Float = 0
+        for offset in stride(from: 0, to: pixels.count, by: 4) {
+            let r = pixels[offset], g = pixels[offset + 1], b = pixels[offset + 2]
+            minimum = min(minimum, r)
+            maximum = max(maximum, r)
+            let redGreen: Float = abs(r - g)
+            let greenBlue: Float = abs(g - b)
+            chroma = max(chroma, max(redGreen, greenBlue))
+            alphaError = max(alphaError, abs(pixels[offset + 3] - 1))
+        }
+        XCTAssertLessThan(alphaError, 0.002, "Opaque source alpha changed: \(recipe.id)")
+        if fixture == "color-chart" {
+            XCTAssertGreaterThan(maximum - minimum, 0.05, "Collapsed tonal range: \(recipe.id)")
+        }
+        let neutralMonochrome = recipe.creativeCollection == .monochrome
+            && recipe.filmBase.monochromeFilter != nil
+            && recipe.monochromaticColor.warmCool == 0
+            && recipe.monochromaticColor.greenMagenta == 0
+        if neutralMonochrome {
+            XCTAssertLessThan(chroma, 0.01, "Neutral monochrome contains unintended color: \(recipe.id)")
+        }
+        let bitmap = try XCTUnwrap(FilmRenderer.outputCGImage(output, from: bounds), recipe.id)
+        XCTAssertEqual(bitmap.width, width)
+        XCTAssertEqual(bitmap.height, height)
+        return bitmap
+    }
+
+    private func verifyJPEG(_ bitmap: CGImage, recipe: FilmRecipe) throws {
+        let encoded = try XCTUnwrap(PhotoOutputEncoder.jpegData(
+            for: bitmap, sourceData: Data(), capturedAt: Date(timeIntervalSince1970: 0), recipe: recipe))
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(encoded as CFData, nil))
+        let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any])
+        XCTAssertEqual(properties[kCGImagePropertyPixelWidth as String] as? Int, 96)
+        XCTAssertEqual(properties[kCGImagePropertyPixelHeight as String] as? Int, 128)
+        XCTAssertNil(properties[kCGImagePropertyGPSDictionary as String])
+        let exif = try XCTUnwrap(properties[kCGImagePropertyExifDictionary as String] as? [String: Any])
+        let comment = try XCTUnwrap(exif[kCGImagePropertyExifUserComment as String] as? String)
+        let metadata = try JSONDecoder().decode(PhotoOutputEncoder.RecipeProvenanceMetadata.self, from: Data(comment.utf8))
+        XCTAssertEqual(metadata.recipeID, recipe.id)
+        XCTAssertEqual(metadata.provenance, recipe.provenance)
+    }
+
+    private func attachContactSheet(_ previews: [CGImage], recipe: FilmRecipe) {
+        XCTAssertEqual(previews.count, 3, recipe.id)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 12), .foregroundColor: UIColor.white
+        ]
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 288, height: 156), format: format)
+        let sheet = renderer.image { context in
+            UIColor.black.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 288, height: 156))
+            for (index, bitmap) in previews.enumerated() {
+                let rect = CGRect(x: CGFloat(index) * 96, y: 28, width: 96, height: 128)
+                UIImage(cgImage: bitmap).draw(in: rect)
+            }
+            (recipe.name as NSString).draw(at: CGPoint(x: 5, y: 5), withAttributes: attributes)
+        }
+        let attachment = XCTAttachment(image: sheet)
+        attachment.name = "catalog-\(recipe.id)-chart-daylight-lowlight"
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     private static func chart(in bounds: CGRect) -> CIImage {
