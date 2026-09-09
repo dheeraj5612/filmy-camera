@@ -1569,7 +1569,7 @@ private struct CameraHardwareShutterModifier: ViewModifier {
     let enabled: Bool
     let action: () -> Void
     @ViewBuilder func body(content: Content) -> some View {
-        if #available(iOS 17.2, *) {
+        if #available(iOS 18.0, *) {
             content.onCameraCaptureEvent(isEnabled: enabled) { event in
                 if event.phase == .ended { action() }
             }
