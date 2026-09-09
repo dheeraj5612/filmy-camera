@@ -1,6 +1,6 @@
 # Current iPhone 6.5-inch App Store screenshot pack
 
-Five actual 1242×2688 PNGs from version 1.0.0 (11), captured September 5, 2026 with reversible review, Original comparison, and optional Instant Print borders. This replacement pack was uploaded to App Store Connect on September 5, 2026; a reload verified all five files in numeric order.
+Five actual 1242×2688 PNGs from version 1.0.0 (12), captured September 9, 2026 from clean source `731b285d1e3e9b28f9a960e21466a4a001b23e3e`. The application/project inputs match signed archive source `e73c5ee`; the intervening changes correct the screenshot test helper and privacy documentation. This pack has not been uploaded to App Store Connect.
 
 1. G7 X Compact import
 2. Muted Color import
@@ -8,12 +8,12 @@ Five actual 1242×2688 PNGs from version 1.0.0 (11), captured September 5, 2026 
 4. Populated Roll with exactly three matching saved treatments
 5. Fine Monochrome Instant Print photo detail
 
-The public generated cafe original in `../demo-source/` was imported through the normal production Photos picker, renderer, review, save, Roll, and detail flows. This demonstrates imported media, not live camera capture. No private photos or composited app UI are included.
+The public generated cafe original in `../demo-source/` was imported through the normal production Photos picker, renderer, review, save, Roll, and detail flows. These images demonstrate imported media. No private photos, composited app UI, debug overlays, or camera-unavailable placeholders are included.
 
-The hardened store-media runner created and seeded an isolated iPhone 11 Pro Max simulator on iOS 26.5, forced zero prior saves, and removed only that owned simulator afterward. Reference simulator libraries were untouched. All five images were visually inspected: G7 X is vivid, Muted Color is restrained, and Fine Monochrome is grayscale; the Roll shows their corresponding saved outputs.
+The runner created and seeded an isolated iPhone 11 Pro Max simulator on iOS 26.5 with zero prior saves. All five images were visually inspected: G7 X is vivid, Muted Color is restrained, Fine Monochrome is grayscale, and the Roll shows the corresponding saved outputs. The test also verifies complete photo bounds, source/Instant Print aspect ratio, reachable Look/Compare/Finish/Save controls, safe areas, and blocked interaction with the covered camera.
 
-Evidence: `build/instant-print-20260905/store-iphone/FilmyCameraStoreMedia.xcresult` and its attachment manifest (ignored). The one store-media flow passed with zero failures/skips, exercising all three imports, review bounds, covered-camera interaction, saving, Roll, and detail. Build-input digest: `a9d7f13a45f734b93a0d06ce0a04f69031a79035ae9ffb28db7fa56586ec7d90`.
+Evidence: `build/pr90-evidence/store-media-build12/iphone-pack-run/filmycamera-store-media-summary.json` and `iphone-6.5-attachments/manifest.json` (ignored). The complete store-media flow passed one test with zero failures/skips. Build-input digest: `2bedbf23ff30a5073b12b1e1ce716bbef9f660520bf62d240e308d231002db15`. Toolchain: Xcode 26.6, build 17F113.
 
-Run `scripts/release/validate-store-media.sh` for format/dimension checks. Structural validation is separate from visual inspection and App Store Connect acceptance.
+Capture provenance and per-image hashes are tracked in [build12-provenance.json](../build12-provenance.json).
 
-The source subsequently received compact-landscape layout changes; this portrait pack represents the unchanged portrait presentation.
+Run `scripts/release/validate-store-media.sh` for format/dimension checks. Local validation is separate from Apple upload and acceptance.
