@@ -1,0 +1,44 @@
+# One-shot fixed-byte API availability correction; removed from the final tree.
+name: Prepare capture availability fix
+on:
+  pull_request:
+    paths: ['.github/workflows/catalog-availability-transfer.yml']
+permissions:
+  contents: read
+jobs:
+  prepare:
+    if: github.event.pull_request.number == 90 && github.event.pull_request.head.repo.full_name == 'dheeraj5612/filmy-camera' && github.event.pull_request.head.ref == 'codex/camera-capabilities-catalog-20260909'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Verify single source correction and create unreferenced blob only
+        shell: python
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          import base64,hashlib,json,os,pathlib,subprocess,urllib.request
+          def git(*args):
+              return subprocess.check_output(['git',*args],timeout=20).decode().strip()
+          assert git('rev-parse','HEAD^') == '8551a231c414982e78f903b3fbb5fe70bac34b7e'
+          assert git('diff','--name-only','HEAD^','HEAD') == '.github/workflows/catalog-availability-transfer.yml'
+          assert os.environ['GITHUB_REPOSITORY'] == 'dheeraj5612/filmy-camera'
+          data=pathlib.Path('FilmyCamera/Views/CameraScreen.swift').read_bytes()
+          def digest(data):
+              return hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()
+          assert digest(data)=='b5cdc928539b1dca71d7faf50b6bcdc02b8d8daa'
+          assert data.count(b'if #available(iOS 17.2, *) {')==1
+          data=data.replace(b'if #available(iOS 17.2, *) {',b'if #available(iOS 18.0, *) {')
+          assert digest(data)=='92d4c888267dc43beb1c5e76f857c7d51599134f'
+          body=json.dumps({'encoding':'base64','content':base64.b64encode(data).decode()}).encode()
+          req=urllib.request.Request('https://api.github.com/repos/dheeraj5612/filmy-camera/git/blobs',data=body,method='POST',headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','Content-Type':'application/json'})
+          with urllib.request.urlopen(req,timeout=30) as response:
+              result=json.load(response)
+          assert result['sha']==digest(data)
+          print('Verified availability fix blob '+result['sha']+'. No refs, commits, or app code executed.')
