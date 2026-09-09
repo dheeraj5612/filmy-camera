@@ -653,13 +653,15 @@ final class FilmyCameraUITests: XCTestCase {
 
         openRoll.tap()
         XCTAssertTrue(cacheApp.staticTexts["Roll"].waitForExistence(timeout: 10))
-        let sourceSummary = cacheApp.descendants(matching: .any).matching(
-            NSPredicate(format: "label == 'Newest first. Source: Local cache'")
-        ).firstMatch
+        let newestFirst = cacheApp.staticTexts["Newest first"]
+        let sourceSummary = cacheApp.staticTexts["Local cache"]
+        XCTAssertTrue(newestFirst.waitForExistence(timeout: 5))
+        XCTAssertTrue(cacheApp.frame.contains(newestFirst.frame))
         XCTAssertTrue(
-            sourceSummary.exists,
+            sourceSummary.waitForExistence(timeout: 5),
             "Add Photos Only must expose the committed local cache; configure Photos access to Add Photos Only"
         )
+        XCTAssertTrue(cacheApp.frame.contains(sourceSummary.frame))
         XCTAssertEqual(try XCTUnwrap(rollFrameCount(in: cacheApp)), countBeforeSave + 1)
 
         let savedFrame = cacheApp.buttons.matching(
@@ -679,7 +681,10 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertTrue(cacheApp.buttons["Open roll"].waitForExistence(timeout: 10))
         cacheApp.buttons["Open roll"].tap()
         XCTAssertTrue(cacheApp.staticTexts["Roll"].waitForExistence(timeout: 10))
-        XCTAssertTrue(sourceSummary.exists, "The cache index must survive service recreation")
+        XCTAssertTrue(newestFirst.waitForExistence(timeout: 5))
+        XCTAssertTrue(cacheApp.frame.contains(newestFirst.frame))
+        XCTAssertTrue(sourceSummary.waitForExistence(timeout: 5), "The cache index must survive service recreation")
+        XCTAssertTrue(cacheApp.frame.contains(sourceSummary.frame))
         XCTAssertEqual(try XCTUnwrap(rollFrameCount(in: cacheApp)), countBeforeSave + 1)
         XCTAssertTrue(savedFrame.exists, "The saved local frame must survive app relaunch")
         savedFrame.tap()
@@ -973,13 +978,19 @@ final class FilmyCameraUITests: XCTestCase {
         openRoll.tap()
         XCTAssertTrue(rollApp.staticTexts["Roll"].waitForExistence(timeout: 10))
 
-        let sourceSummary = rollApp.descendants(matching: .any).matching(
-            NSPredicate(format: "label BEGINSWITH 'Newest first. Source:'")
+        let newestFirst = rollApp.staticTexts["Newest first"]
+        XCTAssertTrue(newestFirst.waitForExistence(timeout: 10))
+        XCTAssertTrue(rollApp.frame.contains(newestFirst.frame))
+        let sourceSummary = rollApp.staticTexts.matching(
+            NSPredicate(format: "label IN %@", [
+                "Photos", "Local cache", "Photos and local cache", "Limited Photos access"
+            ])
         ).firstMatch
         XCTAssertTrue(
             sourceSummary.waitForExistence(timeout: 30),
             "The Roll must publish whether the saved frame came from Photos or local cache"
         )
+        XCTAssertTrue(rollApp.frame.contains(sourceSummary.frame))
         let savedFrame = rollApp.buttons.matching(
             NSPredicate(format: "label == 'Photo in your gallery, G7 X Compact'")
         ).firstMatch
@@ -1669,6 +1680,129 @@ final class FilmyCameraUITests: XCTestCase {
             XCTAssertTrue(waitForLiveShutter(in: app, timeout: 8), "Round \(round): the viewfinder must return after Retake")
             let elapsed = Date().timeIntervalSince(start)
             XCTAssertLessThan(elapsed, 3, "Round \(round): Retake should reuse the warm session (took \(elapsed) s)")
+        }
+        #endif
+    }
+
+    /// Exercises the real timer and capture crop without keeping a photo.
+    /// The isolated preferences and screenshots belong only to this test.
+    func testPhysicalTimerCancellationAndSquareCaptureWithLiveHistogram() throws {
+        #if targetEnvironment(simulator)
+        throw XCTSkip("Timer capture acceptance requires physical camera hardware")
+        #else
+        XCTAssertTrue(waitForLiveShutter(in: app), "The camera must render fresh frames before setup")
+        let setup = app.buttons["capture-setup-open"]
+        XCTAssertTrue(setup.waitForExistence(timeout: 5))
+        setup.tap()
+        let done = app.buttons["capture-setup-done"]
+        XCTAssertTrue(done.waitForExistence(timeout: 5))
+        for (identifier, title) in [("capture-delay-picker", "10s"), ("capture-aspect-picker", "1:1")] {
+            let picker = app.descendants(matching: .any)[identifier]
+            XCTAssertTrue(picker.isHittable)
+            picker.tap()
+            let option = app.buttons[title]
+            XCTAssertTrue(option.waitForExistence(timeout: 5))
+            option.tap()
+        }
+        let histogramToggle = app.switches["capture-histogram-toggle"]
+        let form = app.descendants(matching: .any)["capture-setup-form"]
+        for _ in 0..<4 {
+            if histogramToggle.exists && histogramToggle.isHittable
+                && form.frame.contains(histogramToggle.frame) { break }
+            form.swipeUp()
+        }
+        XCTAssertTrue(histogramToggle.isHittable)
+        XCTAssertTrue(form.frame.contains(histogramToggle.frame))
+        XCTAssertEqual(histogramToggle.value as? String, "0")
+        XCTAssertEqual(histogramToggle.switches.count, 1)
+        let histogramControl = histogramToggle.switches.firstMatch
+        XCTAssertTrue(histogramControl.isEnabled && histogramControl.isHittable)
+        XCTAssertTrue(histogramToggle.frame.contains(histogramControl.frame))
+        histogramControl.tap()
+        XCTAssertTrue(waitUntil(timeout: 5) { histogramToggle.value as? String == "1" })
+        done.tap()
+        XCTAssertTrue(waitForDisappearance(done, timeout: 5))
+        XCTAssertTrue(waitForLiveShutter(in: app), "Changing aspect must settle before capture")
+        XCTAssertEqual(setup.value as? String, "Timer 10s, 1:1")
+        let preview = app.descendants(matching: .any)["camera-preview"]
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(preview.frame.height, 0)
+        XCTAssertTrue(app.frame.contains(preview.frame))
+        XCTAssertEqual(preview.frame.width / preview.frame.height, 1, accuracy: 0.01)
+        let histogram = app.descendants(matching: .any).matching(
+            NSPredicate(format: "label BEGINSWITH 'Preview luminance histogram.'")
+        ).firstMatch
+        XCTAssertTrue(histogram.waitForExistence(timeout: 10), "Live preview analysis must publish a histogram")
+        attachScreenshot(named: "device-square-viewfinder-live-histogram")
+
+        let shutter = app.buttons["Capture photo"]
+        let countdown = app.descendants(matching: .any)["capture-countdown"]
+        let countdownValue = app.descendants(matching: .any)["capture-countdown-value"]
+        let cancel = app.buttons["capture-countdown-cancel"]
+        let photo = app.descendants(matching: .any)["review-image"]
+        shutter.tap()
+        XCTAssertTrue(cancel.waitForExistence(timeout: 5))
+        cancel.tap()
+        XCTAssertTrue(waitForDisappearance(countdown, timeout: 5))
+        // Stay beyond the canceled timer's original deadline before starting
+        // another shot, so a stale completion cannot hide in the next review.
+        let canceledCapture = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == true"), object: photo
+        )
+        canceledCapture.isInverted = true
+        XCTAssertEqual(XCTWaiter.wait(for: [canceledCapture], timeout: 11), .completed,
+                       "Canceling the timer must prevent a captured review")
+        XCTAssertTrue(waitForLiveShutter(in: app), "Canceling the timer must restore fresh preview frames")
+
+        shutter.tap()
+        XCTAssertTrue(countdownValue.waitForExistence(timeout: 5))
+        let initialCountdown = countdownValue.label
+        XCTAssertTrue(initialCountdown.hasPrefix("Photo in "))
+        XCTAssertTrue(waitUntil(timeout: 4) {
+            countdownValue.exists && countdownValue.label != initialCountdown
+        }, "The real countdown must advance before the shutter fires")
+        attachScreenshot(named: "device-square-capture-countdown")
+        let keepFrame = app.buttons["Keep frame"]
+        XCTAssertTrue(keepFrame.waitForExistence(timeout: 40), "The timer must finish with a captured review")
+        XCTAssertFalse(countdown.exists)
+        let photoFinish = app.buttons["review-finish-photo"]
+        XCTAssertTrue(photoFinish.waitForExistence(timeout: 5))
+        photoFinish.tap()
+        XCTAssertTrue(waitUntil(timeout: 20) {
+            photoFinish.value as? String == "Selected" && keepFrame.isEnabled && photo.exists
+        }, "The unframed photo must finish rendering before measuring the capture")
+        XCTAssertGreaterThan(photo.frame.height, 0)
+        XCTAssertTrue(app.frame.contains(photo.frame))
+        XCTAssertEqual(photo.frame.width / photo.frame.height, 1, accuracy: 0.01,
+                       "The physical capture must retain the selected square crop")
+        attachScreenshot(named: "device-timed-square-capture-review")
+        app.buttons["Retake"].tap()
+        XCTAssertTrue(waitForDisappearance(photo, timeout: 5))
+        XCTAssertTrue(waitForLiveShutter(in: app), "Retake must restore fresh preview frames")
+        #endif
+    }
+
+    /// Presses both physical volume buttons through the production hardware
+    /// shutter path. Each frame is discarded without writing to Photos.
+    func testPhysicalVolumeButtonsCaptureAndRetake() throws {
+        #if targetEnvironment(simulator)
+        throw XCTSkip("Volume-button capture requires physical camera hardware")
+        #else
+        guard #available(iOS 18.0, *) else {
+            throw XCTSkip("Hardware shutter events require iOS 18 or later")
+        }
+        XCTAssertTrue(waitForLiveShutter(in: app), "Hardware shutter acceptance requires fresh preview frames")
+        for (button, name) in [(XCUIDevice.Button.volumeUp, "volume-up"), (.volumeDown, "volume-down")] {
+            XCUIDevice.shared.press(button)
+            let keepFrame = app.buttons["Keep frame"]
+            let photo = app.descendants(matching: .any)["review-image"]
+            XCTAssertTrue(keepFrame.waitForExistence(timeout: 30), "\(name) must capture without an onscreen shutter tap")
+            XCTAssertTrue(waitUntil(timeout: 15) { keepFrame.isEnabled && photo.exists },
+                          "\(name) must produce a rendered capture review")
+            attachScreenshot(named: "device-\(name)-capture-review")
+            app.buttons["Retake"].tap()
+            XCTAssertTrue(waitForDisappearance(photo, timeout: 5))
+            XCTAssertTrue(waitForLiveShutter(in: app), "Retake after \(name) must restore fresh preview frames")
         }
         #endif
     }
