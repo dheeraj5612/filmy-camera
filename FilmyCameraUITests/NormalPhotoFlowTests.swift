@@ -408,10 +408,24 @@ final class NormalPhotoFlowTests: XCTestCase {
 
         let deadline = Date(timeIntervalSinceNow: timeout)
         repeat {
-            let viewport = scrollView.frame.intersection(app.frame).insetBy(dx: 0, dy: 8)
+            // AX rounds child bounds to display pixels while the panel width
+            // can be fractional. Allow one point at each horizontal edge;
+            // retain the vertical clearance needed to reveal the whole control.
+            let viewport = scrollView.frame.intersection(app.frame).insetBy(dx: -1, dy: 8)
             let frame = element.frame
             guard viewport.width > 20, viewport.height > 20,
                   frame.width <= viewport.width, frame.height <= viewport.height else {
+                let diagnostic = XCTAttachment(string: """
+                Review control cannot fit its scroll viewport.
+                App: \(app.frame)
+                Scroll view: \(scrollView.frame)
+                Visibility viewport (1 pt horizontal tolerance, 8 pt vertical inset): \(viewport)
+                Control: \(frame)
+                \(app.debugDescription)
+                """)
+                diagnostic.name = "review-control-visibility-bounds"
+                diagnostic.lifetime = .keepAlways
+                add(diagnostic)
                 return false
             }
             if viewport.contains(frame), element.isHittable {
@@ -447,7 +461,7 @@ final class NormalPhotoFlowTests: XCTestCase {
             _ = waitUntil(timeout: 0.75) { element.frame != previousFrame }
         } while Date() < deadline
 
-        let viewport = scrollView.frame.intersection(app.frame).insetBy(dx: 0, dy: 8)
+        let viewport = scrollView.frame.intersection(app.frame).insetBy(dx: -1, dy: 8)
         return viewport.contains(element.frame) && element.isHittable
     }
 
@@ -486,8 +500,19 @@ final class NormalPhotoFlowTests: XCTestCase {
         // disposable simulator was pre-seeded. Resolve the in-app CTA and the
         // subsequent system prompt while waiting for Roll's loaded or empty
         // state; a missing count is never treated as an empty Roll.
+        var requestedReadAccess = false
         let loaded = waitUntil(timeout: 30) {
-            tapPhotosPermissionPromptIfPresent()
+            if rollFrameCount() != nil { return true }
+            if tapPhotosPermissionPromptIfPresent() { return false }
+
+            // Request once, then handle the system alert directly. Repeated
+            // CTA taps can be replayed after XCTest dismisses the alert onto
+            // the newly positioned "Make your first frame" button.
+            let permission = app.buttons["Allow Photos access"]
+            if !requestedReadAccess, permission.exists, permission.isHittable {
+                requestedReadAccess = true
+                permission.tap()
+            }
             return rollFrameCount() != nil
         }
         if !loaded {
@@ -500,12 +525,6 @@ final class NormalPhotoFlowTests: XCTestCase {
 
     @discardableResult
     private func tapPhotosPermissionPromptIfPresent() -> Bool {
-        let appPermissionButton = app.buttons["Allow Photos access"]
-        if appPermissionButton.exists, appPermissionButton.isHittable {
-            appPermissionButton.tap()
-            return true
-        }
-
         let permissionTitles = ["Allow Full Access", "Allow Access to All Photos", "Allow", "OK"]
         let applications: [XCUIApplication] = [
             app,
