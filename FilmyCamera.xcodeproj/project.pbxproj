@@ -9,7 +9,6 @@
 /* Begin PBXBuildFile section */
 		00493D9DE920BF3A134CCF56 /* NormalPhotoFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E79227F5594654480E6C981 /* NormalPhotoFlowTests.swift */; };
 		020D3A1BCF35368AF1D93441 /* CompositionAssistStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DEAF80BF98F3BCC9BB1DBC1 /* CompositionAssistStore.swift */; };
-		1768F2BE69F5DF79C97A1832 /* AppIconSource.svg in Resources */ = {isa = PBXBuildFile; fileRef = B9D2815FF289A04B992AC100 /* AppIconSource.svg */; };
 		1FA4D1311CC59621E8A662B9 /* FilmyCameraApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D59729E8AC667A9120C460CB /* FilmyCameraApp.swift */; };
 		250271E0E5A4918FC7762C91 /* StoreScreenshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EC33B29E08BDF6AF6178EFA /* StoreScreenshotTests.swift */; };
 		269C88773100AEDB94BC74A4 /* FlashHardwareDeviceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F50AF57ED0353408C3CC952 /* FlashHardwareDeviceTests.swift */; };
@@ -111,7 +110,6 @@
 		A3940D2834957A9E44F66872 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A657E128117A2C10BAD8B761 /* FilmyCamera.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = FilmyCamera.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A89BFC50D79A0FAEB41F1D3C /* ManualCameraControlsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualCameraControlsView.swift; sourceTree = "<group>"; };
-		B9D2815FF289A04B992AC100 /* AppIconSource.svg */ = {isa = PBXFileReference; path = AppIconSource.svg; sourceTree = "<group>"; };
 		C2E9A15C80F9345FFEE2F001 /* CameraManualControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraManualControls.swift; sourceTree = "<group>"; };
 		C2F0913587D09FEB4D0E8E14 /* RendererOutputBoundsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RendererOutputBoundsTests.swift; sourceTree = "<group>"; };
 		C34BB7CBA412A194086446CD /* FilmyCameraTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = FilmyCameraTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -133,7 +131,6 @@
 		16D40A895F8235E60F3CB3A9 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
-				B9D2815FF289A04B992AC100 /* AppIconSource.svg */,
 				8F580BECA95D881DF1EB3789 /* Assets.xcassets */,
 				432F02B03418EEADA550733F /* PrivacyInfo.xcprivacy */,
 			);
@@ -367,7 +364,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1768F2BE69F5DF79C97A1832 /* AppIconSource.svg in Resources */,
 				7DCDAA29B2717548B36D8992 /* Assets.xcassets in Resources */,
 				2700E6F80817004C1415242D /* PrivacyInfo.xcprivacy in Resources */,
 			);
@@ -559,7 +555,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 13;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 6ALSCF5GBV;
 				ENABLE_NS_ASSERTIONS = NO;
@@ -623,7 +619,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 13;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 6ALSCF5GBV;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;

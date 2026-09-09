@@ -580,12 +580,14 @@ final class CaptureSetupUITests: XCTestCase {
     }
 
     private func tapCaptureAid(_ aid: XCUIElement, expecting value: String) {
-        // SwiftUI Form exposes the whole labeled row as the switch frame.
-        // Its center can be inert label space, so tap the actual trailing
-        // switch using the current accessibility bounds on each device.
-        aid.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5))
-            .withOffset(CGVector(dx: -min(25, aid.frame.width / 2), dy: 0))
-            .tap()
+        // The identified SwiftUI Form row contains the native switch. Target
+        // that control directly instead of assuming an inset from the row.
+        XCTAssertEqual(aid.switches.count, 1, "The aid row must contain one native switch")
+        let control = aid.switches.firstMatch
+        XCTAssertTrue(control.isEnabled)
+        XCTAssertTrue(control.isHittable)
+        XCTAssertTrue(aid.frame.contains(control.frame), "The native switch must fit inside its visible row")
+        control.tap()
         let updatedValue = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "value == %@", value), object: aid
         )

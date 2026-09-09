@@ -43,6 +43,8 @@
     "FilmyCameraUITests/FilmyCameraUITests/testPhysicalG7XFlashCaptureReachesReview": "device",
     "FilmyCameraUITests/FilmyCameraUITests/testPhysicalG7XSaveRollDetailAndShareAcceptance": "device",
     "FilmyCameraUITests/FilmyCameraUITests/testPhysicalRetakeReturnsToALiveViewfinderInstantly": "device",
+    "FilmyCameraUITests/FilmyCameraUITests/testPhysicalTimerCancellationAndSquareCaptureWithLiveHistogram": "device",
+    "FilmyCameraUITests/FilmyCameraUITests/testPhysicalVolumeButtonsCaptureAndRetake": "device",
     "FilmyCameraUITests/FilmyCameraUITests/testPhysicalLaunchPerformance": "performance"
   }
 }
