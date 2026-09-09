@@ -82,16 +82,16 @@ enum HapticFeedback {
 
 // MARK: - Design tokens
 
-/// A quiet camera body: neutral surfaces keep attention on the image.
-/// Amber identifies compact digital looks; muted green identifies film.
+/// Warm ink surfaces and cool, restrained signals keep photographs central.
+/// Color is never the only indication of selection or an actionable state.
 enum FilmyTheme {
     // Surfaces
-    static let background = Color(white: 0.035)
-    static let backgroundRaised = Color(white: 0.065)
-    static let panel = Color(white: 0.10)
-    static let panelRaised = Color(white: 0.15)
-    static let line = Color.white.opacity(0.08)
-    static let lineStrong = Color.white.opacity(0.14)
+    static let background = Color(red: 0.055, green: 0.058, blue: 0.052)
+    static let backgroundRaised = Color(red: 0.082, green: 0.086, blue: 0.076)
+    static let panel = Color(red: 0.115, green: 0.122, blue: 0.108)
+    static let panelRaised = Color(red: 0.165, green: 0.175, blue: 0.157)
+    static let line = Color.white.opacity(0.09)
+    static let lineStrong = Color.white.opacity(0.18)
 
     // Ink
     static let primary = Color(white: 0.96)
@@ -100,9 +100,9 @@ enum FilmyTheme {
     static let tertiary = Color(white: 0.96).opacity(0.56)
 
     // Signal colors
-    static let accent = Color(red: 0.96, green: 0.73, blue: 0.30)
+    static let accent = Color(red: 0.69, green: 0.85, blue: 0.88)
     static let accentWarm = Color(red: 0.95, green: 0.49, blue: 0.36)
-    static let filmAccent = Color(red: 0.64, green: 0.79, blue: 0.66)
+    static let filmAccent = Color(red: 0.74, green: 0.83, blue: 0.73)
     static let mint = Color(red: 0.47, green: 0.86, blue: 0.66)
     static let danger = Color(red: 1.0, green: 0.44, blue: 0.40)
 
@@ -124,7 +124,7 @@ enum FilmyTheme {
     static let toolControlHeight: CGFloat = 48
     static let pageMargin: CGFloat = 20
 
-    static let titleFont = Font.system(.title2, design: .default).weight(.bold)
+    static let titleFont = Font.system(.title2, design: .serif).weight(.medium)
     static let bodyFont = Font.system(.body, design: .default)
     static let metadataFont = Font.system(.caption, design: .default).weight(.medium)
 
@@ -200,7 +200,11 @@ struct CameraReturnBar: View {
     var body: some View {
         HStack {
             BackToCameraButton(accessibilityIdentifier: accessibilityIdentifier, action: action)
-            Spacer(minLength: 0)
+            Spacer(minLength: 12)
+            Text("filmy")
+                .font(.system(.title3, design: .serif).italic())
+                .foregroundStyle(FilmyTheme.secondary)
+                .accessibilityHidden(true)
         }
         .padding(.horizontal, FilmyTheme.pageMargin)
         .padding(.vertical, 6)
@@ -418,7 +422,7 @@ struct SectionHeading: View {
                 Eyebrow(text: eyebrow, color: FilmyTheme.accent)
 
                 Text(title)
-                    .font(.system(.largeTitle, design: .default).weight(.bold))
+                    .font(.system(.largeTitle, design: .serif).weight(.medium))
                     .foregroundStyle(FilmyTheme.primary)
             }
 

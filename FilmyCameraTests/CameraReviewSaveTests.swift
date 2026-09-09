@@ -155,3 +155,71 @@ final class ControlledPhotoSaver: PhotoSaving {
         requests.last?.completion(result)
     }
 }
+
+final class LookLibraryTests: XCTestCase {
+    func testFavoritesRoundTripStableIDsAndDeterministicEncoding() {
+        let ids: Set<String> = ["g7x-compact", "classic-chrome", "acros-monochrome"]
+        XCTAssertEqual(LookLibraryIndex.favorites(from: LookLibraryIndex.encodeFavorites(ids)), ids)
+        XCTAssertEqual(LookLibraryIndex.encodeFavorites(ids), LookLibraryIndex.encodeFavorites(Set(ids.reversed())))
+    }
+
+    func testMalformedFavoritesRecoverWithoutDiscardingTheCatalog() {
+        for data in [Data(), Data("not json".utf8), Data("{}".utf8), Data(repeating: 0, count: 262_145)] {
+            XCTAssertTrue(LookLibraryIndex.favorites(from: data).isEmpty)
+        }
+        XCTAssertEqual(
+            LookLibraryIndex.results(in: FilmRecipe.builtIns, query: "", filter: .all, favorites: []).count,
+            FilmRecipe.builtIns.count
+        )
+    }
+
+    func testDuplicateAndInvalidFavoriteIDsAreNormalized() {
+        let data = Data("[\"classic-chrome\",\"classic-chrome\",\"\"]".utf8)
+        XCTAssertEqual(LookLibraryIndex.favorites(from: data), ["classic-chrome"])
+        let longID = String(repeating: "x", count: 257)
+        let encoded = LookLibraryIndex.encodeFavorites(["classic-chrome", longID, ""])
+        XCTAssertEqual(LookLibraryIndex.favorites(from: encoded), ["classic-chrome"])
+    }
+
+    func testFavoriteLimitRemainsReadableByTheDecoder() {
+        let ids = Set((0..<512).map { String(repeating: "x", count: 240) + String($0) })
+        let encoded = LookLibraryIndex.encodeFavorites(ids)
+        XCTAssertEqual(LookLibraryIndex.favorites(from: encoded), ids)
+    }
+
+    func testFiltersPartitionTheEntireCatalogWithoutLosingSepia() {
+        let compact = LookLibraryIndex.results(in: FilmRecipe.builtIns, query: "", filter: .compact, favorites: [])
+        let film = LookLibraryIndex.results(in: FilmRecipe.builtIns, query: "", filter: .film, favorites: [])
+        let mono = LookLibraryIndex.results(in: FilmRecipe.builtIns, query: "", filter: .monochrome, favorites: [])
+        let allIDs = (compact + film + mono).map(\.id)
+        XCTAssertEqual(Set(allIDs), Set(FilmRecipe.builtIns.map(\.id)))
+        XCTAssertEqual(allIDs.count, Set(allIDs).count)
+        XCTAssertTrue(compact.allSatisfy { $0.filmBase == .compactDigital })
+        XCTAssertTrue(mono.contains { $0.filmBase == .sepia })
+        XCTAssertFalse(film.contains { $0.filmBase.monochromeFilter != nil || $0.filmBase == .sepia })
+    }
+
+    func testSearchHandlesCaseWhitespaceAndMissingMatches() {
+        let results = LookLibraryIndex.results(in: FilmRecipe.builtIns, query: "  MuTeD   CoLoR \n", filter: .all, favorites: [])
+        XCTAssertTrue(results.contains { $0.id == "classic-chrome" })
+        XCTAssertTrue(LookLibraryIndex.results(in: FilmRecipe.builtIns, query: "no-such-look-987", filter: .all, favorites: []).isEmpty)
+    }
+
+    func testFavoritesIntersectSearchAndIgnoreUnknownIDs() {
+        let ids: Set<String> = ["classic-chrome", "missing-recipe"]
+        let favoriteResults = LookLibraryIndex.results(in: FilmRecipe.builtIns, query: "", filter: .favorites, favorites: ids)
+        XCTAssertEqual(favoriteResults.map(\.id), ["classic-chrome"])
+        XCTAssertTrue(LookLibraryIndex.results(in: FilmRecipe.builtIns, query: "G7", filter: .favorites, favorites: ids).isEmpty)
+    }
+
+    func testDiscoveryPreservesEffectiveRecipeControlsAndCatalogOrder() throws {
+        var customized = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == "classic-chrome" })
+        customized.exposure = 0.75
+        let compact = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == "g7x-compact" })
+        let input = [customized, compact]
+        let results = LookLibraryIndex.results(in: input, query: "", filter: .all, favorites: [])
+        XCTAssertEqual(results.map(\.id), [compact.id, customized.id])
+        XCTAssertEqual(results[1], customized)
+        XCTAssertEqual(input[0], customized, "Browsing must not mutate or reset the user's tuned recipe")
+    }
+}

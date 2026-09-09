@@ -12,14 +12,16 @@ struct GalleryScreen: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var selectedAsset: PhotoLibraryGalleryAsset?
+    @AppStorage("rollRoomyGrid") private var roomyGrid = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// Three columns on iPhone; iPad widths flow as many ~200pt squares as
     /// fit so the contact sheet does not become three enormous tiles.
     private var columns: [GridItem] {
         if horizontalSizeClass == .regular {
-            return [GridItem(.adaptive(minimum: 168, maximum: 240), spacing: 3)]
+            return [GridItem(.adaptive(minimum: roomyGrid ? 240 : 168, maximum: roomyGrid ? 360 : 240), spacing: 6)]
         }
-        return Array(repeating: GridItem(.flexible(), spacing: 3), count: 3)
+        return Array(repeating: GridItem(.flexible(), spacing: 6), count: roomyGrid || dynamicTypeSize.isAccessibilitySize ? 2 : 3)
     }
 
     var body: some View {
@@ -42,6 +44,16 @@ struct GalleryScreen: View {
                         }
 
                         galleryContent
+
+                        if photoLibrary.galleryAssets.isEmpty {
+                            Button(action: onBackToCamera) {
+                                Label("Make your first frame", systemImage: "camera")
+                            }
+                            .buttonStyle(.filmyPrimary)
+                            .padding(.horizontal, FilmyTheme.pageMargin)
+                            .accessibilityIdentifier("roll-start-shooting")
+                            .accessibilityHint("Returns to the camera without changing Photos permissions")
+                        }
                     }
                     .padding(.top, 18)
                     .padding(.bottom, 28)
@@ -93,11 +105,27 @@ struct GalleryScreen: View {
             Text("Newest first")
             Text("·")
             Text(archiveSourceLabel)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Button {
+                HapticFeedback.play(.selection)
+                roomyGrid.toggle()
+            } label: {
+                Image(systemName: roomyGrid ? "square.grid.3x3" : "square.grid.2x2")
+                    .font(.system(.subheadline).weight(.semibold))
+                    .foregroundStyle(FilmyTheme.primary)
+                    .frame(width: 48, height: 48)
+                    .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 14))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("roll-grid-layout")
+            .accessibilityLabel("Change Roll layout")
+            .accessibilityValue(roomyGrid ? "Roomy grid" : "Contact sheet")
         }
         .font(.system(.caption, design: .rounded).weight(.semibold))
         .foregroundStyle(FilmyTheme.secondary)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Newest first. Source: \(archiveSourceLabel)")
+        .accessibilityElement(children: .contain)
     }
 
     private var archiveSourceLabel: String {
@@ -150,7 +178,7 @@ struct GalleryScreen: View {
                     RollEmptyState(
                         systemName: "photo.on.rectangle.angled",
                         title: "Your frames will live here",
-                        message: "Capture a moment with a recipe and it will appear in this quiet little roll."
+                        message: "Take a photo, choose your look, then save it to see it here."
                     )
                     .padding(.horizontal, FilmyTheme.pageMargin)
                 }
@@ -236,7 +264,7 @@ struct GalleryScreen: View {
     }
 
     private var galleryGrid: some View {
-        LazyVGrid(columns: columns, spacing: 3) {
+        LazyVGrid(columns: columns, spacing: 6) {
             ForEach(photoLibrary.galleryAssets) { asset in
                 Button {
                     selectedAsset = asset
@@ -252,7 +280,7 @@ struct GalleryScreen: View {
                 .accessibilityHint("Opens frame details")
             }
         }
-        .padding(.horizontal, 3)
+        .padding(.horizontal, 6)
     }
 
     private var archiveAccessNotice: some View {

@@ -131,7 +131,7 @@ struct OnboardingView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Eyebrow(text: page.eyebrow, color: FilmyTheme.accent)
                     Text(page.title)
-                        .font(.system(.largeTitle, design: .rounded).weight(.bold))
+                        .font(.system(.largeTitle, design: .serif).weight(.medium))
                         .foregroundStyle(FilmyTheme.primary)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityAddTraits(.isHeader)
@@ -194,7 +194,7 @@ struct OnboardingView: View {
         } label: {
             VStack(alignment: .leading, spacing: 10) {
                 RecipeSwatch(recipe: recipe, isSelected: isSelected, compact: false, showsLabel: false)
-                    .frame(height: 92)
+                    .frame(height: 116)
                     .clipped()
                     .accessibilityHidden(true)
                 HStack(alignment: .top, spacing: 6) {
@@ -206,6 +206,10 @@ struct OnboardingView: View {
                         .foregroundStyle(isSelected ? FilmyTheme.accent : FilmyTheme.secondary)
                 }
                 .foregroundStyle(FilmyTheme.primary)
+                Text(recipe.descriptor)
+                    .font(.caption)
+                    .foregroundStyle(FilmyTheme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)

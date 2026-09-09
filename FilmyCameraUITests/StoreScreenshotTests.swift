@@ -308,3 +308,146 @@ final class LaunchOnboardingTests: XCTestCase {
         XCTAssertTrue(currentLook.label.contains("Muted Color"))
     }
 }
+
+/// Non-destructive discovery coverage. Every test owns its preferences and
+/// never imports, saves, deletes, or requests Photos access.
+@MainActor
+final class LookLibraryUITests: XCTestCase {
+    func testSearchFavoriteAndSelectionPersistWithoutAccidentalApply() {
+        continueAfterFailure = false
+        let app = makeApp()
+        app.launch()
+        defer { app.terminate() }
+        openLibrary(app)
+        let search = app.textFields["look-library-search"]
+        search.tap()
+        search.typeText("Muted Color\n")
+        let muted = app.buttons["library-recipe-classic-chrome"]
+        XCTAssertTrue(muted.waitForExistence(timeout: 10))
+        XCTAssertEqual(muted.value as? String, "Not selected")
+        let favorite = app.buttons["look-favorite-classic-chrome"]
+        assertControl(favorite, in: app)
+        favorite.tap()
+        XCTAssertEqual(favorite.value as? String, "Favorite")
+        XCTAssertEqual(muted.value as? String, "Not selected", "Favoriting must not apply the look")
+        XCTAssertTrue(app.buttons["look-library-close"].exists, "Favoriting must not dismiss the library")
+        snapshot(app, "looks-search-favorite")
+        app.buttons["look-library-close"].tap()
+        XCTAssertTrue(app.buttons["recipe-menu"].label.contains("G7 X Compact"))
+
+        app.terminate()
+        app.launch()
+        openLibrary(app)
+        app.buttons["look-filter-favorites"].tap()
+        XCTAssertTrue(muted.waitForExistence(timeout: 5), "Favorites must survive a real relaunch")
+        XCTAssertFalse(app.buttons["library-recipe-g7x-compact"].exists)
+        snapshot(app, "looks-favorites")
+        muted.tap()
+        XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["recipe-menu"].label.contains("Muted Color"))
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["recipe-menu"].label.contains("Muted Color"))
+    }
+
+    func testEmptySearchAndFavoritesHaveRecoveryWithoutChangingTheLook() {
+        continueAfterFailure = false
+        let app = makeApp()
+        app.launch()
+        defer { app.terminate() }
+        openLibrary(app)
+        snapshot(app, "looks-library")
+        app.buttons["look-filter-favorites"].tap()
+        XCTAssertTrue(app.staticTexts["look-library-empty"].waitForExistence(timeout: 5))
+        assertControl(app.buttons["look-library-reset"], in: app)
+        app.buttons["look-library-reset"].tap()
+        XCTAssertTrue(app.buttons["library-recipe-g7x-compact"].waitForExistence(timeout: 5))
+        let search = app.textFields["look-library-search"]
+        search.tap()
+        search.typeText("no-such-look-987\n")
+        XCTAssertTrue(app.staticTexts["look-library-empty"].waitForExistence(timeout: 5))
+        snapshot(app, "looks-empty-search")
+        app.buttons["look-library-reset"].tap()
+        XCTAssertEqual(search.value as? String, "Search looks")
+        XCTAssertEqual(app.buttons["look-filter-all"].value as? String, "Selected")
+        app.buttons["look-library-close"].tap()
+        XCTAssertTrue(app.buttons["recipe-menu"].label.contains("G7 X Compact"))
+    }
+
+    func testLibraryLandscapeAndLargeTextKeepDismissalSearchAndFiltersReachable() {
+        continueAfterFailure = false
+        let app = makeApp()
+        app.launch()
+        defer {
+            app.terminate()
+            XCUIDevice.shared.orientation = .portrait
+        }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        openLibrary(app)
+        assertControl(app.buttons["look-library-close"], in: app)
+        assertControl(app.buttons["look-filter-all"], in: app)
+        XCTAssertTrue(app.textFields["look-library-search"].isHittable)
+        snapshot(app, "looks-landscape")
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        openLibrary(app)
+        assertControl(app.buttons["look-library-close"], in: app)
+        assertControl(app.buttons["look-filter-all"], in: app)
+        XCTAssertTrue(app.textFields["look-library-search"].isHittable)
+        snapshot(app, "looks-accessibility-large-text")
+    }
+
+    func testEmptyRollOffersADirectReturnToShooting() {
+        continueAfterFailure = false
+        let app = makeApp()
+        app.launch()
+        defer { app.terminate() }
+        let roll = app.buttons["roll-tab"]
+        XCTAssertTrue(roll.waitForExistence(timeout: 15))
+        roll.tap()
+        let start = app.buttons["roll-start-shooting"]
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        if !start.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        assertControl(start, in: app)
+        snapshot(app, "roll-empty-recovery")
+        start.tap()
+        XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 5))
+    }
+
+    private func makeApp() -> XCUIApplication {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        app.launchEnvironment["FILMY_TEST_DEFAULTS_SUITE"] = "FilmyCameraUITests.Library.\(UUID().uuidString)"
+        app.launchArguments = ["-ui-testing"]
+        return app
+    }
+
+    private func openLibrary(_ app: XCUIApplication) {
+        let look = app.buttons["recipe-menu"]
+        XCTAssertTrue(look.waitForExistence(timeout: 15))
+        look.tap()
+        let browse = app.buttons["look-library-open"]
+        assertControl(browse, in: app)
+        browse.tap()
+        XCTAssertTrue(app.textFields["look-library-search"].waitForExistence(timeout: 5))
+        assertControl(app.buttons["look-library-close"], in: app)
+    }
+
+    private func assertControl(_ element: XCUIElement, in app: XCUIApplication) {
+        XCTAssertTrue(element.waitForExistence(timeout: 5))
+        XCTAssertTrue(element.isHittable)
+        XCTAssertGreaterThanOrEqual(element.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(element.frame.height, 44)
+        XCTAssertTrue(app.frame.insetBy(dx: -1, dy: -1).contains(element.frame))
+    }
+
+    private func snapshot(_ app: XCUIApplication, _ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+}

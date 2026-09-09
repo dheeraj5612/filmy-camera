@@ -17,31 +17,15 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  source-evidence:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
-        with:
-          persist-credentials: false
-      - name: Record exact UI inputs
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/ui-inputs"
-          git rev-parse HEAD > "$RUNNER_TEMP/ui-inputs/source-sha.txt"
-          git archive --format=zip HEAD FilmyCamera FilmyCameraTests FilmyCameraUITests FilmyCamera.xcodeproj scripts/testing project.yml .github/workflows > "$RUNNER_TEMP/ui-inputs/source.zip"
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
-        with:
-          name: filmy-ui-inputs-${{ github.run_id }}
-          path: ${{ runner.temp }}/ui-inputs/
-          retention-days: 7
-          if-no-files-found: error
-
   ui-screenshots:
     runs-on: macos-15
-    timeout-minutes: 20
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        device: ["iPhone 16 Pro", "iPad Pro 13-inch (M4)"]
     env:
+      SIMULATOR_DEVICE_NAME: ${{ matrix.device }}
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
@@ -55,8 +39,8 @@ jobs:
           git rev-parse HEAD > "$RUNNER_TEMP/ui-evidence/source-sha.txt"
           xcodebuild -version > "$RUNNER_TEMP/ui-evidence/xcode.txt"
           xcrun simctl list devices available -j > "$RUNNER_TEMP/ui-evidence/devices.json"
-          device_id="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); matches=[x["udid"] for key,items in d["devices"].items() if "iOS-26" in key for x in items if x["name"] == "iPhone 16 Pro" and x["isAvailable"]]; print(matches[0] if matches else "")' "$RUNNER_TEMP/ui-evidence/devices.json")"
-          [[ -n "$device_id" ]] || { echo 'iPhone 16 Pro / iOS 26 simulator required' >&2; exit 1; }
+          device_id="$(python3 -c 'import json,sys,os; d=json.load(open(sys.argv[1])); matches=[x["udid"] for key,items in d["devices"].items() if "iOS-26" in key for x in items if x["name"] == os.environ["SIMULATOR_DEVICE_NAME"] and x["isAvailable"]]; print(matches[0] if matches else "")' "$RUNNER_TEMP/ui-evidence/devices.json")"
+          [[ -n "$device_id" ]] || { echo "${SIMULATOR_DEVICE_NAME} / iOS 26 simulator required" >&2; exit 1; }
           printf '%s\n' "$device_id" > "$RUNNER_TEMP/ui-evidence/device-id.txt"
           xcrun simctl boot "$device_id" || true
           xcrun simctl bootstatus "$device_id" -b
@@ -71,6 +55,7 @@ jobs:
             -only-testing:FilmyCameraUITests/FilmyCameraUITests/testLandscapeCameraShell \
             -only-testing:FilmyCameraUITests/FilmyCameraUITests/testAccessibilitySizeCameraShellKeepsRecipeControlsReachable \
             -only-testing:FilmyCameraUITests/LaunchOnboardingTests \
+            -only-testing:FilmyCameraUITests/LookLibraryUITests \
             test > "$RUNNER_TEMP/ui-evidence/xcodebuild.log" 2>&1
       - name: Export actual screenshots and test results
         if: always()
@@ -84,7 +69,7 @@ jobs:
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         if: always()
         with:
-          name: filmy-ui-screenshots-${{ github.run_id }}
+          name: filmy-ui-screenshots-${{ matrix.device }}-${{ github.run_id }}
           path: ${{ runner.temp }}/ui-evidence/
           retention-days: 7
           if-no-files-found: error

@@ -289,6 +289,26 @@ jobs:
             --derived-data "${RUNNER_TEMP}/FilmyCameraDerivedData" \
             --output-dir "${RUNNER_TEMP}/device-build"
 
+      - name: Export review screenshots from normal Photos acceptance
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -d "${RUNNER_TEMP}/FilmyCameraPhotosE2E.xcresult" ]]; then
+            xcrun xcresulttool export attachments \
+              --path "${RUNNER_TEMP}/FilmyCameraPhotosE2E.xcresult" \
+              --output-path "${RUNNER_TEMP}/photo-review-screenshots"
+          fi
+
+      - name: Retain actual photo-review screenshots
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: filmycamera-review-screenshots-${{ github.run_id }}
+          path: ${{ runner.temp }}/photo-review-screenshots/
+          retention-days: 7
+          if-no-files-found: ignore
+
       - name: Record test artifact provenance
         if: always()
         shell: bash

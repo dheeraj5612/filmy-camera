@@ -28,8 +28,8 @@ struct RecipePickerView: View {
     private var swatchSize: CGSize {
         if compact {
             return dynamicTypeSize.isAccessibilitySize
-                ? CGSize(width: 132, height: 76)
-                : CGSize(width: 108, height: 64)
+                ? CGSize(width: 146, height: 90)
+                : CGSize(width: 126, height: 88)
         }
         // Regular widths (iPad) have room for a slightly larger swatch.
         return horizontalSizeClass == .regular
@@ -281,8 +281,8 @@ struct RecipePickerView: View {
                     .fixedSize(horizontal: false, vertical: dynamicTypeSize.isAccessibilitySize)
             }
         }
-        .opacity(isSelected ? 1 : 0.8)
-        .scaleEffect(isSelected ? 1 : 0.95)
+        // Do not dim unselected photographs: their colors are the decision.
+        .opacity(1)
         .contentShape(Rectangle())
         .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: isSelected)
     }
@@ -313,9 +313,10 @@ struct CurrentRecipeButton: View {
     }
 
     private var recipeIcon: some View {
-        Image(systemName: recipe.filmBase == .compactDigital ? "camera.fill" : "film")
-            .font(.system(size: 14, weight: .bold))
-            .foregroundStyle(accentColor)
+        RecipeSwatch(recipe: recipe, compact: true, showsLabel: false)
+            .environment(\.recipePreviewScene, nil)
+            .frame(width: 34, height: 38)
+            .clipShape(RoundedRectangle(cornerRadius: 7))
             .accessibilityHidden(true)
     }
 
@@ -330,13 +331,14 @@ struct CurrentRecipeButton: View {
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
                     .minimumScaleFactor(0.72)
 
-                Text(semanticSubtitle)
-                    .font(.system(.caption2, design: .rounded).weight(.semibold))
+                Text("\(semanticSubtitle) · Explore")
+                    .font(.system(.caption2).weight(.medium))
                     .foregroundStyle(.white.opacity(0.64))
                     .lineLimit(1)
             }
 
-            Image(systemName: "chevron.up.chevron.down")
+            Spacer(minLength: 4)
+            Image(systemName: "chevron.up")
                 .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(.white.opacity(0.58))
                 .accessibilityHidden(true)
@@ -386,14 +388,14 @@ struct CurrentRecipeButton: View {
             }
             .frame(maxWidth: .infinity, minHeight: compactLayout ? 58 : FilmyTheme.minimumHitTarget, alignment: .leading)
             .padding(.horizontal, 11)
-            .background(Color.black.opacity(0.48), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+            .background(FilmyTheme.backgroundRaised, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 15, style: .continuous)
                     .stroke(accentColor.opacity(0.38), lineWidth: 1)
             }
         }
         .buttonStyle(.pressable)
-        .frame(maxWidth: 190)
+        .frame(maxWidth: compactLayout ? 136 : 256)
         .accessibilityIdentifier("recipe-menu")
         .accessibilityLabel("Choose look, current recipe \(recipe.name)")
         .accessibilityValue(semanticSubtitle)
@@ -667,57 +669,31 @@ struct RecipeDetailView: View {
     }
 
     private var hero: some View {
-        RecipeSwatch(recipe: draft, compact: false, showsLabel: false)
-            .frame(maxWidth: .infinity)
-            .frame(height: 236)
-            .overlay {
-                LinearGradient(
-                    colors: [.clear, Color.black.opacity(0.74)],
-                    startPoint: .center,
-                    endPoint: .bottom
-                )
-            }
-            .overlay(alignment: .bottomLeading) {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 8) {
-                        Eyebrow(
-                            text: recipe.filmBase == .compactDigital
-                                ? "COMPACT PROFILE · \(recipe.filmBase.officialName.uppercased())"
-                                : recipe.filmBase.officialName.uppercased(),
-                            color: FilmyTheme.accent
-                        )
+        VStack(alignment: .leading, spacing: 14) {
+            RecipeSwatch(recipe: draft, compact: false, showsLabel: false)
+                .frame(maxWidth: .infinity)
+                .frame(height: 180)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .accessibilityHidden(true)
 
-                        if isSelected {
-                            FilmyTag(text: "ACTIVE")
-                        }
-
-                        if draft != originalRecipe {
-                            FilmyTag(text: "EDITED", filled: false)
-                        }
-                    }
-
-                    Text(recipe.name)
-                        .font(.system(.largeTitle, design: .rounded).weight(.bold))
-                        .foregroundStyle(.white)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Text(recipe.descriptor)
-                        .font(.system(.subheadline, design: .rounded).weight(.medium))
-                        .foregroundStyle(.white.opacity(0.82))
-                        .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 8) {
+                Eyebrow(text: recipe.filmBase.officialName.uppercased(), color: FilmyTheme.accent)
+                Text(recipe.name)
+                    .font(.system(.largeTitle, design: .serif).weight(.medium))
+                    .foregroundStyle(FilmyTheme.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(recipe.descriptor)
+                    .font(.subheadline)
+                    .foregroundStyle(FilmyTheme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    if isSelected { FilmyTag(text: "ACTIVE") }
+                    if draft != originalRecipe { FilmyTag(text: "EDITED", filled: false) }
                 }
-                .padding(18)
             }
-            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 26, style: .continuous)
-                    .strokeBorder(
-                        isSelected ? FilmyTheme.accent.opacity(0.6) : FilmyTheme.lineStrong,
-                        lineWidth: 1
-                    )
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("\(recipe.name). \(recipe.descriptor). Reference \(recipe.filmBase.officialName)")
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(recipe.name). \(recipe.descriptor). Reference \(recipe.filmBase.officialName)")
     }
 
     private var identity: some View {
@@ -1351,5 +1327,366 @@ private struct RecipeSliderRow: View {
             .foregroundStyle(FilmyTheme.secondary)
             .monospacedDigit()
             .lineLimit(1)
+    }
+}
+
+// MARK: - Searchable look library
+
+/// Shared by the camera and review. Stable recipe IDs, not names or catalog
+/// positions, own favorites. Searching and filtering never apply a recipe.
+enum LookLibraryFilter: String, CaseIterable, Identifiable {
+    case all, favorites, compact, film, monochrome
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: return "All looks"
+        case .favorites: return "Favorites"
+        case .compact: return "Compact"
+        case .film: return "Film"
+        case .monochrome: return "Monochrome"
+        }
+    }
+}
+
+enum LookLibraryIndex {
+    static func favorites(from data: Data) -> Set<String> {
+        guard data.count <= 262_144,
+              let ids = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+        return Set(ids.prefix(512).filter { !$0.isEmpty && $0.utf8.count <= 256 })
+    }
+
+    static func encodeFavorites(_ ids: Set<String>) -> Data {
+        let normalized = ids.filter { !$0.isEmpty && $0.utf8.count <= 256 }.sorted().prefix(512)
+        return (try? JSONEncoder().encode(Array(normalized))) ?? Data()
+    }
+
+    static func results(
+        in recipes: [FilmRecipe],
+        query: String,
+        filter: LookLibraryFilter,
+        favorites: Set<String>
+    ) -> [FilmRecipe] {
+        let words = query.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        let ordered = recipes.filter { $0.filmBase == .compactDigital }
+            + recipes.filter { $0.filmBase != .compactDigital }
+        return ordered.filter { recipe in
+            let monochrome = recipe.filmBase.monochromeFilter != nil || recipe.filmBase == .sepia
+            let included: Bool
+            switch filter {
+            case .all: included = true
+            case .favorites: included = favorites.contains(recipe.id)
+            case .compact: included = recipe.filmBase == .compactDigital
+            case .film: included = recipe.filmBase != .compactDigital && !monochrome
+            case .monochrome: included = monochrome
+            }
+            let searchable = "\(recipe.name) \(recipe.descriptor)"
+            return included && words.allSatisfy { searchable.localizedStandardContains($0) }
+        }
+    }
+}
+
+/// A single destination for discovery. Card taps apply a look; hearts only
+/// change favorites. Sample thumbnails use the existing bounded renderer and
+/// its cache, not an additional live camera session or full-resolution render.
+struct LookLibraryView: View {
+    let recipes: [FilmRecipe]
+    let selectedRecipeID: String
+    var selectionIdentifierPrefix = "library-recipe"
+    var subtitle = "Find a feeling. Make it your own."
+    let onSelect: (FilmRecipe) -> Void
+    let onClose: () -> Void
+
+    @AppStorage("favoriteRecipeIDs.v1") private var favoriteData = Data()
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var query = ""
+    @State private var filter: LookLibraryFilter = .all
+    @FocusState private var searchIsFocused: Bool
+
+    private var favoriteIDs: Set<String> { LookLibraryIndex.favorites(from: favoriteData) }
+
+    private var results: [FilmRecipe] {
+        LookLibraryIndex.results(in: recipes, query: query, filter: filter, favorites: favoriteIDs)
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let singleColumn = geometry.size.width < 350 || dynamicTypeSize.isAccessibilitySize
+            let compactHeader = geometry.size.height < 480
+            VStack(spacing: 0) {
+                libraryHeader(compact: compactHeader)
+                searchField
+                    .padding(.top, compactHeader ? 8 : 18)
+                filterStrip
+                    .padding(.top, 12)
+                    .padding(.bottom, 10)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("\(results.count) \(results.count == 1 ? "look" : "looks")")
+                        .font(.caption.weight(.semibold))
+                        .monospacedDigit()
+                    Spacer(minLength: 4)
+                    Text("Sample previews")
+                        .font(.caption)
+                }
+                .foregroundStyle(FilmyTheme.secondary)
+                .padding(.horizontal, 22)
+                .padding(.bottom, 12)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("look-library-result-count")
+
+                ScrollView(showsIndicators: false) {
+                    if results.isEmpty {
+                        emptyResults
+                    } else {
+                        LazyVGrid(
+                            columns: singleColumn
+                                ? [GridItem(.flexible())]
+                                : [GridItem(.adaptive(minimum: 150, maximum: 270), spacing: 14)],
+                            alignment: .leading,
+                            spacing: 16
+                        ) {
+                            ForEach(results) { recipe in
+                                lookCard(recipe)
+                            }
+                        }
+                        .padding(.horizontal, 22)
+                        .padding(.top, 4)
+                        .padding(.bottom, 28)
+                    }
+                }
+                .scrollDismissesKeyboard(.interactively)
+                .id("\(filter.rawValue):\(query)")
+                .accessibilityIdentifier("look-library-results")
+            }
+            .frame(maxWidth: 960)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+        .background(FilmyTheme.background.ignoresSafeArea())
+        .preferredColorScheme(.dark)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("look-library")
+        .accessibilityAction(.escape, onClose)
+    }
+
+    private func libraryHeader(compact: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    if !compact {
+                        Eyebrow(text: "THE LOOK LIBRARY", color: FilmyTheme.accent)
+                    }
+                    Text("Looks")
+                        .font(.system(compact ? .title2 : .largeTitle, design: .serif).weight(.medium))
+                        .foregroundStyle(FilmyTheme.primary)
+                        .accessibilityAddTraits(.isHeader)
+                }
+                Spacer(minLength: 0)
+                Button(action: onClose) {
+                    Text("Done")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(FilmyTheme.primary)
+                        .padding(.horizontal, 16)
+                        .frame(minWidth: 52, minHeight: 48)
+                        .background(FilmyTheme.panel, in: Capsule())
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.pressable)
+                .accessibilityIdentifier("look-library-close")
+                .accessibilityHint("Closes the library without changing your look")
+            }
+            if !compact {
+                Text(subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(FilmyTheme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 22)
+        .padding(.top, compact ? 12 : 26)
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(FilmyTheme.secondary)
+                .accessibilityHidden(true)
+            TextField("Search looks", text: $query)
+                .font(.body)
+                .foregroundStyle(FilmyTheme.primary)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+                .focused($searchIsFocused)
+                .onSubmit { searchIsFocused = false }
+                .accessibilityIdentifier("look-library-search")
+            if !query.isEmpty {
+                Button {
+                    query = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(FilmyTheme.secondary)
+                        .frame(width: 48, height: 48)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+                .accessibilityIdentifier("look-library-clear-search")
+            }
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, query.isEmpty ? 14 : 2)
+        .frame(minHeight: 52)
+        .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 16))
+        .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(FilmyTheme.lineStrong, lineWidth: 1) }
+        .padding(.horizontal, 22)
+    }
+
+    private var filterStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(LookLibraryFilter.allCases) { option in
+                    Button {
+                        HapticFeedback.play(.selection)
+                        filter = option
+                        searchIsFocused = false
+                    } label: {
+                        HStack(spacing: 6) {
+                            if option == .favorites {
+                                Image(systemName: "heart")
+                            }
+                            Text(option.title)
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(filter == option ? FilmyTheme.background : FilmyTheme.secondary)
+                        .padding(.horizontal, 16)
+                        .frame(minHeight: 48)
+                        .background(filter == option ? FilmyTheme.accent : FilmyTheme.panel, in: Capsule())
+                        .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("look-filter-\(option.id)")
+                    .accessibilityValue(filter == option ? "Selected" : "Not selected")
+                    .accessibilityAddTraits(filter == option ? .isSelected : [])
+                }
+            }
+            .padding(.horizontal, 22)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func lookCard(_ recipe: FilmRecipe) -> some View {
+        let selected = recipe.id == selectedRecipeID
+        let favorite = favoriteIDs.contains(recipe.id)
+        return ZStack(alignment: .topTrailing) {
+            Button {
+                searchIsFocused = false
+                HapticFeedback.play(.selection)
+                onSelect(recipe)
+            } label: {
+                VStack(alignment: .leading, spacing: 0) {
+                    Color.clear
+                        .aspectRatio(4.0 / 3.0, contentMode: .fit)
+                        .overlay {
+                            RecipeSwatch(recipe: recipe, compact: false, showsLabel: false)
+                        }
+                        .clipped()
+                        .overlay(alignment: .bottomLeading) {
+                            if selected {
+                                Label("Current", systemImage: "checkmark")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(FilmyTheme.background)
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 6)
+                                    .background(FilmyTheme.accent, in: Capsule())
+                                    .padding(10)
+                            }
+                        }
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(recipe.name)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(FilmyTheme.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(recipe.descriptor)
+                            .font(.caption)
+                            .foregroundStyle(FilmyTheme.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 18))
+                .clipShape(RoundedRectangle(cornerRadius: 18))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 18)
+                        .strokeBorder(selected ? FilmyTheme.accent : FilmyTheme.line, lineWidth: selected ? 2 : 1)
+                }
+                .contentShape(RoundedRectangle(cornerRadius: 18))
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("\(selectionIdentifierPrefix)-\(recipe.id)")
+            .accessibilityLabel("\(recipe.name), \(recipe.descriptor)")
+            .accessibilityValue(selected ? "Selected" : "Not selected")
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            .accessibilityHint("Applies this look and closes the library")
+            // The favorite button is a sibling overlay, never a nested button in
+            // the selection label. Favoriting must not apply or dismiss a look.
+            Button {
+                var updated = favoriteIDs
+                if favorite { updated.remove(recipe.id) } else { updated.insert(recipe.id) }
+                favoriteData = LookLibraryIndex.encodeFavorites(updated)
+                HapticFeedback.play(.selection)
+            } label: {
+                Image(systemName: favorite ? "heart.fill" : "heart")
+                    .font(.system(.subheadline).weight(.semibold))
+                    .foregroundStyle(favorite ? FilmyTheme.accent : .white)
+                    .frame(width: 48, height: 48)
+                    .background(Color.black.opacity(0.78), in: Circle())
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("look-favorite-\(recipe.id)")
+            .accessibilityLabel(favorite ? "Remove \(recipe.name) from favorites" : "Favorite \(recipe.name)")
+            .accessibilityValue(favorite ? "Favorite" : "Not favorite")
+            .padding(8)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private var emptyResults: some View {
+        VStack(spacing: 16) {
+            Image(systemName: filter == .favorites && query.isEmpty ? "heart" : "magnifyingglass")
+                .font(.system(size: 32, weight: .light))
+                .foregroundStyle(FilmyTheme.accent)
+                .accessibilityHidden(true)
+            Text(filter == .favorites && query.isEmpty ? "Keep your favorites close." : "No looks found.")
+                .font(.system(.title2, design: .serif))
+                .foregroundStyle(FilmyTheme.primary)
+                .accessibilityIdentifier("look-library-empty")
+            Text(filter == .favorites && query.isEmpty
+                 ? "Tap the heart on any look to find it here."
+                 : "Try a different name or switch to All looks.")
+                .font(.subheadline)
+                .foregroundStyle(FilmyTheme.secondary)
+            Button {
+                filter = .all
+                query = ""
+                searchIsFocused = false
+            } label: {
+                Text("Show all looks")
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 20)
+                    .frame(minHeight: 48)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(FilmyTheme.background)
+            .background(FilmyTheme.accent, in: Capsule())
+            .accessibilityIdentifier("look-library-reset")
+        }
+        .multilineTextAlignment(.center)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.horizontal, 28)
+        .padding(.vertical, 44)
+        .frame(maxWidth: .infinity)
     }
 }

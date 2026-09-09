@@ -21,7 +21,9 @@
     "FilmyCameraUITests/FilmyCameraUITests": "e2e",
     "FilmyCameraUITests/LaunchOnboardingTests": "e2e",
     "FilmyCameraUITests/NormalPhotoFlowTests": "photos-e2e",
-    "FilmyCameraUITests/StoreScreenshotTests": "store-media"
+    "FilmyCameraUITests/StoreScreenshotTests": "store-media",
+    "FilmyCameraTests/LookLibraryTests": "unit",
+    "FilmyCameraUITests/LookLibraryUITests": "e2e"
   },
   "overrides": {
     "FilmyCameraUITests/FilmyCameraUITests/testSimulatorFallbackExposesReadableStateWithoutPreviewAction": "simulator-e2e",
