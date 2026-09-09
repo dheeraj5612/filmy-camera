@@ -901,8 +901,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     /// Sets continuous focus and exposure at a normalized preview location.
-    /// The point uses the camera's metadata coordinate system: (0, 0) is the
-    /// top-left and (1, 1) is the bottom-right of the displayed preview.
+    /// The point uses the capture device's normalized coordinate system. The
+    /// preview converts its rotation, mirroring and crop before calling this.
     public func focus(at normalizedPoint: CGPoint) {
         let point = clampedNormalizedPoint(normalizedPoint)
 
@@ -912,25 +912,16 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 try device.lockForConfiguration()
                 defer { device.unlockForConfiguration() }
 
-                if self.desiredManualFocus == .auto,
-                   device.isFocusPointOfInterestSupported {
-                    device.focusPointOfInterest = point
-                    if device.isFocusModeSupported(.continuousAutoFocus) {
-                        device.focusMode = .continuousAutoFocus
-                    } else if device.isFocusModeSupported(.autoFocus) {
-                        device.focusMode = .autoFocus
-                    }
+                if self.usesAutoFocusOnQueue(for: device) {
+                    self.applyAutoFocusOnQueue(to: device, at: point)
                 }
 
-                if self.desiredManualExposure == .auto,
-                   device.isExposurePointOfInterestSupported {
-                    device.exposurePointOfInterest = point
-                    if device.isExposureModeSupported(.continuousAutoExposure) {
-                        device.exposureMode = .continuousAutoExposure
-                    }
-                    self.applyExposureBiasOnQueue(to: device)
+                if self.desiredManualExposure == .auto {
+                    self.applyAutoExposureOnQueue(to: device, at: point)
                 }
 
+                device.isSubjectAreaChangeMonitoringEnabled =
+                    self.usesAutoFocusOnQueue(for: device) || self.desiredManualExposure == .auto
                 self.focusExposureLocked = false
                 self.publishFocusExposureLocked(false)
             } catch {
@@ -952,30 +943,14 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 defer { device.unlockForConfiguration() }
 
                 if self.focusExposureLocked {
-                    if self.desiredManualFocus == .auto,
-                       device.isFocusModeSupported(.continuousAutoFocus) {
-                        device.focusMode = .continuousAutoFocus
-                    } else if self.desiredManualFocus == .auto,
-                              device.isFocusModeSupported(.autoFocus) {
-                        device.focusMode = .autoFocus
-                    }
-                    if self.desiredManualExposure == .auto,
-                       device.isExposureModeSupported(.continuousAutoExposure) {
-                        device.exposureMode = .continuousAutoExposure
-                    } else if self.desiredManualExposure == .auto,
-                              device.isExposureModeSupported(.autoExpose) {
-                        device.exposureMode = .autoExpose
-                    }
-                    if self.desiredManualExposure == .auto {
-                        self.applyExposureBiasOnQueue(to: device)
-                    }
+                    self.restoreAutomaticMeteringOnQueue(for: device)
                     self.focusExposureLocked = false
                     self.publishFocusExposureLocked(false)
                     self.publishStatus("Focus and exposure unlocked")
                     return
                 }
 
-                if self.desiredManualFocus == .auto,
+                if self.usesAutoFocusOnQueue(for: device),
                    device.isFocusPointOfInterestSupported {
                     device.focusPointOfInterest = point
                 }
@@ -984,7 +959,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                     device.exposurePointOfInterest = point
                 }
 
-                let focusMode = self.desiredManualFocus == .auto
+                let focusMode = self.usesAutoFocusOnQueue(for: device)
                     ? Self.preferredFocusLockMode(
                         supportsAutoFocus: device.isFocusModeSupported(.autoFocus),
                         supportsLocked: device.isFocusModeSupported(.locked)
@@ -1013,6 +988,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                     device.exposureMode = exposureMode
                     self.applyExposureBiasOnQueue(to: device)
                 }
+                device.isSubjectAreaChangeMonitoringEnabled = false
                 self.focusExposureLocked = true
                 self.publishFocusExposureLocked(true)
                 self.publishStatus("Focus and exposure locked")
@@ -1227,12 +1203,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 )
             }
             if focusExposureLocked,
-               desiredManualFocus == .auto,
-               let focusMode = Self.preferredFocusUnlockMode(
-                   supportsContinuous: device.isFocusModeSupported(.continuousAutoFocus),
-                   supportsAuto: device.isFocusModeSupported(.autoFocus)
-               ) {
-                device.focusMode = focusMode
+               usesAutoFocusOnQueue(for: device) {
+                applyAutoFocusOnQueue(to: device, at: CGPoint(x: 0.5, y: 0.5))
             }
             focusExposureLocked = false
             publishFocusExposureLocked(false)
@@ -1439,13 +1411,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             desiredManualFocus = .manual(lensPosition: position)
             isApplyingManualFocus = true
             if focusExposureLocked,
-               desiredManualExposure == .auto,
-               let exposureMode = Self.preferredExposureUnlockMode(
-                   supportsContinuous: device.isExposureModeSupported(.continuousAutoExposure),
-                   supportsAuto: device.isExposureModeSupported(.autoExpose)
-               ) {
-                device.exposureMode = exposureMode
-                applyExposureBiasOnQueue(to: device)
+               desiredManualExposure == .auto {
+                applyAutoExposureOnQueue(to: device, at: CGPoint(x: 0.5, y: 0.5))
             }
             focusExposureLocked = false
             publishFocusExposureLocked(false)
@@ -1489,7 +1456,20 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             manualFocusGeneration &+= 1
             isApplyingManualFocus = false
             desiredManualFocus = .auto
+            if device.isFocusPointOfInterestSupported {
+                device.focusPointOfInterest = CGPoint(x: 0.5, y: 0.5)
+            }
             device.focusMode = mode
+            if focusExposureLocked, desiredManualExposure == .auto {
+                applyAutoExposureOnQueue(to: device, at: CGPoint(x: 0.5, y: 0.5))
+            }
+            // A separately selected exposure point can still recover when
+            // the scene changes, even after focus returns to the center.
+            device.isSubjectAreaChangeMonitoringEnabled = desiredManualExposure == .auto
+                && device.isExposurePointOfInterestSupported
+                && device.exposurePointOfInterest != CGPoint(x: 0.5, y: 0.5)
+            focusExposureLocked = false
+            publishFocusExposureLocked(false)
             device.unlockForConfiguration()
             publishManualControlsOnQueue(for: device)
             publishStatus("Auto focus enabled")
@@ -1520,23 +1500,11 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             desiredManualExposure = .auto
             desiredManualWhiteBalance = .auto
             desiredManualFocus = .auto
-            if let mode = Self.preferredExposureUnlockMode(
-                supportsContinuous: device.isExposureModeSupported(.continuousAutoExposure),
-                supportsAuto: device.isExposureModeSupported(.autoExpose)
-            ) {
-                device.exposureMode = mode
-                applyExposureBiasOnQueue(to: device)
-            }
+            restoreAutomaticMeteringOnQueue(for: device)
             if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
                 device.whiteBalanceMode = .continuousAutoWhiteBalance
             } else if device.isWhiteBalanceModeSupported(.autoWhiteBalance) {
                 device.whiteBalanceMode = .autoWhiteBalance
-            }
-            if let mode = Self.preferredFocusUnlockMode(
-                supportsContinuous: device.isFocusModeSupported(.continuousAutoFocus),
-                supportsAuto: device.isFocusModeSupported(.autoFocus)
-            ) {
-                device.focusMode = mode
             }
             device.unlockForConfiguration()
             configurePreviewFrameRate(for: device)
@@ -1590,6 +1558,50 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         return nil
     }
 
+    private func usesAutoFocusOnQueue(for device: AVCaptureDevice) -> Bool {
+        // Keep the user's manual setting for a capable lens, but don't let
+        // that preference suppress autofocus on a lens that cannot apply it.
+        desiredManualFocus == .auto || !Self.supportsManualFocus(device)
+    }
+
+    /// These metering helpers require the caller's device configuration lock.
+    /// Set the point before the mode: changing the point alone does not start AF.
+    private func applyAutoFocusOnQueue(to device: AVCaptureDevice, at point: CGPoint) {
+        guard let mode = Self.preferredFocusUnlockMode(
+            supportsContinuous: device.isFocusModeSupported(.continuousAutoFocus),
+            supportsAuto: device.isFocusModeSupported(.autoFocus)
+        ) else { return }
+        if device.isFocusPointOfInterestSupported {
+            device.focusPointOfInterest = point
+        }
+        device.focusMode = mode
+    }
+
+    private func applyAutoExposureOnQueue(to device: AVCaptureDevice, at point: CGPoint) {
+        guard let mode = Self.preferredExposureUnlockMode(
+            supportsContinuous: device.isExposureModeSupported(.continuousAutoExposure),
+            supportsAuto: device.isExposureModeSupported(.autoExpose)
+        ) else { return }
+        if device.isExposurePointOfInterestSupported {
+            device.exposurePointOfInterest = point
+        }
+        device.exposureMode = mode
+        applyExposureBiasOnQueue(to: device)
+    }
+
+    private func restoreAutomaticMeteringOnQueue(for device: AVCaptureDevice) {
+        let center = CGPoint(x: 0.5, y: 0.5)
+        if usesAutoFocusOnQueue(for: device) {
+            applyAutoFocusOnQueue(to: device, at: center)
+        }
+        if desiredManualExposure == .auto {
+            applyAutoExposureOnQueue(to: device, at: center)
+        }
+        // Centered continuous modes track the scene themselves. Monitoring is
+        // only needed to release a tap's temporary off-center target.
+        device.isSubjectAreaChangeMonitoringEnabled = false
+    }
+
     /// Keeps device state aligned with the published lock indicator across a
     /// stop/reuse cycle. Clearing only the Boolean leaves the physical lens and
     /// metering frozen after returning from another tab or the background.
@@ -1597,21 +1609,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         do {
             try device.lockForConfiguration()
             defer { device.unlockForConfiguration() }
-            if desiredManualFocus == .auto,
-               let focusMode = Self.preferredFocusUnlockMode(
-                supportsContinuous: device.isFocusModeSupported(.continuousAutoFocus),
-                supportsAuto: device.isFocusModeSupported(.autoFocus)
-            ) {
-                device.focusMode = focusMode
-            }
-            if desiredManualExposure == .auto,
-               let exposureMode = Self.preferredExposureUnlockMode(
-                supportsContinuous: device.isExposureModeSupported(.continuousAutoExposure),
-                supportsAuto: device.isExposureModeSupported(.autoExpose)
-            ) {
-                device.exposureMode = exposureMode
-                applyExposureBiasOnQueue(to: device)
-            }
+            restoreAutomaticMeteringOnQueue(for: device)
         } catch {
             // Retry when the configured graph is reused. Device configuration
             // may be temporarily unavailable while the app is backgrounding.
@@ -2005,7 +2003,19 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         case .auto:
             setAutoFocusOnQueue()
         case let .manual(lensPosition):
-            setManualFocusOnQueue(lensPosition: lensPosition)
+            if Self.supportsManualFocus(device) {
+                setManualFocusOnQueue(lensPosition: lensPosition)
+            } else {
+                // Keep the preference for the next capable lens, while the
+                // current lens behaves like the Auto state shown in the UI.
+                do {
+                    try device.lockForConfiguration()
+                    restoreAutomaticMeteringOnQueue(for: device)
+                    device.unlockForConfiguration()
+                } catch {
+                    publishStatus("Auto focus is unavailable right now.")
+                }
+            }
         }
         publishManualControlsOnQueue(for: device)
         captureDeferredPhotoWhenManualControlsSettleOnQueue()
@@ -2383,6 +2393,16 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         let notificationCenter = NotificationCenter.default
         sessionObservers = [
             notificationCenter.addObserver(
+                forName: AVCaptureDevice.subjectAreaDidChangeNotification,
+                object: nil,
+                queue: nil
+            ) { [weak self] notification in
+                guard let deviceID = (notification.object as? AVCaptureDevice)?.uniqueID else { return }
+                self?.sessionQueue.async { [weak self] in
+                    self?.handleSubjectAreaChangeOnQueue(deviceID: deviceID)
+                }
+            },
+            notificationCenter.addObserver(
                 forName: AVCaptureSession.runtimeErrorNotification,
                 object: session,
                 queue: nil
@@ -2429,6 +2449,21 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 }
             }
         ]
+    }
+
+    private func handleSubjectAreaChangeOnQueue(deviceID: String) {
+        guard wantsToRun, isConfigured, session.isRunning, !session.isInterrupted,
+              !focusExposureLocked,
+              let device = activeDevice(), device.uniqueID == deviceID,
+              device.isSubjectAreaChangeMonitoringEnabled else { return }
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+            restoreAutomaticMeteringOnQueue(for: device)
+        } catch {
+            // Preserve the tap target if the camera is temporarily busy. A
+            // later scene change or explicit Auto action can try again.
+        }
     }
 
     private func handleRuntimeError(codeRawValue: Int?) {
