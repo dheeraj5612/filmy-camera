@@ -463,11 +463,11 @@ struct RecipeDetailView: View {
     let originalRecipe: FilmRecipe
     let isSelected: Bool
     let onSelect: () -> Void
+    let onCancel: () -> Void
     let onUpdate: ((FilmRecipe) -> Void)?
     let onReset: (() -> Void)?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var draft: FilmRecipe
     @State private var expandedSections: Set<EditorSection> = [.tone, .color]
@@ -478,6 +478,7 @@ struct RecipeDetailView: View {
         originalRecipe: FilmRecipe,
         isSelected: Bool,
         onSelect: @escaping () -> Void,
+        onCancel: @escaping () -> Void,
         onUpdate: ((FilmRecipe) -> Void)? = nil,
         onReset: (() -> Void)? = nil
     ) {
@@ -485,6 +486,7 @@ struct RecipeDetailView: View {
         self.originalRecipe = originalRecipe
         self.isSelected = isSelected
         self.onSelect = onSelect
+        self.onCancel = onCancel
         self.onUpdate = onUpdate
         self.onReset = onReset
         _draft = State(initialValue: recipe)
@@ -498,7 +500,7 @@ struct RecipeDetailView: View {
                 VStack(alignment: .leading, spacing: 22) {
                     BackToCameraButton(
                         accessibilityIdentifier: "recipe-back-to-camera",
-                        action: { dismiss() }
+                        action: onCancel
                     )
 
                     hero
@@ -598,7 +600,6 @@ struct RecipeDetailView: View {
             commitDraft()
             HapticFeedback.play(.success)
             onSelect()
-            dismiss()
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: primaryActionIcon)
@@ -675,6 +676,7 @@ struct RecipeDetailView: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: 180)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .allowsHitTesting(false)
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 8) {

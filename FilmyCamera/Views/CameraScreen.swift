@@ -256,6 +256,9 @@ struct CameraScreen: View {
                     viewModel.select(recipe: recipe)
                     recipeForDetail = nil
                 },
+                // The presenter owns closing the editor. Cancelling never
+                // commits its local draft or selects a different recipe.
+                onCancel: { recipeForDetail = nil },
                 onUpdate: viewModel.update,
                 onReset: {
                     viewModel.reset(recipeID: recipe.id)
