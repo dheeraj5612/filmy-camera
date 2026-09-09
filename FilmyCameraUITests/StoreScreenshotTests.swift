@@ -158,8 +158,23 @@ final class StoreScreenshotTests: XCTestCase {
                 && save.frame.maxY <= app.frame.maxY - 20
         }, "Review controls must clear the status bar and bottom gesture area")
         XCTAssertGreaterThanOrEqual(review.frame.width, app.frame.width * 0.95)
-        XCTAssertGreaterThan(photo.frame.width, app.frame.width * 0.70,
-                             "Portrait review must give the photo most of the display width")
+        // The portrait photo shares the screen with Look, Compare and Finish.
+        // Keep it substantial and entirely visible without cropping its source.
+        XCTAssertTrue(app.frame.contains(photo.frame), "The whole photo must remain visible")
+        XCTAssertGreaterThan(photo.frame.width, app.frame.width * 0.60)
+        XCTAssertGreaterThan(photo.frame.height, app.frame.height * 0.40)
+        // The public fixture is 1086x1448; its Instant Print output is 1164x1618.
+        let expectedAspectRatio: CGFloat = instantPrint ? 1164.0 / 1618.0 : 3.0 / 4.0
+        XCTAssertEqual(photo.frame.width / photo.frame.height, expectedAspectRatio, accuracy: 0.01,
+                       "Review must preserve the complete photo or Instant Print aspect ratio")
+        for identifier in ["review-look-picker", "review-compare-original",
+                           "review-finish-photo", "review-finish-instantPrint"] {
+            let control = app.buttons[identifier]
+            XCTAssertTrue(control.waitForExistence(timeout: 5), identifier)
+            XCTAssertTrue(app.frame.contains(control.frame), "\(identifier) must remain fully visible")
+            XCTAssertTrue(control.isHittable, "\(identifier) must remain reachable")
+        }
+        XCTAssertTrue(save.isHittable, "Save must remain reachable")
         let coveredLookControl = app.buttons["recipe-menu"]
         XCTAssertFalse(coveredLookControl.isHittable,
                        "Review must block interaction with the covered camera")
