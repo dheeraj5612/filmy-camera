@@ -1,0 +1,76 @@
+# One-shot fixed-source transfer. Removed from the implemented app tree.
+# Creates unreferenced content objects only. No commits, refs, tags or deployments.
+name: Prepare verified catalog source
+on:
+  pull_request:
+    paths: ['.github/workflows/catalog-source-transfer.yml', 'docs/catalog-transfer/**']
+permissions:
+  contents: read
+jobs:
+  prepare:
+    if: github.event.pull_request.number == 90 && github.event.pull_request.head.repo.full_name == 'dheeraj5612/filmy-camera' && github.event.pull_request.head.ref == 'codex/camera-capabilities-catalog-20260909'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Verify exact reviewed patch and transfer content without executing it
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: python
+        run: |
+          import base64, hashlib, json, lzma, os, pathlib, re, subprocess, urllib.request
+          base = 'fed817aaca1c389c62db6c1105cae0e164c58e74'
+          def git(*args):
+              return subprocess.check_output(['git', '-c', 'core.hooksPath=/dev/null', *args], timeout=30)
+          assert os.environ['GITHUB_REPOSITORY'] == 'dheeraj5612/filmy-camera'
+          assert git('rev-parse', 'HEAD^').decode().strip() == base
+          transfer_paths = {'.github/workflows/catalog-source-transfer.yml'} | {'docs/catalog-transfer/part%d.b64' % i for i in range(5)}
+          assert set(git('diff', '--name-only', base, 'HEAD').decode().splitlines()) == transfer_paths
+          encoded = b''.join(pathlib.Path('docs/catalog-transfer/part%d.b64' % i).read_bytes() for i in range(5))
+          assert len(encoded) == 38960
+          patch = lzma.decompress(base64.b64decode(encoded, validate=True))
+          assert len(patch) == 122252
+          assert hashlib.sha256(patch).hexdigest() == 'd39eae11431106930b40f2e6166bb16390cc5947d26b3416950fcaffe9efbbea'
+          allowed = {'.github/workflows/catalog-acceptance.yml', '.github/workflows/ui-experience.yml', 'FilmyCamera/Info.plist', 'FilmyCamera/Models/CameraManualControls.swift', 'FilmyCamera/Models/FilmRecipe.swift', 'FilmyCamera/Models/FilmRecipeReferenceCatalog.swift', 'FilmyCamera/Services/LiveRecipePreviewStore.swift', 'FilmyCamera/Views/CameraScreen.swift', 'FilmyCamera/Views/RecipePickerView.swift', 'FilmyCameraTests/CameraManualControlsTests.swift', 'FilmyCameraTests/CameraReviewSaveTests.swift', 'FilmyCameraTests/RecipeInvariantsTests.swift', 'FilmyCameraTests/RecipeReferenceCatalogTests.swift', 'FilmyCameraTests/RecipeRenderGalleryTests.swift', 'FilmyCameraUITests/StoreScreenshotTests.swift', 'docs/camera-capabilities-20260909.md', 'project.yml', 'scripts/testing/original-look-manifest.json', 'scripts/testing/suites.json', 'scripts/testing/test_catalog_contract.py'}
+          records = []
+          for section in patch.decode().split('diff --git ')[1:]:
+              header = re.match(r'a/(.+) b/(.+)\n', section)
+              hashes = re.search(r'^index ([a-f0-9]{40})\.\.([a-f0-9]{40})(?: 100644)?$', section, re.MULTILINE)
+              assert header and hashes and header[1] == header[2] and header[1] in allowed
+              path, before, after = header[1], hashes[1], hashes[2]
+              if before == '0' * 40:
+                  assert subprocess.run(['git', 'cat-file', '-e', base + ':' + path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10).returncode != 0
+              else:
+                  assert git('rev-parse', base + ':' + path).decode().strip() == before
+              records.append({'path':path, 'before':before, 'after':after})
+          assert len(records) == len(allowed) and {r['path'] for r in records} == allowed
+          patch_path = pathlib.Path(os.environ['RUNNER_TEMP']) / 'verified-catalog.patch'
+          patch_path.write_bytes(patch)
+          git('apply', '--check', '--index', str(patch_path))
+          git('apply', '--index', str(patch_path))
+          assert set(git('diff', '--cached', '--name-only').decode().splitlines()) == allowed
+          endpoint = 'https://api.github.com/repos/dheeraj5612/filmy-camera/git/blobs'
+          for record in records:
+              data = pathlib.Path(record['path']).read_bytes()
+              digest = hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()
+              assert digest == record['after']
+              body = json.dumps({'encoding':'base64','content':base64.b64encode(data).decode()}).encode()
+              request = urllib.request.Request(endpoint, data=body, method='POST', headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'], 'Accept':'application/vnd.github+json', 'Content-Type':'application/json'})
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  result = json.load(response)
+              assert result['sha'] == digest
+          output = pathlib.Path(os.environ['RUNNER_TEMP']) / 'verified-catalog-objects.json'
+          output.write_text(json.dumps({'base':base,'files':records}, indent=2))
+          print('Verified 20 unreferenced source objects. No branch, commit, deployment or app execution.')
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: verified-catalog-objects-${{ github.run_id }}
+          path: ${{ runner.temp }}/verified-catalog-objects.json
+          if-no-files-found: error
+          retention-days: 1
