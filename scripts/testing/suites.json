@@ -41,11 +41,11 @@
     "FilmyCameraUITests/FilmyCameraUITests/testPhysicalCaptureKeepsFrameToPhotos": "device",
     "FilmyCameraUITests/FilmyCameraUITests/testPhysicalAddOnlySaveAndRelaunchShowsLocalRoll": "add-only",
     "FilmyCameraUITests/FilmyCameraUITests/testPhysicalRecipeCaptureSheet": "capture-sheet",
-    "FilmyCameraUITests/FilmyCameraUITests/testPhysicalG7XFlashCaptureReachesReview": "device",
+    "FilmyCameraUITests/FilmyCameraUITests/testPhysicalG7XFlashCaptureAutoSaves": "device",
     "FilmyCameraUITests/FilmyCameraUITests/testPhysicalG7XSaveRollDetailAndShareAcceptance": "device",
-    "FilmyCameraUITests/FilmyCameraUITests/testPhysicalRetakeReturnsToALiveViewfinderInstantly": "device",
+    "FilmyCameraUITests/FilmyCameraUITests/testPhysicalAutoSaveKeepsViewfinderLive": "device",
     "FilmyCameraUITests/FilmyCameraUITests/testPhysicalTimerCancellationAndSquareCaptureWithLiveHistogram": "device",
-    "FilmyCameraUITests/FilmyCameraUITests/testPhysicalVolumeButtonsCaptureAndRetake": "device",
+    "FilmyCameraUITests/FilmyCameraUITests/testPhysicalVolumeButtonsCaptureAndAutoSave": "device",
     "FilmyCameraUITests/FilmyCameraUITests/testPhysicalLaunchPerformance": "performance"
   }
 }

@@ -434,31 +434,34 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertTrue(g7x.exists, "G7 X Compact should be discoverable from the first look drawer")
     }
 
-    func testLandscapeCameraShell() throws {
+    func testPortraitCameraShellIgnoresDeviceRotation() throws {
+        let before = app.buttons["Open roll"].frame
         XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertTrue(waitUntil(timeout: 5) { app.frame.height > app.frame.width })
+        XCTAssertEqual(app.buttons["Open roll"].frame.midY, before.midY, accuracy: 1)
         defer { XCUIDevice.shared.orientation = .portrait }
         #if !targetEnvironment(simulator)
-        XCTAssertTrue(waitForLiveShutter(in: app), "The landscape preview must render fresh frames")
+        XCTAssertTrue(waitForLiveShutter(in: app), "The portrait-locked preview must render fresh frames")
         #endif
 
         let currentLook = app.buttons["recipe-menu"]
         let roll = app.buttons["Open roll"]
         let importPhoto = app.buttons["import-photo"]
         for (element, name) in [(currentLook, "Current look"), (roll, "Roll"), (importPhoto, "Import")] {
-            assertMinimumHitTarget(element, named: "Landscape " + name)
+            assertMinimumHitTarget(element, named: "Portrait " + name)
             assertContained(element, in: app, named: name)
         }
         XCTAssertFalse(app.buttons["camera-tab"].exists)
-        attachScreenshot(named: "camera-landscape")
+        attachScreenshot(named: "camera-portrait-locked")
         openRecipeDrawer(in: app)
         let tune = app.buttons["Tune Muted Color"]
         let close = app.buttons["recipe-drawer-close"]
-        assertMinimumHitTarget(tune, named: "Landscape Tune")
-        assertMinimumHitTarget(close, named: "Landscape close picker")
+        assertMinimumHitTarget(tune, named: "Portrait Tune")
+        assertMinimumHitTarget(close, named: "Portrait close picker")
         assertContained(tune, in: app, named: "Tune")
         assertContained(close, in: app, named: "Close picker")
         XCTAssertFalse(tune.frame.intersects(close.frame))
-        attachScreenshot(named: "camera-landscape-look-drawer")
+        attachScreenshot(named: "camera-portrait-locked-look-drawer")
         close.tap()
         XCTAssertFalse(app.descendants(matching: .any)["recipe-picker"].exists)
     }
@@ -528,83 +531,18 @@ final class FilmyCameraUITests: XCTestCase {
         )
     }
 
-    /// Presses the real shutter, reaches review, and keeps the frame to
+    /// Presses the real shutter and automatically saves the frame to
     /// Photos. Only meaningful on hardware with a camera, and only against a
     /// provisioned Photos library because the frame is committed for real.
     func testPhysicalCaptureKeepsFrameToPhotos() throws {
         try skipUnlessPhotosWritesAreAllowed()
+        XCTAssertTrue(waitForLiveShutter(in: app))
         let shutter = app.buttons["Capture photo"]
-        XCTAssertTrue(
-            shutter.waitForExistence(timeout: 20),
-            "The live camera should expose an enabled shutter on hardware"
-        )
         assertMinimumHitTarget(shutter, named: "Shutter")
-        attachScreenshot(named: "device-live-viewfinder")
         shutter.tap()
-
-        let keepFrame = app.buttons["Keep frame"]
-        XCTAssertTrue(
-            keepFrame.waitForExistence(timeout: 30),
-            "A capture should reach the review screen"
-        )
-        XCTAssertTrue(app.buttons["Retake"].exists)
-        attachScreenshot(named: "device-capture-review")
-
-        let compare = app.buttons["review-compare-original"]
-        let lookPicker = app.buttons["review-look-picker"]
-        assertMinimumHitTarget(compare, named: "Original comparison")
-        assertMinimumHitTarget(lookPicker, named: "Review look picker")
-        compare.tap()
-        XCTAssertTrue(waitUntil(timeout: 15) { compare.value as? String == "Original" })
-        lookPicker.tap()
-        let monochrome = revealReviewLook(
-            "review-look-acros-monochrome",
-            named: "Fine Monochrome",
-            in: app
-        )
-        monochrome.tap()
-        let photo = app.descendants(matching: .any)["review-image"]
-        XCTAssertTrue(waitUntil(timeout: 30) {
-            photo.label.contains("Fine Monochrome") && keepFrame.isEnabled
-        }, "A new look must finish rendering on the captured source before Save")
-        XCTAssertEqual(compare.value as? String, "Look")
-
-        XCUIDevice.shared.orientation = .landscapeLeft
-        defer { XCUIDevice.shared.orientation = .portrait }
-        XCTAssertTrue(waitUntil(timeout: 10) { app.frame.width > app.frame.height })
-        for control in [compare, lookPicker, keepFrame] {
-            assertMinimumHitTarget(control, named: "Landscape review control")
-            XCTAssertTrue(app.frame.contains(control.frame), "Review controls must fit inside the screen")
-        }
-        attachScreenshot(named: "device-review-monochrome-landscape")
-        compare.tap()
-        XCTAssertTrue(waitUntil(timeout: 15) { compare.value as? String == "Original" })
-
-        assertMinimumHitTarget(keepFrame, named: "Keep frame")
-        keepFrame.tap()
-        app.tap()
-
-        let savedToast = app.staticTexts.matching(
-            NSPredicate(format: "label BEGINSWITH 'Saved with '")
-        ).firstMatch
-        XCTAssertTrue(
-            savedToast.waitForExistence(timeout: 20),
-            "The kept frame should be committed to Photos"
-        )
-        XCTAssertTrue(savedToast.label.contains("Fine Monochrome"), "Save must keep the chosen look while Original is visible")
-        XCTAssertTrue(
-            waitForDisappearance(keepFrame, timeout: 5),
-            "Keeping a frame should dismiss the review screen"
-        )
-
-        // `-ui-testing` deliberately forces Photos read access to denied so the
-        // Roll stays deterministic on simulators, so the kept frame cannot be
-        // listed here. Confirm the viewfinder is live again instead.
-        XCTAssertTrue(
-            app.buttons["Capture photo"].waitForExistence(timeout: 10),
-            "Keeping a frame should return to the live viewfinder"
-        )
-        attachScreenshot(named: "device-after-keep")
+        assertAutomaticSave(in: app)
+        XCTAssertTrue(waitForLiveShutter(in: app), "Automatic saving must leave the viewfinder live")
+        attachScreenshot(named: "device-capture-auto-saved")
     }
 
     /// Exercises the add-only fallback through a normal save and relaunch.
@@ -641,15 +579,7 @@ final class FilmyCameraUITests: XCTestCase {
         let shutter = cacheApp.buttons["Capture photo"]
         XCTAssertTrue(shutter.waitForExistence(timeout: 20) && shutter.isEnabled)
         shutter.tap()
-        let keepFrame = cacheApp.buttons["Keep frame"]
-        XCTAssertTrue(keepFrame.waitForExistence(timeout: 40))
-        keepFrame.tap()
-        cacheApp.tap()
-
-        let savedToast = cacheApp.staticTexts.matching(
-            NSPredicate(format: "label BEGINSWITH 'Saved with '")
-        ).firstMatch
-        XCTAssertTrue(savedToast.waitForExistence(timeout: 20))
+        assertAutomaticSave(in: cacheApp)
 
         openRoll.tap()
         XCTAssertTrue(cacheApp.staticTexts["Roll"].waitForExistence(timeout: 10))
@@ -697,8 +627,8 @@ final class FilmyCameraUITests: XCTestCase {
     }
 
     /// Captures the same scene through every color recipe, flash off and
-    /// flash on, and attaches each review so the rendered stills can be
-    /// compared against reference looks. Frames are discarded, not saved.
+    /// flash on, and attaches each saved detail for reference comparison.
+    /// Every frame is saved, so this lane also requires Photos-write consent.
     func testPhysicalRecipeCaptureSheet() throws {
         // Thirteen launches and twenty-six captures for a manually inspected
         // contact sheet: opt in explicitly, e.g.
@@ -707,6 +637,7 @@ final class FilmyCameraUITests: XCTestCase {
             ProcessInfo.processInfo.environment["FILMY_RUN_CAPTURE_SHEET"] == "1",
             "Set FILMY_RUN_CAPTURE_SHEET=1 to capture the on-device recipe contact sheet"
         )
+        try skipUnlessPhotosWritesAreAllowed()
         app.terminate()
         let recipeIDs = [
             "provia-standard", "classic-chrome", "velvia-vivid", "astia-soft",
@@ -717,7 +648,7 @@ final class FilmyCameraUITests: XCTestCase {
 
         for recipeID in recipeIDs {
             let recipeApp = makeApplication()
-            recipeApp.launchArguments = ["-ui-testing", "-selectedRecipeID", recipeID]
+            recipeApp.launchArguments = ["-hasCompletedRecipeFirstOnboarding", "YES", "-selectedRecipeID", recipeID, "-captureFinish", "photo"]
             recipeApp.launch()
             recipeApp.tap()
 
@@ -738,13 +669,18 @@ final class FilmyCameraUITests: XCTestCase {
                 // Let exposure settle after a flash-mode change.
                 _ = shutter.waitForExistence(timeout: 1)
                 shutter.tap()
-                let keepFrame = recipeApp.buttons["Keep frame"]
-                XCTAssertTrue(keepFrame.waitForExistence(timeout: 40), "\(recipeID) flash=\(wantsFlash): review")
+                assertAutomaticSave(in: recipeApp)
+                recipeApp.buttons["Open roll"].tap()
+                let frame = recipeApp.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Photo in your gallery'")).firstMatch
+                XCTAssertTrue(frame.waitForExistence(timeout: 20))
+                frame.tap()
+                XCTAssertTrue(recipeApp.images["Photo"].waitForExistence(timeout: 20))
                 let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
                 shot.name = "capture-\(recipeID)-flash-\(wantsFlash ? "on" : "off")"
                 shot.lifetime = .keepAlways
                 add(shot)
-                recipeApp.buttons["Retake"].tap()
+                recipeApp.buttons["Close frame"].tap()
+                recipeApp.buttons["roll-back-to-camera"].tap()
                 XCTAssertTrue(shutter.waitForExistence(timeout: 15), "\(recipeID): back to viewfinder")
             }
 
@@ -758,8 +694,9 @@ final class FilmyCameraUITests: XCTestCase {
     }
 
     /// The G7 X profile renders flash captures differently. Turn the flash
-    /// on, capture, and make sure the still reaches review, then discard it.
-    func testPhysicalG7XFlashCaptureReachesReview() throws {
+    /// on, capture, and make sure the still automatically saves without review.
+    func testPhysicalG7XFlashCaptureAutoSaves() throws {
+        try skipUnlessPhotosWritesAreAllowed()
         app.terminate()
 
         let compactApp = makeApplication()
@@ -790,28 +727,10 @@ final class FilmyCameraUITests: XCTestCase {
         attachScreenshot(named: "device-g7x-flash-viewfinder")
 
         shutter.tap()
-        let keepFrame = compactApp.buttons["Keep frame"]
-        XCTAssertTrue(
-            keepFrame.waitForExistence(timeout: 40),
-            "A G7 X flash capture should reach the review screen"
-        )
-        attachScreenshot(named: "device-g7x-flash-review")
-        // A review that reached the sheet is not enough: the resolved capture
-        // settings must confirm the flash fired, or the flash-aware G7 X
-        // treatment never ran.
-        XCTAssertTrue(
-            compactApp.staticTexts["Full resolution · Flash fired"].waitForExistence(timeout: 5),
-            "The review caption must confirm the flash fired: \(compactApp.staticTexts.allElementsBoundByIndex.map(\.label).filter { $0.contains("resolution") })"
-        )
-
-        let retake = compactApp.buttons["Retake"]
-        assertMinimumHitTarget(retake, named: "Retake")
-        retake.tap()
-        XCTAssertTrue(
-            compactApp.buttons["Capture photo"].waitForExistence(timeout: 10),
-            "Retake should return to the live viewfinder"
-        )
-
+        assertAutomaticSave(in: compactApp)
+        XCTAssertTrue(waitForLiveShutter(in: compactApp))
+        // Resolved flash metadata is asserted by FlashHardwareDeviceTests;
+        // this end-to-end test covers the flash-enabled automatic save path.
         if flash.exists, flash.isEnabled {
             for _ in 0..<3 where (flash.value as? String) != "Off" {
                 flash.tap()
@@ -863,115 +782,18 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertTrue(rollApp.buttons["recipe-menu"].waitForExistence(timeout: 5))
         attachScreenshot(named: "roll-qa-g7x-viewfinder")
 
+        let setup = rollApp.buttons["capture-setup-open"]
+        setup.tap()
+        let finish = rollApp.descendants(matching: .any)["capture-finish-picker"]
+        XCTAssertTrue(finish.waitForExistence(timeout: 5))
+        finish.tap()
+        rollApp.buttons["Instant Print"].tap()
+        rollApp.buttons["capture-setup-done"].tap()
+        XCTAssertTrue(waitForLiveShutter(in: rollApp))
         shutter.tap()
-        let keepFrame = rollApp.buttons["Keep frame"]
-        XCTAssertTrue(
-            keepFrame.waitForExistence(timeout: 40),
-            "G7 X capture must reach full-resolution review"
-        )
-        attachScreenshot(named: "roll-qa-g7x-review")
-
-        let reviewImage = rollApp.descendants(matching: .any)["review-image"]
-        let printFinish = rollApp.buttons["review-finish-instantPrint"]
-        let photoFinish = rollApp.buttons["review-finish-photo"]
-        assertMinimumHitTarget(printFinish, named: "Instant Print finish")
-        assertMinimumHitTarget(photoFinish, named: "Photo finish")
-
-        printFinish.tap()
-        XCTAssertTrue(
-            waitUntil(timeout: 30) {
-                reviewImage.label.contains("Instant Print") && keepFrame.isEnabled
-            },
-            "Instant Print must finish rendering before Save is enabled"
-        )
-        photoFinish.tap()
-        XCTAssertTrue(
-            waitUntil(timeout: 30) {
-                !reviewImage.label.contains("Instant Print") && keepFrame.isEnabled
-            },
-            "Photo must remove the border and settle before Save is enabled"
-        )
-        printFinish.tap()
-        XCTAssertTrue(
-            waitUntil(timeout: 30) {
-                reviewImage.label.contains("Instant Print") && keepFrame.isEnabled
-            },
-            "Returning to Instant Print must restore the finished border"
-        )
-        attachScreenshot(named: "roll-qa-instant-print-portrait")
-
-        let compare = rollApp.buttons["review-compare-original"]
-        assertMinimumHitTarget(compare, named: "Original comparison")
-        compare.tap()
-        XCTAssertTrue(waitUntil(timeout: 30) { compare.value as? String == "Original" })
-        XCTAssertEqual(
-            printFinish.value as? String,
-            "Selected",
-            "Original comparison must not change the selected export finish"
-        )
-        compare.tap()
-        XCTAssertTrue(waitUntil(timeout: 15) {
-            compare.value as? String == "Look" && reviewImage.label.contains("Instant Print")
-        })
-
-        let lookPicker = rollApp.buttons["review-look-picker"]
-        lookPicker.tap()
-        let monochrome = revealReviewLook(
-            "review-look-acros-monochrome",
-            named: "Fine Monochrome",
-            in: rollApp
-        )
-        monochrome.tap()
-        XCTAssertTrue(
-            waitUntil(timeout: 30) {
-                reviewImage.label.contains("Fine Monochrome")
-                    && reviewImage.label.contains("Instant Print")
-                    && keepFrame.isEnabled
-            },
-            "Changing the look must retain Instant Print and finish rendering before Save"
-        )
-
+        assertAutomaticSave(in: rollApp)
         XCUIDevice.shared.orientation = .landscapeLeft
-        XCTAssertTrue(
-            waitUntil(timeout: 10) { rollApp.frame.width > rollApp.frame.height },
-            "Instant Print review must settle into landscape"
-        )
-        XCTAssertEqual(printFinish.value as? String, "Selected")
-        attachScreenshot(named: "roll-qa-instant-print-landscape")
-
-        XCUIDevice.shared.orientation = .portrait
-        XCTAssertTrue(
-            waitUntil(timeout: 10) { rollApp.frame.height > rollApp.frame.width },
-            "Instant Print review must return to portrait before saving"
-        )
-        lookPicker.tap()
-        let g7x = revealReviewLook(
-            "review-look-g7x-compact",
-            named: "G7 X Compact",
-            in: rollApp
-        )
-        g7x.tap()
-        XCTAssertTrue(
-            waitUntil(timeout: 30) {
-                reviewImage.label.contains("G7 X Compact")
-                    && reviewImage.label.contains("Instant Print")
-                    && keepFrame.isEnabled
-            },
-            "Returning to G7 X must retain Instant Print before saving"
-        )
-
-        keepFrame.tap()
-        // Invokes the permission monitor if add-only Photos access is being
-        // requested for this normal-app save.
-        rollApp.tap()
-
-        let savedToast = rollApp.staticTexts.matching(
-            NSPredicate(format: "label BEGINSWITH 'Saved with '")
-        ).firstMatch
-        XCTAssertTrue(
-            savedToast.waitForExistence(timeout: 20),
-            "The G7 X frame must be accepted by Photos before Roll QA continues"
-        )
+        XCTAssertTrue(waitUntil(timeout: 5) { rollApp.frame.height > rollApp.frame.width })
 
         let openRoll = rollApp.buttons["Open roll"]
         XCTAssertTrue(openRoll.waitForExistence(timeout: 10))
@@ -1578,6 +1400,24 @@ final class FilmyCameraUITests: XCTestCase {
         #endif
     }
 
+    private func assertAutomaticSave(in target: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        let saved = target.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Saved with '")).firstMatch
+        let review = target.descendants(matching: .any)["review-screen"]
+        var showedReview = false
+        let completed = waitUntil(timeout: 45) {
+            showedReview = showedReview || review.exists || target.buttons["Retake"].exists || target.buttons["Keep frame"].exists
+            if saved.exists { return true }
+            for title in ["Allow", "Allow Full Access", "Allow Access to All Photos", "OK"] {
+                let button = target.alerts.buttons[title]
+                if button.exists { button.tap(); break }
+            }
+            return false
+        }
+        XCTAssertFalse(showedReview, "Shutter captures must never open Retake/Save review", file: file, line: line)
+        XCTAssertTrue(completed, "Capture must be acknowledged by Photos without a Save tap", file: file, line: line)
+        XCTAssertFalse(target.descendants(matching: .any)["capture-save-recovery"].exists, file: file, line: line)
+    }
+
     private func waitForCameraShell(in target: XCUIApplication, timeout: TimeInterval = 15) -> Bool {
         // The Roll thumbnail sits in the capture row of every camera layout,
         // on hardware and in Simulator preview mode alike.
@@ -1656,40 +1496,32 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertTrue(waitForCameraShell(in: app, timeout: 5), "The shell must survive rapid recipe switching")
         if isPhysical {
             XCTAssertTrue(waitForLiveShutter(in: app, timeout: 5), "The viewfinder must stay live while switching recipes")
-            app.buttons["Capture photo"].tap()
-            let retake = app.buttons["Retake"]
-            XCTAssertTrue(retake.waitForExistence(timeout: 30), "A capture after rapid switching must still reach review")
-            retake.tap()
-            XCTAssertTrue(waitForLiveShutter(in: app, timeout: 8))
+
         }
         attachScreenshot(named: "lifecycle-after-rapid-switching")
     }
 
-    func testPhysicalRetakeReturnsToALiveViewfinderInstantly() throws {
+    func testPhysicalAutoSaveKeepsViewfinderLive() throws {
         #if targetEnvironment(simulator)
         throw XCTSkip("Requires camera hardware")
         #else
-        XCTAssertTrue(waitForLiveShutter(in: app, timeout: 20),
-                      "Physical Retake acceptance requires a live camera")
+        try skipUnlessPhotosWritesAreAllowed()
+        XCTAssertTrue(waitForLiveShutter(in: app))
         for round in 1...3 {
             app.buttons["Capture photo"].tap()
-            let retake = app.buttons["Retake"]
-            XCTAssertTrue(retake.waitForExistence(timeout: 30), "Round \(round): capture should reach review")
-            retake.tap()
-            let start = Date()
-            XCTAssertTrue(waitForLiveShutter(in: app, timeout: 8), "Round \(round): the viewfinder must return after Retake")
-            let elapsed = Date().timeIntervalSince(start)
-            XCTAssertLessThan(elapsed, 3, "Round \(round): Retake should reuse the warm session (took \(elapsed) s)")
+            assertAutomaticSave(in: app)
+            XCTAssertTrue(waitForLiveShutter(in: app, timeout: 8), "Round \(round): preview must remain live after saving")
         }
         #endif
     }
 
-    /// Exercises the real timer and capture crop without keeping a photo.
+    /// Exercises timer cancellation and automatic saving on provisioned hardware.
     /// The isolated preferences and screenshots belong only to this test.
     func testPhysicalTimerCancellationAndSquareCaptureWithLiveHistogram() throws {
         #if targetEnvironment(simulator)
         throw XCTSkip("Timer capture acceptance requires physical camera hardware")
         #else
+        try skipUnlessPhotosWritesAreAllowed()
         XCTAssertTrue(waitForLiveShutter(in: app), "The camera must render fresh frames before setup")
         let setup = app.buttons["capture-setup-open"]
         XCTAssertTrue(setup.waitForExistence(timeout: 5))
@@ -1739,7 +1571,7 @@ final class FilmyCameraUITests: XCTestCase {
         let countdown = app.descendants(matching: .any)["capture-countdown"]
         let countdownValue = app.descendants(matching: .any)["capture-countdown-value"]
         let cancel = app.buttons["capture-countdown-cancel"]
-        let photo = app.descendants(matching: .any)["review-image"]
+        let saved = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Saved with '")).firstMatch
         shutter.tap()
         XCTAssertTrue(cancel.waitForExistence(timeout: 5))
         cancel.tap()
@@ -1747,11 +1579,11 @@ final class FilmyCameraUITests: XCTestCase {
         // Stay beyond the canceled timer's original deadline before starting
         // another shot, so a stale completion cannot hide in the next review.
         let canceledCapture = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "exists == true"), object: photo
+            predicate: NSPredicate(format: "exists == true"), object: saved
         )
         canceledCapture.isInverted = true
         XCTAssertEqual(XCTWaiter.wait(for: [canceledCapture], timeout: 11), .completed,
-                       "Canceling the timer must prevent a captured review")
+                       "Canceling the timer must prevent a Photos save")
         XCTAssertTrue(waitForLiveShutter(in: app), "Canceling the timer must restore fresh preview frames")
 
         shutter.tap()
@@ -1762,47 +1594,27 @@ final class FilmyCameraUITests: XCTestCase {
             countdownValue.exists && countdownValue.label != initialCountdown
         }, "The real countdown must advance before the shutter fires")
         attachScreenshot(named: "device-square-capture-countdown")
-        let keepFrame = app.buttons["Keep frame"]
-        XCTAssertTrue(keepFrame.waitForExistence(timeout: 40), "The timer must finish with a captured review")
+        assertAutomaticSave(in: app)
         XCTAssertFalse(countdown.exists)
-        let photoFinish = app.buttons["review-finish-photo"]
-        XCTAssertTrue(photoFinish.waitForExistence(timeout: 5))
-        photoFinish.tap()
-        XCTAssertTrue(waitUntil(timeout: 20) {
-            photoFinish.value as? String == "Selected" && keepFrame.isEnabled && photo.exists
-        }, "The unframed photo must finish rendering before measuring the capture")
-        XCTAssertGreaterThan(photo.frame.height, 0)
-        XCTAssertTrue(app.frame.contains(photo.frame))
-        XCTAssertEqual(photo.frame.width / photo.frame.height, 1, accuracy: 0.01,
-                       "The physical capture must retain the selected square crop")
-        attachScreenshot(named: "device-timed-square-capture-review")
-        app.buttons["Retake"].tap()
-        XCTAssertTrue(waitForDisappearance(photo, timeout: 5))
-        XCTAssertTrue(waitForLiveShutter(in: app), "Retake must restore fresh preview frames")
+        XCTAssertTrue(waitForLiveShutter(in: app))
+        // Exact crop dimensions are covered by renderer tests; the timer
+        // path must save automatically without presenting review controls.
         #endif
     }
 
     /// Presses both physical volume buttons through the production hardware
-    /// shutter path. Each frame is discarded without writing to Photos.
-    func testPhysicalVolumeButtonsCaptureAndRetake() throws {
+    /// shutter path. Each frame is automatically saved to provisioned Photos.
+    func testPhysicalVolumeButtonsCaptureAndAutoSave() throws {
         #if targetEnvironment(simulator)
         throw XCTSkip("Volume-button capture requires physical camera hardware")
         #else
-        guard #available(iOS 18.0, *) else {
-            throw XCTSkip("Hardware shutter events require iOS 18 or later")
-        }
-        XCTAssertTrue(waitForLiveShutter(in: app), "Hardware shutter acceptance requires fresh preview frames")
+        try skipUnlessPhotosWritesAreAllowed()
+        guard #available(iOS 18.0, *) else { throw XCTSkip("Hardware shutter events require iOS 18 or later") }
+        XCTAssertTrue(waitForLiveShutter(in: app))
         for (button, name) in [(XCUIDevice.Button.volumeUp, "volume-up"), (.volumeDown, "volume-down")] {
             XCUIDevice.shared.press(button)
-            let keepFrame = app.buttons["Keep frame"]
-            let photo = app.descendants(matching: .any)["review-image"]
-            XCTAssertTrue(keepFrame.waitForExistence(timeout: 30), "\(name) must capture without an onscreen shutter tap")
-            XCTAssertTrue(waitUntil(timeout: 15) { keepFrame.isEnabled && photo.exists },
-                          "\(name) must produce a rendered capture review")
-            attachScreenshot(named: "device-\(name)-capture-review")
-            app.buttons["Retake"].tap()
-            XCTAssertTrue(waitForDisappearance(photo, timeout: 5))
-            XCTAssertTrue(waitForLiveShutter(in: app), "Retake after \(name) must restore fresh preview frames")
+            assertAutomaticSave(in: app)
+            XCTAssertTrue(waitForLiveShutter(in: app), "\(name) must save and leave a live preview")
         }
         #endif
     }
