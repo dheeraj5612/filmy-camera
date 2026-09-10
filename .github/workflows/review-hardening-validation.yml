@@ -25,13 +25,15 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           ref: ${{ github.sha }}
-      - name: Apply verified final patch and remove all one-use transfer tools
+      - name: Apply verified product patch without editing workflows
         id: source
         run: |
           set -euo pipefail
           python3 scripts/review-hardening/apply.py
+          # GITHUB_TOKEN cannot edit workflows. Publish those separately
+          # through the authorized repository connection, not this runner.
+          git restore --source=HEAD --staged --worktree .github/workflows
           git rm -r scripts/review-hardening
-          git rm .github/workflows/review-hardening-validation.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'Harden sharing cancellation and enforce App Review release contracts'
