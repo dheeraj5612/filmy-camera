@@ -37,13 +37,16 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         XCTAssertTrue(GalleryPagingPolicy.retainedIndices(around: 0, count: 0).isEmpty)
     }
 
-    func testAppAndItsInfoPlistAllowOnlyPortrait() {
+    func testAppAndItsInfoPlistAllowOnlyPortrait() throws {
         let delegate = FilmyAppDelegate()
         XCTAssertEqual(delegate.application(.shared, supportedInterfaceOrientationsFor: nil), .portrait)
+        // Bundle resolves device-qualified keys. Read the built file to verify both device families.
+        let data = try Data(contentsOf: Bundle.main.bundleURL.appendingPathComponent("Info.plist"))
+        let info = try XCTUnwrap(PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any])
         for key in ["UISupportedInterfaceOrientations", "UISupportedInterfaceOrientations~ipad"] {
-            XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: key) as? [String], ["UIInterfaceOrientationPortrait"])
+            XCTAssertEqual(info[key] as? [String], ["UIInterfaceOrientationPortrait"])
         }
-        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "UIRequiresFullScreen") as? Bool, true)
+        XCTAssertEqual(info["UIRequiresFullScreen"] as? Bool, true)
     }
 
     func testCameraStartsWithAnExplicitIdleAvailability() {
