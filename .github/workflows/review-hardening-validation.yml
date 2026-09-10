@@ -5,7 +5,6 @@ on:
     branches: [codex/app-store-hardening-20260910]
     paths:
       - .github/workflows/review-hardening-validation.yml
-      - scripts/review-hardening/**
 
 permissions:
   contents: read
@@ -15,22 +14,167 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  source-snapshot:
+  prepare:
+    if: github.ref == 'refs/heads/codex/app-store-hardening-20260910'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      source: ${{ steps.source.outputs.sha }}
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
-          persist-credentials: false
-      - name: Export tracked source only
+          ref: ${{ github.sha }}
+      - name: Apply verified product patch and remove transfer files
+        id: source
+        shell: bash
         run: |
-          git archive --format=tar HEAD | gzip > "$RUNNER_TEMP/filmy-source.tar.gz"
+          set -euo pipefail
+          if [[ -f scripts/review-hardening/apply.py ]]; then
+            python3 scripts/review-hardening/apply.py
+            git rm -r scripts/review-hardening
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'Harden camera recovery, Photos privacy, permissions, and Release behavior'
+            git push origin HEAD:refs/heads/codex/app-store-hardening-20260910
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           git rev-parse HEAD > "$RUNNER_TEMP/source-sha.txt"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+          git archive --format=tar HEAD | gzip > "$RUNNER_TEMP/filmy-source.tar.gz"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
-          name: review-hardening-source
+          name: hardening-source
           path: |
-            ${{ runner.temp }}/filmy-source.tar.gz
             ${{ runner.temp }}/source-sha.txt
-          retention-days: 2
+            ${{ runner.temp }}/filmy-source.tar.gz
+          retention-days: 3
           if-no-files-found: error
+
+  simulator:
+    needs: prepare
+    runs-on: macos-15
+    timeout-minutes: 35
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ needs.prepare.outputs.source }}
+          persist-credentials: false
+      - name: Verify generated project and portable checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/review-evidence" "$RUNNER_TEMP/xcodegen"
+          git rev-parse HEAD > "$RUNNER_TEMP/review-evidence/source-sha.txt"
+          xcodebuild -version | tee "$RUNNER_TEMP/review-evidence/xcode-version.txt"
+          gh release download 2.45.4 --repo yonaskolb/XcodeGen --pattern xcodegen.zip --dir "$RUNNER_TEMP/xcodegen"
+          echo "090ec29491aad50aec10631bf6e62253fed733c50f3aab0f5ffc86bc170bdbef  $RUNNER_TEMP/xcodegen/xcodegen.zip" | shasum -a 256 -c -
+          unzip -q "$RUNNER_TEMP/xcodegen/xcodegen.zip" -d "$RUNNER_TEMP/xcodegen"
+          binary="$RUNNER_TEMP/xcodegen/xcodegen/bin/xcodegen"
+          echo "6aa2b4da95304b343bea12890c59f9655aa428c08b351d57d592cfab4e88a9f1  $binary" | shasum -a 256 -c -
+          "$binary" generate --spec project.yml
+          git diff --exit-code -- FilmyCamera.xcodeproj FilmyCamera/Info.plist
+          python3 -m unittest discover -s scripts/testing -p 'test_*.py' > "$RUNNER_TEMP/review-evidence/python-tests.log" 2>&1
+          python3 scripts/testing/run.py inventory > "$RUNNER_TEMP/review-evidence/inventory.log"
+          git diff --check
+      - name: Create isolated simulator
+        id: simulator
+        run: |
+          set -euo pipefail
+          device="$(xcrun simctl create "Filmy App Review ${GITHUB_RUN_ID}" com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro com.apple.CoreSimulator.SimRuntime.iOS-18-5)"
+          echo "id=$device" >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+      - name: Run focused native regression tests
+        env:
+          SIMULATOR_ID: ${{ steps.simulator.outputs.id }}
+        run: |
+          set -euo pipefail
+          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera \
+            -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
+            -derivedDataPath "$RUNNER_TEMP/FilmyReviewDerived" \
+            -resultBundlePath "$RUNNER_TEMP/review-evidence/review.xcresult" \
+            -parallel-testing-enabled NO -maximum-parallel-testing-workers 1 \
+            -only-testing:FilmyCameraTests/AppReviewHardeningTests \
+            -only-testing:FilmyCameraTests/CameraServiceAvailabilityTests \
+            -only-testing:FilmyCameraTests/PhotoLibraryMetadataTests \
+            -only-testing:FilmyCameraUITests/FilmyCameraUITests/testOfflinePrivacyOverviewIsReadableAndDismissible \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test \
+            > "$RUNNER_TEMP/review-evidence/native-tests.log" 2>&1
+      - name: Extract result summary
+        if: always()
+        run: |
+          result="$RUNNER_TEMP/review-evidence/review.xcresult"
+          if [[ -d "$result" ]]; then
+            xcrun xcresulttool get test-results summary --path "$result" --format json > "$RUNNER_TEMP/review-evidence/summary.json"
+          fi
+      - name: Remove owned simulator
+        if: always() && steps.simulator.outputs.id != ''
+        env:
+          SIMULATOR_ID: ${{ steps.simulator.outputs.id }}
+        run: |
+          xcrun simctl shutdown "$SIMULATOR_ID" || true
+          xcrun simctl delete "$SIMULATOR_ID" || true
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        if: always()
+        with:
+          name: app-review-native-evidence
+          path: ${{ runner.temp }}/review-evidence/
+          retention-days: 14
+          if-no-files-found: warn
+
+  distribution:
+    needs: prepare
+    runs-on: macos-15
+    timeout-minutes: 20
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ needs.prepare.outputs.source }}
+          persist-credentials: false
+      - name: Compile and inspect the actual distribution binary
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/distribution-evidence"
+          git rev-parse HEAD > "$RUNNER_TEMP/distribution-evidence/source-sha.txt"
+          xcodebuild -version | tee "$RUNNER_TEMP/distribution-evidence/xcode-version.txt"
+          python3 scripts/release/validate-sdk.py --current
+          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/FilmyReviewDistribution" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build \
+            > "$RUNNER_TEMP/distribution-evidence/release-build.log" 2>&1
+          app="$RUNNER_TEMP/FilmyReviewDistribution/Build/Products/Release-iphoneos/FilmyCamera.app"
+          python3 scripts/release/validate-sdk.py --app-info "$app/Info.plist"
+          APP_PATH="$app" python3 - <<'PY' | tee "$RUNNER_TEMP/distribution-evidence/binary-check.txt"
+          import os, pathlib, plistlib
+          app = pathlib.Path(os.environ['APP_PATH'])
+          info = plistlib.loads((app / 'Info.plist').read_bytes())
+          binary = (app / info['CFBundleExecutable']).read_bytes()
+          for flag in (b'-ui-testing', b'FILMY_TEST_DEFAULTS_SUITE', b'XCTestConfigurationFilePath'):
+              if flag in binary:
+                  raise SystemExit('Test-only launch marker present in Release: ' + flag.decode())
+          manifests = list(app.rglob('PrivacyInfo.xcprivacy'))
+          if not manifests:
+              raise SystemExit('Privacy manifest was not bundled')
+          for path in manifests:
+              plistlib.loads(path.read_bytes())
+          print('PASS: Release binary excludes launch hooks and contains valid privacy manifest')
+          PY
+      - name: Compile physical device test branches
+        run: |
+          python3 scripts/testing/run.py device-build \
+            --derived-data "$RUNNER_TEMP/FilmyReviewDeviceTests" \
+            --output-dir "$RUNNER_TEMP/distribution-evidence"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        if: always()
+        with:
+          name: app-review-distribution-evidence
+          path: ${{ runner.temp }}/distribution-evidence/
+          retention-days: 14
+          if-no-files-found: warn
