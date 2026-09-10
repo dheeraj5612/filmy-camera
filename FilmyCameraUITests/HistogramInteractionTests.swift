@@ -95,8 +95,14 @@ final class HistogramInteractionTests: XCTestCase {
         XCTAssertTrue(app.buttons["camera-active-adjustments"].waitForExistence(timeout: 5))
 
         XCUIDevice.shared.orientation = .landscapeLeft
-        XCTAssertTrue(waitUntil { self.app.frame.width > self.app.frame.height })
-        XCTAssertTrue(waitUntil { preview.frame.insetBy(dx: -1, dy: -1).contains(histogram.frame) })
+        XCTAssertTrue(
+            waitUntil { self.app.frame.height > self.app.frame.width },
+            "The camera is portrait locked and must retain portrait geometry after device rotation"
+        )
+        XCTAssertTrue(
+            waitForStableContainedFrame(histogram, in: preview),
+            "The histogram must settle inside the portrait camera preview after rotation"
+        )
         XCTAssertEqual(histogram.value as? String, persistedPosition)
         for corner in [CGVector(dx: 0.99, dy: 0.01), CGVector(dx: 0.99, dy: 0.99)] {
             drag(histogram, into: preview, x: corner.dx, y: corner.dy)
@@ -105,6 +111,7 @@ final class HistogramInteractionTests: XCTestCase {
         attachScreenshot("histogram-landscape")
         XCUIDevice.shared.orientation = .portrait
         XCTAssertTrue(waitUntil { self.app.frame.height > self.app.frame.width })
+        XCTAssertTrue(waitForStableContainedFrame(histogram, in: preview))
 
         for corner in [CGVector(dx: 0.99, dy: 0.99), CGVector(dx: 0.01, dy: 0.99),
                        CGVector(dx: 0.01, dy: 0.01), CGVector(dx: 0.99, dy: 0.01)] {
@@ -252,6 +259,40 @@ final class HistogramInteractionTests: XCTestCase {
             RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
         } while Date() < deadline
         return condition()
+    }
+
+    private func waitForStableContainedFrame(
+        _ element: XCUIElement,
+        in viewport: XCUIElement,
+        timeout: TimeInterval = 10
+    ) -> Bool {
+        var previousFrame: CGRect?
+        var stableSamples = 0
+        return waitUntil(timeout: timeout) {
+            guard element.exists, viewport.exists else {
+                previousFrame = nil
+                stableSamples = 0
+                return false
+            }
+            let frame = element.frame
+            let viewportFrame = viewport.frame.insetBy(dx: -1, dy: -1)
+            guard frame.width > 0, frame.height > 0, viewportFrame.contains(frame) else {
+                previousFrame = nil
+                stableSamples = 0
+                return false
+            }
+            if let previousFrame,
+               abs(frame.minX - previousFrame.minX) < 0.25,
+               abs(frame.minY - previousFrame.minY) < 0.25,
+               abs(frame.width - previousFrame.width) < 0.25,
+               abs(frame.height - previousFrame.height) < 0.25 {
+                stableSamples += 1
+            } else {
+                stableSamples = 1
+            }
+            previousFrame = frame
+            return stableSamples >= 2
+        }
     }
 
     private func waitForLivePreview() -> Bool {

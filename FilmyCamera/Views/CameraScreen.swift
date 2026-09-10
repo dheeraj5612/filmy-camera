@@ -1006,8 +1006,12 @@ struct CameraScreen: View {
                         .font(.system(size: 12, weight: .bold, design: .rounded))
                         .foregroundStyle(FilmyTheme.primary)
                         .padding(.horizontal, 12)
-                        .frame(minHeight: FilmyTheme.minimumHitTarget)
+                        // In the iPad portrait compatibility window, the
+                        // drawer scales down in landscape. Keep the real
+                        // button target at 44pt after that transform.
+                        .frame(minHeight: 64)
                         .background(FilmyTheme.panel, in: Capsule())
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.pressable)
                 .accessibilityLabel("Tune \(viewModel.selectedRecipe.name)")
@@ -1018,6 +1022,8 @@ struct CameraScreen: View {
                         .foregroundStyle(FilmyTheme.secondary)
                         .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
                         .background(FilmyTheme.panel, in: Circle())
+                        .frame(width: 64, height: 64)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.pressable)
                 .accessibilityIdentifier("recipe-drawer-close")
@@ -1165,7 +1171,7 @@ struct CameraScreen: View {
         } label: {
             RollThumbnail(asset: photoLibrary.galleryAssets.first, photoLibrary: photoLibrary)
                 .frame(width: 52, height: 52)
-                .frame(width: 60, height: 60)
+                .frame(width: 64, height: 64)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.pressable)
@@ -1198,7 +1204,7 @@ struct CameraScreen: View {
                 }
             }
             .frame(width: 52, height: 52)
-            .frame(width: 60, height: 60)
+            .frame(width: 64, height: 64)
             .contentShape(Rectangle())
         }
         .buttonStyle(.pressable)
