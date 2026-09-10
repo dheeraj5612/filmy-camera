@@ -1,0 +1,36 @@
+name: App Review hardening validation
+
+on:
+  push:
+    branches: [codex/app-store-hardening-20260910]
+    paths:
+      - .github/workflows/review-hardening-validation.yml
+      - scripts/review-hardening/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: review-hardening-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Export tracked source only
+        run: |
+          git archive --format=tar HEAD | gzip > "$RUNNER_TEMP/filmy-source.tar.gz"
+          git rev-parse HEAD > "$RUNNER_TEMP/source-sha.txt"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: review-hardening-source
+          path: |
+            ${{ runner.temp }}/filmy-source.tar.gz
+            ${{ runner.temp }}/source-sha.txt
+          retention-days: 2
+          if-no-files-found: error
