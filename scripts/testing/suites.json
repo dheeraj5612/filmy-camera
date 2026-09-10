@@ -31,7 +31,18 @@
     "FilmyCameraTests/CatalogRenderAcceptanceTests": "integration",
     "FilmyCameraTests/CaptureWorkflowPolicyTests": "unit",
     "FilmyCameraTests/ExpandedCreativeCatalogTests": "unit",
-    "FilmyCameraUITests/CaptureSetupUITests": "e2e"
+    "FilmyCameraUITests/CaptureSetupUITests": "e2e",
+    "FilmyCameraTests/HistogramPlacementTests": "unit",
+    "FilmyCameraTests/GalleryPagingPolicyTests": "unit",
+    "FilmyCameraTests/RecipeControlEffectTests": "integration",
+    "FilmyCameraTests/CameraCatalogHardwareTests": "capture-sheet",
+    "FilmyCameraUITests/HistogramInteractionTests": "device",
+    "FilmyCameraUITests/GalleryPagingUITests": "device",
+    "FilmyCameraUITests/ComprehensiveSettingsTests": "e2e",
+    "FilmyCameraTests/CameraPreviewGesturePolicyTests": "unit",
+    "FilmyCameraUITests/AdditionalInteractionTests": "device",
+    "FilmyCameraTests/PhotoLibraryLargeRollTests": "fixtures",
+    "FilmyCameraUITests/NormalRollManagementTests": "photos-e2e"
   },
   "overrides": {
     "FilmyCameraUITests/FilmyCameraUITests/testSimulatorFallbackExposesReadableStateWithoutPreviewAction": "simulator-e2e",
@@ -46,6 +57,7 @@
     "FilmyCameraUITests/FilmyCameraUITests/testPhysicalAutoSaveKeepsViewfinderLive": "device",
     "FilmyCameraUITests/FilmyCameraUITests/testPhysicalTimerCancellationAndSquareCaptureWithLiveHistogram": "device",
     "FilmyCameraUITests/FilmyCameraUITests/testPhysicalVolumeButtonsCaptureAndAutoSave": "device",
-    "FilmyCameraUITests/FilmyCameraUITests/testPhysicalLaunchPerformance": "performance"
+    "FilmyCameraUITests/FilmyCameraUITests/testPhysicalLaunchPerformance": "performance",
+    "FilmyCameraUITests/ComprehensiveSettingsTests/testPhysicalEveryAspectAndTimerCapturesThenFrontCameraReturnsLive": "device"
   }
 }

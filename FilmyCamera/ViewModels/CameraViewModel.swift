@@ -501,8 +501,10 @@ final class CameraViewModel: ObservableObject {
 
                 // The camera stays live. Rendering and Photos IO must not
                 // stop the session or present a Retake/Save interstitial.
-                DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                    let renderedPhoto = autoreleasepool {
+                // Keep the Photos saver on the main actor; only the render
+                // inputs cross into the detached background task.
+                let renderedPhoto = await Task.detached(priority: .userInitiated) {
+                    autoreleasepool {
                         Self.render(
                             sourceData: capturedPhoto.fileData,
                             recipe: recipe,
@@ -514,27 +516,21 @@ final class CameraViewModel: ObservableObject {
                             finish: finish
                         )
                     }
+                }.value
 
-                    DispatchQueue.main.async {
-                        guard let self else {
-                            camera.setFrameDeliveryPaused(false)
-                            return
-                        }
-                        guard let renderedPhoto else {
-                            // CameraScreen owns session lifecycle. Ending the
-                            // capture without a review lets its visibility-aware
-                            // policy decide whether the camera should resume.
-                            camera.setFrameDeliveryPaused(false)
-                            self.isCapturing = false
-                            self.showToast("The selected look could not be rendered. Try the capture again.", style: .error)
-                            return
-                        }
-                        self.saveCapturedPhoto(
-                            renderedPhoto, recipe: recipe, finish: finish, photoLibrary: photoLibrary
-                        )
-                        self.isCapturing = false
-                    }
+                guard let renderedPhoto else {
+                    // CameraScreen owns session lifecycle. Ending the capture
+                    // without a review lets its visibility-aware policy decide
+                    // whether the camera should resume.
+                    camera.setFrameDeliveryPaused(false)
+                    self.isCapturing = false
+                    self.showToast("The selected look could not be rendered. Try the capture again.", style: .error)
+                    return
                 }
+                self.saveCapturedPhoto(
+                    renderedPhoto, recipe: recipe, finish: finish, photoLibrary: photoLibrary
+                )
+                self.isCapturing = false
             }
         }
     }

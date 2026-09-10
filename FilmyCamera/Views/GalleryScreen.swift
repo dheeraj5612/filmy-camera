@@ -489,22 +489,6 @@ private struct RollEmptyState: View {
     }
 }
 
-/// One page on either side is sufficient for interactive native paging. Never
-/// retain a decoded full-screen image for every frame in a large Roll.
-enum GalleryPagingPolicy {
-    static func neighbor(of index: Int, offset: Int, count: Int) -> Int? {
-        guard count > 0, (0..<count).contains(index), offset == -1 || offset == 1 else { return nil }
-        if offset == -1 { return index > 0 ? index - 1 : nil }
-        return index < count - 1 ? index + 1 : nil
-    }
-
-    static func retainedIndices(around index: Int, count: Int) -> Range<Int> {
-        guard count > 0, (0..<count).contains(index) else { return 0..<0 }
-        let end = index < count - 1 ? index + 2 : count
-        return max(0, index - 1)..<end
-    }
-}
-
 /// UIKit owns the interactive horizontal slide and cancellation physics.
 /// Selection changes only after a completed transition, not during a drag.
 private struct GalleryPager: UIViewControllerRepresentable {
@@ -548,25 +532,42 @@ private struct GalleryPager: UIViewControllerRepresentable {
         private var assets: [PhotoLibraryGalleryAsset] = []
         private var indices: [String: Int] = [:]
         private var isTransitioning = false
+        private var needsSynchronization = false
         private var activeID: String?
 
         init(parent: GalleryPager) { self.parent = parent }
 
         func synchronize(with parent: GalleryPager) {
             self.parent = parent
-            guard !isTransitioning, let pager, let selection = parent.selection else { return }
-            assets = parent.photoLibrary.galleryAssets
-            indices = Dictionary(uniqueKeysWithValues: assets.enumerated().map { ($0.element.id, $0.offset) })
-            guard let index = indices[selection.id] else { return }
+            guard let pager else { return }
+            guard !isTransitioning else {
+                needsSynchronization = true
+                return
+            }
+            needsSynchronization = false
+            guard let selection = parent.selection else {
+                pages.removeAll()
+                return
+            }
+            refreshSnapshot()
+            guard let index = indices[selection.id] else {
+                // The selected frame may disappear when Photos authorization
+                // or the source changes. Dismiss the stale detail immediately
+                // instead of leaving an orphaned page on screen.
+                pages.removeAll()
+                self.parent.selection = nil
+                return
+            }
             let current = pager.viewControllers?.first as? GalleryPageController
             if current?.assetIdentifier != selection.id {
                 pager.setViewControllers([page(at: index)], direction: .forward, animated: false)
-            } else if let current {
-                // A Photos permission change may replace an asset with its
-                // cached representation. Refresh that source without paging.
-                current.rootView = detail(for: assets[index])
             }
             finishSelection(at: index)
+        }
+
+        private func refreshSnapshot() {
+            assets = parent.photoLibrary.galleryAssets
+            indices = Dictionary(uniqueKeysWithValues: assets.enumerated().map { ($0.element.id, $0.offset) })
         }
 
         private func detail(for asset: PhotoLibraryGalleryAsset) -> GalleryDetailView {
@@ -623,12 +624,10 @@ private struct GalleryPager: UIViewControllerRepresentable {
             transitionCompleted completed: Bool
         ) {
             isTransitioning = false
-            guard parent.selection != nil, pager != nil,
-                  let current = pageViewController.viewControllers?.first as? GalleryPageController,
-                  let index = indices[current.assetIdentifier] else { return }
-            // An aborted drag still points at the original controller.
-            parent.selection = assets[index]
-            synchronize(with: parent)
+            _ = finished
+            _ = completed
+            let currentID = (pageViewController.viewControllers?.first as? GalleryPageController)?.assetIdentifier
+            synchronizeSelectionAfterTransition(currentID: currentID)
         }
 
         private func move(by offset: Int) {
@@ -641,11 +640,30 @@ private struct GalleryPager: UIViewControllerRepresentable {
                 [page(at: next)], direction: offset > 0 ? .forward : .reverse,
                 animated: !UIAccessibility.isReduceMotionEnabled
             ) { [weak self] finished in
-                guard let self, self.pager != nil, self.parent.selection != nil else { return }
+                guard let self else { return }
                 self.isTransitioning = false
-                if finished { self.parent.selection = self.assets[next] }
-                self.synchronize(with: self.parent)
+                _ = finished
+                let currentID = (self.pager?.viewControllers?.first as? GalleryPageController)?.assetIdentifier
+                self.synchronizeSelectionAfterTransition(currentID: currentID)
             }
+        }
+
+        private func synchronizeSelectionAfterTransition(currentID: String?) {
+            guard pager != nil else { return }
+            refreshSnapshot()
+            if let currentID,
+               let current = assets.first(where: { $0.id == currentID }) {
+                // Resolve the completed page against the latest Photos
+                // snapshot. This avoids selecting an asset at a stale index
+                // when the source changed while the transition was running.
+                parent.selection = current
+            } else if let selection = parent.selection,
+                      let current = assets.first(where: { $0.id == selection.id }) {
+                parent.selection = current
+            } else {
+                parent.selection = nil
+            }
+            synchronize(with: parent)
         }
 
         private func finishSelection(at index: Int) {
@@ -656,7 +674,15 @@ private struct GalleryPager: UIViewControllerRepresentable {
             }
             let retainedIDs = Set(GalleryPagingPolicy.retainedIndices(around: index, count: assets.count).map { assets[$0].id })
             pages = pages.filter { retainedIDs.contains($0.key) }
-            for (id, controller) in pages { controller.view.accessibilityElementsHidden = id != currentID }
+            for (id, controller) in pages {
+                // Rebuild every retained page from the latest asset. Photos
+                // authorization and source changes can replace the backing
+                // image while the page controller itself remains cached.
+                if let asset = assets.first(where: { $0.id == id }) {
+                    controller.rootView = detail(for: asset)
+                }
+                controller.view.accessibilityElementsHidden = id != currentID
+            }
             pager?.view.accessibilityValue = "\(index + 1) of \(assets.count)"
         }
     }
@@ -701,6 +727,9 @@ private struct GalleryDetailView: View {
     @State private var pinchBaseZoom: CGFloat?
     @State private var imageOffset: CGSize = .zero
     @State private var dragBaseOffset: CGSize = .zero
+    @State private var dragStartedZoomed = false
+    @State private var isDraggingFrame = false
+    @State private var shareGeneration = 0
 
     private var imageRequestKey: PhotoLibraryImageRequestKey {
         PhotoLibraryGalleryImagePolicy.requestKey(
@@ -711,121 +740,51 @@ private struct GalleryDetailView: View {
     }
 
     var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-
-            if let image {
-                GeometryReader { proxy in
-                    let fittedSize = fittedImageSize(for: image.size, in: proxy.size)
-
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: fittedSize.width, height: fittedSize.height)
-                        .padding(.vertical, 20)
-                        .scaleEffect(zoomScale)
-                        .offset(constrainedOffset(imageOffset, in: proxy.size))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                        .contentShape(Rectangle())
-                        .accessibilityLabel("Photo")
-                        .accessibilityValue(zoomScale > 1 ? "Zoomed \(Int(zoomScale * 100)) percent" : "Fit to screen")
-                        .accessibilityHint("Pinch to zoom, drag while zoomed, or double tap to reset")
-                        .accessibilityAdjustableAction { direction in
-                            switch direction {
-                            case .increment:
-                                zoomScale = min(zoomScale + 0.5, 4)
-                            case .decrement:
-                                zoomScale = max(zoomScale - 0.5, 1)
-                            @unknown default:
-                                break
-                            }
-                            if zoomScale == 1 {
-                                resetImageTransform()
-                            }
-                        }
-                        .accessibilityAction(named: "Reset zoom", resetImageTransform)
-                        .gesture(
-                            MagnificationGesture()
-                                .onChanged { value in
-                                    let baseZoom = pinchBaseZoom ?? zoomScale
-                                    if pinchBaseZoom == nil {
-                                        pinchBaseZoom = zoomScale
-                                    }
-                                    zoomScale = min(max(baseZoom * value, 1), 4)
-                                    if zoomScale == 1 {
-                                        imageOffset = .zero
-                                        dragBaseOffset = .zero
-                                    } else {
-                                        imageOffset = constrainedOffset(imageOffset, in: proxy.size)
-                                    }
-                                }
-                                .onEnded { _ in
-                                    pinchBaseZoom = nil
-                                    if zoomScale <= 1.05 {
-                                        resetImageTransform()
-                                    } else {
-                                        imageOffset = constrainedOffset(imageOffset, in: proxy.size)
-                                        dragBaseOffset = imageOffset
-                                    }
-                                }
-                        )
-                        .simultaneousGesture(
-                            DragGesture(minimumDistance: 8)
-                                .onChanged { value in
-                                    guard zoomScale > 1 else { return }
-                                    imageOffset = constrainedOffset(
-                                        CGSize(
-                                            width: dragBaseOffset.width + value.translation.width,
-                                            height: dragBaseOffset.height + value.translation.height
-                                        ),
-                                        in: proxy.size
-                                    )
-                                }
-                                .onEnded { _ in
-                                    dragBaseOffset = imageOffset
-                                },
-                            including: zoomScale > 1 ? .all : .subviews
-                        )
-                        .onTapGesture(count: 2, perform: resetImageTransform)
-                }
-            } else if imageLoadFailed {
-                VStack(spacing: 14) {
-                    Image(systemName: "photo.badge.exclamationmark")
-                        .font(.system(size: 28, weight: .medium))
-                        .foregroundStyle(FilmyTheme.secondary)
-                    Eyebrow(text: "FRAME COULDN’T LOAD")
-                    Button("Try Again") {
-                        retryGeneration &+= 1
-                    }
-                    .buttonStyle(.filmyPrimary)
-                    .disabled(isLoadingImage)
-                    .accessibilityIdentifier("gallery-image-retry")
-                }
-                .padding(.horizontal, 32)
-            } else {
-                VStack(spacing: 12) {
-                    ProgressView()
-                        .tint(FilmyTheme.accent)
-                    Eyebrow(text: "DEVELOPING FRAME")
-                }
+        GeometryReader { proxy in
+            ZStack {
+                Color.black
+                frameContent(in: proxy.size)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .simultaneousGesture(frameDragGesture(in: proxy.size))
+            .clipped()
         }
+        .background(Color.black.ignoresSafeArea())
         .onChange(of: zoomScale) { _, scale in onZoomChanged(scale > 1) }
         .onDisappear { onZoomChanged(false) }
-        .accessibilityAction(named: "Previous photo", onPreviousPhoto)
-        .accessibilityAction(named: "Next photo", onNextPhoto)
+        .accessibilityAction(named: "Previous photo") {
+            guard !isPagingLocked else { return }
+            onPreviousPhoto()
+        }
+        .accessibilityAction(named: "Next photo") {
+            guard !isPagingLocked else { return }
+            onNextPhoto()
+        }
         .task(id: imageTaskID) {
             await loadImage()
+        }
+        .onDisappear {
+            shareGeneration &+= 1
+            if !isShowingShareSheet, let shareURL {
+                photoLibrary.removeTemporaryShare(at: shareURL)
+                self.shareURL = nil
+            }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             detailToolbar
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if let metadata = photoLibrary.metadata(for: asset) {
-                metadataCard(metadata)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 14)
+            VStack(spacing: 8) {
+                if photoLibrary.galleryAssets.count > 1 {
+                    pagingControls
+                }
+                if let metadata = photoLibrary.metadata(for: asset) {
+                    metadataCard(metadata)
+                }
             }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 14)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(photoLibrary.metadata(for: asset).map { "Selected gallery photo, \($0.recipe.name)" } ?? "Selected gallery photo")
@@ -865,6 +824,188 @@ private struct GalleryDetailView: View {
         }
     }
 
+    @ViewBuilder
+    private func frameContent(in viewport: CGSize) -> some View {
+        if let image {
+            let fittedSize = fittedImageSize(for: image.size, in: viewport)
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(width: fittedSize.width, height: fittedSize.height)
+                .padding(.vertical, 20)
+                .scaleEffect(zoomScale)
+                .offset(constrainedOffset(imageOffset, in: viewport))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                .contentShape(Rectangle())
+                .accessibilityLabel("Photo")
+                .accessibilityValue(zoomScale > 1 ? "Zoomed \(Int(zoomScale * 100)) percent" : "Fit to screen")
+                .accessibilityHint("Swipe left or right for another frame. Pinch to zoom, drag while zoomed, or double tap to reset.")
+                .accessibilityAdjustableAction { direction in
+                    switch direction {
+                    case .increment:
+                        zoomScale = min(zoomScale + 0.5, 4)
+                    case .decrement:
+                        zoomScale = max(zoomScale - 0.5, 1)
+                    @unknown default:
+                        break
+                    }
+                    if zoomScale == 1 {
+                        resetImageTransform()
+                    } else {
+                        imageOffset = constrainedOffset(imageOffset, in: viewport)
+                        dragBaseOffset = imageOffset
+                    }
+                }
+                .accessibilityAction(named: "Reset zoom", resetImageTransform)
+                .gesture(
+                    MagnificationGesture()
+                        .onChanged { value in
+                            dragStartedZoomed = true
+                            let baseZoom = pinchBaseZoom ?? zoomScale
+                            if pinchBaseZoom == nil { pinchBaseZoom = zoomScale }
+                            zoomScale = min(max(baseZoom * value, 1), 4)
+                            if zoomScale == 1 {
+                                imageOffset = .zero
+                                dragBaseOffset = .zero
+                            } else {
+                                imageOffset = constrainedOffset(imageOffset, in: viewport)
+                            }
+                        }
+                        .onEnded { _ in
+                            pinchBaseZoom = nil
+                            if zoomScale <= 1.05 {
+                                resetImageTransform()
+                            } else {
+                                imageOffset = constrainedOffset(imageOffset, in: viewport)
+                                dragBaseOffset = imageOffset
+                            }
+                        }
+                )
+                .onTapGesture(count: 2, perform: resetImageTransform)
+        } else if imageLoadFailed {
+            VStack(spacing: 14) {
+                Image(systemName: "photo.badge.exclamationmark")
+                    .font(.system(size: 28, weight: .medium))
+                    .foregroundStyle(FilmyTheme.secondary)
+                Eyebrow(text: "FRAME COULDN’T LOAD")
+                Button("Try Again") { retryGeneration &+= 1 }
+                    .buttonStyle(.filmyPrimary)
+                    .disabled(isLoadingImage)
+                    .accessibilityIdentifier("gallery-image-retry")
+            }
+            .padding(.horizontal, 32)
+        } else {
+            VStack(spacing: 12) {
+                ProgressView().tint(FilmyTheme.accent)
+                Eyebrow(text: "DEVELOPING FRAME")
+            }
+        }
+    }
+
+    private var isNavigationLocked: Bool {
+        isDeleting || isPreparingShare || isShowingShareSheet || isShowingDeleteConfirmation
+    }
+
+    private var isPagingLocked: Bool {
+        isNavigationLocked || zoomScale > 1.001 || pinchBaseZoom != nil
+    }
+
+    private var pagingControls: some View {
+        HStack(spacing: 16) {
+            Button { moveFrame(.previous) } label: {
+                Image(systemName: "chevron.left")
+                    .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Previous frame")
+            .accessibilityIdentifier("gallery-previous-frame")
+            .disabled(adjacentAsset(.previous) == nil || isPagingLocked)
+
+            Text("\(currentFrameNumber) of \(photoLibrary.galleryAssets.count)")
+                .font(.system(.caption, design: .rounded).weight(.semibold))
+                .monospacedDigit()
+                .frame(minWidth: 80)
+                .accessibilityLabel("Frame")
+                .accessibilityValue("\(currentFrameNumber) of \(photoLibrary.galleryAssets.count)")
+                .accessibilityIdentifier("gallery-frame-position")
+
+            Button { moveFrame(.next) } label: {
+                Image(systemName: "chevron.right")
+                    .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Next frame")
+            .accessibilityIdentifier("gallery-next-frame")
+            .disabled(adjacentAsset(.next) == nil || isPagingLocked)
+        }
+        .foregroundStyle(.white)
+        .buttonStyle(.plain)
+        .viewfinderChrome(Capsule())
+    }
+
+    private var currentFrameNumber: Int {
+        photoLibrary.galleryAssets.firstIndex(where: { $0.id == asset.id }).map { $0 + 1 } ?? 0
+    }
+
+    private func adjacentAsset(_ direction: GalleryPagingDirection) -> PhotoLibraryGalleryAsset? {
+        let assets = photoLibrary.galleryAssets
+        guard let target = GalleryPagingPolicy.targetIdentifier(
+            in: assets.map(\.id), selectedIdentifier: asset.id, direction: direction
+        ) else { return nil }
+        return assets.first(where: { $0.id == target })
+    }
+
+    private func moveFrame(_ direction: GalleryPagingDirection) {
+        guard !isPagingLocked, adjacentAsset(direction) != nil else { return }
+        // Clear the old pixels before asking the pager to move. The coordinator
+        // replaces the retained page with the latest asset after transition.
+        image = nil
+        imageLoadFailed = false
+        loadGeneration &+= 1
+        resetImageTransform()
+        switch direction {
+        case .previous:
+            onPreviousPhoto()
+        case .next:
+            onNextPhoto()
+        }
+        HapticFeedback.play(.selection)
+    }
+
+    private func frameDragGesture(in viewport: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onChanged { value in
+                guard !isNavigationLocked else { return }
+                if !isDraggingFrame {
+                    dragStartedZoomed = zoomScale > 1 || pinchBaseZoom != nil
+                    isDraggingFrame = true
+                }
+                if zoomScale > 1 || pinchBaseZoom != nil { dragStartedZoomed = true }
+                guard zoomScale > 1 else { return }
+                imageOffset = constrainedOffset(
+                    CGSize(
+                        width: dragBaseOffset.width + value.translation.width,
+                        height: dragBaseOffset.height + value.translation.height
+                    ),
+                    in: viewport
+                )
+            }
+            .onEnded { value in
+                defer {
+                    dragStartedZoomed = false
+                    isDraggingFrame = false
+                }
+                dragBaseOffset = imageOffset
+                guard !dragStartedZoomed, !isNavigationLocked,
+                      let direction = GalleryPagingPolicy.swipeDirection(
+                        translation: value.translation,
+                        viewportWidth: viewport.width,
+                        zoomScale: zoomScale
+                      ) else { return }
+                moveFrame(direction)
+            }
+    }
+
     private var imageTaskID: String {
         "\(imageRequestKey.assetIdentifier)|\(imageRequestKey.authorizationStatusRawValue ?? -1)|\(retryGeneration)"
     }
@@ -897,6 +1038,7 @@ private struct GalleryDetailView: View {
         .padding(.vertical, 10)
         .viewfinderChrome(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("gallery-frame-metadata")
     }
 
     private var detailToolbar: some View {
@@ -945,7 +1087,7 @@ private struct GalleryDetailView: View {
                 }
                 .buttonStyle(.pressable)
                 .accessibilityLabel("Delete frame")
-                .disabled(isDeleting)
+                .disabled(isDeleting || isPreparingShare)
             }
         }
         .padding(.horizontal, 16)
@@ -968,8 +1110,18 @@ private struct GalleryDetailView: View {
     private func shareFrame() {
         guard !isPreparingShare else { return }
         isPreparingShare = true
+        shareGeneration &+= 1
+        let generation = shareGeneration
+        let sharingAsset = asset
+        let requestKey = imageRequestKey
         Task { @MainActor in
-            let url = await photoLibrary.shareURL(for: asset)
+            let url = await photoLibrary.shareURL(for: sharingAsset)
+            guard generation == shareGeneration,
+                  requestKey == imageRequestKey else {
+                if let url { photoLibrary.removeTemporaryShare(at: url) }
+                isPreparingShare = false
+                return
+            }
             isPreparingShare = false
             guard let url else {
                 actionErrorMessage = "The original frame could not be prepared for sharing. Try again in a moment."
@@ -984,15 +1136,18 @@ private struct GalleryDetailView: View {
     /// new request key while one is in flight) always supersedes the older
     /// one instead of being rejected by it.
     private func loadImage() async {
-        loadGeneration += 1
+        loadGeneration &+= 1
         let generation = loadGeneration
+        let loadingAsset = asset
+        let requestKey = imageRequestKey
 
         image = nil
         imageLoadFailed = false
         isLoadingImage = true
+        resetImageTransform()
 
         guard PhotoLibraryGalleryImagePolicy.canLoad(
-            isPhotosAsset: asset.isPhotosAsset,
+            isPhotosAsset: loadingAsset.isPhotosAsset,
             authorizationStatus: photoLibrary.authorizationStatus
         ) else {
             isLoadingImage = false
@@ -1001,11 +1156,12 @@ private struct GalleryDetailView: View {
         }
 
         let loadedImage = await photoLibrary.image(
-            for: asset,
+            for: loadingAsset,
             targetSize: CGSize(width: 1600, height: 2200),
             contentMode: .aspectFit
         )
-        guard generation == loadGeneration, !Task.isCancelled else { return }
+        guard generation == loadGeneration, requestKey == imageRequestKey,
+              !Task.isCancelled else { return }
 
         image = loadedImage
         imageLoadFailed = loadedImage == nil

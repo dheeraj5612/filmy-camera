@@ -1,14 +1,14 @@
 # Filmy Camera release checklist
 
-The current build 13 candidate refreshes the app icon while preserving build 12 camera logic. Its source changes and generated icon provenance are documented in [the icon record](app-store/icon/README.md). Build 12 has already uploaded and finished processing; its distribution binary retains the earlier icon.
+The current build 14 candidate carries the consolidated camera and gallery corrections while preserving the refreshed opaque app icon. Its source changes and generated icon provenance are documented in [the icon record](app-store/icon/README.md). Build 12 has already uploaded and finished processing; its distribution binary retains the earlier icon.
 
-## Build 13 release gates
+## Build 14 release gates
 
-- [x] Integrate the refreshed opaque 1024-pixel icon and consistently increment both project representations to build 13. Preserve the old design and new generated master/prompts outside application resources.
-- [x] Correct native-switch and Roll accessibility targets; pass the focused simulator case, 66 portable checks, and the signed build 12 device-test compilation. Four corrected/expanded iPhone cases passed: aid persistence, timer/square/live histogram, background recovery, and Save/Roll/Detail/Share.
-- [ ] Pass required CI and create/validate a signed build 13 archive and IPA from its exact clean source.
-- [ ] Inspect the installed build 13 icon and complete remaining physical acceptance. Synthetic volume-up was inconclusive, volume-down was not reached, and 5× constituent confirmation needs a bright distant scene. See the [device acceptance record](device-acceptance-build12-20260909.md).
-- [ ] Upload build 13, verify Apple processing, and select it with matching listing/media. Build 12 readiness does not establish build 13 readiness.
+- [x] Integrate the refreshed opaque 1024-pixel icon and consistently increment both project representations to build 14. Preserve the old design and new generated master/prompts outside application resources.
+- [ ] Complete the consolidated camera/gallery corrections and physical acceptance on the connected iPad. Existing simulator evidence and generic signed-device compilation remain historical diagnostics; they do not replace the required latest-OS iPad run.
+- [ ] Pass required CI and create/validate a signed build 14 archive and IPA from its exact clean source.
+- [ ] Inspect the installed build 14 icon and complete remaining physical acceptance. Synthetic volume-up was inconclusive, volume-down was not reached, and 5× constituent confirmation needs a bright distant scene. See the [device acceptance record](device-acceptance-build12-20260909.md).
+- [ ] Upload build 14, verify Apple processing, and select it with matching listing/media. Build 12 readiness does not establish build 14 readiness.
 - [ ] Complete saved portal/privacy/age-rating/support-contact checks and App Review. Keep manual release selected.
 
 ## Build 12 candidate
@@ -24,7 +24,7 @@ Version 1.0.0, build 12, came from [PR #90](https://github.com/dheeraj5612/filmy
 - [x] Integrate [PR #91](https://github.com/dheeraj5612/filmy-camera/pull/91) at `006f7b2`, correcting the store-media test helper and privacy documentation. Its final PR checks passed 407 core/UI/Photos tests, 149 catalog tests, 14 UI cases per device, and the SDK build, with zero failures/skips. These later test/documentation changes preserve the signed candidate's production application and project inputs; the archive source stamp remains `e73c5ee`.
 - [x] Create and validate the signed build 12 archive and IPA, including source provenance, signing, privacy, executable/dSYM UUIDs, and export parity. Archive source remains `e73c5ee`.
 - [x] Upload build 12. The resumed Xcode transfer completed on September 9, 2026 at 18:27 UTC with `Upload succeeded` and `EXPORT SUCCEEDED`; the signed archive remains from `e73c5ee`.
-- [x] Verify Apple processing. The signed-in App Store Connect build list shows build 12 Complete and Ready to Submit. It has not been submitted; build 13 will carry the new icon.
+- [x] Verify Apple processing. The signed-in App Store Connect build list shows build 12 Complete and Ready to Submit. It has not been submitted; build 14 will carry the new icon.
 - [ ] Complete physical-device acceptance for timer/cancel, framing, hardware shutter, preview aids, camera/lens controls, capture/import/save, and interruptions. Matching-source development build 12 is now testable on the unlocked iPhone 16 Pro. Flash, Retake, exposure, autofocus, save/Roll/share, aid persistence, timer/square/live histogram, and background recovery passed. The original switch/Roll failures and passing corrections are retained in the [dated device acceptance record](device-acceptance-build12-20260909.md); synthetic volume-button behavior and scene-dependent telephoto acceptance remain unresolved. Final iPad acceptance remains unverified while locked. These development tests do not establish TestFlight acceptance of the uploaded distribution binary.
 - [x] Publish and verify the privacy-policy explanation of optional on-device horizon motion processing. The live policy matches legal-site commit `f699bcb` ([deployment](https://github.com/dheeraj5612/filmycam-legal/actions/runs/34379804180)).
 - [x] Refresh and inspect both local five-image screenshot packs for build 12. Clean capture source `731b285` passed both complete import/save/Roll/detail flows with zero failures/skips; all ten unedited PNG attachments passed visual and structural validation. Source, runtime, summaries, and hashes are preserved. Upload remains pending.

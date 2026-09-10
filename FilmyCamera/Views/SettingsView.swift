@@ -79,18 +79,23 @@ struct SettingsView: View {
 
     private var captureSettings: some View {
         settingsSection(title: "CAPTURE") {
-            SettingRow(
-                systemName: "bolt.fill",
-                title: "Flash",
-                detail: flashSettingDetail
-            ) {
+            VStack(alignment: .leading, spacing: 12) {
+                SettingRow(
+                    systemName: "bolt.fill",
+                    title: "Flash",
+                    detail: flashSettingDetail
+                ) {
+                    EmptyView()
+                }
+                // Give each choice usable space even when the explanation
+                // wraps or Dynamic Type enlarges it.
                 Picker("Flash", selection: flashModeBinding) {
                     ForEach(CameraService.FlashMode.allCases, id: \.self) { mode in
                         Text(mode.title).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
-                .frame(maxWidth: 200)
+                .frame(maxWidth: .infinity, minHeight: 44)
                 .disabled(camera.flashAvailability != .available)
                 .accessibilityIdentifier("flash-setting")
             }
