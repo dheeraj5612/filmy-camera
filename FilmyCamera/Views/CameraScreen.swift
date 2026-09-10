@@ -34,7 +34,7 @@ enum CameraActivityPolicy {
     /// themselves (hardware tests start their own session), so the host UI
     /// leaves the device alone. UI tests launch the app as a separate
     /// process without this variable and are unaffected.
-    static let isUnitTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    static let isUnitTestHost = AppLaunchConfiguration.current.isUnitTestHost
 
     static func action(
         hasReview: Bool,
@@ -180,10 +180,8 @@ struct CameraScreen: View {
         // opens quiet. UI tests that exercise exposure and zoom launch with
         // it open; the viewfinder-chrome preview launches with it closed so
         // the toggle itself can be verified.
-        let arguments = ProcessInfo.processInfo.arguments
-        let isUITesting = arguments.contains("-ui-testing")
-        let isViewfinderPreview = arguments.contains("-ui-testing-viewfinder-chrome")
-        _isShowingTools = State(initialValue: isUITesting && !isViewfinderPreview)
+        let launch = AppLaunchConfiguration.current
+        _isShowingTools = State(initialValue: launch.isUITesting && !launch.isViewfinderPreview)
     }
 
     var body: some View {
@@ -1020,7 +1018,7 @@ struct CameraScreen: View {
         case .simulator:
             return "Connect a physical iPhone or iPad to capture photos."
         case .permissionDenied:
-            return "Open Settings above to allow camera access."
+            return CameraService.cameraPermissionMessage(for: AVCaptureDevice.authorizationStatus(for: .video))
         case .interrupted, .needsRecovery:
             return "Tap Resume Camera above the preview to try again."
         case .unavailable:
@@ -1196,7 +1194,7 @@ struct CameraScreen: View {
     }
 
     private var isViewfinderChromePreview: Bool {
-        ProcessInfo.processInfo.arguments.contains("-ui-testing-viewfinder-chrome")
+        AppLaunchConfiguration.current.isViewfinderPreview
     }
 
     @ViewBuilder
@@ -1227,12 +1225,20 @@ struct CameraScreen: View {
                 action: camera.start
             )
         case .permissionDenied:
-            PreviewPlaceholder(
-                isSimulator: false,
-                recipe: viewModel.selectedRecipe,
-                actionTitle: "Open Settings",
-                action: openSystemSettings
-            )
+            if AVCaptureDevice.authorizationStatus(for: .video) == .restricted {
+                PreviewPlaceholder(
+                    isSimulator: false,
+                    recipe: viewModel.selectedRecipe,
+                    message: CameraService.cameraPermissionMessage(for: .restricted)
+                )
+            } else {
+                PreviewPlaceholder(
+                    isSimulator: false,
+                    recipe: viewModel.selectedRecipe,
+                    actionTitle: "Open Settings",
+                    action: openSystemSettings
+                )
+            }
         case .simulator:
             PreviewPlaceholder(
                 isSimulator: true,
@@ -1411,7 +1417,8 @@ private struct RollThumbnail: View {
         return PhotoLibraryGalleryImagePolicy.requestKey(
             assetIdentifier: asset.assetIdentifier,
             isPhotosAsset: asset.isPhotosAsset,
-            authorizationStatus: photoLibrary.authorizationStatus
+            authorizationStatus: photoLibrary.authorizationStatus,
+            revision: asset.imageRevision
         )
     }
 

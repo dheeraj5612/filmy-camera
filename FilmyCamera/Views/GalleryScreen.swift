@@ -81,7 +81,7 @@ struct GalleryScreen: View {
         .onChange(of: photoLibrary.authorizationStatus) { _, _ in
             clearSelectionIfUnavailable()
         }
-        .onChange(of: photoLibrary.assets.map(\.localIdentifier)) { _, _ in
+        .onChange(of: photoLibrary.assets.map { "\($0.localIdentifier)|\(PhotoLibraryGalleryAsset.photos($0).imageRevision)" }) { _, _ in
             clearSelectionIfUnavailable()
         }
         .onChange(of: photoLibrary.localSavedFrames.map(\.assetIdentifier)) { _, _ in
@@ -155,7 +155,7 @@ struct GalleryScreen: View {
             self.selectedAsset = nil
             return
         }
-        if current.isPhotosAsset != selectedAsset.isPhotosAsset {
+        if current.isPhotosAsset != selectedAsset.isPhotosAsset || current.imageRevision != selectedAsset.imageRevision {
             self.selectedAsset = current
         }
     }
@@ -335,7 +335,8 @@ private struct GalleryThumbnail: View {
         PhotoLibraryGalleryImagePolicy.requestKey(
             assetIdentifier: asset.assetIdentifier,
             isPhotosAsset: asset.isPhotosAsset,
-            authorizationStatus: photoLibrary.authorizationStatus
+            authorizationStatus: photoLibrary.authorizationStatus,
+            revision: asset.imageRevision
         )
     }
 
@@ -512,7 +513,8 @@ private struct GalleryDetailView: View {
         PhotoLibraryGalleryImagePolicy.requestKey(
             assetIdentifier: asset.assetIdentifier,
             isPhotosAsset: asset.isPhotosAsset,
-            authorizationStatus: photoLibrary.authorizationStatus
+            authorizationStatus: photoLibrary.authorizationStatus,
+            revision: asset.imageRevision
         )
     }
 
@@ -667,7 +669,7 @@ private struct GalleryDetailView: View {
     }
 
     private var imageTaskID: String {
-        "\(imageRequestKey.assetIdentifier)|\(imageRequestKey.authorizationStatusRawValue ?? -1)|\(retryGeneration)"
+        "\(imageRequestKey.assetIdentifier)|\(imageRequestKey.authorizationStatusRawValue ?? -1)|\(imageRequestKey.revision ?? "-")|\(retryGeneration)"
     }
 
     private func metadataCard(_ metadata: SavedFrameMetadata) -> some View {

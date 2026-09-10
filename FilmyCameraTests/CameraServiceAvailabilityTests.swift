@@ -119,7 +119,8 @@ final class CameraServiceAvailabilityTests: XCTestCase {
             CameraService.availabilityAfterStopping(
                 authorizationStatus: .authorized,
                 hasCameraDevice: true,
-                previousAvailability: .running
+                previousAvailability: .running,
+                isSimulator: true
             ),
             .paused
         )
@@ -127,7 +128,8 @@ final class CameraServiceAvailabilityTests: XCTestCase {
             CameraService.availabilityAfterStopping(
                 authorizationStatus: .authorized,
                 hasCameraDevice: false,
-                previousAvailability: .running
+                previousAvailability: .running,
+                isSimulator: true
             ),
             .simulator
         )
@@ -135,7 +137,8 @@ final class CameraServiceAvailabilityTests: XCTestCase {
             CameraService.availabilityAfterStopping(
                 authorizationStatus: .notDetermined,
                 hasCameraDevice: true,
-                previousAvailability: .starting
+                previousAvailability: .starting,
+                isSimulator: true
             ),
             .idle
         )
@@ -872,4 +875,129 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         )
     }
 
+}
+
+
+final class AppReviewHardeningTests: XCTestCase {
+    func testCameraReadinessRequiresEveryGraphComponent() {
+        // Exhaust the five independent flags. A running flag is intentionally
+        // absent: it cannot compensate for any missing graph component.
+        for bits in 0..<32 {
+            let configured = bits & 1 != 0
+            let needsRebuild = bits & 2 != 0
+            let input = bits & 4 != 0
+            let preview = bits & 8 != 0
+            let still = bits & 16 != 0
+            XCTAssertEqual(
+                CameraService.canReuseSessionGraph(
+                    isConfigured: configured,
+                    needsRebuild: needsRebuild,
+                    hasCameraInput: input,
+                    hasPreviewOutput: preview,
+                    hasPhotoOutput: still
+                ),
+                configured && !needsRebuild && input && preview && still,
+                "Unexpected readiness for graph flags \(bits)"
+            )
+        }
+    }
+
+    func testFailedInputSwapPreservesHealthyRollbackAndResetsMissingInput() {
+        XCTAssertFalse(CameraService.shouldResetSessionGraphAfterFailedInputReplacement(restoredPreviousInput: true))
+        XCTAssertTrue(CameraService.shouldResetSessionGraphAfterFailedInputReplacement(restoredPreviousInput: false))
+    }
+
+    func testMissingDeviceNeverClaimsSimulatorMode() {
+        XCTAssertEqual(CameraService.availabilityWithoutCamera(isSimulator: false), .unavailable)
+        XCTAssertEqual(CameraService.availabilityWithoutCamera(isSimulator: true), .simulator)
+        for status in [AVAuthorizationStatus.authorized, .notDetermined] {
+            XCTAssertEqual(
+                CameraService.availabilityAfterStopping(
+                    authorizationStatus: status,
+                    hasCameraDevice: false,
+                    previousAvailability: .starting,
+                    isSimulator: false
+                ),
+                .unavailable
+            )
+        }
+    }
+
+    func testRestrictedCameraPermissionExplainsAdministrativeRestrictions() {
+        let restricted = CameraService.cameraPermissionMessage(for: .restricted)
+        XCTAssertTrue(restricted.contains("Screen Time"))
+        XCTAssertFalse(restricted.contains("disabled in Settings"))
+        XCTAssertTrue(CameraService.cameraPermissionMessage(for: .denied).contains("Settings"))
+    }
+
+    func testProductionLaunchConfigurationCannotEnableTestBehavior() {
+        let launch = AppLaunchConfiguration.production
+        XCTAssertFalse(launch.isUITesting)
+        XCTAssertFalse(launch.isOnboardingUITesting)
+        XCTAssertFalse(launch.isViewfinderPreview)
+        XCTAssertFalse(launch.exposesPreviewStatus)
+        XCTAssertFalse(launch.isUnitTestHost)
+        XCTAssertNil(launch.testDefaultsSuite)
+        #if !DEBUG
+        XCTAssertEqual(AppLaunchConfiguration.current, .production)
+        #endif
+    }
+
+    #if DEBUG
+    func testDebugLaunchOnlyUsesAnOwnedExplicitTestSuite() {
+        let suite = "FilmyCameraUITests.review"
+        let environment = ["FILMY_TEST_DEFAULTS_SUITE": suite]
+        XCTAssertNil(AppLaunchConfiguration.testing(arguments: [], environment: environment).testDefaultsSuite)
+        XCTAssertEqual(
+            AppLaunchConfiguration.testing(arguments: ["-ui-testing"], environment: environment).testDefaultsSuite,
+            suite
+        )
+        XCTAssertNil(AppLaunchConfiguration.testing(
+            arguments: ["-ui-testing"], environment: ["FILMY_TEST_DEFAULTS_SUITE": "com.apple.preferences"]
+        ).testDefaultsSuite)
+        XCTAssertNil(AppLaunchConfiguration.testing(
+            arguments: ["-ui-testing"], environment: ["FILMY_TEST_DEFAULTS_SUITE": "FilmyCameraUITests."]
+        ).testDefaultsSuite)
+    }
+
+    func testPreviewDiagnosticFlagDoesNotFakePhotosAuthorization() {
+        let launch = AppLaunchConfiguration.testing(arguments: ["-ui-testing-preview-status"], environment: [:])
+        XCTAssertTrue(launch.exposesPreviewStatus)
+        XCTAssertFalse(launch.isUITesting)
+        XCTAssertFalse(launch.isOnboardingUITesting)
+        XCTAssertNil(launch.testDefaultsSuite)
+    }
+
+    func testOnboardingSeedAndUnitTestHostAreIndependent() {
+        let launch = AppLaunchConfiguration.testing(
+            arguments: ["-ui-testing-onboarding"],
+            environment: ["XCTestConfigurationFilePath": "test.xctestconfiguration"]
+        )
+        XCTAssertTrue(launch.isOnboardingUITesting)
+        XCTAssertTrue(launch.isUnitTestHost)
+        XCTAssertFalse(launch.isUITesting)
+        XCTAssertFalse(launch.isViewfinderPreview)
+    }
+    #endif
+
+    func testOfflinePrivacyOverviewExplainsCloudAndDeletionBoundaries() {
+        let sections = AppPrivacyOverview.sections
+        XCTAssertEqual(Set(sections.map(\.id)).count, sections.count)
+        XCTAssertTrue(sections.allSatisfy { !$0.title.isEmpty && !$0.text.isEmpty })
+        let text = sections.map(\.text).joined(separator: " ")
+        XCTAssertTrue(text.contains("iCloud Photos"))
+        XCTAssertTrue(text.contains("does not delete photos saved to your Photos library"))
+        XCTAssertTrue(text.contains("without requiring broad library access"))
+        XCTAssertTrue(text.contains(AppPrivacyOverview.supportEmail))
+    }
+
+    func testBuiltAppPermissionCopyMatchesPickerAndRollSeparation() {
+        let bundle = Bundle.main
+        let readPurpose = bundle.object(forInfoDictionaryKey: "NSPhotoLibraryUsageDescription") as? String
+        XCTAssertTrue(readPurpose?.contains("Roll") == true)
+        XCTAssertTrue(readPurpose?.contains("does not require full library access") == true)
+        XCTAssertEqual(bundle.object(forInfoDictionaryKey: "NSPhotoLibraryPreventAutomaticLimitedAccessAlert") as? Bool, true)
+        XCTAssertNil(bundle.object(forInfoDictionaryKey: "NSMicrophoneUsageDescription"))
+        XCTAssertNil(bundle.object(forInfoDictionaryKey: "NSUserTrackingUsageDescription"))
+    }
 }

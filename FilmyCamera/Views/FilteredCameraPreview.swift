@@ -12,11 +12,7 @@ public struct FilteredCameraPreview: UIViewRepresentable {
     /// Keeps render diagnostics out of the normal accessibility experience.
     /// The narrower flag lets normal-app Photos tests observe the preview
     /// without enabling the app's broader UI-testing behavior.
-    static let exposesRenderStatusForUITesting: Bool = {
-        let arguments = ProcessInfo.processInfo.arguments
-        return arguments.contains("-ui-testing")
-            || arguments.contains("-ui-testing-preview-status")
-    }()
+    static let exposesRenderStatusForUITesting = AppLaunchConfiguration.current.exposesPreviewStatus
 
     @ObservedObject private var cameraService: CameraService
     private let recipe: FilmRecipe

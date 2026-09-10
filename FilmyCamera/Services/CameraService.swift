@@ -3,6 +3,7 @@ import Combine
 import CoreImage
 import CoreMedia
 import Foundation
+import OSLog
 import UIKit
 
 /// Owns the AVFoundation session and provides CIImage frames to the preview.
@@ -11,7 +12,52 @@ import UIKit
 /// Published state and `onFrame` are delivered on the main queue so SwiftUI
 /// callers do not need to coordinate AVFoundation's worker threads.
 public final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
+    private static let logger = Logger(subsystem: "com.dheeraj.filmycamera", category: "camera-recovery")
     public typealias FrameHandler = (CIImage) -> Void
+
+    /// A session can claim it is running after losing an input or output.
+    /// Readiness requires the complete graph, not just AVFoundation's flag.
+    static func canReuseSessionGraph(
+        isConfigured: Bool,
+        needsRebuild: Bool,
+        hasCameraInput: Bool,
+        hasPreviewOutput: Bool,
+        hasPhotoOutput: Bool
+    ) -> Bool {
+        isConfigured && !needsRebuild && hasCameraInput && hasPreviewOutput && hasPhotoOutput
+    }
+
+    static func shouldResetSessionGraphAfterFailedInputReplacement(restoredPreviousInput: Bool) -> Bool {
+        !restoredPreviousInput
+    }
+
+    public static let isSimulatorProcess: Bool = {
+        #if targetEnvironment(simulator)
+        true
+        #else
+        false
+        #endif
+    }()
+
+    static func availabilityWithoutCamera(isSimulator: Bool) -> Availability {
+        isSimulator ? .simulator : .unavailable
+    }
+
+    static func cameraPermissionMessage(for status: AVAuthorizationStatus) -> String {
+        status == .restricted
+            ? "Camera access is restricted. Check Screen Time or device-management restrictions."
+            : "Camera access is disabled in Settings."
+    }
+
+    private var hasReusableSessionGraphOnQueue: Bool {
+        Self.canReuseSessionGraph(
+            isConfigured: isConfigured,
+            needsRebuild: needsGraphRebuild,
+            hasCameraInput: activeDevice() != nil,
+            hasPreviewOutput: session.outputs.contains { $0 === videoOutput },
+            hasPhotoOutput: session.outputs.contains { $0 === photoOutput }
+        )
+    }
 
     /// The physical direction used by the active capture device. The service
     /// keeps this separate from AVFoundation's enum so the UI and view model
@@ -83,19 +129,20 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     public static func availabilityAfterStopping(
         authorizationStatus: AVAuthorizationStatus,
         hasCameraDevice: Bool,
-        previousAvailability: Availability
+        previousAvailability: Availability,
+        isSimulator: Bool = CameraService.isSimulatorProcess
     ) -> Availability {
         switch authorizationStatus {
         case .denied, .restricted:
             return .permissionDenied
         case .notDetermined:
-            return hasCameraDevice ? .idle : .simulator
+            return hasCameraDevice ? .idle : availabilityWithoutCamera(isSimulator: isSimulator)
         case .authorized:
             switch previousAvailability {
             case .unavailable, .needsRecovery:
                 return previousAvailability
             default:
-                return hasCameraDevice ? .paused : .simulator
+                return hasCameraDevice ? .paused : availabilityWithoutCamera(isSimulator: isSimulator)
             }
         @unknown default:
             return .unavailable
@@ -557,13 +604,10 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             guard let self else { return }
             self.deferredStopGeneration &+= 1
             self.wantsToRun = true
-            if self.session.isRunning {
-                // A deferred stop was still pending or the session survived a
-                // tab switch: report the live state without a restart flicker.
-                self.publishAlreadyRunningOnQueue()
-                return
+            if !self.session.isRunning {
+                self.publishAvailability(.starting)
             }
-            self.publishAvailability(.starting)
+            // Recheck permission even when returning to a warm session.
             self.requestAuthorizationAndStartOnQueue()
         }
     }
@@ -636,7 +680,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         self.publishAvailability(nextAvailability)
         switch nextAvailability {
         case .permissionDenied:
-            self.publishStatus("Camera access is disabled in Settings.")
+            self.publishStatus(Self.cameraPermissionMessage(for: AVCaptureDevice.authorizationStatus(for: .video)))
         case .simulator:
             self.publishStatus("Camera unavailable in Simulator. Use an iPhone or iPad to preview and capture.")
         case .idle:
@@ -2062,7 +2106,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             resetCaptureCapabilitiesOnQueue()
             publishRunning(false)
             publishAvailability(.permissionDenied)
-            publishStatus("Camera access is disabled in Settings.")
+            publishStatus(Self.cameraPermissionMessage(for: authorizationStatus))
             return
         case .authorized, .notDetermined:
             break
@@ -2088,8 +2132,10 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         guard hasAnyCameraDeviceOnQueue() else {
             resetCaptureCapabilitiesOnQueue()
             publishRunning(false)
-            publishAvailability(.simulator)
-            publishStatus("Camera unavailable in Simulator. Use an iPhone or iPad to preview and capture.")
+            publishAvailability(Self.availabilityWithoutCamera(isSimulator: Self.isSimulatorProcess))
+            publishStatus(Self.isSimulatorProcess
+                ? "Camera unavailable in Simulator. Use an iPhone or iPad to preview and capture."
+                : "No camera is available. Close other camera apps and try again.")
             return
         }
 
@@ -2124,7 +2170,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         case .denied, .restricted:
             publishRunning(false)
             publishAvailability(.permissionDenied)
-            publishStatus("Camera access is disabled in Settings.")
+            publishStatus(Self.cameraPermissionMessage(for: authorizationStatus))
         @unknown default:
             publishRunning(false)
             publishAvailability(.unavailable)
@@ -2143,10 +2189,11 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         // graph when returning from background or another tab instead of
         // trying to add duplicate AVFoundation objects. A graph whose input
         // vanished (device reset, runtime error) is rebuilt from scratch.
-        if isConfigured, needsGraphRebuild || activeDevice() == nil {
+        if !hasReusableSessionGraphOnQueue,
+           isConfigured || needsGraphRebuild || !session.inputs.isEmpty || !session.outputs.isEmpty {
             tearDownSessionGraphOnQueue()
         }
-        if isConfigured, let device = activeDevice() {
+        if hasReusableSessionGraphOnQueue, let device = activeDevice() {
             refreshCaptureCapabilitiesOnQueue(for: device)
             restoreContinuousFocusExposureOnQueue(for: device)
             reapplyDesiredManualControlsOnQueue(for: device)
@@ -2159,8 +2206,10 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         guard let device = cameraDeviceForPositionOnQueue(requestedCameraPosition) else {
             resetCaptureCapabilitiesOnQueue()
             publishRunning(false)
-            publishAvailability(.simulator)
-            publishStatus("Camera unavailable in Simulator. Use an iPhone or iPad to preview and capture.")
+            publishAvailability(Self.availabilityWithoutCamera(isSimulator: Self.isSimulatorProcess))
+            publishStatus(Self.isSimulatorProcess
+                ? "Camera unavailable in Simulator. Use an iPhone or iPad to preview and capture."
+                : "No camera is available. Close other camera apps and try again.")
             return
         }
 
@@ -2235,11 +2284,15 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// Publishes the state of a session that is already running, without
     /// claiming a live preview while AVFoundation still holds an interruption.
     private func publishAlreadyRunningOnQueue() {
-        if let device = activeDevice() {
-            refreshCaptureCapabilitiesOnQueue(for: device)
-        } else {
-            resetCaptureCapabilitiesOnQueue()
+        guard hasReusableSessionGraphOnQueue, let device = activeDevice() else {
+            // An input rollback or media-services reset can leave a running
+            // but incomplete graph. Stop it before rebuilding on this queue.
+            tearDownSessionGraphOnQueue()
+            publishRunning(false)
+            configureAndStartOnQueue()
+            return
         }
+        refreshCaptureCapabilitiesOnQueue(for: device)
         guard !session.isInterrupted else {
             publishRunning(false)
             publishAvailability(.interrupted)
@@ -2253,8 +2306,15 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func publishStartOutcomeOnQueue(running: Bool) {
-        publishRunning(running)
-        if running {
+        guard !session.isInterrupted else {
+            publishRunning(false)
+            publishAvailability(.interrupted)
+            publishStatus(interruptionStatus)
+            return
+        }
+        let isReady = running && hasReusableSessionGraphOnQueue
+        publishRunning(isReady)
+        if isReady {
             recoveryAttempt = 0
             publishAvailability(.running)
             publishStatus("Camera ready")
@@ -2282,17 +2342,44 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
               recoveryAttempt < Self.maxAutomaticRecoveryAttempts else { return }
         let delay = Self.automaticRecoveryDelay(afterAttempt: recoveryAttempt)
         recoveryAttempt += 1
+        Self.logger.notice("Camera recovery attempt \(self.recoveryAttempt, privacy: .public), delay \(delay, privacy: .public)")
         recoveryScheduled = true
         publishStatus("Reconnecting to the camera…")
         sessionQueue.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self else { return }
             self.recoveryScheduled = false
-            guard self.wantsToRun, !self.session.isRunning else { return }
+            guard self.wantsToRun,
+                  !self.session.isRunning || !self.hasReusableSessionGraphOnQueue else { return }
             self.requestAuthorizationAndStartOnQueue()
         }
     }
 
     private func tearDownSessionGraphOnQueue() {
+        Self.logger.notice("Resetting incomplete or invalid camera session graph")
+        // startRunning/stopRunning must never be called inside a configuration
+        // transaction. Complete any orphaned capture before clearing the graph.
+        if session.isRunning {
+            session.stopRunning()
+        }
+        cancelPendingPhotoOnQueue(status: "Camera is reconnecting. Please retake the photo.")
+        activeConstituentObservation?.invalidate()
+        activeConstituentObservation = nil
+        observedVirtualDeviceID = nil
+        let previousRotationToken = rotationCoordinatorToken
+        rotationCoordinatorToken = UUID()
+        rotationCoordinatorDeviceID = nil
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.activeRotationToken == previousRotationToken else { return }
+            self.previewRotationObservation?.invalidate()
+            self.captureRotationObservation?.invalidate()
+            self.previewRotationObservation = nil
+            self.captureRotationObservation = nil
+            self.rotationCoordinator = nil
+            self.activeRotationToken = nil
+            self.rotationDevice = nil
+        }
+        focusExposureLocked = false
+        publishFocusExposureLocked(false)
         manualDeviceGeneration &+= 1
         isApplyingManualExposure = false
         isApplyingManualWhiteBalance = false
@@ -2457,10 +2544,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                           AVCaptureDevice.authorizationStatus(for: .video) == .authorized else {
                         return
                     }
-                    if !self.session.isRunning {
-                        self.session.startRunning()
-                    }
-                    self.publishStartOutcomeOnQueue(running: self.session.isRunning && !self.session.isInterrupted)
+                    self.requestAuthorizationAndStartOnQueue()
                 }
             }
         ]
@@ -2497,14 +2581,11 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         // path instead of silently presenting a frozen preview.
         guard wantsToRun else { return }
         cancelPendingPhotoOnQueue(status: "Capture interrupted.")
-        if codeRawValue == AVError.Code.mediaServicesWereReset.rawValue, isConfigured {
-            session.startRunning()
-            publishStartOutcomeOnQueue(running: session.isRunning)
-            return
-        }
+        // A media-services reset can invalidate outputs as well as inputs.
+        // Rebuild for all runtime errors, through the same bounded recovery
+        // path, rather than publishing a stale isRunning flag as success.
+        Self.logger.error("Camera runtime error code \(codeRawValue ?? -1, privacy: .public); rebuilding session")
 
-        // Any other runtime error leaves the graph suspect: rebuild it on the
-        // next (automatic) start instead of retrying a broken configuration.
         needsGraphRebuild = true
         if session.isRunning {
             session.stopRunning()
@@ -2811,10 +2892,20 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
 
         guard session.canAddInput(newInput) else {
+            let restoredPreviousInput: Bool
             if let oldInput, session.canAddInput(oldInput) {
                 session.addInput(oldInput)
+                restoredPreviousInput = true
+            } else {
+                restoredPreviousInput = false
             }
             session.commitConfiguration()
+            if Self.shouldResetSessionGraphAfterFailedInputReplacement(restoredPreviousInput: restoredPreviousInput) {
+                tearDownSessionGraphOnQueue()
+                publishRunning(false)
+                publishAvailability(.needsRecovery)
+                scheduleAutomaticRecoveryOnQueue()
+            }
             return false
         }
 
@@ -3316,7 +3407,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// UI tests must start from a known flash state, so persistence is
     /// ignored under `-ui-testing` even though the control still works.
     private static var persistsFlashMode: Bool {
-        !ProcessInfo.processInfo.arguments.contains("-ui-testing")
+        !AppLaunchConfiguration.current.isUITesting
     }
 
     static func rememberedFlashMode(defaults: UserDefaults = .standard) -> FlashMode {
@@ -3455,7 +3546,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func capturePhotoOnQueue(completion: @escaping PhotoCompletion) {
-        guard isConfigured, session.isRunning else {
+        guard hasReusableSessionGraphOnQueue, session.isRunning, !session.isInterrupted else {
             publishStatus("Start the camera before capturing.")
             publishPhoto(nil, completion: completion)
             return

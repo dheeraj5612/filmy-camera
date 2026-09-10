@@ -15,6 +15,9 @@ struct SettingsView: View {
 
     @AppStorage("showGrid") private var showGrid = true
     @AppStorage("hapticsEnabled") private var hapticsEnabled = true
+    @State private var isShowingPrivacyOverview = false
+    @State private var isConfirmingCacheClear = false
+    @State private var cacheClearFailed = false
 
     var body: some View {
         NavigationStack {
@@ -41,6 +44,22 @@ struct SettingsView: View {
                 CameraReturnBar(accessibilityIdentifier: "settings-back-to-camera", action: onBackToCamera)
             }
             .toolbar(.hidden, for: .navigationBar)
+        }
+        .sheet(isPresented: $isShowingPrivacyOverview) {
+            PrivacyOverviewView(privacyPolicyURL: privacyPolicyURL, supportURL: supportURL)
+        }
+        .confirmationDialog("Clear local frame cache?", isPresented: $isConfirmingCacheClear, titleVisibility: .visible) {
+            Button("Clear local cache", role: .destructive) {
+                cacheClearFailed = !photoLibrary.clearLocalRollCache()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes temporary copies stored by Filmy Camera. Photos originals and your recipes are not deleted. Some frames may leave the Roll until you allow Photos access.")
+        }
+        .alert("Couldn’t clear all cached frames", isPresented: $cacheClearFailed) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Some temporary files could not be removed. Unlock your device and try again. Your Photos originals were not changed.")
         }
         .onAppear { refreshPermissionState() }
         .onChange(of: scenePhase) { _, phase in
@@ -174,7 +193,7 @@ struct SettingsView: View {
                 )
             }
 
-            if photoLibrary.authorizationStatus == .denied || photoLibrary.authorizationStatus == .restricted {
+            if photoLibrary.authorizationStatus == .denied {
                 settingsDivider
                 settingsAction(
                     title: "Open System Settings",
@@ -195,8 +214,7 @@ struct SettingsView: View {
                 )
             }
 
-            if photoLibrary.addOnlyAuthorizationStatus == .denied
-                || photoLibrary.addOnlyAuthorizationStatus == .restricted {
+            if photoLibrary.addOnlyAuthorizationStatus == .denied {
                 settingsDivider
                 settingsAction(
                     title: "Allow saving frames",
@@ -238,7 +256,7 @@ struct SettingsView: View {
 
             Button {
                 guard photoLibrary.hasLocalCache else { return }
-                photoLibrary.clearLocalRollCache()
+                isConfirmingCacheClear = true
             } label: {
                 HStack(spacing: 13) {
                     SettingIcon(
@@ -300,6 +318,18 @@ struct SettingsView: View {
                 .foregroundStyle(FilmyTheme.secondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
+
+            settingsDivider
+
+            settingsAction(
+                title: "Privacy & Data",
+                systemName: "hand.raised",
+                identifier: "privacy-overview",
+                hint: "Read how your photos and settings are handled without an internet connection",
+                subtitle: "Read inside the app"
+            ) {
+                isShowingPrivacyOverview = true
+            }
 
             settingsDivider
 
@@ -438,7 +468,7 @@ struct SettingsView: View {
 
     private var cameraPermissionNeedsSettings: Bool {
         let status = AVCaptureDevice.authorizationStatus(for: .video)
-        return status == .denied || status == .restricted
+        return status == .denied
     }
 
     private var cameraPermissionNeedsRequest: Bool {
@@ -479,14 +509,19 @@ struct SettingsView: View {
             return camera.availability == .requestingPermission
                 ? "Waiting for camera permission."
                 : "Ask when you are ready to capture."
-        case .denied, .restricted:
+        case .denied:
             return "Enable camera access in Settings to preview and capture."
+        case .restricted:
+            return "Camera access is restricted. Check Screen Time or device-management restrictions."
         @unknown default:
             return "Camera permission status is unavailable."
         }
     }
 
     private var photoStatusDetail: String {
+        if photoLibrary.authorizationStatus == .restricted || photoLibrary.addOnlyAuthorizationStatus == .restricted {
+            return "Photos access is restricted. Check Screen Time or device-management restrictions."
+        }
         let canRead = PhotoLibraryAuthorizationPolicy.canRead(photoLibrary.authorizationStatus)
         let canAdd = photoLibrary.canSaveToPhotos
         switch (canRead, canAdd) {
@@ -544,5 +579,93 @@ struct SettingsView: View {
     private func openSystemSettings() {
         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
         UIApplication.shared.open(url)
+    }
+}
+
+
+/// Local, inspectable disclosure content. No web view, permission request,
+/// login, or network connection is needed to read this overview.
+enum AppPrivacyOverview {
+    struct Section: Identifiable, Sendable {
+        let title: String
+        let text: String
+        var id: String { title }
+    }
+
+    static let supportEmail = "dheerajnamburu+support@gmail.com"
+    static let sections: [Section] = [
+        Section(
+            title: "On-device processing",
+            text: "Filmy Camera processes photos on your device. The app does not upload images to a developer server and has no advertising, analytics, tracking, or account service. All currently shipped camera tools and looks are free."
+        ),
+        Section(
+            title: "Permissions you choose",
+            text: "Camera access enables preview and capture. Save to Photos requests permission to add a finished frame. Import uses the system photo picker and accesses only items you select, without requiring broad library access. Optional Photos read access lets the Roll display frames recorded as saved by Filmy Camera."
+        ),
+        Section(
+            title: "Optional horizon level",
+            text: "The horizon level uses device gravity temporarily in memory. Motion samples are not saved or uploaded. Updates stop when the aid is disabled or the camera leaves active use. Only your on/off preference is saved."
+        ),
+        Section(
+            title: "Local storage and removal",
+            text: "Recipe preferences and saved-frame identifiers are stored in the app. Temporary frame copies are protected, excluded from backup, capped at 250 MB, and may be evicted. Clear local cache removes these copies, not Photos originals. Uninstalling removes the app’s data, but does not delete photos saved to your Photos library."
+        ),
+        Section(
+            title: "Apple Photos and iCloud",
+            text: "Apple may sync saved photos with iCloud Photos, or back up app preferences, according to your device settings. The system picker and Roll may download an image from iCloud. These Apple-managed services are separate from Filmy Camera’s on-device processing and are controlled by your Apple settings."
+        ),
+        Section(
+            title: "Export and sharing",
+            text: "Finished JPEGs contain recipe information, image dimensions, and a capture timestamp. Filmy Camera does not copy source GPS coordinates or camera identifiers into these exports. Sharing sends the selected photo only to the destination you choose in the system share sheet. That destination has its own privacy policy."
+        ),
+        Section(
+            title: "Your controls",
+            text: "Manage Camera and Photos permissions in iOS Settings. Limited Photos access lets you choose which images the app can read. Delete a saved frame in Photos, or use Delete frame in the Roll when available. There is no Filmy Camera account to delete."
+        ),
+        Section(
+            title: "Contact support",
+            text: "Email \(supportEmail) with your device model, iOS version, and the steps that led to the issue. Do not send private photos, Apple credentials, or other sensitive information. The links below open external websites."
+        )
+    ]
+}
+
+private struct PrivacyOverviewView: View {
+    let privacyPolicyURL: URL
+    let supportURL: URL
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    ForEach(AppPrivacyOverview.sections) { section in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(section.title)
+                                .font(.headline)
+                                .accessibilityAddTraits(.isHeader)
+                            Text(section.text)
+                                .font(.body)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    Link("Published Privacy Policy", destination: privacyPolicyURL)
+                        .frame(minHeight: 44)
+                    Link("Support website", destination: supportURL)
+                        .frame(minHeight: 44)
+                }
+                .frame(maxWidth: FilmyLayout.readableMaxWidth, alignment: .leading)
+                .padding(24)
+            }
+            .accessibilityIdentifier("privacy-overview-content")
+            .navigationTitle("Privacy & Data")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                        .accessibilityIdentifier("privacy-overview-done")
+                }
+            }
+        }
     }
 }

@@ -30,7 +30,8 @@
     "FilmyCameraTests/CatalogRenderAcceptanceTests": "integration",
     "FilmyCameraTests/CaptureWorkflowPolicyTests": "unit",
     "FilmyCameraTests/ExpandedCreativeCatalogTests": "unit",
-    "FilmyCameraUITests/CaptureSetupUITests": "e2e"
+    "FilmyCameraUITests/CaptureSetupUITests": "e2e",
+    "FilmyCameraTests/AppReviewHardeningTests": "unit"
   },
   "overrides": {
     "FilmyCameraUITests/FilmyCameraUITests/testSimulatorFallbackExposesReadableStateWithoutPreviewAction": "simulator-e2e",

@@ -541,4 +541,89 @@ final class PhotoLibraryMetadataTests: XCTestCase {
 
         XCTAssertFalse(state.canCacheResult())
     }
+
+    func testPhotoLibraryChangeBridgeHopsToMainActor() async {
+        let delivered = expectation(description: "Main-actor library change")
+        let bridge = PhotoLibraryChangeBridge {
+            MainActor.assertIsolated()
+            delivered.fulfill()
+        }
+        DispatchQueue(label: "PhotoLibraryMetadataTests.observer").async {
+            bridge.deliverChange()
+        }
+        await fulfillment(of: [delivered], timeout: 2)
+    }
+
+    func testGalleryRequestKeyChangesWhenAnExistingPhotoIsEdited() {
+        let original = PhotoLibraryGalleryImagePolicy.requestKey(
+            assetIdentifier: "owned-frame",
+            isPhotosAsset: true,
+            authorizationStatus: .authorized,
+            revision: "100x200|1"
+        )
+        let edited = PhotoLibraryGalleryImagePolicy.requestKey(
+            assetIdentifier: "owned-frame",
+            isPhotosAsset: true,
+            authorizationStatus: .authorized,
+            revision: "200x100|2"
+        )
+        XCTAssertNotEqual(original, edited)
+        XCTAssertEqual(original.assetIdentifier, edited.assetIdentifier)
+    }
+
+    @MainActor
+    func testImageRequestTimeoutFinishesWithoutCachingOrHanging() async {
+        let state = PhotoLibraryService.ImageRequestState(imageManager: PHImageManager.default())
+        let finished = expectation(description: "Timed-out request completes")
+        let task = Task { @MainActor in
+            let result: UIImage? = await withCheckedContinuation { continuation in
+                state.install(continuation)
+                state.startTimeout(after: 0.01)
+            }
+            XCTAssertNil(result)
+            XCTAssertFalse(state.canCacheResult())
+            finished.fulfill()
+        }
+        await fulfillment(of: [finished], timeout: 2)
+        state.cancel()
+        await task.value
+    }
+
+    @MainActor
+    func testImageRequestTimeoutPreservesPreviewButRejectsLateFinalResult() async {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { context in
+            UIColor.systemBlue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        }
+        let state = PhotoLibraryService.ImageRequestState(imageManager: PHImageManager.default())
+        state.rememberFallback(image)
+        let finished = expectation(description: "Timed-out request returns preview")
+        let task = Task { @MainActor in
+            let result: UIImage? = await withCheckedContinuation { continuation in
+                state.install(continuation)
+                state.startTimeout(after: 0.01)
+            }
+            XCTAssertEqual(result?.pngData(), image.pngData())
+            state.finish(with: image, cacheable: true)
+            XCTAssertFalse(state.canCacheResult())
+            finished.fulfill()
+        }
+        await fulfillment(of: [finished], timeout: 2)
+        state.cancel()
+        await task.value
+    }
+
+    @MainActor
+    func testCancelledImageRequestDoesNotRestartItsTimeout() async {
+        let state = PhotoLibraryService.ImageRequestState(imageManager: PHImageManager.default())
+        state.cancel()
+        state.startTimeout(after: 0)
+        let result: UIImage? = await withCheckedContinuation { continuation in
+            state.install(continuation)
+        }
+        state.finish(with: nil)
+        XCTAssertNil(result)
+        XCTAssertFalse(state.canCacheResult())
+    }
+
 }

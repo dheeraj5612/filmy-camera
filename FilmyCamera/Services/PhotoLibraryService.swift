@@ -60,6 +60,15 @@ enum PhotoLibraryGalleryAsset: Identifiable {
         if case .photos = self { return true }
         return false
     }
+
+    var imageRevision: String {
+        switch self {
+        case .photos(let asset):
+            return "\(asset.pixelWidth)x\(asset.pixelHeight)|\(asset.modificationDate?.timeIntervalSinceReferenceDate ?? -1)"
+        case .cached(let frame):
+            return "\(frame.pixelWidth)x\(frame.pixelHeight)"
+        }
+    }
 }
 
 enum PhotoLibraryAuthorizationPolicy {
@@ -81,6 +90,7 @@ enum PhotoLibraryAuthorizationPolicy {
 struct PhotoLibraryImageRequestKey: Hashable, Sendable {
     let assetIdentifier: String
     let authorizationStatusRawValue: Int?
+    let revision: String?
 }
 
 enum PhotoLibraryThumbnailCachePolicy {
@@ -123,11 +133,13 @@ enum PhotoLibraryGalleryImagePolicy {
     static func requestKey(
         assetIdentifier: String,
         isPhotosAsset: Bool,
-        authorizationStatus: PHAuthorizationStatus
+        authorizationStatus: PHAuthorizationStatus,
+        revision: String? = nil
     ) -> PhotoLibraryImageRequestKey {
         PhotoLibraryImageRequestKey(
             assetIdentifier: assetIdentifier,
-            authorizationStatusRawValue: isPhotosAsset ? authorizationStatus.rawValue : nil
+            authorizationStatusRawValue: isPhotosAsset ? authorizationStatus.rawValue : nil,
+            revision: revision
         )
     }
 }
@@ -337,6 +349,27 @@ enum PhotoLibraryCachePath {
     }
 }
 
+/// PhotoKit delivers change notifications on a background queue. Only the
+/// notification crosses the isolation boundary, never the PHChange object.
+final class PhotoLibraryChangeBridge: NSObject, PHPhotoLibraryChangeObserver, @unchecked Sendable {
+    private let onChange: @MainActor @Sendable () -> Void
+
+    init(onChange: @escaping @MainActor @Sendable () -> Void) {
+        self.onChange = onChange
+        super.init()
+    }
+
+    nonisolated func photoLibraryDidChange(_ changeInstance: PHChange) {
+        deliverChange()
+    }
+
+    nonisolated func deliverChange() {
+        Task { @MainActor [onChange] in
+            onChange()
+        }
+    }
+}
+
 @MainActor
 final class PhotoLibraryService: ObservableObject {
     private final class IdentifierBox: @unchecked Sendable {
@@ -378,6 +411,24 @@ final class PhotoLibraryService: ObservableObject {
         private var fallbackImage: UIImage?
         private var didFinish = false
         private var didProduceCacheableImage = false
+        private var timeoutWorkItem: DispatchWorkItem?
+
+        /// PhotoKit can leave an iCloud request without a terminal callback.
+        /// Bound the wait while preserving a degraded preview as a fallback.
+        func startTimeout(after interval: TimeInterval = 30) {
+            let workItem = DispatchWorkItem { [weak self] in
+                self?.finish(with: nil, cancelRequest: true, allowFallback: true)
+            }
+            lock.lock()
+            guard !didFinish, timeoutWorkItem == nil else {
+                lock.unlock()
+                return
+            }
+            timeoutWorkItem = workItem
+            lock.unlock()
+            let delay = interval.isFinite ? max(interval, 0) : 30
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay, execute: workItem)
+        }
 
         init(imageManager: PHImageManager) {
             self.imageManager = imageManager
@@ -438,8 +489,11 @@ final class PhotoLibraryService: ObservableObject {
             self.continuation = nil
             let requestID = self.requestID
             self.requestID = nil
+            let timeout = timeoutWorkItem
+            timeoutWorkItem = nil
             lock.unlock()
 
+            timeout?.cancel()
             if cancelRequest, let requestID {
                 imageManager.cancelImageRequest(requestID)
             }
@@ -486,6 +540,48 @@ final class PhotoLibraryService: ObservableObject {
     private let thumbnailCache = NSCache<NSString, UIImage>()
     private var thumbnailCacheGeneration: UInt64 = 0
     private var savedFrameResourcesCache: [String: SavedFrameResource]?
+    private var libraryChangeObserver: PhotoLibraryChangeBridge?
+    private var libraryChangeTask: Task<Void, Never>?
+
+    deinit {
+        libraryChangeTask?.cancel()
+        if let libraryChangeObserver {
+            PHPhotoLibrary.shared().unregisterChangeObserver(libraryChangeObserver)
+        }
+    }
+
+    private func updateLibraryObservation() {
+        let shouldObserve = !isUITesting && PhotoLibraryAuthorizationPolicy.canRead(authorizationStatus)
+        if shouldObserve, libraryChangeObserver == nil {
+            let observer = PhotoLibraryChangeBridge { [weak self] in
+                self?.scheduleLibraryChangeRefresh()
+            }
+            libraryChangeObserver = observer
+            PHPhotoLibrary.shared().register(observer)
+        } else if !shouldObserve, let observer = libraryChangeObserver {
+            PHPhotoLibrary.shared().unregisterChangeObserver(observer)
+            libraryChangeObserver = nil
+            libraryChangeTask?.cancel()
+            libraryChangeTask = nil
+        }
+    }
+
+    private func scheduleLibraryChangeRefresh() {
+        libraryChangeTask?.cancel()
+        libraryChangeTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(150))
+            } catch {
+                return
+            }
+            guard let self, !Task.isCancelled else { return }
+            self.invalidateThumbnailCache()
+            // refresh fetches only identifiers recorded by this app, not the
+            // whole library, and rechecks authorization before each fetch.
+            self.refresh()
+            self.libraryChangeTask = nil
+        }
+    }
 
     private func invalidateThumbnailCache() {
         thumbnailCacheGeneration &+= 1
@@ -498,7 +594,7 @@ final class PhotoLibraryService: ObservableObject {
     private var galleryAssetsCache: [PhotoLibraryGalleryAsset]?
 
     init() {
-        isUITesting = ProcessInfo.processInfo.arguments.contains("-ui-testing")
+        isUITesting = AppLaunchConfiguration.current.isUITesting
         thumbnailCache.countLimit = 80
         thumbnailCache.totalCostLimit = 48 * 1024 * 1024
         metadataByAssetIdentifier = Self.loadMetadata(forKey: savedFrameMetadataKey)
@@ -513,6 +609,7 @@ final class PhotoLibraryService: ObservableObject {
             // applied here, after which the Roll thumbnail refreshes.
             scheduleCacheMaintenance(includingLaunchPasses: true)
         }
+        updateLibraryObservation()
     }
 
     private struct CacheMaintenanceInput: Sendable {
@@ -725,6 +822,7 @@ final class PhotoLibraryService: ObservableObject {
         if authorizationStatus != previousReadStatus || addOnlyAuthorizationStatus != previousAddStatus {
             invalidateThumbnailCache()
         }
+        updateLibraryObservation()
     }
 
     func save(
@@ -1102,7 +1200,7 @@ final class PhotoLibraryService: ObservableObject {
                     withIntermediateDirectories: true
                 )
                 Self.protectLocalResource(at: directoryURL)
-                try data.write(to: resourceURL, options: .atomic)
+                try data.write(to: resourceURL, options: [.atomic, .completeFileProtection])
                 Self.protectLocalResource(at: resourceURL)
                 return true
             } catch {
@@ -1305,7 +1403,8 @@ final class PhotoLibraryService: ObservableObject {
     /// regular files. Photos originals and their saved ownership metadata are
     /// never deleted. Failed file deletions retain their cache mappings so a
     /// later clear can retry them.
-    func clearLocalRollCache() {
+    @discardableResult
+    func clearLocalRollCache() -> Bool {
         // Invalidate writes already running off the main actor so they cannot
         // recreate a cache entry after the user clears it.
         cacheWriteGeneration &+= 1
@@ -1314,14 +1413,14 @@ final class PhotoLibraryService: ObservableObject {
         guard let directoryURL = localFramesDirectoryURL else {
             savedFrameResources = [:]
             refreshCachedFrames(excluding: Set(assets.map(\.localIdentifier)))
-            return
+            return !hasLocalCache
         }
 
         guard let result = PhotoLibraryCachePath.removeRegularFiles(in: directoryURL) else {
             // Keep the index if the directory cannot be read so a later clear
             // can retry the files that may still be present.
             refreshCachedFrames(excluding: Set(assets.map(\.localIdentifier)))
-            return
+            return false
         }
 
         var resources = savedFrameResources
@@ -1339,6 +1438,7 @@ final class PhotoLibraryService: ObservableObject {
         }
         savedFrameResources = resources
         refreshCachedFrames(excluding: Set(assets.map(\.localIdentifier)))
+        return result.failedFilenames.isEmpty && !hasLocalCache
     }
 
     func removeTemporaryShare(at url: URL) {
@@ -1564,7 +1664,11 @@ final class PhotoLibraryService: ObservableObject {
         targetSize: CGSize,
         contentMode: PHImageContentMode = .aspectFill
     ) async -> UIImage? {
-        let revision = "\(asset.pixelWidth)x\(asset.pixelHeight)|\(asset.modificationDate?.timeIntervalSinceReferenceDate ?? -1)"
+        guard !Task.isCancelled,
+              PhotoLibraryAuthorizationPolicy.canRead(PHPhotoLibrary.authorizationStatus(for: .readWrite)) else {
+            return nil
+        }
+        let revision = PhotoLibraryGalleryAsset.photos(asset).imageRevision
         let cacheKey = PhotoLibraryThumbnailCachePolicy.key(
             assetIdentifier: asset.localIdentifier,
             targetSize: targetSize,
@@ -1584,6 +1688,7 @@ final class PhotoLibraryService: ObservableObject {
         let loaded = await withTaskCancellationHandler(operation: {
             await withCheckedContinuation { continuation in
                 state.install(continuation)
+                state.startTimeout()
                 let options = PHImageRequestOptions()
                 options.deliveryMode = .opportunistic
                 options.resizeMode = .fast
@@ -1619,8 +1724,11 @@ final class PhotoLibraryService: ObservableObject {
         }, onCancel: {
             state.cancel()
         })
-        if !Task.isCancelled,
-           cacheGeneration == thumbnailCacheGeneration,
+        guard !Task.isCancelled,
+              PhotoLibraryAuthorizationPolicy.canRead(PHPhotoLibrary.authorizationStatus(for: .readWrite)) else {
+            return nil
+        }
+        if cacheGeneration == thumbnailCacheGeneration,
            state.canCacheResult() {
             storeThumbnail(loaded, forKey: nsCacheKey)
         }

@@ -1230,6 +1230,28 @@ final class FilmyCameraUITests: XCTestCase {
         returnToMainCamera(using: app.buttons["settings-back-to-camera"], named: "Scrolled Settings back to camera")
     }
 
+    func testOfflinePrivacyOverviewIsReadableAndDismissible() throws {
+        app.buttons["settings-tab"].tap()
+        let privacy = app.buttons["privacy-overview"]
+        scrollToHittable(privacy, in: app)
+        privacy.tap()
+
+        let content = app.scrollViews["privacy-overview-content"]
+        XCTAssertTrue(content.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["On-device processing"].exists)
+        let cloudSection = app.staticTexts["Apple Photos and iCloud"]
+        for _ in 0..<8 where !cloudSection.isHittable {
+            content.swipeUp()
+        }
+        XCTAssertTrue(cloudSection.isHittable, "Offline overview must disclose Apple-managed cloud behavior")
+        let done = app.buttons["privacy-overview-done"]
+        XCTAssertTrue(done.isHittable, "Privacy overview must always offer a visible return action")
+        done.tap()
+        XCTAssertTrue(app.buttons["settings-back-to-camera"].waitForExistence(timeout: 5))
+        app.buttons["settings-back-to-camera"].tap()
+        XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 5))
+    }
+
     func testEveryTopLevelPageCanReturnToCamera() throws {
         let gallery = app.buttons["roll-tab"]
         gallery.tap()
