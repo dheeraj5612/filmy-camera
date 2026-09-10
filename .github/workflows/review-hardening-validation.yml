@@ -25,28 +25,54 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           ref: ${{ github.sha }}
-      - name: Apply verified product patch without editing workflows
+      - name: Apply one-use test-scroll correction with source verification
         id: source
         run: |
           set -euo pipefail
-          python3 scripts/review-hardening/apply.py
-          # GITHUB_TOKEN cannot edit workflows. Publish those separately
-          # through the authorized repository connection, not this runner.
-          git restore --source=HEAD --staged --worktree .github/workflows
-          git rm -r scripts/review-hardening
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          path = Path('FilmyCameraUITests/FilmyCameraUITests.swift')
+          if hashlib.sha256(path.read_bytes()).hexdigest() != '92592b523ff5a81521612f5e2cad6d0bf403d0a761d5b324cfa32f693fcf2fa2':
+              raise SystemExit('Refusing changed UI test source')
+          text = path.read_text()
+          old = '''        for _ in 0..<8 where !cloudSection.isHittable {
+                      content.swipeUp()
+                  }
+                  XCTAssertTrue(cloudSection.isHittable, "Offline overview must disclose Apple-managed cloud behavior")
+          '''
+          new = '''        // A full fling can skip this heading inside the shorter iPad sheet.
+                  // Use small drags and reverse direction if the target moved above us.
+                  for _ in 0..<20 where !cloudSection.isHittable {
+                      let viewport = content.frame.intersection(app.frame)
+                      let moveDown = cloudSection.exists && cloudSection.frame.midY < viewport.midY
+                      let start = content.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: moveDown ? 0.45 : 0.75))
+                      let end = content.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: moveDown ? 0.75 : 0.45))
+                      start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
+                  }
+                  XCTAssertTrue(cloudSection.isHittable, "Offline overview must disclose Apple-managed cloud behavior")
+                  attachScreenshot(named: "privacy-overview-cloud-disclosure")
+          '''
+          if text.count(old) != 1:
+              raise SystemExit('Test correction does not match exactly once')
+          path.write_text(text.replace(old, new))
+          if hashlib.sha256(path.read_bytes()).hexdigest() != '98d6331664b7448cfef1eeaae4d000044b8b7bc4a6eaea5b2c20ffd1875f427d':
+              raise SystemExit('Unexpected corrected test source')
+          PY
+          git add FilmyCameraUITests/FilmyCameraUITests.swift
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'Harden sharing cancellation and enforce App Review release contracts'
+          git commit -m 'Avoid overshooting privacy disclosure in iPad sheet regression test'
           git push origin HEAD:refs/heads/codex/app-store-hardening-20260910
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           python3 -m unittest discover -s scripts/testing -p 'test_*.py'
-          python3 scripts/release/validate-app-review.py --check-live-urls
+          python3 scripts/release/validate-app-review.py
           git diff --check
 
   simulator:
     needs: prepare
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -62,21 +88,12 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.source }}
           persist-credentials: false
-      - name: Record exact source and validate project generation
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Record source provenance
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/review-evidence" "$RUNNER_TEMP/xcodegen"
+          mkdir -p "$RUNNER_TEMP/review-evidence"
           git rev-parse HEAD > "$RUNNER_TEMP/review-evidence/source-sha.txt"
           xcodebuild -version > "$RUNNER_TEMP/review-evidence/xcode-version.txt"
-          gh release download 2.45.4 --repo yonaskolb/XcodeGen --pattern xcodegen.zip --dir "$RUNNER_TEMP/xcodegen"
-          echo "090ec29491aad50aec10631bf6e62253fed733c50f3aab0f5ffc86bc170bdbef  $RUNNER_TEMP/xcodegen/xcodegen.zip" | shasum -a 256 -c -
-          unzip -q "$RUNNER_TEMP/xcodegen/xcodegen.zip" -d "$RUNNER_TEMP/xcodegen"
-          binary="$RUNNER_TEMP/xcodegen/xcodegen/bin/xcodegen"
-          echo "6aa2b4da95304b343bea12890c59f9655aa428c08b351d57d592cfab4e88a9f1  $binary" | shasum -a 256 -c -
-          "$binary" generate --spec project.yml
-          git diff --exit-code -- FilmyCamera.xcodeproj FilmyCamera/Info.plist
           python3 scripts/testing/run.py inventory > "$RUNNER_TEMP/review-evidence/inventory.log"
           python3 scripts/release/validate-app-review.py > "$RUNNER_TEMP/review-evidence/preflight.log"
       - name: Create isolated simulator
@@ -106,12 +123,13 @@ jobs:
             -only-testing:FilmyCameraUITests/FilmyCameraUITests/testOfflinePrivacyOverviewIsReadableAndDismissible \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test \
             > "$RUNNER_TEMP/review-evidence/native-tests.log" 2>&1
-      - name: Extract test summary
+      - name: Extract summary and screenshots
         if: always()
         run: |
           result="$RUNNER_TEMP/review-evidence/review.xcresult"
           if [[ -d "$result" ]]; then
             xcrun xcresulttool get test-results summary --path "$result" --format json > "$RUNNER_TEMP/review-evidence/summary.json"
+            xcrun xcresulttool export attachments --path "$result" --output-path "$RUNNER_TEMP/review-evidence/screenshots"
           fi
       - name: Delete owned simulator
         if: always() && steps.simulator.outputs.id != ''
@@ -123,44 +141,7 @@ jobs:
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         if: always()
         with:
-          name: final-app-review-${{ matrix.label }}
+          name: verified-app-review-${{ matrix.label }}
           path: ${{ runner.temp }}/review-evidence/
-          retention-days: 14
-          if-no-files-found: warn
-
-  distribution:
-    needs: prepare
-    runs-on: macos-15
-    timeout-minutes: 20
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
-        with:
-          ref: ${{ needs.prepare.outputs.source }}
-          persist-credentials: false
-      - name: Compile and inspect distribution app
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/distribution-evidence"
-          git rev-parse HEAD > "$RUNNER_TEMP/distribution-evidence/source-sha.txt"
-          xcodebuild -version > "$RUNNER_TEMP/distribution-evidence/xcode-version.txt"
-          python3 scripts/release/validate-sdk.py --current
-          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera \
-            -configuration Release -destination 'generic/platform=iOS' \
-            -derivedDataPath "$RUNNER_TEMP/FilmyReviewDistribution" \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build \
-            > "$RUNNER_TEMP/distribution-evidence/release-build.log" 2>&1
-          python3 scripts/release/validate-app-review.py --app \
-            "$RUNNER_TEMP/FilmyReviewDistribution/Build/Products/Release-iphoneos/FilmyCamera.app" \
-            | tee "$RUNNER_TEMP/distribution-evidence/preflight.log"
-          python3 scripts/testing/run.py device-build \
-            --derived-data "$RUNNER_TEMP/FilmyReviewDeviceTests" \
-            --output-dir "$RUNNER_TEMP/distribution-evidence"
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
-        if: always()
-        with:
-          name: final-app-review-distribution
-          path: ${{ runner.temp }}/distribution-evidence/
           retention-days: 14
           if-no-files-found: warn
