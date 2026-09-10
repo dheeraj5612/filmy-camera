@@ -68,6 +68,14 @@ jobs:
             "${RUNNER_TEMP}/FilmyReleaseSDK/Build/Products/Release-iphoneos/FilmyCamera.app/Info.plist" \
             | tee "${RUNNER_TEMP}/release-sdk/built-app-sdk-check.txt"
 
+      - name: Validate the distribution binary and bundled privacy contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/release/validate-app-review.py --app \
+            "${RUNNER_TEMP}/FilmyReleaseSDK/Build/Products/Release-iphoneos/FilmyCamera.app" \
+            | tee "${RUNNER_TEMP}/release-sdk/app-review-preflight.txt"
+
       - name: Compile all physical-device test branches without running them
         run: |
           python3 scripts/testing/run.py device-build \
