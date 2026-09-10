@@ -312,7 +312,9 @@ final class NormalPhotoFlowTests: XCTestCase {
         XCTAssertTrue(waitUntil(timeout: 10) { (pager.value as? String)?.hasPrefix("1 of ") == true })
         photo.swipeLeft()
         XCTAssertTrue(waitUntil(timeout: 10) { (pager.value as? String)?.hasPrefix("2 of ") == true })
-        XCTAssertTrue(app.staticTexts["G7 X Compact"].exists)
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(
+            format: "label == %@", "Selected gallery photo, G7 X Compact"
+        )).firstMatch.waitForExistence(timeout: 10))
         XCTAssertTrue(photo.waitForExistence(timeout: 20))
         photo.pinch(withScale: 2, velocity: 1)
         XCTAssertTrue(waitUntil(timeout: 5) { (photo.value as? String)?.hasPrefix("Zoomed ") == true })
@@ -322,7 +324,9 @@ final class NormalPhotoFlowTests: XCTestCase {
         XCTAssertTrue(waitUntil(timeout: 5) { photo.value as? String == "Fit to screen" })
         photo.swipeRight()
         XCTAssertTrue(waitUntil(timeout: 10) { (pager.value as? String)?.hasPrefix("1 of ") == true })
-        XCTAssertTrue(app.staticTexts["Fine Monochrome"].exists)
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(
+            format: "label == %@", "Selected gallery photo, Fine Monochrome"
+        )).firstMatch.waitForExistence(timeout: 10))
         photo.swipeRight()
         XCTAssertTrue((pager.value as? String)?.hasPrefix("1 of ") == true, "The first photo must not wrap to the last")
         app.buttons["Close frame"].tap()
