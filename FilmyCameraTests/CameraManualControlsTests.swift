@@ -104,6 +104,61 @@ final class CameraManualControlsTests: XCTestCase {
         XCTAssertEqual(invalidMaximum.blueGain, 1)
     }
 
+    func testTransientCameraGainReadbackNeverReachesExceptionThrowingConversion() {
+        for invalid: Float in [0, 0.99, -1, 8.01, .nan, .infinity, -.infinity] {
+            for channel in 0..<3 {
+                var channels: [Float] = [2, 3, 4]
+                channels[channel] = invalid
+                var didConvert = false
+                let result = CameraService.validatedWhiteBalanceTemperatureAndTint(
+                    for: .init(redGain: channels[0], greenGain: channels[1], blueGain: channels[2]),
+                    maximumGain: 8
+                ) { _ in
+                    didConvert = true
+                    return .init(temperature: 5600, tint: 0)
+                }
+                XCTAssertNil(result, "Invalid sensor readback must remain unavailable")
+                XCTAssertFalse(didConvert, "AVFoundation must never receive the invalid gain")
+            }
+        }
+        for maximum: Float in [0, 0.99, -1, .nan, .infinity, -.infinity] {
+            let result = CameraService.validatedWhiteBalanceTemperatureAndTint(
+                for: .init(redGain: 1, greenGain: 1, blueGain: 1), maximumGain: maximum
+            ) { _ in
+                XCTFail("An uninitialized gain bound must never reach AVFoundation")
+                return .init(temperature: 5600, tint: 0)
+            }
+            XCTAssertNil(result)
+        }
+    }
+
+    func testValidCameraWhiteBalanceReadbackPreservesSensorValuesWithoutClamping() throws {
+        var conversionCount = 0
+        let result = try XCTUnwrap(CameraService.validatedWhiteBalanceTemperatureAndTint(
+            for: .init(redGain: 1, greenGain: 2.75, blueGain: 8), maximumGain: 8
+        ) { gains in
+            conversionCount += 1
+            XCTAssertEqual(gains.redGain, 1)
+            XCTAssertEqual(gains.greenGain, 2.75)
+            XCTAssertEqual(gains.blueGain, 8)
+            // Auto metering can lie outside the user's manual slider range.
+            return .init(temperature: 12000, tint: 175)
+        })
+        XCTAssertEqual(conversionCount, 1)
+        XCTAssertEqual(result.temperature, 12000)
+        XCTAssertEqual(result.tint, 175)
+    }
+
+    func testInvalidConvertedWhiteBalanceReadbackRemainsUnavailable() {
+        for values in [AVCaptureDevice.WhiteBalanceTemperatureAndTintValues(temperature: .nan, tint: 0),
+                       .init(temperature: .infinity, tint: 0), .init(temperature: 0, tint: 0),
+                       .init(temperature: 5600, tint: .nan), .init(temperature: 5600, tint: .infinity)] {
+            XCTAssertNil(CameraService.validatedWhiteBalanceTemperatureAndTint(
+                for: .init(redGain: 2, greenGain: 3, blueGain: 4), maximumGain: 8
+            ) { _ in values })
+        }
+    }
+
     func testManualFrameDurationKeepsExactThirtyFPSAndAccommodatesLongShutter() {
         let fastShutter = CameraService.manualFrameDuration(
             for: CMTime(value: 1, timescale: 8_000)
@@ -257,7 +312,7 @@ final class CaptureWorkflowPolicyTests: XCTestCase {
                 let control = try XCTUnwrap(measurements.frames["control-\(index)"])
                 XCTAssertFalse(badge.intersects(control), "The badge must not cover a control")
             }
-            XCTAssertEqual(fitted.height, width < 700 ? 92 : 44, accuracy: 0.5)
+            XCTAssertEqual(fitted.height, 92, accuracy: 0.5)
             var drewHierarchy = false
             let snapshot = UIGraphicsImageRenderer(size: fitted).image { _ in
                 drewHierarchy = host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)

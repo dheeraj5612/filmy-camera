@@ -13,7 +13,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     /// adds the canonical camera mode controls introduced by the fidelity pass;
     /// version 5 adds persisted Kelvin white-balance control.
     public static let currentSchemaVersion = 5
-    public static let rendererVersion = "core-image-parametric-v9"
+    public static let rendererVersion = "core-image-parametric-v11"
 
     /// The Kelvin value that renders as "as shot". Phone frames are already
     /// balanced for their scene, so a Color Temperature setting equal to this
@@ -263,8 +263,10 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             case .fluorescent1: return -0.03
             case .fluorescent2: return -0.08
             case .fluorescent3: return -0.12
-            case .incandescent: return 0.18
-            case .underwater: return -0.08
+            // Compensate the illuminant's cast: tungsten needs cooling,
+            // while underwater light needs warmth to reduce its blue cast.
+            case .incandescent: return -0.18
+            case .underwater: return 0.08
             default: return 0
             }
         }

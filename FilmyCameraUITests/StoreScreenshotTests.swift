@@ -608,6 +608,7 @@ private func waitForStationaryControl(_ control: XCUIElement, in app: XCUIApplic
     // Accessibility queries on a loaded hosted iPad can take several seconds
     // per observation. Allow enough time to compare two complete samples.
     let deadline = Date(timeIntervalSinceNow: 15)
+    let frameTolerance: CGFloat = 1.0
     var previousFrame: CGRect?
     var stationarySince: Date?
     // A drawer's accessibility frame can appear before its spring transition
@@ -617,7 +618,11 @@ private func waitForStationaryControl(_ control: XCUIElement, in app: XCUIApplic
         if control.exists && control.isEnabled && control.isHittable {
             let frame = control.frame
             if frame.width >= 44 && frame.height >= 44 && app.frame.contains(frame) {
-                if frame == previousFrame {
+                if let previousFrame,
+                   abs(frame.minX - previousFrame.minX) <= frameTolerance,
+                   abs(frame.minY - previousFrame.minY) <= frameTolerance,
+                   abs(frame.width - previousFrame.width) <= frameTolerance,
+                   abs(frame.height - previousFrame.height) <= frameTolerance {
                     if let stationarySince, Date().timeIntervalSince(stationarySince) >= 0.3 {
                         return true
                     }

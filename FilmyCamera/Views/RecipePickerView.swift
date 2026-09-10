@@ -1041,6 +1041,10 @@ struct RecipeDetailView: View {
                         Text(priority.displayName).tag(priority)
                     }
                 }
+                Text("Adjusts tones in the finished look. Auto uses a preset strength; it does not meter the scene or change sensor exposure.")
+                    .font(.system(.caption, design: .rounded).weight(.medium))
+                    .foregroundStyle(FilmyTheme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         case .color:
             VStack(spacing: 14) {
@@ -1071,6 +1075,12 @@ struct RecipeDetailView: View {
                     ForEach(FilmRecipe.WhiteBalanceMode.allCases, id: \.self) { mode in
                         Text(mode.displayName).tag(mode)
                     }
+                }
+                if [.auto, .whitePriority, .custom1, .custom2, .custom3].contains(draft.whiteBalance.mode) {
+                    Text("Auto, White priority, and Custom 1–3 start from the photo’s captured white balance and use the Warmth and Tint shifts below. Custom white measurement is not available.")
+                        .font(.system(.caption, design: .rounded).weight(.medium))
+                        .foregroundStyle(FilmyTheme.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 if draft.whiteBalance.mode == .colorTemperature {
                     RecipeSliderRow(

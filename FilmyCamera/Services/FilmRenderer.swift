@@ -798,11 +798,11 @@ public final class FilmRenderer {
 
         let shadow = clamp(recipe.shadowTone, lower: -1, upper: 1)
         let highlight = clamp(recipe.highlightTone, lower: -1, upper: 1)
-        // The public camera convention uses positive tone values for a harder
-        // curve: highlights and shadows move down. Keep that polarity in the
-        // model instead of silently inverting the user's control.
+        // A harder camera tone curve brightens highlights and darkens
+        // shadows. Keep the two polarities distinct: reducing Highlights
+        // should recover a softer shoulder rather than brighten it.
         let shadowDelta = -shadow
-        let highlightDelta = -highlight
+        let highlightDelta = highlight
         let points: [(CGFloat, CGFloat)] = [
             (0, clamp(0 + shadowDelta * 0.10, lower: 0, upper: 1)),
             (0.25, clamp(0.25 + shadowDelta * 0.055, lower: 0, upper: 1)),
@@ -1757,7 +1757,10 @@ public final class FilmRenderer {
             // hue- and midtone-local so landscapes and neutral objects do not
             // inherit a face-filter cast. This is an original exaggeration of
             // the public visual intent, not a sampled transform.
-            mappedRed += 0.046 * redWeight
+            // Preserve selective color separation through the compact
+            // highlight shoulder, including when positive Highlights lifts
+            // the dominant channel before that shoulder compresses it.
+            mappedRed += 0.060 * redWeight
             mappedGreen -= 0.014 * redWeight
             mappedBlue -= 0.012 * redWeight
             // Peach/pink rather than orange: push red, hold green, and let a
@@ -1775,7 +1778,7 @@ public final class FilmRenderer {
             mappedGreen = mix(mappedGreen, luma, greenRestraint)
             mappedBlue = mix(mappedBlue, luma, greenRestraint)
 
-            mappedBlue += 0.042 * blueWeight
+            mappedBlue += 0.060 * blueWeight
             mappedGreen += 0.004 * blueWeight
             mappedRed -= 0.016 * blueWeight
         }

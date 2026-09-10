@@ -115,13 +115,25 @@ final class PhotoPrintCompositorTests: XCTestCase {
     }
 
     func testPrintBordersAreSymmetricAndProportionalWithoutChangingImageAspect() throws {
-        for size in [CGSize(width: 3_000, height: 4_000), CGSize(width: 4_000, height: 3_000), CGSize(width: 3_000, height: 3_000)] {
-            let layout = try XCTUnwrap(PhotoPrintCompositor.layout(for: CGRect(origin: .zero, size: size), finish: .instantPrint))
+        let sizes = [
+            CGSize(width: 1_000, height: 1_400),
+            CGSize(width: 2_000, height: 2_800),
+            CGSize(width: 3_000, height: 4_200)
+        ]
+
+        for size in sizes {
+            let layout = try XCTUnwrap(
+                PhotoPrintCompositor.layout(
+                    for: CGRect(origin: .zero, size: size),
+                    finish: .instantPrint
+                )
+            )
+            let shortEdge = min(size.width, size.height)
             XCTAssertEqual(layout.imageFrame.size, size)
             XCTAssertEqual(layout.imageFrame.minX, layout.canvasExtent.maxX - layout.imageFrame.maxX)
             XCTAssertEqual(layout.sideMargin, layout.topMargin)
-            XCTAssertEqual(layout.bottomMargin, 480)
-            XCTAssertEqual(layout.sideMargin, 150)
+            XCTAssertEqual(layout.sideMargin, ceil(shortEdge * 0.05))
+            XCTAssertEqual(layout.bottomMargin, ceil(shortEdge * 0.16))
         }
     }
 
