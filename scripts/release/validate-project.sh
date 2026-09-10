@@ -39,6 +39,8 @@ if [[ "${failures}" -gt 0 ]]; then
   exit 1
 fi
 
+python3 "${script_dir}/validate-app-review.py"
+
 if ! plutil -lint "${info_plist}" >/dev/null; then
   echo "Info.plist is not valid" >&2
   failures=$((failures + 1))

@@ -503,6 +503,7 @@ private struct GalleryDetailView: View {
     @State private var isShowingDeleteConfirmation = false
     @State private var isDeleting = false
     @State private var isPreparingShare = false
+    @State private var shareTask: Task<Void, Never>?
     @State private var actionErrorMessage: String?
     @State private var zoomScale: CGFloat = 1
     @State private var pinchBaseZoom: CGFloat?
@@ -619,6 +620,15 @@ private struct GalleryDetailView: View {
         }
         .task(id: imageTaskID) {
             await loadImage()
+        }
+        .onDisappear {
+            shareTask?.cancel()
+            shareTask = nil
+            isPreparingShare = false
+            if !isShowingShareSheet, let shareURL {
+                photoLibrary.removeTemporaryShare(at: shareURL)
+                self.shareURL = nil
+            }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             detailToolbar
@@ -771,9 +781,14 @@ private struct GalleryDetailView: View {
     private func shareFrame() {
         guard !isPreparingShare else { return }
         isPreparingShare = true
-        Task { @MainActor in
+        shareTask = Task { @MainActor in
             let url = await photoLibrary.shareURL(for: asset)
+            guard !Task.isCancelled else {
+                if let url { photoLibrary.removeTemporaryShare(at: url) }
+                return
+            }
             isPreparingShare = false
+            shareTask = nil
             guard let url else {
                 actionErrorMessage = "The original frame could not be prepared for sharing. Try again in a moment."
                 return

@@ -370,6 +370,67 @@ final class PhotoLibraryChangeBridge: NSObject, PHPhotoLibraryChangeObserver, @u
     }
 }
 
+/// Bounds the caller's wait for PhotoKit's non-cancellable writeData API.
+/// A late completion after cancellation removes its file instead of presenting
+/// a stale share sheet. Duplicate success callbacks must not remove a file
+/// already handed to the system share sheet.
+final class PhotoLibraryShareRequest: @unchecked Sendable {
+    private enum Outcome { case pending, delivered, abandoned }
+    private let lock = NSLock()
+    private let destination: URL
+    private var outcome = Outcome.pending
+    private var continuation: CheckedContinuation<URL?, Never>?
+    private var timeout: DispatchWorkItem?
+
+    init(destination: URL) {
+        self.destination = destination
+    }
+
+    func install(_ continuation: CheckedContinuation<URL?, Never>) {
+        lock.lock()
+        let isPending = outcome == .pending
+        if isPending { self.continuation = continuation }
+        lock.unlock()
+        if !isPending { continuation.resume(returning: nil) }
+    }
+
+    func startTimeout(after interval: TimeInterval = 60) {
+        let work = DispatchWorkItem { [weak self] in self?.cancel() }
+        lock.lock()
+        guard outcome == .pending, timeout == nil else {
+            lock.unlock()
+            return
+        }
+        timeout = work
+        lock.unlock()
+        let delay = interval.isFinite ? max(interval, 0) : 60
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    func complete(success: Bool) {
+        lock.lock()
+        guard outcome == .pending else {
+            let shouldCleanUp = outcome == .abandoned
+            lock.unlock()
+            if shouldCleanUp { try? FileManager.default.removeItem(at: destination) }
+            return
+        }
+        outcome = success ? .delivered : .abandoned
+        let continuation = self.continuation
+        self.continuation = nil
+        let timeout = self.timeout
+        self.timeout = nil
+        lock.unlock()
+        timeout?.cancel()
+        if !success { try? FileManager.default.removeItem(at: destination) }
+        continuation?.resume(returning: success ? destination : nil)
+    }
+
+    func cancel() {
+        complete(success: false)
+    }
+}
+
 @MainActor
 final class PhotoLibraryService: ObservableObject {
     private final class IdentifierBox: @unchecked Sendable {
@@ -1454,59 +1515,91 @@ final class PhotoLibraryService: ObservableObject {
     }
 
     func shareURL(for asset: PhotoLibraryGalleryAsset) async -> URL? {
+        guard !Task.isCancelled,
+              PhotoLibraryAssetOwnership.contains(asset.assetIdentifier, in: savedAssetIdentifiers),
+              let directoryURL = temporaryShareDirectoryURL else { return nil }
+        let destinationURL = directoryURL.appendingPathComponent("\(UUID().uuidString).jpg", isDirectory: false)
+        do {
+            try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+            protectLocalResource(at: directoryURL)
+        } catch {
+            return nil
+        }
+
         switch asset {
         case .cached(let frame):
-            guard PhotoLibraryAssetOwnership.contains(
-                frame.assetIdentifier,
-                in: savedAssetIdentifiers
-            ),
-            let filename = savedFrameResources[frame.assetIdentifier]?.filename,
-            let url = localFrameURL(for: filename) else { return nil }
-            return FileManager.default.fileExists(atPath: url.path) ? url : nil
-
-        case .photos(let photoAsset):
-            let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-            let resources = PHAssetResource.assetResources(for: photoAsset)
-            guard PhotoLibraryAuthorizationPolicy.canRead(status),
-                  savedAssetIdentifiers.contains(photoAsset.localIdentifier),
-                  let resource = resources.first(where: { $0.type == .photo }) ?? resources.first,
-                  let cachesURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+            guard let filename = savedFrameResources[frame.assetIdentifier]?.filename,
+                  let sourceURL = localFrameURL(for: filename) else { return nil }
+            // Keep a share independent of later local-cache eviction/clearing.
+            let copied = await Task.detached(priority: .utility) {
+                do {
+                    try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+                    try FileManager.default.setAttributes(
+                        [.protectionKey: FileProtectionType.complete],
+                        ofItemAtPath: destinationURL.path
+                    )
+                    Self.protectLocalResource(at: destinationURL)
+                    return true
+                } catch {
+                    try? FileManager.default.removeItem(at: destinationURL)
+                    return false
+                }
+            }.value
+            guard copied, !Task.isCancelled else {
+                removeTemporaryShare(at: destinationURL)
                 return nil
             }
+            return destinationURL
 
-            let directoryURL = cachesURL.appendingPathComponent(shareDirectoryName, isDirectory: true)
-            let destinationURL = directoryURL.appendingPathComponent(
-                "\(UUID().uuidString).jpg",
-                isDirectory: false
-            )
-            do {
-                try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-                protectLocalResource(at: directoryURL)
-                let options = PHAssetResourceRequestOptions()
-                options.isNetworkAccessAllowed = true
-                let manager = PHAssetResourceManager.default()
-                return await withCheckedContinuation { continuation in
-                    let writeCompletion: @Sendable (Error?) -> Void = { [weak self] error in
-                        Task { @MainActor in
-                            guard error == nil else {
-                                try? FileManager.default.removeItem(at: destinationURL)
-                                continuation.resume(returning: nil)
-                                return
-                            }
-                            self?.protectLocalResource(at: destinationURL)
-                            continuation.resume(returning: destinationURL)
+        case .photos(let photoAsset):
+            guard PhotoLibraryAuthorizationPolicy.canRead(PHPhotoLibrary.authorizationStatus(for: .readWrite)) else {
+                return nil
+            }
+            let resources = PHAssetResource.assetResources(for: photoAsset)
+            guard let resource = resources.first(where: { $0.type == .photo }) else { return nil }
+            let request = PhotoLibraryShareRequest(destination: destinationURL)
+            let result = await withTaskCancellationHandler(operation: {
+                await withCheckedContinuation { continuation in
+                    request.install(continuation)
+                    guard !Task.isCancelled else {
+                        request.cancel()
+                        return
+                    }
+                    request.startTimeout()
+                    let options = PHAssetResourceRequestOptions()
+                    options.isNetworkAccessAllowed = true
+                    let writeCompletion: @Sendable (Error?) -> Void = { error in
+                        guard error == nil else {
+                            request.complete(success: false)
+                            return
+                        }
+                        do {
+                            try FileManager.default.setAttributes(
+                                [.protectionKey: FileProtectionType.complete],
+                                ofItemAtPath: destinationURL.path
+                            )
+                            Self.protectLocalResource(at: destinationURL)
+                            request.complete(success: true)
+                        } catch {
+                            request.complete(success: false)
                         }
                     }
-                    manager.writeData(
+                    PHAssetResourceManager.default().writeData(
                         for: resource,
                         toFile: destinationURL,
                         options: options,
                         completionHandler: writeCompletion
                     )
                 }
-            } catch {
+            }, onCancel: {
+                request.cancel()
+            })
+            guard !Task.isCancelled,
+                  PhotoLibraryAuthorizationPolicy.canRead(PHPhotoLibrary.authorizationStatus(for: .readWrite)) else {
+                removeTemporaryShare(at: destinationURL)
                 return nil
             }
+            return result
         }
     }
 
