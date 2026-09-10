@@ -1,0 +1,26 @@
+name: Camera polish validation
+
+on:
+  push:
+    branches: [fix/portrait-capture-gallery-polish]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Archive exact source for local regression validation
+        run: git archive --format=zip HEAD > "$RUNNER_TEMP/filmy-source.zip"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: camera-polish-source
+          path: ${{ runner.temp }}/filmy-source.zip
+          retention-days: 1
+          if-no-files-found: error
