@@ -1,0 +1,36 @@
+name: Gallery assertion polish
+on:
+  push:
+    branches: [fix/portrait-capture-gallery-polish]
+    paths: ['.github/workflows/gallery-test-polish.yml']
+permissions:
+  contents: write
+jobs:
+  polish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: fix/portrait-capture-gallery-polish
+      - name: Assert the displayed page rather than a combined metadata child
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path('FilmyCameraUITests/NormalPhotoFlowTests.swift')
+          text = source.read_text()
+          for name in ['G7 X Compact', 'Fine Monochrome']:
+              before = '        XCTAssertTrue(app.staticTexts["' + name + '"].exists)'
+              after = '        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(\n            format: "label == %@", "Selected gallery photo, ' + name + '"\n        )).firstMatch.waitForExistence(timeout: 10))'
+              assert text.count(before) == 1, name
+              text = text.replace(before, after)
+          source.write_text(text)
+          PY
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add FilmyCameraUITests/NormalPhotoFlowTests.swift
+          git commit -m 'Test gallery page identity independently of metadata accessibility grouping'
+          git push origin HEAD:fix/portrait-capture-gallery-polish
