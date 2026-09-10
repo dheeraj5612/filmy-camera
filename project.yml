@@ -38,20 +38,16 @@ targets:
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         NSMotionUsageDescription: Filmy Camera uses device orientation only to display the optional horizon level. Motion data is not saved or uploaded.
         NSCameraUsageDescription: Filmy Camera uses the camera to preview and capture photos with your selected film recipe.
-        NSPhotoLibraryAddUsageDescription: Filmy Camera saves finished photos to your Photos library when you choose Save to Photos.
+        NSPhotoLibraryAddUsageDescription: Filmy Camera saves finished photos to your Photos library automatically when you take a picture, or when you save an edited import.
         NSPhotoLibraryUsageDescription: Filmy Camera lets you choose existing photos to apply film recipes and reads frames saved by Filmy Camera for the in-app Roll.
         ITSAppUsesNonExemptEncryption: false
         UILaunchScreen:
           UIColorName: LaunchBackground
+        UIRequiresFullScreen: true
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
-          - UIInterfaceOrientationLandscapeLeft
-          - UIInterfaceOrientationLandscapeRight
         UISupportedInterfaceOrientations~ipad:
           - UIInterfaceOrientationPortrait
-          - UIInterfaceOrientationPortraitUpsideDown
-          - UIInterfaceOrientationLandscapeLeft
-          - UIInterfaceOrientationLandscapeRight
     scheme:
       gatherCoverageData: false
       testTargets:

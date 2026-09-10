@@ -94,18 +94,18 @@ final class NormalPhotoFlowTests: XCTestCase {
         XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }
         XCTAssertTrue(
-            waitUntil(timeout: 10) { app.frame.width > app.frame.height },
-            "Large-text review must settle into landscape before compact-layout checks"
+            waitUntil(timeout: 10) { app.frame.height > app.frame.width },
+            "Large-text review must stay portrait after device rotation before compact-layout checks"
         )
         let landscapeFinish = app.buttons["review-finish-instantPrint"]
         let landscapeScroll = app.scrollViews["review-controls-scroll"]
         XCTAssertTrue(
             revealFully(landscapeFinish, in: landscapeScroll),
-            "Large-text landscape Instant Print must scroll fully into view"
+            "Large-text portrait-locked Instant Print must scroll fully into view"
         )
         assertReviewControl(
             landscapeFinish,
-            name: "Large-text landscape Instant Print",
+            name: "Large-text portrait-locked Instant Print",
             containedInApp: true
         )
         landscapeFinish.tap()
@@ -114,22 +114,22 @@ final class NormalPhotoFlowTests: XCTestCase {
                 app.descendants(matching: .any)["review-image"].label.contains("Instant Print")
                     && app.buttons["Save filtered photo"].isEnabled
             },
-            "Large-text landscape review must finish rendering Instant Print"
+            "Large-text portrait-locked review must finish rendering Instant Print"
         )
 
         let save = app.buttons["Save filtered photo"]
         XCTAssertTrue(
             revealFully(save, in: landscapeScroll),
-            "Large-text landscape Save must scroll fully into view"
+            "Large-text portrait-locked Save must scroll fully into view"
         )
-        assertReviewControl(save, name: "Large-text landscape Save", containedInApp: true)
+        assertReviewControl(save, name: "Large-text portrait-locked Save", containedInApp: true)
 
         let cancel = app.buttons["Cancel"]
         XCTAssertTrue(
             revealFully(cancel, in: landscapeScroll),
-            "Large-text landscape Cancel must scroll fully into view"
+            "Large-text portrait-locked Cancel must scroll fully into view"
         )
-        assertReviewControl(cancel, name: "Large-text landscape Cancel", containedInApp: true)
+        assertReviewControl(cancel, name: "Large-text portrait-locked Cancel", containedInApp: true)
         cancel.tap()
         let review = app.descendants(matching: .any)["review-screen"]
         XCTAssertTrue(waitForDisappearance(review, timeout: 10), "Cancel must dismiss imported review")
@@ -211,31 +211,31 @@ final class NormalPhotoFlowTests: XCTestCase {
         XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }
         XCTAssertTrue(
-            waitUntil(timeout: 10) { app.frame.width > app.frame.height },
-            "The review must settle into landscape before layout assertions"
+            waitUntil(timeout: 10) { app.frame.height > app.frame.width },
+            "The review must stay portrait after device rotation before layout assertions"
         )
-        assertReviewControl(compare, name: "Landscape Original comparison", containedInApp: true)
-        assertReviewControl(lookPicker, name: "Landscape review look picker", containedInApp: true)
-        assertReviewControl(printFinish, name: "Landscape Instant Print", containedInApp: true)
+        assertReviewControl(compare, name: "Portrait-locked Original comparison", containedInApp: true)
+        assertReviewControl(lookPicker, name: "Portrait-locked review look picker", containedInApp: true)
+        assertReviewControl(printFinish, name: "Portrait-locked Instant Print", containedInApp: true)
         assertReviewControl(
             app.buttons["Save filtered photo"],
-            name: "Landscape Save filtered photo",
+            name: "Portrait-locked Save filtered photo",
             containedInApp: true
         )
         let landscapePhoto = app.descendants(matching: .any)["review-image"]
-        XCTAssertTrue(landscapePhoto.waitForExistence(timeout: 10), "Landscape review must keep its photo visible")
+        XCTAssertTrue(landscapePhoto.waitForExistence(timeout: 10), "Portrait-locked review must keep its photo visible")
         XCTAssertTrue(
             app.frame.insetBy(dx: -1, dy: -1).contains(landscapePhoto.frame),
-            "Landscape review photo must remain inside the app frame"
+            "Portrait-locked review photo must remain inside the app frame"
         )
         XCTAssertGreaterThan(
             landscapePhoto.frame.height,
             120,
-            "Landscape review must reserve usable height for the fitted photo"
+            "Portrait-locked review must reserve usable height for the fitted photo"
         )
         XCTAssertTrue(
             landscapePhoto.frame.intersection(app.buttons["Save filtered photo"].frame).isNull,
-            "Landscape actions must not cover the fitted photo"
+            "Portrait-locked actions must not cover the fitted photo"
         )
         attachScreenshot(named: "review-monochrome-landscape")
 
@@ -290,6 +290,43 @@ final class NormalPhotoFlowTests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    func testGallerySlidesBetweenSavedPhotosAndPreservesZoomBehavior() throws {
+        launchNormalApp()
+        // Two distinct look labels prove that paging changed the actual
+        // asset, not just a counter or recycled image placeholder.
+        for (id, name) in [("g7x-compact", "G7 X Compact"), ("acros-monochrome", "Fine Monochrome")] {
+            try ensureRecipe(id: id, name: name)
+            try importSeededFixture()
+            app.buttons["Save filtered photo"].tap()
+            try waitForSaveCompletion()
+        }
+        openRoll()
+        let newest = app.buttons.matching(NSPredicate(format: "label == 'Photo in your gallery, Fine Monochrome'")).firstMatch
+        XCTAssertTrue(newest.waitForExistence(timeout: 20))
+        newest.tap()
+        let photo = app.images["Photo"]
+        let pager = app.descendants(matching: .any)["gallery-pager"]
+        XCTAssertTrue(photo.waitForExistence(timeout: 20))
+        XCTAssertTrue(waitUntil(timeout: 10) { (pager.value as? String)?.hasPrefix("1 of ") == true })
+        photo.swipeLeft()
+        XCTAssertTrue(waitUntil(timeout: 10) { (pager.value as? String)?.hasPrefix("2 of ") == true })
+        XCTAssertTrue(app.staticTexts["G7 X Compact"].exists)
+        XCTAssertTrue(photo.waitForExistence(timeout: 20))
+        photo.pinch(withScale: 2, velocity: 1)
+        XCTAssertTrue(waitUntil(timeout: 5) { (photo.value as? String)?.hasPrefix("Zoomed ") == true })
+        photo.swipeRight()
+        XCTAssertTrue((pager.value as? String)?.hasPrefix("2 of ") == true, "Zoomed panning must not change the photo")
+        photo.doubleTap()
+        XCTAssertTrue(waitUntil(timeout: 5) { photo.value as? String == "Fit to screen" })
+        photo.swipeRight()
+        XCTAssertTrue(waitUntil(timeout: 10) { (pager.value as? String)?.hasPrefix("1 of ") == true })
+        XCTAssertTrue(app.staticTexts["Fine Monochrome"].exists)
+        photo.swipeRight()
+        XCTAssertTrue((pager.value as? String)?.hasPrefix("1 of ") == true, "The first photo must not wrap to the last")
+        app.buttons["Close frame"].tap()
+        XCTAssertTrue(app.buttons["roll-back-to-camera"].waitForExistence(timeout: 10))
     }
 
     private func launchNormalApp(contentSizeCategory: String? = nil) {

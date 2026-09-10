@@ -158,7 +158,7 @@ enum PhotoLibrarySaveError: LocalizedError, Equatable, Sendable {
         case .accessDenied:
             return "Photo access is needed to save this frame. Enable Photos access in Settings, then try again."
         case .writeFailed:
-            return "Photos could not save this frame. Keep the review open and try again in a moment."
+            return "Photos could not save this frame. Keep Filmy Camera open and retry the save in a moment."
         }
     }
 

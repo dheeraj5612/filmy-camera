@@ -105,15 +105,13 @@ struct CameraTopBarLayout<Controls: View, Indicators: View>: View {
     }
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) {
-                controls
-                indicators.fixedSize(horizontal: true, vertical: false)
-            }
-            VStack(alignment: .trailing, spacing: 4) {
-                controls
-                indicators.fixedSize(horizontal: true, vertical: false)
-            }
+        // Hardware discovery and status changes must never choose a different
+        // row count. Reserve both rows before the first camera frame arrives.
+        VStack(alignment: .trailing, spacing: 4) {
+            controls.frame(height: 48)
+            indicators
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, minHeight: 44, maxHeight: 44, alignment: .trailing)
         }
     }
 }
@@ -211,13 +209,25 @@ struct CameraScreen: View {
             }
             .background(FilmyTheme.viewfinderBand.ignoresSafeArea())
             .overlay(alignment: .top) {
-                if let toastMessage = viewModel.toastMessage {
-                    ToastView(message: toastMessage, style: viewModel.toastStyle)
-                        .padding(.top, 56)
-                        .transition(.move(edge: .top).combined(with: .opacity))
+                VStack(spacing: 8) {
+                    if viewModel.hasPendingCapture, let error = viewModel.saveErrorMessage {
+                        captureSaveRecovery(error)
+                    } else if viewModel.hasPendingCapture && viewModel.isSaving {
+                        Label("Saving photo", systemImage: "photo.badge.arrow.down")
+                            .font(.subheadline.weight(.semibold))
+                            .padding(12)
+                            .viewfinderChrome(Capsule())
+                            .accessibilityIdentifier("capture-saving")
+                    } else if let toastMessage = viewModel.toastMessage {
+                        ToastView(message: toastMessage, style: viewModel.toastStyle)
+                            .transition(.opacity)
+                    }
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 82)
+                // Animate feedback only, not the camera's geometry transaction.
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: viewModel.toastMessage)
             }
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: viewModel.toastMessage)
             .allowsHitTesting(!isReviewing && !countdown.state.isActive)
             .disabled(isReviewing || countdown.state.isActive)
             .accessibilityElement(children: .contain)
@@ -225,7 +235,7 @@ struct CameraScreen: View {
 
             if countdown.state.isActive { countdownOverlay.zIndex(2) }
 
-            if let image = viewModel.reviewImage, let recipe = viewModel.reviewRecipe {
+            if viewModel.isReviewingImport, let image = viewModel.reviewImage, let recipe = viewModel.reviewRecipe {
                 CaptureReviewView(
                     image: image,
                     recipe: recipe,
@@ -342,7 +352,7 @@ struct CameraScreen: View {
             updateCameraActivity()
             updateIdleTimer()
         }
-        .onChange(of: viewModel.reviewImage != nil) { _, hasReview in
+        .onChange(of: viewModel.isReviewingImport) { _, hasReview in
             if hasReview {
                 camera.setFrameDeliveryPaused(true)
             }
@@ -353,7 +363,7 @@ struct CameraScreen: View {
             if isCapturing {
                 blinkShutter()
             }
-            guard !isCapturing, viewModel.reviewImage == nil else { return }
+            guard !isCapturing, !viewModel.isReviewingImport else { return }
             updateCameraActivity()
         }
         .onChange(of: viewModel.isImporting) { _, _ in
@@ -368,6 +378,27 @@ struct CameraScreen: View {
         // non-zero ideal size. Keep that child from expanding the camera shell
         // beyond the window proposal and shifting the chrome offscreen.
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// A failed write keeps the exact captured bytes for retry. Never turn a
+    /// normal shutter press into an editor or let the next shot overwrite it.
+    private func captureSaveRecovery(_ message: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Photo not saved yet").font(.headline)
+            Text(message).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button("Retry save") { viewModel.saveReview(photoLibrary: photoLibrary) }
+                    .accessibilityIdentifier("capture-save-retry")
+                if viewModel.saveErrorRequiresSettings {
+                    Button("Photos Settings", action: openSystemSettings)
+                        .accessibilityIdentifier("capture-save-settings")
+                }
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(14)
+        .viewfinderChrome(RoundedRectangle(cornerRadius: 16))
+        .accessibilityIdentifier("capture-save-recovery")
     }
 
     // MARK: - Shells
@@ -432,7 +463,7 @@ struct CameraScreen: View {
     }
 
     private var isChromeDisabled: Bool {
-        viewModel.isCapturing || isImporting
+        viewModel.isCapturing || viewModel.isSaving || viewModel.hasPendingCapture || isImporting
     }
 
     private var portraitControlClearance: CGFloat {
@@ -625,11 +656,13 @@ struct CameraScreen: View {
     private var topBar: some View {
         CameraTopBarLayout {
             HStack(spacing: 8) {
-                flashControl
+                ZStack { Color.clear; flashControl }
+                    .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
 
-                if camera.availableCameraPositions.count > 1 {
-                    cameraSwitchButton
-                }
+                cameraSwitchButton
+                    .opacity(camera.availableCameraPositions.count > 1 ? 1 : 0)
+                    .disabled(camera.availableCameraPositions.count < 2)
+                    .accessibilityHidden(camera.availableCameraPositions.count < 2)
 
                 Spacer(minLength: 4)
 
@@ -647,21 +680,20 @@ struct CameraScreen: View {
                 captureSetupButton
                 settingsButton
 
-                if camera.isRunning || isViewfinderChromePreview {
-                    toolsToggle
-                }
+                toolsToggle
+                    .disabled(!camera.isRunning && !isViewfinderChromePreview)
             }
         } indicators: {
             HStack(spacing: 8) {
                 activeCaptureIndicators
 
-                if !isLive {
-                    CameraStatusPill(
-                        isRunning: camera.isRunning,
-                        availability: camera.availability,
-                        message: camera.statusMessage
-                    )
-                }
+                CameraStatusPill(
+                    isRunning: camera.isRunning,
+                    availability: camera.availability,
+                    message: camera.statusMessage
+                )
+                .opacity(isLive ? 0 : 1)
+                .accessibilityHidden(isLive)
             }
         }
     }
@@ -1192,7 +1224,7 @@ struct CameraScreen: View {
     }
 
     private var isReviewing: Bool {
-        viewModel.reviewImage != nil
+        viewModel.isReviewingImport
     }
 
     private var isViewfinderChromePreview: Bool {
@@ -1253,11 +1285,11 @@ struct CameraScreen: View {
         guard canTriggerShutter else { return }
         closeControlDrawers()
         if captureDelay == .off {
-            viewModel.capture(camera: camera)
+            viewModel.capture(camera: camera, photoLibrary: photoLibrary)
         } else {
             countdown.start(seconds: captureDelay.rawValue) {
                 guard canTriggerShutter else { return }
-                viewModel.capture(camera: camera)
+                viewModel.capture(camera: camera, photoLibrary: photoLibrary)
             }
         }
     }
@@ -1311,7 +1343,7 @@ struct CameraScreen: View {
         }
 
         let action = CameraActivityPolicy.action(
-            hasReview: viewModel.reviewImage != nil,
+            hasReview: viewModel.isReviewingImport,
             sceneIsActive: scenePhase == .active,
             isCameraTabActive: isCameraTabActive,
             availability: camera.availability
@@ -1501,7 +1533,7 @@ extension CameraScreen {
             && !isShowingManualControls && !isShowingCaptureSetup
     }
     private var canTriggerShutter: Bool {
-        isCameraVisibleForAssists && !viewModel.isSaving && !camera.manualControls.isApplying && !countdown.state.isActive && framingIsReady
+        isCameraVisibleForAssists && viewModel.reviewImage == nil && !viewModel.isSaving && !camera.manualControls.isApplying && !countdown.state.isActive && framingIsReady
     }
     private var framingIsReady: Bool {
         guard captureAspect != .viewfinder else { return true }
@@ -1578,6 +1610,7 @@ struct CaptureSetupView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("captureDelay") private var delay = CaptureDelay.off
     @AppStorage("captureAspect") private var aspect = CaptureAspect.viewfinder
+    @AppStorage("captureFinish") private var finish = PhotoFinish.photo
     @AppStorage("compositionGuide") private var guide = CompositionGuide.thirds
     @AppStorage("showGrid") private var showGrid = true
     @AppStorage("showHistogram") private var histogram = false
@@ -1595,6 +1628,10 @@ struct CaptureSetupView: View {
                     Picker("Photo aspect", selection: $aspect) {
                         ForEach(CaptureAspect.allCases) { Text($0.title).tag($0) }
                     }.accessibilityIdentifier("capture-aspect-picker")
+                    Picker("Photo finish", selection: $finish) {
+                        Text("Photo").tag(PhotoFinish.photo)
+                        Text("Instant Print").tag(PhotoFinish.instantPrint)
+                    }.accessibilityIdentifier("capture-finish-picker")
                 } header: { Text("Capture") } footer: {
                     Text("The viewfinder and saved photo use the same crop. Timer cancellation, leaving the camera, or an interruption prevents the shot. Imports keep their original aspect.")
                 }

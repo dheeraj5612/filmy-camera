@@ -901,7 +901,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
     }
 
-    /// Sets continuous focus and exposure at a normalized preview location.
+    /// Meters focus once and tracks exposure at a normalized preview location.
     /// The point uses the capture device's normalized coordinate system. The
     /// preview converts its rotation, mirroring and crop before calling this.
     public func focus(at normalizedPoint: CGPoint) {
@@ -914,7 +914,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 defer { device.unlockForConfiguration() }
 
                 if self.usesAutoFocusOnQueue(for: device) {
-                    self.applyAutoFocusOnQueue(to: device, at: point)
+                    self.applyAutoFocusOnQueue(to: device, at: point, isUserInitiated: true)
                 }
 
                 if self.desiredManualExposure == .auto {
@@ -1475,6 +1475,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             if device.isFocusPointOfInterestSupported {
                 device.focusPointOfInterest = CGPoint(x: 0.5, y: 0.5)
             }
+            if device.isSmoothAutoFocusSupported { device.isSmoothAutoFocusEnabled = true }
             device.focusMode = mode
             if focusExposureLocked, desiredManualExposure == .auto {
                 applyAutoExposureOnQueue(to: device, at: CGPoint(x: 0.5, y: 0.5))
@@ -1582,14 +1583,29 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
     /// These metering helpers require the caller's device configuration lock.
     /// Set the point before the mode: changing the point alone does not start AF.
-    private func applyAutoFocusOnQueue(to device: AVCaptureDevice, at point: CGPoint) {
-        guard let mode = Self.preferredFocusUnlockMode(
-            supportsContinuous: device.isFocusModeSupported(.continuousAutoFocus),
-            supportsAuto: device.isFocusModeSupported(.autoFocus)
-        ) else { return }
-        if device.isFocusPointOfInterestSupported {
-            device.focusPointOfInterest = point
-        }
+    static func preferredTapFocusMode(supportsAuto: Bool, supportsContinuous: Bool) -> AVCaptureDevice.FocusMode? {
+        if supportsAuto { return .autoFocus }
+        if supportsContinuous { return .continuousAutoFocus }
+        return nil
+    }
+
+    private func applyAutoFocusOnQueue(to device: AVCaptureDevice, at point: CGPoint, isUserInitiated: Bool = false) {
+        let mode = isUserInitiated
+            ? Self.preferredTapFocusMode(
+                supportsAuto: device.isFocusModeSupported(.autoFocus),
+                supportsContinuous: device.isFocusModeSupported(.continuousAutoFocus)
+            )
+            : Self.preferredFocusUnlockMode(
+                supportsContinuous: device.isFocusModeSupported(.continuousAutoFocus),
+                supportsAuto: device.isFocusModeSupported(.autoFocus)
+            )
+        guard let mode else { return }
+        if device.isSmoothAutoFocusSupported { device.isSmoothAutoFocusEnabled = true }
+        let pointChanged = device.isFocusPointOfInterestSupported && device.focusPointOfInterest != point
+        // Repeated capability refreshes must not restart a settled lens. An
+        // explicit tap still performs a new one-shot focus at the same point.
+        guard isUserInitiated || pointChanged || device.focusMode != mode else { return }
+        if pointChanged { device.focusPointOfInterest = point }
         device.focusMode = mode
     }
 

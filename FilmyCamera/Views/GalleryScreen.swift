@@ -87,13 +87,17 @@ struct GalleryScreen: View {
         .onChange(of: photoLibrary.localSavedFrames.map(\.assetIdentifier)) { _, _ in
             clearSelectionIfUnavailable()
         }
-        .fullScreenCover(item: $selectedAsset) { asset in
-            GalleryDetailView(
-                asset: asset,
+        .fullScreenCover(isPresented: Binding(
+            get: { selectedAsset != nil },
+            set: { if !$0 { selectedAsset = nil } }
+        )) {
+            GalleryPager(
+                selection: $selectedAsset,
                 photoLibrary: photoLibrary,
                 onBackToCamera: onBackToCamera
             )
-                .presentationBackground(FilmyTheme.background)
+            .ignoresSafeArea()
+            .presentationBackground(.black)
         }
     }
 
@@ -485,12 +489,202 @@ private struct RollEmptyState: View {
     }
 }
 
+/// One page on either side is sufficient for interactive native paging. Never
+/// retain a decoded full-screen image for every frame in a large Roll.
+enum GalleryPagingPolicy {
+    static func neighbor(of index: Int, offset: Int, count: Int) -> Int? {
+        guard count > 0, (0..<count).contains(index), offset == -1 || offset == 1 else { return nil }
+        if offset == -1 { return index > 0 ? index - 1 : nil }
+        return index < count - 1 ? index + 1 : nil
+    }
+
+    static func retainedIndices(around index: Int, count: Int) -> Range<Int> {
+        guard count > 0, (0..<count).contains(index) else { return 0..<0 }
+        let end = index < count - 1 ? index + 2 : count
+        return max(0, index - 1)..<end
+    }
+}
+
+/// UIKit owns the interactive horizontal slide and cancellation physics.
+/// Selection changes only after a completed transition, not during a drag.
+private struct GalleryPager: UIViewControllerRepresentable {
+    @Binding var selection: PhotoLibraryGalleryAsset?
+    @ObservedObject var photoLibrary: PhotoLibraryService
+    let onBackToCamera: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+
+    func makeUIViewController(context: Context) -> UIPageViewController {
+        let pager = UIPageViewController(
+            transitionStyle: .scroll,
+            navigationOrientation: .horizontal,
+            options: [.interPageSpacing: 16]
+        )
+        pager.view.backgroundColor = .black
+        pager.view.accessibilityIdentifier = "gallery-pager"
+        pager.dataSource = context.coordinator
+        pager.delegate = context.coordinator
+        context.coordinator.pager = pager
+        context.coordinator.synchronize(with: self)
+        return pager
+    }
+
+    func updateUIViewController(_ pager: UIPageViewController, context: Context) {
+        context.coordinator.synchronize(with: self)
+    }
+
+    static func dismantleUIViewController(_ pager: UIPageViewController, coordinator: Coordinator) {
+        pager.dataSource = nil
+        pager.delegate = nil
+        coordinator.pages.removeAll()
+        coordinator.pager = nil
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, UIPageViewControllerDataSource, UIPageViewControllerDelegate {
+        var parent: GalleryPager
+        weak var pager: UIPageViewController?
+        var pages: [String: GalleryPageController] = [:]
+        private var assets: [PhotoLibraryGalleryAsset] = []
+        private var indices: [String: Int] = [:]
+        private var isTransitioning = false
+        private var activeID: String?
+
+        init(parent: GalleryPager) { self.parent = parent }
+
+        func synchronize(with parent: GalleryPager) {
+            self.parent = parent
+            guard !isTransitioning, let pager, let selection = parent.selection else { return }
+            assets = parent.photoLibrary.galleryAssets
+            indices = Dictionary(uniqueKeysWithValues: assets.enumerated().map { ($0.element.id, $0.offset) })
+            guard let index = indices[selection.id] else { return }
+            let current = pager.viewControllers?.first as? GalleryPageController
+            if current?.assetIdentifier != selection.id {
+                pager.setViewControllers([page(at: index)], direction: .forward, animated: false)
+            } else if let current {
+                // A Photos permission change may replace an asset with its
+                // cached representation. Refresh that source without paging.
+                current.rootView = detail(for: assets[index])
+            }
+            finishSelection(at: index)
+        }
+
+        private func detail(for asset: PhotoLibraryGalleryAsset) -> GalleryDetailView {
+            GalleryDetailView(
+                asset: asset,
+                photoLibrary: parent.photoLibrary,
+                onBackToCamera: parent.onBackToCamera,
+                onClose: { [weak self] in self?.parent.selection = nil },
+                onZoomChanged: { [weak self] zoomed in
+                    guard let self,
+                          (self.pager?.viewControllers?.first as? GalleryPageController)?.assetIdentifier == asset.id else { return }
+                    self.pager?.view.subviews.compactMap { $0 as? UIScrollView }.forEach {
+                        $0.isScrollEnabled = !zoomed
+                    }
+                },
+                onPreviousPhoto: { [weak self] in self?.move(by: -1) },
+                onNextPhoto: { [weak self] in self?.move(by: 1) }
+            )
+        }
+
+        private func page(at index: Int) -> GalleryPageController {
+            let asset = assets[index]
+            if let existing = pages[asset.id] { return existing }
+            let controller = GalleryPageController(assetIdentifier: asset.id, rootView: detail(for: asset))
+            controller.view.backgroundColor = .black
+            controller.view.accessibilityElementsHidden = true
+            pages[asset.id] = controller
+            return controller
+        }
+
+        private func adjacent(to controller: UIViewController, offset: Int) -> UIViewController? {
+            guard let controller = controller as? GalleryPageController,
+                  let index = indices[controller.assetIdentifier],
+                  let next = GalleryPagingPolicy.neighbor(of: index, offset: offset, count: assets.count) else { return nil }
+            return page(at: next)
+        }
+
+        func pageViewController(_ pageViewController: UIPageViewController, viewControllerBefore controller: UIViewController) -> UIViewController? {
+            adjacent(to: controller, offset: -1)
+        }
+
+        func pageViewController(_ pageViewController: UIPageViewController, viewControllerAfter controller: UIViewController) -> UIViewController? {
+            adjacent(to: controller, offset: 1)
+        }
+
+        func pageViewController(_ pageViewController: UIPageViewController, willTransitionTo pendingViewControllers: [UIViewController]) {
+            isTransitioning = true
+        }
+
+        func pageViewController(
+            _ pageViewController: UIPageViewController,
+            didFinishAnimating finished: Bool,
+            previousViewControllers: [UIViewController],
+            transitionCompleted completed: Bool
+        ) {
+            isTransitioning = false
+            guard parent.selection != nil, pager != nil,
+                  let current = pageViewController.viewControllers?.first as? GalleryPageController,
+                  let index = indices[current.assetIdentifier] else { return }
+            // An aborted drag still points at the original controller.
+            parent.selection = assets[index]
+            synchronize(with: parent)
+        }
+
+        private func move(by offset: Int) {
+            guard !isTransitioning, let pager,
+                  let current = pager.viewControllers?.first as? GalleryPageController,
+                  let index = indices[current.assetIdentifier],
+                  let next = GalleryPagingPolicy.neighbor(of: index, offset: offset, count: assets.count) else { return }
+            isTransitioning = true
+            pager.setViewControllers(
+                [page(at: next)], direction: offset > 0 ? .forward : .reverse,
+                animated: !UIAccessibility.isReduceMotionEnabled
+            ) { [weak self] finished in
+                guard let self, self.pager != nil, self.parent.selection != nil else { return }
+                self.isTransitioning = false
+                if finished { self.parent.selection = self.assets[next] }
+                self.synchronize(with: self.parent)
+            }
+        }
+
+        private func finishSelection(at index: Int) {
+            let currentID = assets[index].id
+            if activeID != currentID {
+                pager?.view.subviews.compactMap { $0 as? UIScrollView }.forEach { $0.isScrollEnabled = true }
+                activeID = currentID
+            }
+            let retainedIDs = Set(GalleryPagingPolicy.retainedIndices(around: index, count: assets.count).map { assets[$0].id })
+            pages = pages.filter { retainedIDs.contains($0.key) }
+            for (id, controller) in pages { controller.view.accessibilityElementsHidden = id != currentID }
+            pager?.view.accessibilityValue = "\(index + 1) of \(assets.count)"
+        }
+    }
+}
+
+@MainActor
+private final class GalleryPageController: UIHostingController<GalleryDetailView> {
+    let assetIdentifier: String
+
+    init(assetIdentifier: String, rootView: GalleryDetailView) {
+        self.assetIdentifier = assetIdentifier
+        super.init(rootView: rootView)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("Use init(assetIdentifier:rootView:)") }
+}
+
 private struct GalleryDetailView: View {
     let asset: PhotoLibraryGalleryAsset
     @ObservedObject var photoLibrary: PhotoLibraryService
     let onBackToCamera: () -> Void
 
-    @Environment(\.dismiss) private var dismiss
+    let onClose: () -> Void
+    let onZoomChanged: (Bool) -> Void
+    let onPreviousPhoto: () -> Void
+    let onNextPhoto: () -> Void
+
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var image: UIImage?
     @State private var isLoadingImage = false
@@ -589,7 +783,8 @@ private struct GalleryDetailView: View {
                                 }
                                 .onEnded { _ in
                                     dragBaseOffset = imageOffset
-                                }
+                                },
+                            including: zoomScale > 1 ? .all : .subviews
                         )
                         .onTapGesture(count: 2, perform: resetImageTransform)
                 }
@@ -615,6 +810,10 @@ private struct GalleryDetailView: View {
                 }
             }
         }
+        .onChange(of: zoomScale) { _, scale in onZoomChanged(scale > 1) }
+        .onDisappear { onZoomChanged(false) }
+        .accessibilityAction(named: "Previous photo", onPreviousPhoto)
+        .accessibilityAction(named: "Next photo", onNextPhoto)
         .task(id: imageTaskID) {
             await loadImage()
         }
@@ -703,11 +902,11 @@ private struct GalleryDetailView: View {
     private var detailToolbar: some View {
         HStack(spacing: 10) {
             FilmyIconButton(systemName: "xmark", accessibilityLabel: "Close frame") {
-                dismiss()
+                onClose()
             }
 
             BackToCameraButton(accessibilityIdentifier: "frame-back-to-camera") {
-                dismiss()
+                onClose()
                 onBackToCamera()
             }
 
@@ -759,7 +958,7 @@ private struct GalleryDetailView: View {
             isDeleting = false
             switch result {
             case .success:
-                dismiss()
+                onClose()
             case .failure(let error):
                 actionErrorMessage = error.localizedDescription
             }
