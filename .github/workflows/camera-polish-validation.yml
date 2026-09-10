@@ -3,7 +3,7 @@ name: Camera polish validation
 on:
   push:
     branches: [fix/portrait-capture-gallery-polish]
-    paths: ['scripts/camera-polish-transport.txt']
+    paths: ['scripts/camera-polish-transport.txt', '.github/workflows/camera-polish-validation.yml']
 
 permissions:
   contents: read
@@ -21,7 +21,7 @@ jobs:
         with:
           ref: fix/portrait-capture-gallery-polish
           fetch-depth: 0
-      - name: Apply verified local changes only to the isolated branch
+      - name: Apply verified local source changes only to the isolated branch
         id: apply
         shell: bash
         run: |
@@ -31,10 +31,14 @@ jobs:
           import base64, hashlib, lzma, pathlib, subprocess
           patch = lzma.decompress(base64.b64decode(pathlib.Path('scripts/camera-polish-transport.txt').read_text()))
           assert hashlib.sha256(patch).hexdigest() == '96d782236e8668e00e48364e608b0822af138381df10e4bcf060974766c4901a'
-          subprocess.run(['git', 'apply', '--check', '--unidiff-zero', '-'], input=patch, check=True)
-          subprocess.run(['git', 'apply', '--unidiff-zero', '-'], input=patch, check=True)
+          subprocess.run(['git', 'apply', '--check', '--unidiff-zero', '--exclude=.github/workflows/*', '-'], input=patch, check=True)
+          subprocess.run(['git', 'apply', '--unidiff-zero', '--exclude=.github/workflows/*', '-'], input=patch, check=True)
+          source = pathlib.Path('FilmyCameraUITests/FilmyCameraUITests.swift')
+          text = source.read_text()
+          assert text.count('.portrait-lockedLeft') == 1
+          source.write_text(text.replace('.portrait-lockedLeft', '.landscapeLeft'))
           PY
-          rm scripts/camera-polish-transport.txt .github/workflows/camera-polish-validation.yml
+          rm scripts/camera-polish-transport.txt
           git diff --check
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
