@@ -125,6 +125,7 @@ final class CameraViewModel: ObservableObject {
             .recipes.values.first(where: { $0.id == base.id }) else {
             return base
         }
+        if isSupersededG7XDefault(saved, parent: base) { return base }
         var resolved = base
         resolved.applyControlValues(from: saved)
         resolved.markUserModified(parentRecipeID: base.id)
@@ -351,6 +352,7 @@ final class CameraViewModel: ObservableObject {
             guard let parent = Self.builtInRecipesByID[savedRecipe.id] else {
                 continue
             }
+            if Self.isSupersededG7XDefault(savedRecipe, parent: parent) { continue }
             var migratedRecipe = parent
             migratedRecipe.applyControlValues(from: savedRecipe)
             migratedRecipe.markUserModified(parentRecipeID: parent.id)
@@ -361,6 +363,27 @@ final class CameraViewModel: ObservableObject {
         if decoded.shouldRewrite || migratedRecipes != decoded.recipes {
             persistRecipeOverrides()
         }
+    }
+
+    /// A slider round trip could persist the v11 default as a customization.
+    /// Upgrade only that unchanged look; intentional edits remain overrides.
+    nonisolated private static func isSupersededG7XDefault(
+        _ saved: FilmRecipe,
+        parent: FilmRecipe
+    ) -> Bool {
+        guard saved.id == "g7x-compact",
+              saved.filmBase == .compactDigital,
+              saved.provenance.rendererVersion == "core-image-parametric-v11" else { return false }
+        var previousDefault = parent
+        previousDefault.exposure = 0.12
+        previousDefault.saturation = 1.12
+        previousDefault.contrast = 1.10
+        return saved.dynamicRange == previousDefault.dynamicRange
+            && saved.dRangePriority == previousDefault.dRangePriority
+            && saved.whiteBalance.mode == previousDefault.whiteBalance.mode
+            && FilmRecipe.Control.allCases.allSatisfy {
+                abs($0.value(in: saved) - $0.value(in: previousDefault)) < 0.000_001
+            }
     }
 
     nonisolated static func decodeRecipeOverrides(

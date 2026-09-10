@@ -577,6 +577,7 @@ public final class FilmRenderer {
 
         output = applyDynamicRange(to: output, recipe: safeRecipe)
         output = applyExposureAndTone(to: output, recipe: safeRecipe)
+        output = applyRecipeCharacter(to: output, recipe: safeRecipe)
         output = applyCompactDigitalTone(
             to: output,
             recipe: safeRecipe,
@@ -844,6 +845,67 @@ public final class FilmRenderer {
         return filter.outputImage?.cropped(to: image.extent) ?? image
     }
 
+    /// Strengthen each family's existing character across preview, capture,
+    /// and imported photos. Keep the neutral utility base neutral, and let
+    /// G7 X use its independently reviewed compact-camera treatment.
+    private static func applyRecipeCharacter(to image: CIImage, recipe: FilmRecipe) -> CIImage {
+        guard recipe.filmBase != .compactDigital,
+              recipe.filmBase != .standard || recipe.creativeCollection != nil else { return image }
+
+        let levels: [CGFloat]
+        let saturation: Double
+        if recipe.creativeCollection == .instant {
+            // Instant film keeps lifted blacks and compressed whites.
+            levels = [0.045, 0.20, 0.55, 0.80, 0.94]
+            saturation = 0.95
+        } else {
+            switch recipe.filmBase {
+            case .standard, .provia, .realaAce, .proNegative:
+                levels = [0.0, 0.13, 0.49, 0.85, 0.99]
+                saturation = 1.08
+            case .classicChrome:
+                levels = [0.014, 0.14, 0.49, 0.80, 0.95]
+                saturation = 0.94
+            case .velvia:
+                levels = [0.0, 0.115, 0.49, 0.87, 1.0]
+                saturation = 1.08
+            case .astia, .proNegStandard:
+                levels = [0.015, 0.16, 0.51, 0.83, 0.97]
+                saturation = 1.04
+            case .eterna:
+                levels = [0.02, 0.13, 0.45, 0.76, 0.93]
+                saturation = 0.94
+            case .eternaBleachBypass:
+                levels = [0.003, 0.10, 0.46, 0.83, 0.96]
+                saturation = 0.90
+            case .classicNegative:
+                levels = [0.008, 0.11, 0.47, 0.84, 0.97]
+                saturation = 1.04
+            case .nostalgicNegative:
+                levels = [0.025, 0.16, 0.53, 0.84, 0.97]
+                saturation = 1.06
+            case .acros, .acrosYellow, .acrosRed, .acrosGreen, .monochrome:
+                levels = [0.0, 0.10, 0.46, 0.86, 1.0]
+                saturation = 1
+            case .sepia:
+                levels = [0.025, 0.14, 0.49, 0.81, 0.955]
+                saturation = 1
+            case .compactDigital:
+                return image
+            }
+        }
+        guard let curve = CIFilter(name: "CIToneCurve") else { return image }
+        curve.setValue(image, forKey: kCIInputImageKey)
+        for (index, x) in [CGFloat(0), 0.20, 0.50, 0.80, 1].enumerated() {
+            curve.setValue(CIVector(x: x, y: levels[index]), forKey: "inputPoint\(index)")
+        }
+        var output = curve.outputImage?.cropped(to: image.extent) ?? image
+        if saturation != 1 {
+            output = output.applyingFilter("CIColorControls", parameters: [kCIInputSaturationKey: saturation])
+        }
+        return output
+    }
+
     private static func applyCompactDigitalTone(
         to image: CIImage,
         recipe: FilmRecipe,
@@ -854,11 +916,9 @@ public final class FilmRenderer {
             return image
         }
 
-        // The default deliberately favors the social compact-camera outcome:
-        // richer ambient shadows, present portrait midtones, and a protected
-        // highlight shoulder. When flash actually fired, the stronger curve
-        // reinforces that bright-subject/dark-room separation without
-        // pretending flash lighting exists on a non-flash capture.
+        // Signature gives ambient captures deep shadows and lower midtones
+        // while retaining a bright shoulder. Flash keeps its separate subject-
+        // lifting curve; actual capture facts still determine that treatment.
         let points: [(CGFloat, CGFloat)] = captureContext.flashFired
             ? [
                 (0.00, 0.002),
@@ -869,9 +929,9 @@ public final class FilmRenderer {
             ]
             : [
                 (0.00, 0.004),
-                (0.18, 0.185),
-                (0.50, 0.560),
-                (0.80, 0.828),
+                (0.18, 0.100),
+                (0.50, 0.430),
+                (0.80, 0.810),
                 (1.00, 0.972)
             ]
 
@@ -1745,6 +1805,10 @@ public final class FilmRenderer {
                 * smoothstep(0.04, 0.34, chroma)
             let deepShadowWeight = 1 - smoothstep(0.04, 0.26, luma)
             let brightHighlightWeight = smoothstep(0.72, 0.98, luma)
+
+            // Signature warmth grows into the brighter tones instead of
+            // shifting the entire image's white balance.
+            nudge(0.035, 0.007, -0.030, by: smoothstep(0.45, 0.90, luma))
 
             // Deep shadows and near-white highlights carry less chroma than
             // the midtones. This avoids colorful shadow noise and hard color

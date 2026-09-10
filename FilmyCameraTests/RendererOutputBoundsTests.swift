@@ -262,11 +262,14 @@ final class RendererOutputBoundsTests: XCTestCase {
             proviaMagentaBias - 0.002,
             "Classic Chrome should selectively suppress magenta"
         )
-        XCTAssertGreaterThan(
-            Double(classicShadow[2] - classicShadow[0]),
-            Double(proviaShadow[2] - proviaShadow[0]) + 0.002,
-            "Classic Chrome should preserve cooler shadow separation"
-        )
+        // These looks now have deliberately different shadow brightness.
+        // Compare hue bias relative to each pixel's peak, so darkening a
+        // still-cool shadow is not mistaken for warming it.
+        func blueBias(_ pixel: [Float]) -> Double {
+            Double(pixel[2] - pixel[0]) / Double(max(0.0001, pixel[0], pixel[1], pixel[2]))
+        }
+        XCTAssertGreaterThan(blueBias(classicShadow), blueBias(proviaShadow) + 0.002,
+                             "Classic Chrome should preserve cooler shadow separation")
     }
 
     func testG7XCompactStrengthensBlueAndFoliageWithoutTintingNeutralGray() throws {
@@ -371,7 +374,7 @@ final class RendererOutputBoundsTests: XCTestCase {
         }
     }
 
-    func testG7XCompactToneCurveIsMonotonicAndOpensUsefulMidtones() throws {
+    func testG7XCompactToneCurveIsMonotonicAndDeepensAmbientTones() throws {
         let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
         let context = CIContext(options: FilmRenderer.testContextOptions)
         let compact = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == "g7x-compact" })
@@ -396,15 +399,15 @@ final class RendererOutputBoundsTests: XCTestCase {
             XCTAssertLessThan(lower, upper, "The compact tone response must remain monotonic")
         }
 
-        XCTAssertGreaterThan(
+        XCTAssertLessThan(
             renderedLuma(0.18, recipe: compact),
-            renderedLuma(0.18, recipe: neutral) + 0.005,
-            "The dedicated compact curve should recover useful shadow detail"
+            renderedLuma(0.18, recipe: neutral) - 0.005,
+            "The approved compact look should deepen ambient shadows"
         )
-        XCTAssertGreaterThan(
+        XCTAssertLessThan(
             renderedLuma(0.50, recipe: compact),
-            renderedLuma(0.50, recipe: neutral) + 0.005,
-            "The dedicated compact curve should give midtones JPEG-style presence"
+            renderedLuma(0.50, recipe: neutral) - 0.005,
+            "The approved compact look should lower ambient midtones"
         )
         XCTAssertLessThan(compactLevels.last ?? 1, 0.995, "Highlights should retain a shoulder before clipping")
     }
@@ -459,14 +462,12 @@ final class RendererOutputBoundsTests: XCTestCase {
         }
 
         let skin = rendered(CIColor(red: 0.70, green: 0.43, blue: 0.30, alpha: 1), recipe: compact)
-        let neutralSkin = rendered(CIColor(red: 0.70, green: 0.43, blue: 0.30, alpha: 1), recipe: neutral)
-        // The compact profile pushes skin toward peach/pink rather than tan:
-        // a little blue returns while the tone stays clearly rosy.
-        XCTAssertGreaterThan(
-            Double(skin[2]),
-            Double(neutralSkin[2]),
-            "Peach/pink skin keeps a little more blue than a plain warm render"
-        )
+        // Warm highlights can reduce blue relative to the neutral pipeline.
+        // Preserve channel detail and the warm hue instead of requiring the
+        // former, brighter look's absolute blue-channel value.
+        XCTAssertGreaterThan(Double(skin[2]), 0.04, "Warm skin must retain blue-channel detail")
+        XCTAssertGreaterThan(skin[1], skin[2], "Warm skin must retain its red/yellow hue")
+        XCTAssertLessThan(skin[0], 0.99, "Warm skin must not clip the red channel")
         XCTAssertGreaterThan(
             Double(skin[0] - skin[1]),
             0.25,

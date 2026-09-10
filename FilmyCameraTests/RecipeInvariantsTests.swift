@@ -34,7 +34,7 @@ final class RecipeInvariantsTests: XCTestCase {
     private var previousRecipeOverrides: Data?
 
     func testRendererVersionTracksCurrentParametricPipeline() {
-        XCTAssertEqual(FilmRecipe.rendererVersion, "core-image-parametric-v11")
+        XCTAssertEqual(FilmRecipe.rendererVersion, "core-image-parametric-v12")
     }
 
     override func setUp() {
@@ -315,11 +315,11 @@ final class RecipeInvariantsTests: XCTestCase {
         XCTAssertEqual(recipe.dynamicRange, .auto)
         XCTAssertEqual(recipe.dRangePriority, .weak)
         XCTAssertEqual(recipe.whiteBalance.mode, .ambiencePriority)
-        XCTAssertEqual(recipe.exposure, 0.12, accuracy: 0.000_001)
+        XCTAssertEqual(recipe.exposure, -0.15, accuracy: 0.000_001)
         XCTAssertEqual(recipe.whiteBalance.temperature, 0.012, accuracy: 0.000_001)
         XCTAssertEqual(recipe.whiteBalance.tint, 0.012, accuracy: 0.000_001)
-        XCTAssertEqual(recipe.saturation, 1.12, accuracy: 0.000_001)
-        XCTAssertEqual(recipe.contrast, 1.10, accuracy: 0.000_001)
+        XCTAssertEqual(recipe.saturation, 1.16, accuracy: 0.000_001)
+        XCTAssertEqual(recipe.contrast, 1.14, accuracy: 0.000_001)
         XCTAssertGreaterThan(recipe.sharpness, 0)
         XCTAssertEqual(recipe.noiseReduction, 0.20, accuracy: 0.000_001)
         XCTAssertEqual(recipe.clarity, -0.08, accuracy: 0.000_001)
@@ -555,6 +555,51 @@ final class RecipeInvariantsTests: XCTestCase {
 
         XCTAssertEqual(selectedID, CameraViewModel.defaultRecipeID)
         XCTAssertEqual(selectedRecipe.id, "g7x-compact")
+    }
+
+    @MainActor
+    func testUnchangedV11G7XOverrideUpgradesAtLaunchAndPersists() throws {
+        let current = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == "g7x-compact" })
+        let previous = try persistedV11G7X()
+        UserDefaults.standard.set(current.id, forKey: selectedRecipeKey)
+        UserDefaults.standard.set(try JSONEncoder().encode([current.id: previous]), forKey: recipeOverridesKey)
+
+        XCTAssertEqual(CameraViewModel.launchRecipe(), current)
+        let model = CameraViewModel()
+        XCTAssertEqual(model.selectedRecipe, current)
+        XCTAssertFalse(model.isCustomized(current))
+        XCTAssertEqual(CameraViewModel().selectedRecipe, current)
+    }
+
+    @MainActor
+    func testDeliberateV11G7XCustomControlsSurviveUpgrade() throws {
+        var previous = try persistedV11G7X()
+        previous.exposure = 0.75
+        previous.whiteBalance.mode = .daylight
+        UserDefaults.standard.set(previous.id, forKey: selectedRecipeKey)
+        UserDefaults.standard.set(try JSONEncoder().encode([previous.id: previous]), forKey: recipeOverridesKey)
+
+        let launch = CameraViewModel.launchRecipe()
+        let model = CameraViewModel()
+        XCTAssertEqual(launch.exposure, 0.75)
+        XCTAssertEqual(model.selectedRecipe.exposure, 0.75)
+        XCTAssertEqual(model.selectedRecipe.whiteBalance.mode, .daylight)
+        XCTAssertEqual(model.selectedRecipe.saturation, previous.saturation)
+        XCTAssertEqual(model.selectedRecipe.provenance.rendererVersion, FilmRecipe.rendererVersion)
+    }
+
+    private func persistedV11G7X() throws -> FilmRecipe {
+        var old = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == "g7x-compact" })
+        old.exposure = 0.12
+        old.saturation = 1.12
+        old.contrast = 1.10
+        old.whiteBalance.tint = 0.011999964
+        old.markUserModified(parentRecipeID: old.id)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(old)) as? [String: Any])
+        var provenance = try XCTUnwrap(object["provenance"] as? [String: Any])
+        provenance["rendererVersion"] = "core-image-parametric-v11"
+        object["provenance"] = provenance
+        return try JSONDecoder().decode(FilmRecipe.self, from: JSONSerialization.data(withJSONObject: object))
     }
 
     func testUnknownPersistedSelectionFallsBackToDefaultRecipe() async {

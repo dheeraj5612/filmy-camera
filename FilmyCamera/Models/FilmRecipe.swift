@@ -13,7 +13,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     /// adds the canonical camera mode controls introduced by the fidelity pass;
     /// version 5 adds persisted Kelvin white-balance control.
     public static let currentSchemaVersion = 5
-    public static let rendererVersion = "core-image-parametric-v11"
+    public static let rendererVersion = "core-image-parametric-v12"
 
     /// The Kelvin value that renders as "as shot". Phone frames are already
     /// balanced for their scene, so a Color Temperature setting equal to this
@@ -1899,16 +1899,15 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         FilmRecipe(
             id: "g7x-compact",
             name: "G7 X Compact",
-            subtitle: "Bright portraits / social pop",
+            subtitle: "Rich contrast / warm highlights",
             filmBase: .compactDigital,
-            exposure: 0.12,
-            // The dedicated compact stage still carries the measured Canon-
-            // style response. These social-reference defaults intentionally
-            // lean harder into bright subjects, rich darks, rosy skin, and
-            // compact-camera color without copying a sample image.
+            exposure: -0.15,
+            // The Signature look combines deeper ambient tones, richer color,
+            // and warm highlights. It is an original stylized approximation,
+            // not a measured Canon camera response.
             tone: Tone(highlight: 0.12, shadow: 0.16),
-            saturation: 1.12,
-            contrast: 1.1,
+            saturation: 1.16,
+            contrast: 1.14,
             dynamicRange: .auto,
             dRangePriority: .weak,
             whiteBalance: WhiteBalanceShift(
