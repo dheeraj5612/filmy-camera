@@ -468,12 +468,33 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertTrue(waitForLiveShutter(in: app), "The portrait-locked preview must render fresh frames")
         #endif
 
+        guard let visibleWindow = app.windows.allElementsBoundByIndex.first(where: { $0.exists && $0.isHittable }) else {
+            XCTFail("The portrait camera shell must expose a visible app window after rotation")
+            return
+        }
+        XCTAssertGreaterThan(
+            visibleWindow.frame.height,
+            visibleWindow.frame.width,
+            "The visible app window must remain portrait after device rotation"
+        )
         let currentLook = app.buttons["recipe-menu"]
         let roll = app.buttons["Open roll"]
         let importPhoto = app.buttons["import-photo"]
         for (element, name) in [(currentLook, "Current look"), (roll, "Roll"), (importPhoto, "Import")] {
+            let stable = waitForStableHittableFrame(element, timeout: 10, within: visibleWindow)
+            if !stable {
+                let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                screenshot.name = "portrait-rotation-\(name)-failure"
+                screenshot.lifetime = .keepAlways
+                add(screenshot)
+                let hierarchy = XCTAttachment(string: app.debugDescription)
+                hierarchy.name = "portrait-rotation-\(name)-hierarchy"
+                hierarchy.lifetime = .keepAlways
+                add(hierarchy)
+            }
+            XCTAssertTrue(stable, "Portrait \(name) must settle to a hittable 44pt frame after rotation")
             assertMinimumHitTarget(element, named: "Portrait " + name)
-            assertContained(element, in: app, named: name)
+            assertContained(element, in: visibleWindow, named: name)
         }
         XCTAssertFalse(app.buttons["camera-tab"].exists)
         attachScreenshot(named: "camera-portrait-locked")
@@ -482,8 +503,8 @@ final class FilmyCameraUITests: XCTestCase {
         let close = app.buttons["recipe-drawer-close"]
         assertMinimumHitTarget(tune, named: "Portrait Tune")
         assertMinimumHitTarget(close, named: "Portrait close picker")
-        assertContained(tune, in: app, named: "Tune")
-        assertContained(close, in: app, named: "Close picker")
+        assertContained(tune, in: visibleWindow, named: "Tune")
+        assertContained(close, in: visibleWindow, named: "Close picker")
         XCTAssertFalse(tune.frame.intersects(close.frame))
         attachScreenshot(named: "camera-portrait-locked-look-drawer")
         close.tap()
@@ -1233,7 +1254,7 @@ final class FilmyCameraUITests: XCTestCase {
         assertMinimumHitTarget(target.buttons["recipe-drawer-close"], named: "Close look picker")
     }
 
-    private func assertContained(_ element: XCUIElement, in target: XCUIApplication, named: String) {
+    private func assertContained(_ element: XCUIElement, in target: XCUIElement, named: String) {
         let tolerance = target.frame.insetBy(dx: -1, dy: -1)
         XCTAssertTrue(tolerance.contains(element.frame), named + " must remain inside the visible screen")
     }

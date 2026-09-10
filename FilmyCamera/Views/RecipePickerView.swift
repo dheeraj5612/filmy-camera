@@ -386,7 +386,7 @@ struct CurrentRecipeButton: View {
                     regularLabel
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: compactLayout ? 58 : FilmyTheme.minimumHitTarget, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: compactLayout ? 64 : FilmyTheme.minimumHitTarget, alignment: .leading)
             .padding(.horizontal, 11)
             .background(FilmyTheme.backgroundRaised, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
             .overlay {

@@ -1,29 +1,29 @@
-Replace the placeholder with the latest-OS physical-device recording/reference before submission.
-
-[RECORDING PLACEHOLDER — physical-device recording/testing is pending verification. Use portrait/full-screen on iPad.]
-
-Recording checklist (pending): begin at Home; launch Filmy Camera; choose a look; capture; show the automatic save; open Roll; open the saved photo; import the café sample with Apple's photo picker; compare/select Original; choose Instant Print; Save. Add the verified recording or review attachment after the physical-device run. This draft makes no claim that the run is complete.
+App Review response draft — replace the recording placeholder after final physical verification. This draft makes no claim that the recording or all tests are complete.
 
 1. Device launch and representative flow
 
-The recording flow is launch/setup, Camera permission, look/control selection, capture, automatic Photos save, and Roll. Camera capture has no Retake/Keep editor. Import uses Apple's system picker: choose a photo, compare Original or adjust the look, choose Photo or Instant Print, and Save. The recording is not yet available; this makes no device-testing claim.
+[PENDING ATTACHMENT: <FINAL_FLOW8C_MP4_FILENAME>.mp4, recorded on an iPad Pro 11-inch (2nd generation), iPadOS 26.6.2.]
+
+The representative flow is: launch from Home, allow Camera if prompted, choose a look, capture a photo, observe the automatic Photos save, open Filmy Camera’s Roll, open the saved frame, import a photo from the device Photo Library with Apple’s system picker, compare the filtered result with Original, choose Instant Print, and Save. Camera captures save automatically without a Retake/Keep screen. Imported photos use an explicit review-and-save step.
 
 2. Purpose, audience, and value
 
-Filmy Camera is a native iPhone/iPad camera and local editor for people who want a chosen style before shooting or importing. It addresses generic output and opaque filters with editable recipes, Original comparison, and clear saved results. It includes 128 editable looks, a G7 X Compact approximation, search/favorites, timer/framing aids, import up to 40 MP, supported-camera manual controls, full-resolution processing, and Instant Print.
+Filmy Camera is a native iPhone/iPad camera and local photo editor for people who want a chosen visual style while shooting or importing. It provides editable recipes, an Original comparison, and clear saved results. The app includes 128 editable looks, a G7 X Compact approximation, search and favorites, framing aids, import up to 40 MP, supported-camera manual controls, full-resolution processing, and Instant Print.
 
 3. Setup, access, and main features
 
-Filmy Camera requires iOS 17+ on iPhone/iPad. No account, login, credentials, or sample data are required; first launch presents recipe onboarding. Camera access is requested when Camera opens. Camera captures process and save to Photos automatically; imported photos open review and require Save. Import uses Apple's system picker and shares only the selected photo. Photos access is requested when saving or via Allow Photos in Roll; Roll reads frames saved by Filmy Camera. All features are free: no purchase, subscription, trial, paywall, or watermark. Pro controls follow hardware. The café image is an optional local swatch.
+Filmy Camera requires iOS 17 or later on iPhone or iPad. No account, login, credentials, sample-data setup, purchase, subscription, trial, or paywall is required; first launch provides recipe onboarding. Camera permission is requested when the camera is used. Camera captures save automatically to Photos. Imported photos are selected through Apple’s system photo picker, then reviewed and saved explicitly. Photos access is requested on save or through “Allow Photos” in Roll; Roll reads frames saved by Filmy Camera. Pro controls depend on the device’s camera hardware. The optional café image is not required for setup.
+
+The app has no account deletion flow because it creates no accounts. It has no public user-generated content, social feed, messaging, reporting, blocking, or moderation workflow.
 
 4. External services, tools, and platforms
 
-Core capture/rendering are on-device with Apple's AVFoundation, Core Image, Core Graphics, Metal/MetalKit, ImageIO, PhotosUI/PhotoKit, Core Motion, SwiftUI/UIKit, and FileManager/UserDefaults. There is no app-owned backend/API, CloudKit, cloud service, authentication, analytics, advertising, crash reporting, payment/subscription service, or third-party runtime SDK. Apple Photos/iCloud sync and system share/export destinations remain under user settings/actions. Public Fujifilm, Canon, Fuji X Weekly, support, and privacy links are informational and do not deliver core functionality.
+Core capture, editing, and rendering run on-device with Apple system frameworks. The app has no app-owned backend or API, cloud service operated by the app, authentication, analytics, advertising, crash-reporting, payment/subscription service, or third-party network SDK. Apple Photos/iCloud synchronization and user-invoked share/export destinations are controlled by the user and the operating system; they are not app-operated backend services. Public reference links are informational and do not deliver core functionality.
 
 5. Regional differences
 
-Where distributed, it has no country/region gates, regional content, localized pricing, or eligibility rules. Features are consistent apart from localized permission UI and device/hardware differences; Pro follows active hardware. It supports iPhone/iPad; use portrait full-screen for iPad review.
+There are no intentional country or region gates, regional content rules, or localized pricing/eligibility rules. Behavior is consistent where distributed, apart from localized system permission UI, system share destinations, and device-dependent Pro controls. iPad supports portrait orientation; behavior is otherwise the same across supported regions and devices subject to hardware capabilities.
 
 6. Regulated industry and third-party material
 
-Filmy Camera is a creative camera/photo utility with no medical, financial, legal, gambling, or other regulated service. Recipes are app-authored parametric implementations informed by public Fujifilm/Canon documentation and community settings; there is no hardware calibration. It ships no third-party photographs, logos, firmware, proprietary LUTs, calibration data, or proprietary code, and is not affiliated with Fujifilm, Canon, or Fuji X Weekly. The café sample is original and contains no people, brands, or private photos. No protected third-party asset is bundled and no authorization material applies.
+Filmy Camera is a creative camera/photo utility and does not provide medical, financial, legal, gambling, or another regulated service. Its recipes are app-authored parametric implementations. No firmware, LUTs, or camera calibration data are bundled. The optional café sample is original and team-generated. The app is not affiliated with Fujifilm, Canon, or Fuji X Weekly.
