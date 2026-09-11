@@ -34,7 +34,7 @@ final class RecipeInvariantsTests: XCTestCase {
     private var previousRecipeOverrides: Data?
 
     func testRendererVersionTracksCurrentParametricPipeline() {
-        XCTAssertEqual(FilmRecipe.rendererVersion, "core-image-parametric-v12")
+        XCTAssertEqual(FilmRecipe.rendererVersion, "core-image-parametric-v13")
     }
 
     override func setUp() {
@@ -315,14 +315,14 @@ final class RecipeInvariantsTests: XCTestCase {
         XCTAssertEqual(recipe.dynamicRange, .auto)
         XCTAssertEqual(recipe.dRangePriority, .weak)
         XCTAssertEqual(recipe.whiteBalance.mode, .ambiencePriority)
-        XCTAssertEqual(recipe.exposure, -0.15, accuracy: 0.000_001)
-        XCTAssertEqual(recipe.whiteBalance.temperature, 0.012, accuracy: 0.000_001)
-        XCTAssertEqual(recipe.whiteBalance.tint, 0.012, accuracy: 0.000_001)
-        XCTAssertEqual(recipe.saturation, 1.16, accuracy: 0.000_001)
-        XCTAssertEqual(recipe.contrast, 1.14, accuracy: 0.000_001)
-        XCTAssertGreaterThan(recipe.sharpness, 0)
-        XCTAssertEqual(recipe.noiseReduction, 0.20, accuracy: 0.000_001)
-        XCTAssertEqual(recipe.clarity, -0.08, accuracy: 0.000_001)
+        XCTAssertEqual(recipe.exposure, 0.05, accuracy: 0.000_001)
+        XCTAssertEqual(recipe.whiteBalance.temperature, 0.006, accuracy: 0.000_001)
+        XCTAssertEqual(recipe.whiteBalance.tint, 0.006, accuracy: 0.000_001)
+        XCTAssertEqual(recipe.saturation, 1.06, accuracy: 0.000_001)
+        XCTAssertEqual(recipe.contrast, 1.10, accuracy: 0.000_001)
+        XCTAssertEqual(recipe.sharpness, 0.05, accuracy: 0.000_001)
+        XCTAssertEqual(recipe.noiseReduction, 0.04, accuracy: 0.000_001)
+        XCTAssertEqual(recipe.clarity, 0, accuracy: 0.000_001)
         XCTAssertEqual(recipe.halation, 0)
         XCTAssertEqual(recipe.provenance, FilmRecipe.g7XProvenance)
         XCTAssertTrue(recipe.provenance.disclaimer.contains("one-inch sensor"))
@@ -572,6 +572,19 @@ final class RecipeInvariantsTests: XCTestCase {
     }
 
     @MainActor
+    func testUnchangedV12G7XOverrideUpgradesAtLaunch() throws {
+        let current = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == "g7x-compact" })
+        let previous = try persistedV12G7X()
+        UserDefaults.standard.set(current.id, forKey: selectedRecipeKey)
+        UserDefaults.standard.set(try JSONEncoder().encode([current.id: previous]), forKey: recipeOverridesKey)
+
+        XCTAssertEqual(CameraViewModel.launchRecipe(), current)
+        let model = CameraViewModel()
+        XCTAssertEqual(model.selectedRecipe, current)
+        XCTAssertFalse(model.isCustomized(current))
+    }
+
+    @MainActor
     func testDeliberateV11G7XCustomControlsSurviveUpgrade() throws {
         var previous = try persistedV11G7X()
         previous.exposure = 0.75
@@ -591,13 +604,53 @@ final class RecipeInvariantsTests: XCTestCase {
     private func persistedV11G7X() throws -> FilmRecipe {
         var old = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == "g7x-compact" })
         old.exposure = 0.12
+        old.tone = FilmRecipe.Tone(highlight: 0.12, shadow: 0.16)
         old.saturation = 1.12
         old.contrast = 1.10
-        old.whiteBalance.tint = 0.011999964
+        old.whiteBalance = FilmRecipe.WhiteBalanceShift(
+            temperature: 0.012,
+            tint: 0.012,
+            mode: .ambiencePriority,
+            kelvin: FilmRecipe.asShotKelvin
+        )
+        old.sharpness = 0.10
+        old.noiseReduction = 0.20
+        old.clarity = -0.08
+        old.grain = 0
+        old.grainSize = 0.75
+        old.vignette = 0
+        old.halation = 0
         old.markUserModified(parentRecipeID: old.id)
         var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(old)) as? [String: Any])
         var provenance = try XCTUnwrap(object["provenance"] as? [String: Any])
         provenance["rendererVersion"] = "core-image-parametric-v11"
+        object["provenance"] = provenance
+        return try JSONDecoder().decode(FilmRecipe.self, from: JSONSerialization.data(withJSONObject: object))
+    }
+
+    private func persistedV12G7X() throws -> FilmRecipe {
+        var old = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == "g7x-compact" })
+        old.exposure = -0.15
+        old.tone = FilmRecipe.Tone(highlight: 0.12, shadow: 0.16)
+        old.saturation = 1.16
+        old.contrast = 1.14
+        old.whiteBalance = FilmRecipe.WhiteBalanceShift(
+            temperature: 0.012,
+            tint: 0.012,
+            mode: .ambiencePriority,
+            kelvin: FilmRecipe.asShotKelvin
+        )
+        old.sharpness = 0.10
+        old.noiseReduction = 0.20
+        old.clarity = -0.08
+        old.grain = 0
+        old.grainSize = 0.75
+        old.vignette = 0
+        old.halation = 0
+        old.markUserModified(parentRecipeID: old.id)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(old)) as? [String: Any])
+        var provenance = try XCTUnwrap(object["provenance"] as? [String: Any])
+        provenance["rendererVersion"] = "core-image-parametric-v12"
         object["provenance"] = provenance
         return try JSONDecoder().decode(FilmRecipe.self, from: JSONSerialization.data(withJSONObject: object))
     }

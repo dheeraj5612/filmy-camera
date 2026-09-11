@@ -374,7 +374,7 @@ final class RendererOutputBoundsTests: XCTestCase {
         }
     }
 
-    func testG7XCompactToneCurveIsMonotonicAndDeepensAmbientTones() throws {
+    func testG7XCompactToneCurveRetainsShadowsAndBalancedMidtones() throws {
         let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
         let context = CIContext(options: FilmRenderer.testContextOptions)
         let compact = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == "g7x-compact" })
@@ -404,43 +404,116 @@ final class RendererOutputBoundsTests: XCTestCase {
             renderedLuma(0.18, recipe: neutral) - 0.005,
             "The approved compact look should deepen ambient shadows"
         )
-        XCTAssertLessThan(
+        XCTAssertEqual(
             renderedLuma(0.50, recipe: compact),
-            renderedLuma(0.50, recipe: neutral) - 0.005,
-            "The approved compact look should lower ambient midtones"
+            renderedLuma(0.50, recipe: neutral),
+            accuracy: 0.03,
+            "The restrained Signature look should keep midtones near the neutral response"
         )
         XCTAssertLessThan(compactLevels.last ?? 1, 0.995, "Highlights should retain a shoulder before clipping")
     }
 
-    func testG7XFlashContextSeparatesCenteredSubjectFromAmbientBackground() throws {
+    func testG7XFlashContextDoesNotCreateACenteredHalo() throws {
         let extent = CGRect(x: 0, y: 0, width: 64, height: 64)
         let input = CIImage(
             color: CIColor(red: 0.42, green: 0.35, blue: 0.30, alpha: 1)
         ).cropped(to: extent)
         let recipe = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == "g7x-compact" })
         let context = CIContext(options: FilmRenderer.testContextOptions)
-        let captureContext = FilmRenderer.CaptureContext(
-            flashFired: true,
-            subjectRegions: [CGRect(x: 24, y: 24, width: 16, height: 16)]
-        )
-        let pixels = renderFloatPixels(
+
+        let contexts = [
+            ("ambient", FilmRenderer.CaptureContext()),
+            ("ambient face", FilmRenderer.CaptureContext(
+                subjectRegions: [CGRect(x: 24, y: 24, width: 16, height: 16)]
+            )),
+            ("no-face fallback", FilmRenderer.CaptureContext(flashFired: true)),
+            (
+                "detected-face region",
+                FilmRenderer.CaptureContext(
+                    flashFired: true,
+                    subjectRegions: [CGRect(x: 24, y: 24, width: 16, height: 16)]
+                )
+            )
+        ]
+
+        for quality in [FilmRenderer.Quality.preview, .photo, .export] {
+            for (label, captureContext) in contexts {
+                let pixels = renderFloatPixels(
+                    FilmRenderer.render(
+                        input,
+                        recipe: recipe,
+                        quality: quality,
+                        captureContext: captureContext
+                    ),
+                    extent: extent,
+                    context: context
+                )
+                let center = pixel(pixels, width: 64, x: 32, y: 32)
+                let edge = pixel(pixels, width: 64, x: 2, y: 2)
+
+                XCTAssertLessThan(
+                    abs(luma(center) - luma(edge)),
+                    0.0005,
+                    "G7 X " + label + " created a localized center halo at " + String(describing: quality)
+                )
+            }
+        }
+
+        let ambientPixels = renderFloatPixels(
             FilmRenderer.render(
                 input,
                 recipe: recipe,
                 quality: .photo,
-                captureContext: captureContext
+                captureContext: .standard
             ),
             extent: extent,
             context: context
         )
-
-        let subject = pixel(pixels, width: 64, x: 32, y: 32)
-        let ambient = pixel(pixels, width: 64, x: 2, y: 2)
-        XCTAssertGreaterThan(
-            luma(subject),
-            luma(ambient) + 0.04,
-            "Resolved flash captures should lift the subject while holding back ambient background"
+        let flashPixels = renderFloatPixels(
+            FilmRenderer.render(
+                input,
+                recipe: recipe,
+                quality: .photo,
+                captureContext: FilmRenderer.CaptureContext(flashFired: true)
+            ),
+            extent: extent,
+            context: context
         )
+        XCTAssertGreaterThan(
+            meanLuminance(flashPixels),
+            meanLuminance(ambientPixels) + 0.02,
+            "Flash should retain its global compact-camera tone response"
+        )
+    }
+
+    func testG7XSkinTextureDoesNotReceiveFaceDependentAirbrushing() throws {
+        let extent = CGRect(x: 0, y: 0, width: 64, height: 64)
+        let input = try XCTUnwrap(CIFilter(name: "CICheckerboardGenerator", parameters: [
+            "inputColor0": CIColor(red: 0.62, green: 0.42, blue: 0.32),
+            "inputColor1": CIColor(red: 0.66, green: 0.46, blue: 0.36),
+            "inputWidth": 2,
+            "inputSharpness": 1
+        ])?.outputImage).cropped(to: extent)
+        let recipe = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == "g7x-compact" })
+        let context = CIContext(options: FilmRenderer.testContextOptions)
+        for quality in [FilmRenderer.Quality.preview, .photo, .export] {
+            for flash in [false, true] {
+                let withoutFace = renderFloatPixels(FilmRenderer.render(
+                    input, recipe: recipe, quality: quality,
+                    captureContext: .init(flashFired: flash)
+                ), extent: extent, context: context)
+                let withFace = renderFloatPixels(FilmRenderer.render(
+                    input, recipe: recipe, quality: quality,
+                    captureContext: .init(flashFired: flash, subjectRegions: [extent])
+                ), extent: extent, context: context)
+                XCTAssertLessThan(meanAbsoluteRGBDifference(withoutFace, withFace), 0.00001,
+                                  "Detecting a face must not add a beauty blur")
+                let light = pixel(withFace, width: 64, x: 30, y: 30)
+                let dark = pixel(withFace, width: 64, x: 32, y: 30)
+                XCTAssertGreaterThan(abs(luma(light) - luma(dark)), 0.02,
+                                     "Fine skin-toned texture must survive the default look")
+            }
+        }
     }
 
     func testG7XCompactColorEmphasizesWarmSubjectsAndSkyWhileRestrainingFoliage() throws {

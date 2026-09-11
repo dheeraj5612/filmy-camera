@@ -13,7 +13,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     /// adds the canonical camera mode controls introduced by the fidelity pass;
     /// version 5 adds persisted Kelvin white-balance control.
     public static let currentSchemaVersion = 5
-    public static let rendererVersion = "core-image-parametric-v12"
+    public static let rendererVersion = "core-image-parametric-v13"
 
     /// The Kelvin value that renders as "as shot". Phone frames are already
     /// balanced for their scene, so a Color Temperature setting equal to this
@@ -1901,29 +1901,29 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             name: "G7 X Compact",
             subtitle: "Rich contrast / warm highlights",
             filmBase: .compactDigital,
-            exposure: -0.15,
+            exposure: 0.05,
             // The Signature look combines deeper ambient tones, richer color,
             // and warm highlights. It is an original stylized approximation,
             // not a measured Canon camera response.
             tone: Tone(highlight: 0.12, shadow: 0.16),
-            saturation: 1.16,
-            contrast: 1.14,
+            saturation: 1.06,
+            contrast: 1.10,
             dynamicRange: .auto,
             dRangePriority: .weak,
             whiteBalance: WhiteBalanceShift(
                 // Ambience Priority already contributes a small warm bias.
-                // Keep the global shift small so neutral walls and fabric stay
-                // neutral; the peach/pink feel comes from the skin-local stage.
-                temperature: 0.012,
-                tint: 0.012,
+                // Keep the explicit shift restrained so neutral walls and
+                // fabric stay neutral in daylight.
+                temperature: 0.006,
+                tint: 0.006,
                 mode: .ambiencePriority
             ),
             colorChrome: 0,
             blueResponse: 0,
             fxBlue: 0,
-            sharpness: 0.10,
-            noiseReduction: 0.20,
-            clarity: -0.08,
+            sharpness: 0.05,
+            noiseReduction: 0.04,
+            clarity: 0,
             grain: 0,
             grainSize: 0.75,
             vignette: 0,

@@ -29,7 +29,7 @@ extension FilmRecipe {
         case "classic-negative": return "Warm highlights, restrained greens, and a textured negative feel for street scenes and quiet rooms."
         case "nostalgic-negative": return "Amber light, softened blues, and gentle contrast for a memory-like everyday palette."
         case "reala-ace": return "Natural color, open shadows, and a clean negative finish that lets the scene stay itself."
-        case "g7x-compact": return "The default social compact-camera profile: bright warm portraits, peach/pink skin, crisp reds and blues, a protected highlight shoulder, and gentle subject-aware smoothing. Real flash captures deepen the ambient background while device optics and depth of field remain unchanged."
+        case "g7x-compact": return "The default compact-camera profile: restrained warmth, crisp reds and blues, a protected highlight shoulder, and clean detail. Flash captures use a global tone response while device optics and depth of field remain unchanged."
         default: return subtitle
         }
     }
@@ -86,9 +86,9 @@ extension FilmRecipe {
     var controlSummary: [(String, String)] {
         if filmBase == .compactDigital {
             return [
-                ("Tone", "Social pop"),
-                ("Color", "Peach vivid"),
-                ("Detail", "Soft skin"),
+                ("Tone", "Balanced"),
+                ("Color", "Subtle warmth"),
+                ("Detail", "Clean"),
                 ("Grain", grainEffectLevel.displayName)
             ]
         }
@@ -365,19 +365,53 @@ final class CameraViewModel: ObservableObject {
         }
     }
 
-    /// A slider round trip could persist the v11 default as a customization.
-    /// Upgrade only that unchanged look; intentional edits remain overrides.
+    /// A slider round trip could persist an older G7 X default as a
+    /// customization. Upgrade only unchanged v11/v12 looks; intentional edits
+    /// remain overrides.
     nonisolated private static func isSupersededG7XDefault(
         _ saved: FilmRecipe,
         parent: FilmRecipe
     ) -> Bool {
+        let rendererVersion = saved.provenance.rendererVersion
         guard saved.id == "g7x-compact",
               saved.filmBase == .compactDigital,
-              saved.provenance.rendererVersion == "core-image-parametric-v11" else { return false }
+              rendererVersion == "core-image-parametric-v11"
+                || rendererVersion == "core-image-parametric-v12" else { return false }
+
+        let previousExposure: Double
+        let previousSaturation: Double
+        let previousContrast: Double
+        switch rendererVersion {
+        case "core-image-parametric-v11":
+            previousExposure = 0.12
+            previousSaturation = 1.12
+            previousContrast = 1.10
+        case "core-image-parametric-v12":
+            previousExposure = -0.15
+            previousSaturation = 1.16
+            previousContrast = 1.14
+        default:
+            return false
+        }
+
         var previousDefault = parent
-        previousDefault.exposure = 0.12
-        previousDefault.saturation = 1.12
-        previousDefault.contrast = 1.10
+        previousDefault.exposure = previousExposure
+        previousDefault.tone = FilmRecipe.Tone(highlight: 0.12, shadow: 0.16)
+        previousDefault.saturation = previousSaturation
+        previousDefault.contrast = previousContrast
+        previousDefault.whiteBalance = FilmRecipe.WhiteBalanceShift(
+            temperature: 0.012,
+            tint: 0.012,
+            mode: .ambiencePriority,
+            kelvin: FilmRecipe.asShotKelvin
+        )
+        previousDefault.sharpness = 0.10
+        previousDefault.noiseReduction = 0.20
+        previousDefault.clarity = -0.08
+        previousDefault.grain = 0
+        previousDefault.grainSize = 0.75
+        previousDefault.vignette = 0
+        previousDefault.halation = 0
         return saved.dynamicRange == previousDefault.dynamicRange
             && saved.dRangePriority == previousDefault.dRangePriority
             && saved.whiteBalance.mode == previousDefault.whiteBalance.mode
