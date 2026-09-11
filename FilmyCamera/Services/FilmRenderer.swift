@@ -29,6 +29,25 @@ public final class FilmRenderer {
         }
     }
 
+    /// Internal stage names used by the real-capture color-artifact
+    /// investigation. The normal render path still returns only the final
+    /// image; tests use these names to compare the actual Core Image stages.
+    enum DiagnosticStage: String, CaseIterable, Hashable {
+        case source
+        case preSignature
+        case postSignature
+        case postWhiteBalance
+        case postColorCube
+        case preDetail
+        case postDetail
+        case postSkin
+        case bypassedSkin
+        case legacyUpperSaturationGate
+        case legacyUpperSaturationGateFinal
+        case postHalation
+        case final
+    }
+
     /// Capture facts that cannot be represented by an editable color recipe.
     /// The default keeps previews, imports, and existing callers deterministic;
     /// still captures supply the resolved flash result. Subject regions remain
@@ -221,7 +240,11 @@ public final class FilmRenderer {
             // without turning naturally warm skin into saturated orange. This
             // is a feathered color-range mask, not face segmentation or blur.
             skinColorKernel = CIColorKernel(source: """
-                kernel vec4 filmySkinColor(__sample source, __sample rendered) {
+                kernel vec4 filmySkinColor(
+                    __sample source,
+                    __sample rendered,
+                    float upperSaturationGate
+                ) {
                     vec3 weights = vec3(0.2126, 0.7152, 0.0722);
                     float sourceLuma = dot(source.rgb, weights);
                     float outputLuma = dot(rendered.rgb, weights);
@@ -242,22 +265,31 @@ public final class FilmRenderer {
                         * smoothstep(0.08, 0.18, huePosition)
                         * (1.0 - smoothstep(0.65, 0.85, huePosition))
                         * smoothstep(0.08, 0.18, saturation)
-                        * (1.0 - smoothstep(0.68, 0.90, saturation))
+                        * mix(1.0, 1.0 - smoothstep(0.68, 0.90, saturation), upperSaturationGate)
                         * smoothstep(0.015, 0.055, sourceLuma);
                     vec3 reference = source.rgb * outputLuma / max(sourceLuma, 0.001);
+                    // Display P3 input can contain negative channels in the
+                    // sRGB working space. Fit both ends of the reference into
+                    // gamut before measuring warmth, so later channel clipping
+                    // cannot turn a small mask change into a colored contour.
+                    float maxReference = max(reference.r, max(reference.g, reference.b));
+                    float minReference = min(reference.r, min(reference.g, reference.b));
+                    float upperGamut = max(1.0 - outputLuma, 0.0)
+                        / max(maxReference - outputLuma, 0.001);
+                    float lowerGamut = max(outputLuma, 0.0)
+                        / max(outputLuma - minReference, 0.001);
+                    float gamut = min(1.0, min(upperGamut, lowerGamut));
+                    reference = vec3(outputLuma) + (reference - vec3(outputLuma)) * gamut;
                     float addedRed = (rendered.r - rendered.b - reference.r + reference.b)
                         / max(outputLuma, 0.02);
                     float addedYellow = (rendered.g - rendered.b - reference.g + reference.b)
                         / max(outputLuma, 0.02);
-                    float excessWarmth = max(addedRed, addedYellow);
-                    float amount = skin * 0.85 * smoothstep(0.025, 0.14, excessWarmth)
+                    float excessWarmth = max(0.0, max(addedRed, addedYellow));
+                    // A fixed percentage leaves an unbounded warm residual in
+                    // strongly graded shadows. This soft knee retains subtle
+                    // warmth while bounding the residual on fully masked skin.
+                    float amount = skin * excessWarmth / (excessWarmth + 0.12)
                         * (1.0 - smoothstep(0.90, 1.0, outputLuma));
-                    // Fit the reference chroma into gamut without changing its
-                    // luminance or introducing clipped red highlights.
-                    float maxReference = max(reference.r, max(reference.g, reference.b));
-                    float gamut = min(1.0, max(1.0 - outputLuma, 0.0)
-                        / max(maxReference - outputLuma, 0.001));
-                    reference = vec3(outputLuma) + (reference - vec3(outputLuma)) * gamut;
                     return vec4(mix(rendered.rgb, reference, amount), rendered.a);
                 }
                 """)
@@ -575,34 +607,142 @@ public final class FilmRenderer {
     ) -> CIImage {
         guard !image.extent.isEmpty else { return image }
 
+        var diagnostics: [DiagnosticStage: CIImage]? = nil
+        return renderPipeline(
+            image,
+            recipe: recipe,
+            quality: quality,
+            captureContext: captureContext,
+            grainSeed: grainSeed,
+            grainPhase: grainPhase,
+            skinProtectionEnabled: true,
+            skinUpperSaturationGate: 0,
+            diagnostics: &diagnostics
+        )
+    }
+
+    /// Captures the same render graph used by `render`, plus an otherwise
+    /// identical graph with only skin-color protection bypassed. Keeping this
+    /// internal lets tests inspect a real source capture without making the
+    /// diagnostic contract part of the app's public API.
+    static func diagnosticRenderStages(
+        _ image: CIImage,
+        recipe: FilmRecipe,
+        quality: Quality = .photo,
+        captureContext: CaptureContext = .standard,
+        grainSeed: UInt32 = canonicalGrainSeed,
+        grainPhase: CGPoint? = nil
+    ) -> [DiagnosticStage: CIImage] {
+        var stages: [DiagnosticStage: CIImage]? = [:]
+        _ = renderPipeline(
+            image,
+            recipe: recipe,
+            quality: quality,
+            captureContext: captureContext,
+            grainSeed: grainSeed,
+            grainPhase: grainPhase,
+            skinProtectionEnabled: true,
+            skinUpperSaturationGate: 0,
+            diagnostics: &stages
+        )
+
+        var bypassStages: [DiagnosticStage: CIImage]? = [:]
+        _ = renderPipeline(
+            image,
+            recipe: recipe,
+            quality: quality,
+            captureContext: captureContext,
+            grainSeed: grainSeed,
+            grainPhase: grainPhase,
+            skinProtectionEnabled: false,
+            skinUpperSaturationGate: 0,
+            diagnostics: &bypassStages
+        )
+        if let bypassedSkin = bypassStages?[.postSkin] {
+            stages?[.bypassedSkin] = bypassedSkin
+        }
+
+        // Keep the former high-saturation exclusion available for regression
+        // comparisons without making it part of the production render path.
+        var legacyStages: [DiagnosticStage: CIImage]? = [:]
+        _ = renderPipeline(
+            image,
+            recipe: recipe,
+            quality: quality,
+            captureContext: captureContext,
+            grainSeed: grainSeed,
+            grainPhase: grainPhase,
+            skinProtectionEnabled: true,
+            skinUpperSaturationGate: 1,
+            diagnostics: &legacyStages
+        )
+        if let legacyPostSkin = legacyStages?[.postSkin] {
+            stages?[.legacyUpperSaturationGate] = legacyPostSkin
+        }
+        if let legacyFinal = legacyStages?[.final] {
+            stages?[.legacyUpperSaturationGateFinal] = legacyFinal
+        }
+        return stages ?? [:]
+    }
+
+    private static func renderPipeline(
+        _ image: CIImage,
+        recipe: FilmRecipe,
+        quality: Quality,
+        captureContext: CaptureContext,
+        grainSeed: UInt32,
+        grainPhase: CGPoint?,
+        skinProtectionEnabled: Bool,
+        skinUpperSaturationGate: Double,
+        diagnostics: inout [DiagnosticStage: CIImage]?
+    ) -> CIImage {
+        guard !image.extent.isEmpty else { return image }
+
         let sourceExtent = image.extent
         let safeRecipe = sanitizedRecipe(recipe)
         // Core Image's blend stages can operate on premultiplied alpha. Work
         // on an opaque copy, then restore the source alpha once at the end so
         // a transparent input is not multiplied repeatedly by finishing FX.
         let processingImage = opaqueImage(from: image)
+        diagnostics?[.source] = processingImage
         var output = processingImage
         output = applyDynamicRange(to: output, recipe: safeRecipe)
         output = applyExposureAndTone(to: output, recipe: safeRecipe)
+        diagnostics?[.preSignature] = output
+        output = applyRecipeCharacter(to: output, recipe: safeRecipe)
+        diagnostics?[.postSignature] = output
         output = applyCompactDigitalTone(
             to: output,
             recipe: safeRecipe,
             captureContext: captureContext
         )
         output = applyWhiteBalance(to: output, recipe: safeRecipe)
+        diagnostics?[.postWhiteBalance] = output
         output = applyMonochromeFilter(to: output, recipe: safeRecipe)
         output = applyColorControls(to: output, recipe: safeRecipe)
         output = applyColorCube(to: output, recipe: safeRecipe, quality: quality)
+        diagnostics?[.postColorCube] = output
         output = applyMonochromaticColorAxes(to: output, recipe: safeRecipe)
+        diagnostics?[.preDetail] = output
         output = applyDetailControls(to: output, recipe: safeRecipe)
         output = applyClarity(to: output, recipe: safeRecipe)
+        diagnostics?[.postDetail] = output
         // Correct warm skin chroma after local contrast stages so sharpening
         // cannot re-amplify tiny red-channel variations into colored speckles.
-        output = applySkinColorProtection(to: output, source: processingImage, recipe: safeRecipe)
+        if skinProtectionEnabled {
+            output = applySkinColorProtection(
+                to: output,
+                source: processingImage,
+                recipe: safeRecipe,
+                upperSaturationGate: skinUpperSaturationGate
+            )
+        }
+        diagnostics?[.postSkin] = output
         // Halation is light scattered inside the film stack, so derive its
         // highlight mask before adding the final grain texture. Otherwise the
         // synthetic grain itself can create or modulate red highlight bloom.
         output = applyHalation(to: output, recipe: safeRecipe, quality: quality)
+        diagnostics?[.postHalation] = output
         output = applyGrain(
             to: output,
             recipe: safeRecipe,
@@ -616,17 +756,23 @@ public final class FilmRenderer {
 
         // Some finishing filters can expand their extent. Camera and export
         // callers expect the same bounds as the source image.
-        return output.cropped(to: sourceExtent)
+        output = output.cropped(to: sourceExtent)
+        diagnostics?[.final] = output
+        return output
     }
 
     private static func applySkinColorProtection(
         to image: CIImage,
         source: CIImage,
-        recipe: FilmRecipe
+        recipe: FilmRecipe,
+        upperSaturationGate: Double
     ) -> CIImage {
         guard !recipe.filmBase.supportsMonochromaticColorAxes,
               let kernel = immutableResources.skinColorKernel else { return image }
-        return kernel.apply(extent: image.extent, arguments: [source, image])?
+        return kernel.apply(
+            extent: image.extent,
+            arguments: [source, image, upperSaturationGate]
+        )?
             .cropped(to: image.extent) ?? image
     }
 

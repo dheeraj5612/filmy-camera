@@ -34,7 +34,7 @@ final class RecipeInvariantsTests: XCTestCase {
     private var previousRecipeOverrides: Data?
 
     func testRendererVersionTracksCurrentParametricPipeline() {
-        XCTAssertEqual(FilmRecipe.rendererVersion, "core-image-parametric-v14")
+        XCTAssertEqual(FilmRecipe.rendererVersion, "core-image-parametric-v16")
     }
 
     override func setUp() {

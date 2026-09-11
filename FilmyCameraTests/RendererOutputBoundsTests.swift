@@ -577,6 +577,188 @@ final class RendererOutputBoundsTests: XCTestCase {
         )
     }
 
+    func testSaturatedDisplayPSkinTextureKeepsWarmthContinuousAcrossCreases() throws {
+        let fixture = saturatedDisplayPSkinCreaseFixture(width: 384)
+        let context = FilmRenderer.sharedContext
+        let sourcePixels = renderFloatPixels(
+            fixture.image,
+            extent: fixture.extent,
+            context: context
+        )
+        let inspectedPixelCount = (fixture.width - 8) * (fixture.width - 8)
+        var highSaturationCount = 0
+
+        for recipe in try colorSkinRecipes() {
+            for quality in [FilmRenderer.Quality.preview, .photo, .export] {
+                let output = FilmRenderer.render(
+                    fixture.image,
+                    recipe: recipe,
+                    quality: quality
+                )
+                let pixels = renderFloatPixels(
+                    output,
+                    extent: fixture.extent,
+                    context: context
+                )
+                // Verify this same fixture still catches the former mask
+                // cutoff. It must fail for added contrast, not for the gamut
+                // mapping reducing an existing source-color difference.
+                let legacyPixels: [Float]?
+                if quality == .photo {
+                    let legacy = try XCTUnwrap(FilmRenderer.diagnosticRenderStages(
+                        fixture.image, recipe: recipe, quality: quality
+                    )[.legacyUpperSaturationGateFinal])
+                    legacyPixels = renderFloatPixels(legacy, extent: fixture.extent, context: context)
+                } else {
+                    legacyPixels = nil
+                }
+                var largestLegacyWarmthAmplification = 0.0
+                var finitePixelCount = 0
+                var validWarmthSampleCount = 0
+                var largestAddedWarmth = 0.0
+                var largestWarmthStep = 0.0
+                var largestChromaStep = 0.0
+                var worstWarmthPair = ""
+
+                for y in 4..<(fixture.width - 4) {
+                    for x in 4..<(fixture.width - 4) {
+                        let index = (y * fixture.width + x) * 4
+                        let sourceFinite = sourcePixels[index].isFinite
+                            && sourcePixels[index + 1].isFinite
+                            && sourcePixels[index + 2].isFinite
+                        let renderedFinite = pixels[index].isFinite
+                            && pixels[index + 1].isFinite
+                            && pixels[index + 2].isFinite
+                        guard sourceFinite && renderedFinite else { continue }
+                        finitePixelCount += 1
+
+                        let sourceLuma = luma(sourcePixels, at: index)
+                        let renderedLuma = luma(pixels, at: index)
+                        let sourceMaximum = max(
+                            sourcePixels[index],
+                            max(sourcePixels[index + 1], sourcePixels[index + 2])
+                        )
+                        let sourceMinimum = min(
+                            sourcePixels[index],
+                            min(sourcePixels[index + 1], sourcePixels[index + 2])
+                        )
+                        let sourceSaturation = Double(sourceMaximum - sourceMinimum)
+                            / max(Double(sourceMaximum), 0.001)
+                        if recipe.id == "velvia-vivid",
+                           quality == .preview,
+                           sourceSaturation > 0.90 {
+                            highSaturationCount += 1
+                        }
+
+                        guard sourceLuma > 0.06, renderedLuma > 0.06 else { continue }
+                        validWarmthSampleCount += 1
+                        var sourceWarmth = [Double](repeating: 0, count: 2)
+                        var renderedWarmth = [Double](repeating: 0, count: 2)
+                        for channel in 0...1 {
+                            sourceWarmth[channel] = Double(
+                                sourcePixels[index + channel] - sourcePixels[index + 2]
+                            ) / sourceLuma
+                            renderedWarmth[channel] = Double(
+                                pixels[index + channel] - pixels[index + 2]
+                            ) / renderedLuma
+                            largestAddedWarmth = max(
+                                largestAddedWarmth,
+                                renderedWarmth[channel] - sourceWarmth[channel]
+                            )
+                        }
+
+                        for neighborOffset in 0..<2 {
+                            let neighbor = index + (neighborOffset == 0 ? 4 : fixture.width * 4)
+                            let sourceSimilar =
+                                abs(sourcePixels[index] - sourcePixels[neighbor]) < 0.024
+                                && abs(sourcePixels[index + 1] - sourcePixels[neighbor + 1]) < 0.024
+                                && abs(sourcePixels[index + 2] - sourcePixels[neighbor + 2]) < 0.024
+                            guard sourceSimilar else { continue }
+                            let neighborSourceLuma = luma(sourcePixels, at: neighbor)
+                            let neighborRenderedLuma = luma(pixels, at: neighbor)
+                            guard neighborSourceLuma > 0.06, neighborRenderedLuma > 0.06 else {
+                                continue
+                            }
+                            for channel in 0...1 {
+                                let neighborSourceWarmth = Double(
+                                    sourcePixels[neighbor + channel] - sourcePixels[neighbor + 2]
+                                ) / neighborSourceLuma
+                                let neighborRenderedWarmth = Double(
+                                    pixels[neighbor + channel] - pixels[neighbor + 2]
+                                ) / neighborRenderedLuma
+                                // Extended sRGB may have negative source channels.
+                                // Gamut fitting can legitimately reduce their hue
+                                // contrast; flag amplification, not that reduction.
+                                let sourceStep = abs(sourceWarmth[channel] - neighborSourceWarmth)
+                                let warmthStep = abs(renderedWarmth[channel] - neighborRenderedWarmth)
+                                    - sourceStep
+                                if let legacyPixels {
+                                    let legacyLuma = luma(legacyPixels, at: index)
+                                    let legacyNeighborLuma = luma(legacyPixels, at: neighbor)
+                                    if legacyLuma > 0.06, legacyNeighborLuma > 0.06 {
+                                        let legacyWarmth = Double(legacyPixels[index + channel] - legacyPixels[index + 2]) / legacyLuma
+                                        let legacyNeighborWarmth = Double(legacyPixels[neighbor + channel] - legacyPixels[neighbor + 2]) / legacyNeighborLuma
+                                        largestLegacyWarmthAmplification = max(
+                                            largestLegacyWarmthAmplification,
+                                            abs(legacyWarmth - legacyNeighborWarmth) - sourceStep
+                                        )
+                                    }
+                                }
+                                if warmthStep > largestWarmthStep {
+                                    largestWarmthStep = warmthStep
+                                    worstWarmthPair = "at (\(x), \(y)), channel \(channel), source \(Array(sourcePixels[index..<(index + 3)])) / \(Array(sourcePixels[neighbor..<(neighbor + 3)])), output \(Array(pixels[index..<(index + 3)])) / \(Array(pixels[neighbor..<(neighbor + 3)]))"
+                                }
+                                largestChromaStep = max(
+                                    largestChromaStep,
+                                    Double(abs(
+                                        (pixels[index + channel] - pixels[index + 2])
+                                            - (pixels[neighbor + channel] - pixels[neighbor + 2])
+                                    ))
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if legacyPixels != nil {
+                    XCTAssertGreaterThan(largestLegacyWarmthAmplification, 0.20,
+                        "The fixture must reproduce the old saturation cutoff's added color discontinuity")
+                }
+                XCTAssertEqual(
+                    finitePixelCount,
+                    inspectedPixelCount,
+                    "\(recipe.id) \(quality) produced non-finite saturated skin pixels"
+                )
+                XCTAssertGreaterThan(
+                    validWarmthSampleCount,
+                    inspectedPixelCount / 2,
+                    "\(recipe.id) \(quality) had too few valid saturated skin samples"
+                )
+                XCTAssertLessThan(
+                    largestAddedWarmth,
+                    0.45,
+                    "\(recipe.id) \(quality) added excessive orange to high-saturation skin"
+                )
+                XCTAssertLessThan(
+                    largestWarmthStep,
+                    0.20,
+                    "\(recipe.id) \(quality) amplified a warm discontinuity across a dark crease \(worstWarmthPair)"
+                )
+                XCTAssertLessThan(
+                    largestChromaStep,
+                    0.08,
+                    "\(recipe.id) \(quality) acquired an abrupt chroma step across a dark crease"
+                )
+            }
+        }
+
+        XCTAssertGreaterThan(
+            highSaturationCount,
+            inspectedPixelCount / 2,
+            "The regression fixture must exercise the upper saturation boundary"
+        )
+    }
+
     func testG7XCompactColorEmphasizesWarmSubjectsAndSkyWhileRestrainingFoliage() throws {
         let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
         let context = CIContext(options: FilmRenderer.testContextOptions)
@@ -1865,6 +2047,62 @@ final class RendererOutputBoundsTests: XCTestCase {
             colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!
         )
         return (image, extent)
+    }
+
+    /// An anonymous Display P3 skin-colored ramp modeled on the real capture's
+    /// high-saturation hand samples. Luma varies smoothly while narrow dark
+    /// creases and achromatic noise preserve local texture. The fixed warm hue
+    /// keeps the test focused on the upper saturation gate rather than hue
+    /// classification or a global orange preset change.
+    private func saturatedDisplayPSkinCreaseFixture(
+        width: Int
+    ) -> (image: CIImage, extent: CGRect, width: Int) {
+        let extent = CGRect(x: 0, y: 0, width: width, height: width)
+        var bytes = [UInt8](repeating: 255, count: width * width * 4)
+        for y in 0..<width {
+            for x in 0..<width {
+                let xProgress = Double(x) / Double(width - 1)
+                let yProgress = Double(y) / Double(width - 1)
+                let saturation = min(1.02, 0.66 + xProgress * 0.36)
+                let huePosition = 0.40 + 0.018 * sin(Double(y) * 0.031)
+                let crease = pow(
+                    max(0, sin(Double(x) * 0.105 + sin(Double(y) * 0.041) * 1.8)),
+                    10
+                )
+                let lumaValue = max(
+                    0.026,
+                    (0.16 + yProgress * 0.30) * (1 - 0.80 * crease)
+                )
+
+                // Choose R, G, and B from luma, saturation, and a fixed warm
+                // hue so the fixture spans the .68... .90 gate continuously.
+                let blueRatio = 1 - saturation
+                let greenRatio = blueRatio + saturation * huePosition
+                let lumaScale = 0.2126
+                    + 0.7152 * greenRatio
+                    + 0.0722 * blueRatio
+                let red = lumaValue / lumaScale
+                let green = red * greenRatio
+                let blue = red * blueRatio
+                let noise = Double((x * 17 + y * 31) % 9 - 4) / 700
+                let index = (y * width + x) * 4
+                bytes[index] = UInt8((clampFixture(red + noise) * 255).rounded())
+                bytes[index + 1] = UInt8((clampFixture(green + noise) * 255).rounded())
+                bytes[index + 2] = UInt8((clampFixture(blue + noise) * 255).rounded())
+            }
+        }
+        let image = CIImage(
+            bitmapData: Data(bytes),
+            bytesPerRow: width * 4,
+            size: extent.size,
+            format: .RGBA8,
+            colorSpace: CGColorSpace(name: CGColorSpace.displayP3)!
+        )
+        return (image, extent, width)
+    }
+
+    private func clampFixture(_ value: Double) -> Double {
+        min(max(value, 0), 1)
     }
 
     private func assertSkinTextureContinuity(

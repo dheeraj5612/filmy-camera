@@ -17,7 +17,7 @@ Keep Signature at 50%. Preserve luminance texture; avoid a face blur. Cover G7X 
 
 ## Implemented fix and measured results
 
-Renderer v15 normalizes the skin-mask channel differences by luminance, applies protection after sharpness/clarity, and disables CINoiseReduction's internal sharpening. Signature is 50%. The evidence supports this combined fix; it does not isolate one stage as the sole cause.
+Renderer v15 normalizes the skin-mask channel differences by luminance, applies protection after sharpness/clarity, and disables CINoiseReduction's internal sharpening. Its Signature constant was 50%, but the shared stage was later found to be disconnected (see below). These initial synthetic results did not establish a fix for the real capture.
 
 The 512-pixel crease regression fails against the previous v14 renderer: the largest neighboring normalized warmth-residual jump is 0.5569 for Vivid Slide and 0.2598 for G7X, exceeding the 0.18 limit. The new renderer passes both recipes at preview, photo, and export quality. A separate 2048-pixel photo test checks local chroma continuity and finite output; the 512-pixel test additionally checks overall added warmth.
 
@@ -25,7 +25,7 @@ The 512-pixel crease regression fails against the previous v14 renderer: the lar
 - Physical iPad GPU: the 512-pixel regression and seven metadata tests passed in `build/release-build19/ipad-tests/Skin-and-PhotoOutputEncoder-ipad-retry2.xcresult`.
 - Physical iPad GPU: final 512- and 2048-pixel tests both passed in `build/release-build19/ipad-tests/NativeSize-and-FineSkin-ipad-retry2.xcresult`.
 
-The final candidate has not yet been tested on the reporting iPhone because it is locked.
+At that stage, the v15 candidate had not been tested on the reporting iPhone because it was locked.
 
 ## Real capture invalidates the synthetic acceptance result
 
@@ -36,3 +36,35 @@ Visual inspection confirms conspicuous orange/red patches along the finger creas
 The unfiltered capture is not retained by the normal save path. Next diagnostic: an explicitly enabled debug-only capture of the unfiltered source plus final output and render parameters, followed by stage-by-stage comparisons on that exact input. Do not infer the cause solely from the already-filtered JPEG or loosen test thresholds to match it.
 
 Code review also found that `applyRecipeCharacter` is currently uncalled: its 50% strength constant does not affect non-G7X rendering. Restoring the requested shared 50% Signature stage and proving it affects rendered output remains required for the final fix. The diagnostic build preserves the current renderer so the stage comparison starts from the observed failure.
+
+## Paired-source reproduction and isolated cause
+
+Build 20 captured a paired original/result at September 10, 22:09:08 EDT. The original is a Display P3 JPEG at ISO 800 with flash off. Its crease detail does not contain the conspicuous red bands visible in the filtered result. The pair remains local under `build/skin-diagnostic-pair/latest/`.
+
+Re-rendering that exact original through the normal v15 pipeline reproduces the red bands. Exporting intermediate stages shows that the color transform adds warmth broadly, while the skin correction suppresses it unevenly. Its upper saturation exclusion fades protection between saturation 0.68 and 0.90 and removes protection above 0.90. Legitimate warm skin in this capture crosses that range, especially along darker creases. The prior synthetic fixture stayed below the boundary and could not detect this failure.
+
+Removing **only** that upper saturation exclusion removes the conspicuous red bands in the paired-source Vivid Slide and G7X renders while retaining crease texture. In a fixed sampled hand region, the 95th percentile of added normalized red warmth falls from 0.8897 to 0.1524 for Vivid Slide and from 0.5100 to 0.0870 for G7X. These are diagnostic measurements, not universal image-quality thresholds. The stage-export run passed in `build/skin-diagnostic-pair/StageExport-v15.xcresult`; images and measurements are in `build/skin-diagnostic-pair/stages-v15/`.
+
+This experiment establishes an app-specific cause for the reproduced defect. The internet reports helped choose experiments; they do not establish an Apple GPU defect. Final acceptance still requires the permanent change, the restored 50% Signature stage, expanded saturated-skin regression coverage, and physical-device verification.
+
+
+## Remaining failures with restored Signature and wide-gamut input
+
+The first v16 candidate removed the upper saturation exclusion and restored the actual shared Signature stage at 50%. The real capture no longer had the red bands on either simulator or physical iPhone GPU. However, two expanded synthetic tests still failed on both: the fine-skin fixture retained excessive orange in a deep shadow, and the Display P3 fixture showed abrupt chroma changes. This candidate was not accepted for upload.
+
+Worst-pixel diagnostics isolate two additional mechanisms. A fully selected skin pixel retained 0.4287 added normalized warmth because a fixed 85% correction leaves 15% of an arbitrarily strong grade. In the saturated fixture, Display P3 source colors transformed into extended sRGB with negative blue values (for example `[0.9772, 0.2748, -0.1628]`). The old correction compared warmth against that out-of-gamut reference before fitting only its upper channel limit. Subsequent clipping of the negative blue value produced a large visible change near the correction threshold. The mask itself was fully selected at these pixels; this was a gamut/comparison-order failure, not another saturation exclusion.
+
+The revised v16 candidate fits reference chroma to **both** ends of the destination gamut before measuring warmth. A smooth bounded residual replaces fixed-percentage correction: for a fully selected pixel outside highlight fade, residual warmth approaches 0.12 as the incoming excess increases. It keeps rendered luminance and uses no spatial blur. Signature remains 50%. Final simulator validation and physical-device availability are recorded below.
+
+
+The revised kernel passed 55 of 56 renderer/Signature/real-source checks. Inspection of the remaining test's exact pixels revealed a measurement error: source normalized red contrast was 0.2353, while rendered contrast was 0.0256. Taking the absolute *change in residual* incorrectly classified that reduction as a 0.2097 discontinuity. The Display P3 test now measures amplification of neighboring hue contrast. Its 0.20 threshold is unchanged; added warmth and raw chroma-step limits are unchanged. A counterfactual render with the legacy saturation cutoff must exceed that same threshold, ensuring the corrected metric still detects the original failure. Existing 512- and 2048-pixel tests remain unchanged.
+
+
+## Final v16 validation
+
+- The final kernel passed the other 55 renderer, Signature, and real-source checks in `build/skin-diagnostic-pair/FinalRenderer-v16-rerun.xcresult`. That run's one failing test was the Display P3 measurement subsequently corrected above; production code did not change afterward.
+- The corrected saturated-skin regression, its legacy-cutoff counterfactual, catalog acceptance, EXIF encoder, color-space boundaries, flash availability, and recipe invariants passed **219/219** with no skips in `build/release-build21/validation/Final-Catalog-Metadata-Saturated.xcresult`. Together these runs cover 274 distinct passing checks on the final code/test behavior.
+- The exact paired original was rendered through the final kernel for both Vivid Slide and G7X. Visual inspection confirms the conspicuous red bands are absent and crease texture remains. Local images: `build/skin-diagnostic-pair/stages-v16-final/`.
+- Physical iPhone testing of the intermediate upper-gate-only fix reproduced the earlier synthetic failures and rendered the same real-source improvement. It is not validation of the final gamut/bounded-warmth revision. Both devices became locked before that final revision could be tested or installed. Lock/preparation evidence is under `build/release-build21/final-verification/`. Device verification remains pending unlock; no hardware-GPU claim is made for the final revision.
+
+The final release candidate is app 1.0.0 build 21, renderer `core-image-parametric-v16`. It includes the shared 50% Signature stage, the skin-color fixes, the earlier flash-off correction, and populated capture EXIF/app provenance. Personal diagnostic photographs remain ignored local artifacts, not test fixtures committed to the repository.
