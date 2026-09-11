@@ -96,7 +96,10 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
                 .frame(maxWidth: .infinity, minHeight: 44)
-                .disabled(camera.flashAvailability != .available)
+                // Off is always selectable, including while the hardware is
+                // temporarily unavailable. The service rejects On/Auto until
+                // the camera reports that it can honor them.
+                .disabled(camera.flashAvailability == .unsupported)
                 .accessibilityIdentifier("flash-setting")
             }
 

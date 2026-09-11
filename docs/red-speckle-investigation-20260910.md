@@ -25,4 +25,14 @@ The 512-pixel crease regression fails against the previous v14 renderer: the lar
 - Physical iPad GPU: the 512-pixel regression and seven metadata tests passed in `build/release-build19/ipad-tests/Skin-and-PhotoOutputEncoder-ipad-retry2.xcresult`.
 - Physical iPad GPU: final 512- and 2048-pixel tests both passed in `build/release-build19/ipad-tests/NativeSize-and-FineSkin-ipad-retry2.xcresult`.
 
-The final candidate has not yet been tested on the reporting iPhone because it is locked. A fresh photograph of the affected scene on that device remains the final visual confirmation.
+The final candidate has not yet been tested on the reporting iPhone because it is locked.
+
+## Real capture invalidates the synthetic acceptance result
+
+The user reported continued artifacts and requested review of the latest Vivid Slide photograph. The original cached output was retrieved from the iPad at `build/photo-review-latest/ipad-vivid-slide-v15-latest.jpg`. Its embedded EXIF confirms app 1.0.0 build 19, renderer v15, Vivid Slide, capture time September 10 at 21:48:07 EDT, ISO 1000, 1/60 second, f/2.4, and flash off.
+
+Visual inspection confirms conspicuous orange/red patches along the finger creases and palm, and an excessive overall orange cast. Therefore v15 does **not** resolve the reported defect, and the passing synthetic tests are insufficient acceptance evidence. The problem is now reproduced in a current iPad saved image as well. Build 19 had already uploaded before this confirmation; no external beta review was submitted for it.
+
+The unfiltered capture is not retained by the normal save path. Next diagnostic: an explicitly enabled debug-only capture of the unfiltered source plus final output and render parameters, followed by stage-by-stage comparisons on that exact input. Do not infer the cause solely from the already-filtered JPEG or loosen test thresholds to match it.
+
+Code review also found that `applyRecipeCharacter` is currently uncalled: its 50% strength constant does not affect non-G7X rendering. Restoring the requested shared 50% Signature stage and proving it affects rendered output remains required for the final fix. The diagnostic build preserves the current renderer so the stage comparison starts from the observed failure.

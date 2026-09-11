@@ -895,24 +895,21 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     public func cycleFlashMode() {
         sessionQueue.async { [weak self] in
             guard let self else { return }
-            guard !self.isManualExposureActiveOrRequested else {
-                self.publishStatus("Flash requires Auto exposure.")
-                return
-            }
-            guard self.flashAvailabilityState == .available else {
-                if self.flashAvailabilityState == .temporarilyUnavailable {
-                    self.publishStatus("Flash is temporarily unavailable.")
-                }
+            let manualExposureActive = self.isManualExposureActiveOrRequested
+            guard manualExposureActive || self.flashAvailabilityState != .unsupported else {
                 return
             }
 
             let supported = self.supportedFlashModeRawValuesOnQueue()
-            let modes = FlashMode.allCases.filter { supported.contains($0.rawValue) }
-            guard let currentIndex = modes.firstIndex(of: self.selectedFlashMode), !modes.isEmpty else {
-                self.setFlashModeOnQueue(.off)
-                return
+            let nextMode = Self.nextFlashMode(
+                current: self.selectedFlashMode,
+                availability: self.flashAvailabilityState,
+                supportedModeRawValues: supported,
+                manualExposureActive: manualExposureActive
+            )
+            if manualExposureActive && self.selectedFlashMode == .off {
+                self.publishStatus("Flash requires Auto exposure.")
             }
-            let nextMode = modes[(currentIndex + 1) % modes.count]
             self.setFlashModeOnQueue(nextMode)
         }
     }
@@ -3359,6 +3356,40 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             selection = remembered
         }
         return supportedModeRawValues.contains(selection.rawValue) ? selection : .off
+    }
+
+    /// Returns the modes that the viewfinder control may cycle through.
+    /// Off remains a safe, valid request while the hardware is temporarily
+    /// unavailable; Auto and On must wait until the hardware recovers.
+    static func flashModesForCycle(
+        availability: FlashAvailability,
+        supportedModeRawValues: Set<Int>
+    ) -> [FlashMode] {
+        guard availability != .unsupported else { return [] }
+        guard availability == .available else { return [.off] }
+        return FlashMode.allCases.filter {
+            supportedModeRawValues.contains($0.rawValue)
+        }
+    }
+
+    /// Resolves one user-facing cycle transition. Manual exposure can leave
+    /// a stale non-Off selection after a capability refresh, so its only
+    /// valid transition is explicitly back to Off.
+    static func nextFlashMode(
+        current: FlashMode,
+        availability: FlashAvailability,
+        supportedModeRawValues: Set<Int>,
+        manualExposureActive: Bool
+    ) -> FlashMode {
+        guard !manualExposureActive else { return .off }
+        let modes = flashModesForCycle(
+            availability: availability,
+            supportedModeRawValues: supportedModeRawValues
+        )
+        guard let currentIndex = modes.firstIndex(of: current), !modes.isEmpty else {
+            return .off
+        }
+        return modes[(currentIndex + 1) % modes.count]
     }
 
     private func refreshFlashCapabilitiesOnQueue(

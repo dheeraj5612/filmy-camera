@@ -584,6 +584,40 @@ final class CameraViewModel: ObservableObject {
                     self.showToast("The selected look could not be rendered. Try the capture again.", style: .error)
                     return
                 }
+#if DEBUG
+                if FilmyCaptureDiagnostics.isEnabled() {
+                    let metadata = FilmyCaptureDiagnostics.Metadata(
+                        capturedAt: capturedPhoto.capturedAt,
+                        sourceDimensions: .init(
+                            width: Int(capturedPhoto.dimensions.width),
+                            height: Int(capturedPhoto.dimensions.height)
+                        ),
+                        viewportSize: .init(
+                            width: viewportSize.width.isFinite ? max(viewportSize.width, 0) : 0,
+                            height: viewportSize.height.isFinite ? max(viewportSize.height, 0) : 0
+                        ),
+                        previewDrawableSize: .init(
+                            width: previewDrawableSize.width.isFinite ? max(previewDrawableSize.width, 0) : 0,
+                            height: previewDrawableSize.height.isFinite ? max(previewDrawableSize.height, 0) : 0
+                        ),
+                        grainSeed: grainSeed,
+                        flashFired: capturedPhoto.flashFired,
+                        finish: finish,
+                        appVersion: PhotoOutputEncoder.currentApplicationVersion,
+                        appBuild: PhotoOutputEncoder.currentApplicationBuild,
+                        recipe: recipe
+                    )
+                    let originalData = capturedPhoto.fileData
+                    let finalJPEGData = renderedPhoto.data
+                    Task.detached(priority: .utility) {
+                        _ = await FilmyCaptureDiagnostics.persist(
+                            originalData: originalData,
+                            finalJPEGData: finalJPEGData,
+                            metadata: metadata
+                        )
+                    }
+                }
+#endif
                 self.saveCapturedPhoto(
                     renderedPhoto, recipe: recipe, finish: finish, photoLibrary: photoLibrary
                 )

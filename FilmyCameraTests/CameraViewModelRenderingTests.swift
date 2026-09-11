@@ -210,6 +210,93 @@ final class CameraViewModelRenderingTests: XCTestCase {
         XCTAssertEqual(phase.y, 29, accuracy: 0.001)
     }
 
+#if DEBUG
+    func testCaptureDiagnosticsRequiresExplicitOptIn() {
+        XCTAssertFalse(
+            FilmyCaptureDiagnostics.isEnabled(arguments: [], environment: [:])
+        )
+        XCTAssertTrue(
+            FilmyCaptureDiagnostics.isEnabled(
+                arguments: [FilmyCaptureDiagnostics.launchArgument],
+                environment: [:]
+            )
+        )
+        XCTAssertTrue(
+            FilmyCaptureDiagnostics.isEnabled(
+                arguments: [],
+                environment: [FilmyCaptureDiagnostics.environmentVariable: "1"]
+            )
+        )
+        XCTAssertFalse(
+            FilmyCaptureDiagnostics.isEnabled(
+                arguments: [],
+                environment: [FilmyCaptureDiagnostics.environmentVariable: "0"]
+            )
+        )
+    }
+
+    func testCaptureDiagnosticsReplacesTheLatestSourceAndFinalPair() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FilmyCaptureDiagnosticsTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let recipe = try XCTUnwrap(
+            FilmRecipe.builtIns.first(where: { $0.id == "velvia-vivid" })
+        )
+        let metadata = FilmyCaptureDiagnostics.Metadata(
+            capturedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            sourceDimensions: .init(width: 4_032, height: 3_024),
+            viewportSize: .init(width: 390, height: 844),
+            previewDrawableSize: .init(width: 1_170, height: 2_532),
+            grainSeed: 123,
+            flashFired: true,
+            finish: .photo,
+            appVersion: "1.0.0",
+            appBuild: "19",
+            recipe: recipe
+        )
+
+        let firstWrite = await FilmyCaptureDiagnostics.persist(
+            originalData: Data("source-one".utf8),
+            finalJPEGData: Data("final-one".utf8),
+            metadata: metadata,
+            rootDirectory: root
+        )
+        XCTAssertTrue(firstWrite)
+        let secondWrite = await FilmyCaptureDiagnostics.persist(
+            originalData: Data("source-two".utf8),
+            finalJPEGData: Data("final-two".utf8),
+            metadata: metadata,
+            rootDirectory: root
+        )
+        XCTAssertTrue(secondWrite)
+
+        let latest = root.appendingPathComponent("latest", isDirectory: true)
+        XCTAssertEqual(
+            try Data(contentsOf: latest.appendingPathComponent("source.capture")),
+            Data("source-two".utf8)
+        )
+        XCTAssertEqual(
+            try Data(contentsOf: latest.appendingPathComponent("final.jpg")),
+            Data("final-two".utf8)
+        )
+        let metadataData = try Data(contentsOf: latest.appendingPathComponent("metadata.json"))
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let saved = try decoder.decode(FilmyCaptureDiagnostics.Metadata.self, from: metadataData)
+        XCTAssertEqual(saved.recipe.id, recipe.id)
+        XCTAssertEqual(saved.grainSeed, 123)
+        XCTAssertEqual(saved.viewportSize.width, 390)
+        XCTAssertEqual(saved.previewDrawableSize.height, 2_532)
+        XCTAssertEqual(saved.sourceDataByteCount, Data("source-two".utf8).count)
+        XCTAssertEqual(saved.finalJPEGByteCount, Data("final-two".utf8).count)
+        XCTAssertEqual(
+            try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).map(\.lastPathComponent),
+            ["latest"]
+        )
+    }
+#endif
+
     @MainActor
     private func makeViewModel() throws -> CameraViewModel {
         let suiteName = "CameraViewModelRenderingTests.\(UUID().uuidString)"

@@ -699,6 +699,64 @@ final class CameraServiceAvailabilityTests: XCTestCase {
             ),
             .off
         )
+        // Once the user turns flash off, a recipe/capability refresh must not
+        // restore a previous On preference over the visible Off selection.
+        XCTAssertEqual(
+            CameraService.resolvedFlashSelection(
+                current: .off,
+                remembered: .on,
+                supportedModeRawValues: supported,
+                restoringRememberedSelection: false
+            ),
+            .off
+        )
+    }
+
+    func testFlashCycleKeepsOffAvailableWhileHardwareIsTemporarilyUnavailable() {
+        let supported: Set<Int> = [
+            CameraService.FlashMode.off.rawValue,
+            CameraService.FlashMode.auto.rawValue,
+            CameraService.FlashMode.on.rawValue
+        ]
+        XCTAssertEqual(
+            CameraService.flashModesForCycle(
+                availability: .temporarilyUnavailable,
+                supportedModeRawValues: supported
+            ),
+            [.off]
+        )
+        XCTAssertEqual(
+            CameraService.flashModesForCycle(
+                availability: .available,
+                supportedModeRawValues: supported
+            ),
+            [.off, .auto, .on]
+        )
+        XCTAssertEqual(
+            CameraService.flashModesForCycle(
+                availability: .unsupported,
+                supportedModeRawValues: supported
+            ),
+            []
+        )
+        XCTAssertEqual(
+            CameraService.nextFlashMode(
+                current: .on,
+                availability: .temporarilyUnavailable,
+                supportedModeRawValues: supported,
+                manualExposureActive: false
+            ),
+            .off
+        )
+        XCTAssertEqual(
+            CameraService.nextFlashMode(
+                current: .on,
+                availability: .available,
+                supportedModeRawValues: supported,
+                manualExposureActive: true
+            ),
+            .off
+        )
     }
 
     func testAutomaticRecoveryBacksOffAndStaysBounded() {

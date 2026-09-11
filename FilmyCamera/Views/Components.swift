@@ -567,14 +567,17 @@ struct FlashControl: View {
             .viewfinderCapsule(interactive: true)
         }
         .buttonStyle(.pressable)
-        .disabled(isTemporarilyUnavailable)
+        // Off remains a valid request while the hardware is temporarily
+        // unavailable, so the user can always turn flash off. The camera
+        // screen omits this control entirely for unsupported hardware.
+        .disabled(availability == .unsupported)
         .opacity(isTemporarilyUnavailable ? 0.58 : 1)
         .accessibilityIdentifier("flash-control")
         .accessibilityLabel(isTemporarilyUnavailable ? "Flash temporarily unavailable" : "Flash")
         .accessibilityValue(mode.title)
         .accessibilityHint(
             isTemporarilyUnavailable
-                ? "The flash is temporarily unavailable. Try again after the camera cools down."
+                ? "The flash is temporarily unavailable. Tap to turn it off, or try again after the camera cools down."
                 : "Cycles between flash off, automatic low-light flash, and flash on."
         )
     }
