@@ -71,3 +71,5 @@ The final release candidate is app 1.0.0 build 21, renderer `core-image-parametr
 
 
 Release identity follow-up: the intermediate build 21/v16 had already been installed on the iPhone. Persistent recipe thumbnails are keyed by renderer version, so the final release is **build 22 / renderer v17** to invalidate those cached previews and distinguish it from the diagnostic candidate. The rendering kernel is identical to the final validated v16 revision above. Build 21's archive was preserved but was not uploaded.
+
+Build 23 / renderer v18 (2026-09-11, source `e94737c`) layers the PR #96 halation-mask fix (clamped highlight mask instead of the `CIMaskToAlpha` path that could emit negative values) on top of the v17 skin-protection kernel; the version bump again invalidates cached recipe thumbnails. Archive validated with `scripts/release/validate-archive.sh` and uploaded to App Store Connect via the native Xcode account (`build/release-build23-final/release-evidence.json`). 238/238 focused simulator tests passed on the merged tree; the physical-device GPU pass and a fresh real-capture check are still open because both devices were locked.
