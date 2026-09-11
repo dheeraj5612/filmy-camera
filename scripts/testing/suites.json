@@ -16,6 +16,7 @@
     "FilmyCameraTests/PhotoLibraryMetadataTests": "integration",
     "FilmyCameraTests/PhotoOutputEncoderTests": "integration",
     "FilmyCameraTests/RendererOutputBoundsTests": "integration",
+    "FilmyCameraTests/HalationArtifactRegressionTests": "integration",
     "FilmyCameraTests/FlashHardwareDeviceTests": "device",
     "FilmyCameraTests/CameraLensAcceptanceTests": "lens",
     "FilmyCameraTests/RendererPerformanceTests": "performance",

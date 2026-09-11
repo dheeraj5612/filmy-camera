@@ -13,7 +13,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     /// adds the canonical camera mode controls introduced by the fidelity pass;
     /// version 5 adds persisted Kelvin white-balance control.
     public static let currentSchemaVersion = 5
-    public static let rendererVersion = "core-image-parametric-v9"
+    public static let rendererVersion = "core-image-parametric-v10"
 
     /// The Kelvin value that renders as "as shot". Phone frames are already
     /// balanced for their scene, so a Color Temperature setting equal to this
