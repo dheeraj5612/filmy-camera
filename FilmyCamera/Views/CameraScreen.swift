@@ -749,16 +749,17 @@ struct CameraScreen: View {
 
     private var topBar: some View {
         CameraTopBarLayout {
-            HStack(spacing: 8) {
-                ZStack { Color.clear; flashControl }
-                    .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+            HStack(spacing: 4) {
+                flashControl
+                    .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
+                    .fixedSize(horizontal: true, vertical: false)
 
                 cameraSwitchButton
                     .opacity(camera.availableCameraPositions.count > 1 ? 1 : 0)
                     .disabled(camera.availableCameraPositions.count < 2)
                     .accessibilityHidden(camera.availableCameraPositions.count < 2)
 
-                Spacer(minLength: 4)
+                Spacer(minLength: 0)
 
                 ViewThatFits(in: .horizontal) {
                     Text("filmy")
@@ -769,7 +770,7 @@ struct CameraScreen: View {
                 }
                 .layoutPriority(-1)
 
-                Spacer(minLength: 4)
+                Spacer(minLength: 0)
 
                 captureSetupButton
                 settingsButton
@@ -854,16 +855,14 @@ struct CameraScreen: View {
         return values.joined(separator: ", ")
     }
 
-    /// Flash sits in the top corner, icon-only, where every iPhone camera
-    /// keeps it. It is a capture decision the G7 X flash treatment depends
-    /// on, so it is never hidden behind the tools toggle.
+    /// Keep the current flash selection visible in the top corner,
+    /// including its full label, even when the tools are hidden.
     @ViewBuilder
     private var flashControl: some View {
         if camera.flashAvailability != .unsupported {
             FlashControl(
                 mode: camera.flashMode,
                 availability: camera.flashAvailability,
-                iconOnly: true,
                 action: camera.cycleFlashMode
             )
         }

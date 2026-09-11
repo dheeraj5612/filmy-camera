@@ -228,8 +228,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         origin == .standalone
     }
 
-    /// The still-photo flash request. `off` is intentionally the default so
-    /// opening the camera never fires the flash without an explicit choice.
+    /// The still-photo flash request. A new preference defaults to On;
+    /// supported cameras restore the saved selection when configured.
     public enum FlashMode: Int, CaseIterable, Equatable, Sendable {
         case off = 0
         case auto = 2
@@ -240,6 +240,14 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             case .off: "Off"
             case .auto: "Auto"
             case .on: "On"
+            }
+        }
+
+        public var statusTitle: String {
+            switch self {
+            case .off: "Flash Off"
+            case .auto: "Auto Flash"
+            case .on: "Flash On"
             }
         }
 
@@ -3421,7 +3429,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         guard persistsFlashMode,
               let raw = defaults.object(forKey: flashModeDefaultsKey) as? Int,
               let mode = FlashMode(rawValue: raw) else {
-            return .off
+            return .on
         }
         return mode
     }

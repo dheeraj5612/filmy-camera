@@ -539,9 +539,6 @@ struct CameraActionButton: View {
 struct FlashControl: View {
     let mode: CameraService.FlashMode
     let availability: CameraService.FlashAvailability
-    /// Icon-only in the top bar (the way every iPhone camera shows flash);
-    /// labelled inside a control strip.
-    var iconOnly = false
     let action: () -> Void
 
     private var isTemporarilyUnavailable: Bool {
@@ -557,21 +554,17 @@ struct FlashControl: View {
             HapticFeedback.play(.controlStep)
             action()
         } label: {
-            if iconOnly {
+            HStack(spacing: 4) {
                 Image(systemName: mode.systemImageName)
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(tint)
-                    .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
-                    .background { ChromeShapeBackground(shape: Circle()) }
-                    .contentShape(Circle())
-            } else {
-                Label(mode.title, systemImage: mode.systemImageName)
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
-                    .foregroundStyle(tint)
-                    .padding(.horizontal, 12)
-                    .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.toolControlHeight)
-                    .viewfinderCapsule(interactive: true)
+                Text(mode.statusTitle)
             }
+            .font(.system(size: 11, weight: .bold, design: .rounded))
+            .foregroundStyle(tint)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, 6)
+            .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
+            .viewfinderCapsule(interactive: true)
         }
         .buttonStyle(.pressable)
         .disabled(isTemporarilyUnavailable)

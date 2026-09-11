@@ -228,6 +228,25 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         XCTAssertFalse(camera.hasFrameHandlers)
     }
 
+    func testFlashPreferenceDefaultsToOnAndPreservesEachSavedMode() throws {
+        let suite = "FlashPreferenceTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertEqual(CameraService.rememberedFlashMode(defaults: defaults), .on)
+        for mode in CameraService.FlashMode.allCases {
+            defaults.set(mode.rawValue, forKey: CameraService.flashModeDefaultsKey)
+            XCTAssertEqual(CameraService.rememberedFlashMode(defaults: defaults), mode)
+        }
+        defaults.set(99, forKey: CameraService.flashModeDefaultsKey)
+        XCTAssertEqual(CameraService.rememberedFlashMode(defaults: defaults), .on)
+    }
+
+    func testFlashStatusLabelsAreExplicit() {
+        XCTAssertEqual(CameraService.FlashMode.on.statusTitle, "Flash On")
+        XCTAssertEqual(CameraService.FlashMode.off.statusTitle, "Flash Off")
+        XCTAssertEqual(CameraService.FlashMode.auto.statusTitle, "Auto Flash")
+    }
+
     func testFlashDefaultsToSafeOffAndUnsupportedBeforeCameraConfiguration() {
         let camera = CameraService()
 

@@ -61,7 +61,7 @@ struct SettingsView: View {
         case .temporarilyUnavailable:
             return "The flash is temporarily unavailable, usually while the device cools down."
         case .available:
-            return "Remembered between launches. The G7 X profile renders flash frames differently."
+            return "On by default. Your choice is remembered between launches."
         }
     }
 
