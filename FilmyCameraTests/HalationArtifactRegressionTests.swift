@@ -3,6 +3,7 @@ import CoreImage
 import Foundation
 import ImageIO
 import Metal
+import UniformTypeIdentifiers
 import XCTest
 @testable import FilmyCamera
 
@@ -183,15 +184,55 @@ final class HalationArtifactRegressionTests: XCTestCase {
         }
     }
 
-    func testFinishedJPEGRoundTripDoesNotBakeInRedSpeckles() throws {
+    func testVividSlideEightBitOutputDoesNotAddRedSpeckles() throws {
         let image = neutralDetail()
         let recipe = try vividSlide()
         var noHalation = recipe
         noHalation.halation = 0
-        let expected = try finishedJPEG(image, recipe: noHalation)
-        let actual = try finishedJPEG(image, recipe: recipe)
+        for quality in qualities {
+            let expected = try XCTUnwrap(FilmRenderer.outputCGImage(
+                FilmRenderer.render(image, recipe: noHalation, quality: quality)
+            ))
+            let actual = try XCTUnwrap(FilmRenderer.outputCGImage(
+                FilmRenderer.render(image, recipe: recipe, quality: quality)
+            ))
+            // Float regressions above check the filter graph more strictly.
+            // Materialization rounds to 8 bits; allow one code value, plus
+            // floating-point comparison epsilon, at every individual pixel.
+            assertRGBEqual(
+                pixels(CIImage(cgImage: actual)), pixels(CIImage(cgImage: expected)),
+                tolerance: 1.0 / 255 + 0.000001, "Actual 8-bit output boundary, \(quality)"
+            )
+        }
+    }
+
+    func testFinishedJPEGRoundTripPreservesTheValidatedFrame() throws {
+        let recipe = try vividSlide()
+        let rendered = FilmRenderer.render(neutralDetail(), recipe: recipe, quality: .photo)
+        let frame = try XCTUnwrap(FilmRenderer.outputCGImage(rendered))
+        let actualData = try XCTUnwrap(PhotoOutputEncoder.jpegData(
+            for: frame, sourceData: Data(), capturedAt: Date(timeIntervalSince1970: 0), recipe: recipe
+        ))
+
+        // Compare codecs using the SAME materialized frame. Independently
+        // rendering halation-on/off first introduces rounding differences
+        // that a lossy JPEG encoder can amplify around quantization steps.
+        // That is not a valid one-code-value oracle for decoded JPEGs.
+        // The preceding test validates the actual frame against halation-off;
+        // this independent ImageIO reference detects changes in the app's
+        // saved-photo path, including profile/metadata-driven pixel changes.
+        let referenceData = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(
+            referenceData, UTType.jpeg.identifier as CFString, 1, nil
+        ))
+        CGImageDestinationAddImage(destination, frame, [
+            kCGImageDestinationLossyCompressionQuality: PhotoOutputEncoder.jpegCompressionQuality
+        ] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        let expected = try decodedJPEG(referenceData as Data)
+        let actual = try decodedJPEG(actualData)
         XCTAssertEqual(actual.extent, expected.extent)
-        assertRGBEqual(pixels(actual), pixels(expected), tolerance: 1.0 / 255, "Finished Photos-ready JPEG")
+        assertRGBEqual(pixels(actual), pixels(expected), tolerance: 0, "Finished Photos-ready JPEG")
     }
 
     func testRendererVersionInvalidatesPreFixThumbnailCache() {
@@ -283,12 +324,7 @@ final class HalationArtifactRegressionTests: XCTestCase {
         XCTAssertLessThanOrEqual(maximumError, tolerance, message, file: file, line: line)
     }
 
-    private func finishedJPEG(_ image: CIImage, recipe: FilmRecipe) throws -> CIImage {
-        let rendered = FilmRenderer.render(image, recipe: recipe, quality: .photo)
-        let cgImage = try XCTUnwrap(FilmRenderer.outputCGImage(rendered))
-        let data = try XCTUnwrap(PhotoOutputEncoder.jpegData(
-            for: cgImage, sourceData: Data(), capturedAt: Date(timeIntervalSince1970: 0), recipe: recipe
-        ))
+    private func decodedJPEG(_ data: Data) throws -> CIImage {
         let source = try XCTUnwrap(CGImageSourceCreateWithData(data as CFData, nil))
         let decoded = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
         return CIImage(cgImage: decoded)
