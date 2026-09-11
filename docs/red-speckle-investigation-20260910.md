@@ -68,3 +68,6 @@ The revised kernel passed 55 of 56 renderer/Signature/real-source checks. Inspec
 - Physical iPhone testing of the intermediate upper-gate-only fix reproduced the earlier synthetic failures and rendered the same real-source improvement. It is not validation of the final gamut/bounded-warmth revision. Both devices became locked before that final revision could be tested or installed. Lock/preparation evidence is under `build/release-build21/final-verification/`. Device verification remains pending unlock; no hardware-GPU claim is made for the final revision.
 
 The final release candidate is app 1.0.0 build 21, renderer `core-image-parametric-v16`. It includes the shared 50% Signature stage, the skin-color fixes, the earlier flash-off correction, and populated capture EXIF/app provenance. Personal diagnostic photographs remain ignored local artifacts, not test fixtures committed to the repository.
+
+
+Release identity follow-up: the intermediate build 21/v16 had already been installed on the iPhone. Persistent recipe thumbnails are keyed by renderer version, so the final release is **build 22 / renderer v17** to invalidate those cached previews and distinguish it from the diagnostic candidate. The rendering kernel is identical to the final validated v16 revision above. Build 21's archive was preserved but was not uploaded.
