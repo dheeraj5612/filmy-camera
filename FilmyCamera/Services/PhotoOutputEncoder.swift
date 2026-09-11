@@ -15,6 +15,8 @@ enum PhotoOutputEncoder {
     struct RecipeProvenanceMetadata: Codable, Equatable, Sendable {
         let format: String
         let metadataVersion: Int
+        let appVersion: String
+        let appBuild: String
         let recipeID: String
         let recipeName: String
         let filmBase: FilmRecipe.FilmBase
@@ -22,9 +24,11 @@ enum PhotoOutputEncoder {
         let rendererVersion: String
         let provenance: FilmRecipe.Provenance
 
-        init(recipe: FilmRecipe) {
+        init(recipe: FilmRecipe, appVersion: String, appBuild: String) {
             format = PhotoOutputEncoder.recipeMetadataFormat
             metadataVersion = 1
+            self.appVersion = appVersion
+            self.appBuild = appBuild
             recipeID = recipe.id
             recipeName = recipe.name
             filmBase = recipe.filmBase
@@ -32,13 +36,73 @@ enum PhotoOutputEncoder {
             rendererVersion = recipe.provenance.rendererVersion
             provenance = recipe.provenance
         }
+
+        private enum CodingKeys: String, CodingKey {
+            case format
+            case metadataVersion
+            case appVersion
+            case appBuild
+            case recipeID
+            case recipeName
+            case filmBase
+            case recipeSchemaVersion
+            case rendererVersion
+            case provenance
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            format = try container.decode(String.self, forKey: .format)
+            metadataVersion = try container.decode(Int.self, forKey: .metadataVersion)
+            // v1 provenance emitted before app version/build fields remains
+            // readable; newly encoded payloads always populate both values.
+            appVersion = try container.decodeIfPresent(String.self, forKey: .appVersion) ?? "unknown"
+            appBuild = try container.decodeIfPresent(String.self, forKey: .appBuild) ?? "unknown"
+            recipeID = try container.decode(String.self, forKey: .recipeID)
+            recipeName = try container.decode(String.self, forKey: .recipeName)
+            filmBase = try container.decode(FilmRecipe.FilmBase.self, forKey: .filmBase)
+            recipeSchemaVersion = try container.decode(Int.self, forKey: .recipeSchemaVersion)
+            rendererVersion = try container.decode(String.self, forKey: .rendererVersion)
+            provenance = try container.decode(FilmRecipe.Provenance.self, forKey: .provenance)
+        }
     }
+
+    static var currentApplicationVersion: String {
+        bundleString(forKey: "CFBundleShortVersionString")
+    }
+
+    static var currentApplicationBuild: String {
+        bundleString(forKey: "CFBundleVersion")
+    }
+
+    private static let preservedCaptureExifKeys: [String] = [
+        kCGImagePropertyExifExposureTime as String,
+        kCGImagePropertyExifExposureBiasValue as String,
+        kCGImagePropertyExifExposureProgram as String,
+        kCGImagePropertyExifISOSpeedRatings as String,
+        kCGImagePropertyExifFNumber as String,
+        kCGImagePropertyExifFocalLength as String,
+        kCGImagePropertyExifFocalLenIn35mmFilm as String,
+        kCGImagePropertyExifLensModel as String,
+        kCGImagePropertyExifLensSpecification as String,
+        kCGImagePropertyExifFlash as String,
+        kCGImagePropertyExifMeteringMode as String,
+        kCGImagePropertyExifWhiteBalance as String,
+        kCGImagePropertyExifDateTimeOriginal as String,
+        kCGImagePropertyExifDateTimeDigitized as String,
+        kCGImagePropertyExifOffsetTimeOriginal as String,
+        kCGImagePropertyExifOffsetTimeDigitized as String,
+        kCGImagePropertyExifSubsecTimeOriginal as String,
+        kCGImagePropertyExifSubsecTimeDigitized as String
+    ]
 
     static func jpegData(
         for image: CGImage,
-        sourceData _: Data,
+        sourceData: Data,
         capturedAt: Date,
-        recipe: FilmRecipe
+        recipe: FilmRecipe,
+        appVersion: String = currentApplicationVersion,
+        appBuild: String = currentApplicationBuild
     ) -> Data? {
         // FilmRenderer.outputCGImage() establishes the actual sRGB conversion
         // before this boundary. Replacing the color space here makes that
@@ -49,9 +113,10 @@ enum PhotoOutputEncoder {
             return nil
         }
 
-        // Build export metadata from an explicit allowlist. Source TIFF, EXIF,
+        // Build export metadata from an explicit allowlist. Source TIFF,
         // MakerApple, GPS, and other camera/device metadata must never cross
-        // this boundary into an app-created JPEG.
+        // this boundary into an app-created JPEG. Capture facts such as
+        // exposure, ISO, and lens are useful provenance and are copied below.
         var properties: [String: Any] = [
             kCGImagePropertyColorModel as String: kCGImagePropertyColorModelRGB,
             kCGImagePropertyProfileName as String: Self.outputProfileName,
@@ -74,16 +139,36 @@ enum PhotoOutputEncoder {
         dateFormatter.locale = Locale(identifier: "en_US_POSIX")
         dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
         dateFormatter.dateFormat = "yyyy:MM:dd HH:mm:ss"
-        var exif: [String: Any] = [
-            kCGImagePropertyExifDateTimeOriginal as String: dateFormatter.string(from: capturedAt),
-            kCGImagePropertyExifPixelXDimension as String: outputImage.width,
-            kCGImagePropertyExifPixelYDimension as String: outputImage.height,
-            // EXIF 2.3: 1 means sRGB. This complements the embedded ICC
-            // profile for readers that inspect EXIF but do not parse ICC
-            // resources.
-            kCGImagePropertyExifColorSpace as String: 1
-        ]
-        if let provenance = provenanceJSON(for: recipe) {
+        var exif = captureExif(from: sourceData)
+        let fallbackDate = dateFormatter.string(from: capturedAt)
+        let originalDateKey = kCGImagePropertyExifDateTimeOriginal as String
+        let digitizedDateKey = kCGImagePropertyExifDateTimeDigitized as String
+        let originalOffsetKey = kCGImagePropertyExifOffsetTimeOriginal as String
+        let digitizedOffsetKey = kCGImagePropertyExifOffsetTimeDigitized as String
+        if (exif[originalDateKey] as? String)?.isEmpty != false {
+            exif[originalDateKey] = fallbackDate
+            exif[originalOffsetKey] = "+00:00"
+        }
+        let digitizedDateWasDerived = (exif[digitizedDateKey] as? String)?.isEmpty != false
+        if digitizedDateWasDerived {
+            exif[digitizedDateKey] = exif[originalDateKey] ?? fallbackDate
+        }
+        if digitizedDateWasDerived,
+           (exif[digitizedOffsetKey] as? String)?.isEmpty != false,
+           let originalOffset = exif[originalOffsetKey] as? String {
+            exif[digitizedOffsetKey] = originalOffset
+        }
+        exif[kCGImagePropertyExifPixelXDimension as String] = outputImage.width
+        exif[kCGImagePropertyExifPixelYDimension as String] = outputImage.height
+        // EXIF 2.3: 1 means sRGB. This complements the embedded ICC
+        // profile for readers that inspect EXIF but do not parse ICC
+        // resources.
+        exif[kCGImagePropertyExifColorSpace as String] = 1
+        if let provenance = provenanceJSON(
+            for: recipe,
+            appVersion: appVersion,
+            appBuild: appBuild
+        ) {
             exif[kCGImagePropertyExifUserComment as String] = provenance
         }
         properties[kCGImagePropertyExifDictionary as String] = exif
@@ -103,10 +188,42 @@ enum PhotoOutputEncoder {
         return outputData as Data
     }
 
-    private static func provenanceJSON(for recipe: FilmRecipe) -> String? {
+    private static func captureExif(from sourceData: Data) -> [String: Any] {
+        guard let source = CGImageSourceCreateWithData(sourceData as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any],
+              let sourceExif = properties[kCGImagePropertyExifDictionary as String] as? [String: Any] else {
+            return [:]
+        }
+
+        return preservedCaptureExifKeys.reduce(into: [String: Any]()) { result, key in
+            if let value = sourceExif[key] {
+                result[key] = value
+            }
+        }
+    }
+
+    private static func bundleString(forKey key: String) -> String {
+        guard let value = Bundle.main.object(forInfoDictionaryKey: key) as? String,
+              !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return "unknown"
+        }
+        return value
+    }
+
+    private static func provenanceJSON(
+        for recipe: FilmRecipe,
+        appVersion: String,
+        appBuild: String
+    ) -> String? {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        guard let data = try? encoder.encode(RecipeProvenanceMetadata(recipe: recipe)) else {
+        guard let data = try? encoder.encode(
+            RecipeProvenanceMetadata(
+                recipe: recipe,
+                appVersion: appVersion,
+                appBuild: appBuild
+            )
+        ) else {
             return nil
         }
         return String(data: data, encoding: .utf8)

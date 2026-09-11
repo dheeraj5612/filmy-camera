@@ -549,6 +549,34 @@ final class RendererOutputBoundsTests: XCTestCase {
         }
     }
 
+    func testColorRecipesKeepFineSkinTextureFreeOfColorSpeckles() throws {
+        let fixture = skinCreaseFixture(width: 512)
+        try assertSkinTextureContinuity(
+            input: fixture.image,
+            extent: fixture.extent,
+            width: 512,
+            recipes: colorSkinRecipes(),
+            qualities: [.preview, .photo, .export],
+            context: FilmRenderer.sharedContext,
+            attachmentSuffix: "skin-continuity",
+            maximumAddedWarmth: 0.35
+        )
+    }
+
+    func testColorRecipesKeepHighResolutionSkinTextureFreeOfColorSpeckles() throws {
+        let fixture = skinCreaseFixture(width: 2048)
+        try assertSkinTextureContinuity(
+            input: fixture.image,
+            extent: fixture.extent,
+            width: 2048,
+            recipes: colorSkinRecipes(),
+            qualities: [.photo],
+            context: FilmRenderer.sharedContext,
+            attachmentSuffix: nil,
+            maximumAddedWarmth: nil
+        )
+    }
+
     func testG7XCompactColorEmphasizesWarmSubjectsAndSkyWhileRestrainingFoliage() throws {
         let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
         let context = CIContext(options: FilmRenderer.testContextOptions)
@@ -1805,6 +1833,178 @@ final class RendererOutputBoundsTests: XCTestCase {
         XCTAssertEqual(landscapeCrop.midY, source.midY, accuracy: 0.001)
     }
 
+    private func colorSkinRecipes() throws -> [FilmRecipe] {
+        try ["velvia-vivid", "g7x-compact"].map { identifier in
+            try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == identifier })
+        }
+    }
+
+    private func skinCreaseFixture(width: Int) -> (image: CIImage, extent: CGRect) {
+        let extent = CGRect(x: 0, y: 0, width: width, height: width)
+        var bytes = [UInt8](repeating: 255, count: width * width * 4)
+        for y in 0..<width {
+            for x in 0..<width {
+                let crease = pow(max(0, sin(Double(x) * 0.12 + sin(Double(y) * 0.037) * 2)), 12)
+                let red = (0.20 + Double(x) / Double(width - 1) * 0.65) * (1 - 0.8 * crease)
+                let greenRatio = 0.55 + Double(y) / Double(width - 1) * 0.35
+                let texture = Double((x * 17 + y * 31) % 7 - 3) / 500
+                let redChannel = red + texture
+                let greenChannel = red * greenRatio + texture
+                let blueChannel = red * (greenRatio - 0.15) + texture
+                let index = (y * width + x) * 4
+                bytes[index] = UInt8((redChannel * 255).rounded())
+                bytes[index + 1] = UInt8((greenChannel * 255).rounded())
+                bytes[index + 2] = UInt8((blueChannel * 255).rounded())
+            }
+        }
+        let image = CIImage(
+            bitmapData: Data(bytes),
+            bytesPerRow: width * 4,
+            size: extent.size,
+            format: .RGBA8,
+            colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!
+        )
+        return (image, extent)
+    }
+
+    private func assertSkinTextureContinuity(
+        input: CIImage,
+        extent: CGRect,
+        width: Int,
+        recipes: [FilmRecipe],
+        qualities: [FilmRenderer.Quality],
+        context: CIContext,
+        attachmentSuffix: String?,
+        maximumAddedWarmth: Double?
+    ) throws {
+        let sourcePixels = renderFloatPixels(input, extent: extent, context: context)
+
+        func warmthResidual(
+            source: [Float],
+            rendered: [Float],
+            index: Int,
+            channel: Int
+        ) -> Double? {
+            let sourceLuma = luma(source, at: index)
+            let renderedLuma = luma(rendered, at: index)
+            guard sourceLuma > 0.06, renderedLuma > 0.06 else { return nil }
+            let sourceWarmth = Double(source[index + channel] - source[index + 2]) / sourceLuma
+            let renderedWarmth = Double(rendered[index + channel] - rendered[index + 2]) / renderedLuma
+            return renderedWarmth - sourceWarmth
+        }
+
+        for recipe in recipes {
+            for quality in qualities {
+                let output = FilmRenderer.render(input, recipe: recipe, quality: quality)
+                let pixels = renderFloatPixels(output, extent: extent, context: context)
+                var largestChromaStep = 0.0
+                var largestAddedWarmth = 0.0
+                var largestWarmthStep = 0.0
+                var finitePixelCount = 0
+                var validWarmthSampleCount = 0
+                let inspectedPixelCount = (width - 8) * (width - 8)
+
+                for y in 4..<(width - 4) {
+                    for x in 4..<(width - 4) {
+                        let index = (y * width + x) * 4
+                        let sourceFinite = sourcePixels[index].isFinite
+                            && sourcePixels[index + 1].isFinite
+                            && sourcePixels[index + 2].isFinite
+                        let renderedFinite = pixels[index].isFinite
+                            && pixels[index + 1].isFinite
+                            && pixels[index + 2].isFinite
+                        guard sourceFinite && renderedFinite else { continue }
+                        finitePixelCount += 1
+                        let sourceLuma = luma(sourcePixels, at: index)
+                        let renderedLuma = luma(pixels, at: index)
+                        if sourceLuma > 0.06, renderedLuma > 0.06 {
+                            validWarmthSampleCount += 1
+                        }
+                        for channel in 0...1 {
+                            if let addedWarmth = warmthResidual(
+                                source: sourcePixels,
+                                rendered: pixels,
+                                index: index,
+                                channel: channel
+                            ) {
+                                largestAddedWarmth = max(largestAddedWarmth, addedWarmth)
+                            }
+                        }
+
+                        for neighborOffset in 0..<2 {
+                            let neighbor = index + (neighborOffset == 0 ? 4 : width * 4)
+                            let sourceSimilar =
+                                abs(sourcePixels[index] - sourcePixels[neighbor]) < 0.024
+                                && abs(sourcePixels[index + 1] - sourcePixels[neighbor + 1]) < 0.024
+                                && abs(sourcePixels[index + 2] - sourcePixels[neighbor + 2]) < 0.024
+                            guard sourceSimilar else { continue }
+
+                            for channel in 0...1 {
+                                let chroma = pixels[index + channel] - pixels[index + 2]
+                                let nearbyChroma = pixels[neighbor + channel] - pixels[neighbor + 2]
+                                largestChromaStep = max(
+                                    largestChromaStep,
+                                    Double(abs(chroma - nearbyChroma))
+                                )
+                                if let warmth = warmthResidual(
+                                    source: sourcePixels,
+                                    rendered: pixels,
+                                    index: index,
+                                    channel: channel
+                                ), let nearbyWarmth = warmthResidual(
+                                    source: sourcePixels,
+                                    rendered: pixels,
+                                    index: neighbor,
+                                    channel: channel
+                                ) {
+                                    largestWarmthStep = max(
+                                        largestWarmthStep,
+                                        abs(warmth - nearbyWarmth)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                XCTAssertLessThan(
+                    largestChromaStep,
+                    0.06,
+                    "\(recipe.id) \(quality) acquired abrupt red/yellow speckles"
+                )
+                XCTAssertLessThan(
+                    largestWarmthStep,
+                    0.18,
+                    "\(recipe.id) \(quality) acquired isolated warm chroma steps"
+                )
+                XCTAssertEqual(
+                    finitePixelCount,
+                    inspectedPixelCount,
+                    "\(recipe.id) \(quality) produced non-finite skin pixels"
+                )
+                XCTAssertGreaterThan(
+                    validWarmthSampleCount,
+                    inspectedPixelCount / 2,
+                    "\(recipe.id) \(quality) had too few valid warmth samples"
+                )
+                if let maximumAddedWarmth {
+                    XCTAssertLessThan(
+                        largestAddedWarmth,
+                        maximumAddedWarmth,
+                        "\(recipe.id) \(quality) acquired an excessive warm cast"
+                    )
+                }
+                if let attachmentSuffix, quality == .photo {
+                    let bitmap = try XCTUnwrap(context.createCGImage(output, from: extent))
+                    let attachment = XCTAttachment(image: UIImage(cgImage: bitmap))
+                    attachment.name = "\(recipe.id)-\(attachmentSuffix)"
+                    attachment.lifetime = .keepAlways
+                    add(attachment)
+                }
+            }
+        }
+    }
+
     private func renderFloatPixels(
         _ image: CIImage,
         extent: CGRect,
@@ -1902,6 +2102,12 @@ final class RendererOutputBoundsTests: XCTestCase {
         0.2126 * Double(pixel[0])
             + 0.7152 * Double(pixel[1])
             + 0.0722 * Double(pixel[2])
+    }
+
+    private func luma(_ pixels: [Float], at index: Int) -> Double {
+        0.2126 * Double(pixels[index])
+            + 0.7152 * Double(pixels[index + 1])
+            + 0.0722 * Double(pixels[index + 2])
     }
 
     private func chroma(_ pixel: [Float]) -> Double {

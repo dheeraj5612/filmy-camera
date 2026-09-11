@@ -230,8 +230,15 @@ public final class FilmRenderer {
                     float saturation = (maximum - minimum) / max(maximum, 0.001);
                     float warmRange = max(source.r - source.b, 0.001);
                     float huePosition = (source.g - source.b) / warmRange;
-                    float skin = smoothstep(0.005, 0.035, source.r - source.g)
-                        * smoothstep(0.002, 0.025, source.g - source.b)
+                    // Use channel separation relative to scene brightness so
+                    // a shadowed crease keeps the same hue mask as its lit
+                    // neighbors. Absolute RGB deltas make the correction
+                    // disappear in dark skin and leave a red contour behind.
+                    float chromaScale = max(sourceLuma, 0.02);
+                    float redGreenRatio = (source.r - source.g) / chromaScale;
+                    float greenBlueRatio = (source.g - source.b) / chromaScale;
+                    float skin = smoothstep(0.03, 0.10, redGreenRatio)
+                        * smoothstep(0.015, 0.08, greenBlueRatio)
                         * smoothstep(0.08, 0.18, huePosition)
                         * (1.0 - smoothstep(0.65, 0.85, huePosition))
                         * smoothstep(0.08, 0.18, saturation)
@@ -587,9 +594,11 @@ public final class FilmRenderer {
         output = applyColorControls(to: output, recipe: safeRecipe)
         output = applyColorCube(to: output, recipe: safeRecipe, quality: quality)
         output = applyMonochromaticColorAxes(to: output, recipe: safeRecipe)
-        output = applySkinColorProtection(to: output, source: processingImage, recipe: safeRecipe)
         output = applyDetailControls(to: output, recipe: safeRecipe)
         output = applyClarity(to: output, recipe: safeRecipe)
+        // Correct warm skin chroma after local contrast stages so sharpening
+        // cannot re-amplify tiny red-channel variations into colored speckles.
+        output = applySkinColorProtection(to: output, source: processingImage, recipe: safeRecipe)
         // Halation is light scattered inside the film stack, so derive its
         // highlight mask before adding the final grain texture. Otherwise the
         // synthetic grain itself can create or modulate red highlight bloom.
@@ -894,7 +903,7 @@ public final class FilmRenderer {
             }
         }
 
-        let signatureStrength: CGFloat = 0.25
+        let signatureStrength: CGFloat = 0.50
         let controlPoints: [CGFloat] = [0, 0.20, 0.50, 0.80, 1]
         let levels = zip(controlPoints, signatureLevels).map { x, signatureY in
             x + (signatureY - x) * signatureStrength
@@ -936,9 +945,9 @@ public final class FilmRenderer {
             ]
             : [
                 (0.00, 0.004),
-                (0.18, 0.16375),
-                (0.50, 0.5275),
-                (0.80, 0.8235),
+                (0.18, 0.1425),
+                (0.50, 0.495),
+                (0.80, 0.819),
                 (1.00, 0.972)
             ]
 
@@ -1191,7 +1200,10 @@ public final class FilmRenderer {
            let noiseFilter = CIFilter(name: "CINoiseReduction") {
             noiseFilter.setValue(output, forKey: kCIInputImageKey)
             noiseFilter.setValue(noiseReduction * 0.035, forKey: "inputNoiseLevel")
-            noiseFilter.setValue(1 - noiseReduction * 0.65, forKey: "inputSharpness")
+            // CINoiseReduction sharpens luminance above its noise threshold.
+            // Keep that hidden sharpening off; explicit Sharpness and Clarity
+            // controls below are the only stages allowed to add edge contrast.
+            noiseFilter.setValue(0, forKey: "inputSharpness")
             output = noiseFilter.outputImage?.cropped(to: image.extent) ?? output
         }
 
@@ -1659,9 +1671,9 @@ public final class FilmRenderer {
             let deepShadowWeight = 1 - smoothstep(0.04, 0.26, luma)
             let brightHighlightWeight = smoothstep(0.72, 0.98, luma)
 
-            // Keep the compact-camera warmth at the same restrained quarter
+            // Keep the compact-camera warmth at the same restrained half
             // strength as the shared Signature character stage.
-            nudge(0.00875, 0.00175, -0.0075, by: smoothstep(0.45, 0.90, luma))
+            nudge(0.0175, 0.0035, -0.015, by: smoothstep(0.45, 0.90, luma))
 
             // Deep shadows and near-white highlights carry less chroma than
             // the midtones. This avoids colorful shadow noise and hard color

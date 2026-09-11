@@ -88,7 +88,14 @@ final class PhotoOutputEncoderTests: XCTestCase {
                 kCGImagePropertyTIFFArtist as String: "source-artist-should-not-leak"
             ],
             kCGImagePropertyExifDictionary as String: [
-                kCGImagePropertyExifLensModel as String: "source-lens-should-not-leak"
+                kCGImagePropertyExifExposureTime as String: 0.008,
+                kCGImagePropertyExifExposureBiasValue as String: -0.3,
+                kCGImagePropertyExifISOSpeedRatings as String: [200],
+                kCGImagePropertyExifFNumber as String: 1.8,
+                kCGImagePropertyExifFocalLength as String: 4.2,
+                kCGImagePropertyExifFocalLenIn35mmFilm as String: 24,
+                kCGImagePropertyExifLensModel as String: "capture-lens-should-survive",
+                kCGImagePropertyExifCameraOwnerName as String: "private-owner-should-not-leak"
             ],
             kCGImagePropertyMakerAppleDictionary as String: [
                 "source-device-field": "source-maker-apple-should-not-leak"
@@ -102,7 +109,9 @@ final class PhotoOutputEncoderTests: XCTestCase {
             for: image,
             sourceData: sourceData as Data,
             capturedAt: capturedAt,
-            recipe: recipe
+            recipe: recipe,
+            appVersion: "1.0.0",
+            appBuild: "19"
         ))
         let outputSource = try XCTUnwrap(CGImageSourceCreateWithData(output as CFData, nil))
         let properties = try XCTUnwrap(
@@ -117,6 +126,39 @@ final class PhotoOutputEncoderTests: XCTestCase {
             "Filmy Camera • \(recipe.name)"
         )
         XCTAssertEqual(exif[kCGImagePropertyExifDateTimeOriginal as String] as? String, "2026:08:12 18:00:00")
+        XCTAssertEqual(exif[kCGImagePropertyExifOffsetTimeOriginal as String] as? String, "+00:00")
+        XCTAssertEqual(exif[kCGImagePropertyExifDateTimeDigitized as String] as? String, "2026:08:12 18:00:00")
+        XCTAssertEqual(exif[kCGImagePropertyExifOffsetTimeDigitized as String] as? String, "+00:00")
+        XCTAssertEqual(
+            try XCTUnwrap(exif[kCGImagePropertyExifExposureTime as String] as? NSNumber).doubleValue,
+            0.008,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(exif[kCGImagePropertyExifExposureBiasValue as String] as? NSNumber).doubleValue,
+            -0.3,
+            accuracy: 0.000_001
+        )
+        let isoValues = try XCTUnwrap(exif[kCGImagePropertyExifISOSpeedRatings as String] as? [NSNumber])
+        XCTAssertEqual(isoValues.map(\.intValue), [200])
+        XCTAssertEqual(
+            try XCTUnwrap(exif[kCGImagePropertyExifFNumber as String] as? NSNumber).doubleValue,
+            1.8,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(exif[kCGImagePropertyExifFocalLength as String] as? NSNumber).doubleValue,
+            4.2,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(exif[kCGImagePropertyExifFocalLenIn35mmFilm as String] as? NSNumber).intValue,
+            24
+        )
+        XCTAssertEqual(
+            exif[kCGImagePropertyExifLensModel as String] as? String,
+            "capture-lens-should-survive"
+        )
         XCTAssertEqual((exif[kCGImagePropertyExifPixelXDimension as String] as? NSNumber)?.intValue, 4)
         XCTAssertEqual((exif[kCGImagePropertyExifPixelYDimension as String] as? NSNumber)?.intValue, 3)
         XCTAssertEqual((exif[kCGImagePropertyExifColorSpace as String] as? NSNumber)?.intValue, 1)
@@ -127,7 +169,7 @@ final class PhotoOutputEncoderTests: XCTestCase {
         XCTAssertEqual(properties[kCGImagePropertyProfileName as String] as? String, PhotoOutputEncoder.outputProfileName)
         XCTAssertNil(properties[kCGImagePropertyGPSDictionary as String])
         XCTAssertNil(tiff[kCGImagePropertyTIFFArtist as String])
-        XCTAssertNil(exif[kCGImagePropertyExifLensModel as String])
+        XCTAssertNil(exif[kCGImagePropertyExifCameraOwnerName as String])
         XCTAssertNil(properties[kCGImagePropertyMakerAppleDictionary as String])
         XCTAssertEqual(CGImageSourceGetType(outputSource) as String?, UTType.jpeg.identifier)
 
@@ -139,12 +181,145 @@ final class PhotoOutputEncoderTests: XCTestCase {
         )
         XCTAssertEqual(metadata.format, PhotoOutputEncoder.recipeMetadataFormat)
         XCTAssertEqual(metadata.metadataVersion, 1)
+        XCTAssertEqual(metadata.appVersion, "1.0.0")
+        XCTAssertEqual(metadata.appBuild, "19")
         XCTAssertEqual(metadata.recipeID, recipe.id)
         XCTAssertEqual(metadata.recipeName, recipe.name)
         XCTAssertEqual(metadata.filmBase, recipe.filmBase)
         XCTAssertEqual(metadata.recipeSchemaVersion, recipe.schemaVersion)
         XCTAssertEqual(metadata.rendererVersion, recipe.provenance.rendererVersion)
         XCTAssertEqual(metadata.provenance, recipe.provenance)
+    }
+
+    func testJPEGPreservesSourceCaptureDatesAndOffsetsForImportedPhotos() throws {
+        let colorSpace = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        let context = try XCTUnwrap(CGContext(
+            data: nil,
+            width: 2,
+            height: 2,
+            bitsPerComponent: 8,
+            bytesPerRow: 8,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        let image = try XCTUnwrap(context.makeImage())
+        let sourceData = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(
+            sourceData,
+            UTType.jpeg.identifier as CFString,
+            1,
+            nil
+        ))
+        let sourceProperties: [String: Any] = [
+            kCGImagePropertyExifDictionary as String: [
+                kCGImagePropertyExifDateTimeOriginal as String: "2024:02:03 04:05:06",
+                kCGImagePropertyExifDateTimeDigitized as String: "2024:02:03 04:05:07",
+                kCGImagePropertyExifOffsetTimeOriginal as String: "-05:00",
+                kCGImagePropertyExifOffsetTimeDigitized as String: "-05:00"
+            ]
+        ]
+        CGImageDestinationAddImage(destination, image, sourceProperties as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+
+        let output = try XCTUnwrap(PhotoOutputEncoder.jpegData(
+            for: image,
+            sourceData: sourceData as Data,
+            capturedAt: Date(timeIntervalSince1970: 4_102_444_800),
+            recipe: FilmRecipe.builtIns[0],
+            appVersion: "1.0.0",
+            appBuild: "19"
+        ))
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(output as CFData, nil))
+        let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any])
+        let exif = try XCTUnwrap(properties[kCGImagePropertyExifDictionary as String] as? [String: Any])
+
+        XCTAssertEqual(
+            exif[kCGImagePropertyExifDateTimeOriginal as String] as? String,
+            "2024:02:03 04:05:06"
+        )
+        XCTAssertEqual(
+            exif[kCGImagePropertyExifDateTimeDigitized as String] as? String,
+            "2024:02:03 04:05:07"
+        )
+        XCTAssertEqual(
+            exif[kCGImagePropertyExifOffsetTimeOriginal as String] as? String,
+            "-05:00"
+        )
+        XCTAssertEqual(
+            exif[kCGImagePropertyExifOffsetTimeDigitized as String] as? String,
+            "-05:00"
+        )
+    }
+
+    func testJPEGDoesNotInventDigitizedOffsetForPreservedDigitizedDate() throws {
+        let colorSpace = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        let context = try XCTUnwrap(CGContext(
+            data: nil,
+            width: 2,
+            height: 2,
+            bitsPerComponent: 8,
+            bytesPerRow: 8,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        let image = try XCTUnwrap(context.makeImage())
+        let sourceData = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(
+            sourceData,
+            UTType.jpeg.identifier as CFString,
+            1,
+            nil
+        ))
+        let sourceProperties: [String: Any] = [
+            kCGImagePropertyExifDictionary as String: [
+                kCGImagePropertyExifDateTimeOriginal as String: "2024:02:03 04:05:06",
+                kCGImagePropertyExifDateTimeDigitized as String: "2024:02:03 04:05:07",
+                kCGImagePropertyExifOffsetTimeOriginal as String: "-05:00"
+            ]
+        ]
+        CGImageDestinationAddImage(destination, image, sourceProperties as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+
+        let output = try XCTUnwrap(PhotoOutputEncoder.jpegData(
+            for: image,
+            sourceData: sourceData as Data,
+            capturedAt: Date(timeIntervalSince1970: 4_102_444_800),
+            recipe: FilmRecipe.builtIns[0],
+            appVersion: "1.0.0",
+            appBuild: "19"
+        ))
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(output as CFData, nil))
+        let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any])
+        let exif = try XCTUnwrap(properties[kCGImagePropertyExifDictionary as String] as? [String: Any])
+
+        XCTAssertEqual(exif[kCGImagePropertyExifDateTimeDigitized as String] as? String, "2024:02:03 04:05:07")
+        XCTAssertNil(exif[kCGImagePropertyExifOffsetTimeDigitized as String])
+    }
+
+    func testLegacyRecipeProvenanceWithoutAppFieldsRemainsReadable() throws {
+        let recipe = FilmRecipe.builtIns[0]
+        let current = PhotoOutputEncoder.RecipeProvenanceMetadata(
+            recipe: recipe,
+            appVersion: "1.0.0",
+            appBuild: "19"
+        )
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: JSONEncoder().encode(current),
+                options: []
+            ) as? [String: Any]
+        )
+        object.removeValue(forKey: "appVersion")
+        object.removeValue(forKey: "appBuild")
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(
+            PhotoOutputEncoder.RecipeProvenanceMetadata.self,
+            from: legacyData
+        )
+        XCTAssertEqual(decoded.appVersion, "unknown")
+        XCTAssertEqual(decoded.appBuild, "unknown")
+        XCTAssertEqual(decoded.recipeID, recipe.id)
     }
 
     func testJPEGProvenancePreservesUserModifiedDisclosure() throws {
