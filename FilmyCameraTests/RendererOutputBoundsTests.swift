@@ -374,19 +374,28 @@ final class RendererOutputBoundsTests: XCTestCase {
         }
     }
 
-    func testG7XCompactToneCurveRetainsShadowsAndBalancedMidtones() throws {
+    func testG7XCompactToneCurveIsMonotonicAndDistinguishesFlashResponse() throws {
         let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
         let context = CIContext(options: FilmRenderer.testContextOptions)
         let compact = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == "g7x-compact" })
-        let neutral = replacingFilmBase(of: compact, with: .standard)
+        let flashContext = FilmRenderer.CaptureContext(flashFired: true)
 
-        func renderedLuma(_ value: CGFloat, recipe: FilmRecipe) -> Double {
+        func renderedLuma(
+            _ value: CGFloat,
+            recipe: FilmRecipe,
+            captureContext: FilmRenderer.CaptureContext = .standard
+        ) -> Double {
             let image = CIImage(
                 color: CIColor(red: value, green: value, blue: value, alpha: 1)
             ).cropped(to: extent)
             return luma(
                 renderFloatPixels(
-                    FilmRenderer.render(image, recipe: recipe, quality: .photo),
+                    FilmRenderer.render(
+                        image,
+                        recipe: recipe,
+                        quality: .photo,
+                        captureContext: captureContext
+                    ),
                     extent: extent,
                     context: context
                 )
@@ -399,16 +408,10 @@ final class RendererOutputBoundsTests: XCTestCase {
             XCTAssertLessThan(lower, upper, "The compact tone response must remain monotonic")
         }
 
-        XCTAssertLessThan(
-            renderedLuma(0.18, recipe: compact),
-            renderedLuma(0.18, recipe: neutral) - 0.005,
-            "The approved compact look should deepen ambient shadows"
-        )
-        XCTAssertEqual(
-            renderedLuma(0.50, recipe: compact),
-            renderedLuma(0.50, recipe: neutral),
-            accuracy: 0.03,
-            "The restrained Signature look should keep midtones near the neutral response"
+        XCTAssertGreaterThan(
+            renderedLuma(0.50, recipe: compact, captureContext: flashContext),
+            renderedLuma(0.50, recipe: compact) + 0.02,
+            "Flash should retain a brighter global compact-camera response"
         )
         XCTAssertLessThan(compactLevels.last ?? 1, 0.995, "Highlights should retain a shoulder before clipping")
     }
@@ -512,6 +515,36 @@ final class RendererOutputBoundsTests: XCTestCase {
                 let dark = pixel(withFace, width: 64, x: 32, y: 30)
                 XCTAssertGreaterThan(abs(luma(light) - luma(dark)), 0.02,
                                      "Fine skin-toned texture must survive the default look")
+            }
+        }
+    }
+
+    func testColorRecipesRestrainAddedOrangeAcrossSkinTonesAndQualityTiers() throws {
+        let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
+        let context = CIContext(options: FilmRenderer.testContextOptions)
+        let tones: [[Float]] = [
+            [0.28, 0.18, 0.13, 1],
+            [0.58, 0.38, 0.28, 1],
+            [0.82, 0.65, 0.55, 1]
+        ]
+        for recipe in FilmRecipe.builtIns where !recipe.filmBase.supportsMonochromaticColorAxes {
+            for tone in tones {
+                let input = CIImage(color: CIColor(
+                    red: CGFloat(tone[0]), green: CGFloat(tone[1]), blue: CGFloat(tone[2])
+                )).cropped(to: extent)
+                for quality in [FilmRenderer.Quality.preview, .photo, .export] {
+                    let output = renderFloatPixels(FilmRenderer.render(
+                        input, recipe: recipe, quality: quality
+                    ), extent: extent, context: context)
+                    let sourceLuma = luma(tone)
+                    let outputLuma = max(luma(output), 0.02)
+                    for channel in 0...1 {
+                        let originalWarmth = Double(tone[channel] - tone[2]) / sourceLuma
+                        let outputWarmth = Double(output[channel] - output[2]) / outputLuma
+                        XCTAssertLessThanOrEqual(outputWarmth, originalWarmth + 0.25,
+                            "\(recipe.id) adds excessive orange to \(tone) at \(quality)")
+                    }
+                }
             }
         }
     }

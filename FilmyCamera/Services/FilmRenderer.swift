@@ -200,6 +200,7 @@ public final class FilmRenderer {
     private final class ImmutableResources: @unchecked Sendable {
         let grainTexture: CIImage?
         let grainKernel: CIColorKernel?
+        let skinColorKernel: CIColorKernel?
         let clearImage: CIImage
         let zeroComponents: CIVector
         let oneComponents: CIVector
@@ -214,6 +215,43 @@ public final class FilmRenderer {
                     float luminanceMask = clamp(4.0 * luminance * (1.0 - luminance), 0.0, 1.0);
                     float delta = (noise.r - 0.5) * amplitude * luminanceMask;
                     return vec4(clamp(image.rgb + vec3(delta), 0.0, 1.0), image.a);
+                }
+                """)
+            // Compare chroma at equal luminance: a recipe can change exposure
+            // without turning naturally warm skin into saturated orange. This
+            // is a feathered color-range mask, not face segmentation or blur.
+            skinColorKernel = CIColorKernel(source: """
+                kernel vec4 filmySkinColor(__sample source, __sample rendered) {
+                    vec3 weights = vec3(0.2126, 0.7152, 0.0722);
+                    float sourceLuma = dot(source.rgb, weights);
+                    float outputLuma = dot(rendered.rgb, weights);
+                    float maximum = max(source.r, max(source.g, source.b));
+                    float minimum = min(source.r, min(source.g, source.b));
+                    float saturation = (maximum - minimum) / max(maximum, 0.001);
+                    float warmRange = max(source.r - source.b, 0.001);
+                    float huePosition = (source.g - source.b) / warmRange;
+                    float skin = smoothstep(0.005, 0.035, source.r - source.g)
+                        * smoothstep(0.002, 0.025, source.g - source.b)
+                        * smoothstep(0.08, 0.18, huePosition)
+                        * (1.0 - smoothstep(0.65, 0.85, huePosition))
+                        * smoothstep(0.08, 0.18, saturation)
+                        * (1.0 - smoothstep(0.68, 0.90, saturation))
+                        * smoothstep(0.015, 0.055, sourceLuma);
+                    vec3 reference = source.rgb * outputLuma / max(sourceLuma, 0.001);
+                    float addedRed = (rendered.r - rendered.b - reference.r + reference.b)
+                        / max(outputLuma, 0.02);
+                    float addedYellow = (rendered.g - rendered.b - reference.g + reference.b)
+                        / max(outputLuma, 0.02);
+                    float excessWarmth = max(addedRed, addedYellow);
+                    float amount = skin * 0.85 * smoothstep(0.025, 0.14, excessWarmth)
+                        * (1.0 - smoothstep(0.90, 1.0, outputLuma));
+                    // Fit the reference chroma into gamut without changing its
+                    // luminance or introducing clipped red highlights.
+                    float maxReference = max(reference.r, max(reference.g, reference.b));
+                    float gamut = min(1.0, max(1.0 - outputLuma, 0.0)
+                        / max(maxReference - outputLuma, 0.001));
+                    reference = vec3(outputLuma) + (reference - vec3(outputLuma)) * gamut;
+                    return vec4(mix(rendered.rgb, reference, amount), rendered.a);
                 }
                 """)
             clearImage = CIImage(color: .clear)
@@ -539,7 +577,6 @@ public final class FilmRenderer {
         var output = processingImage
         output = applyDynamicRange(to: output, recipe: safeRecipe)
         output = applyExposureAndTone(to: output, recipe: safeRecipe)
-        output = applyRecipeCharacter(to: output, recipe: safeRecipe)
         output = applyCompactDigitalTone(
             to: output,
             recipe: safeRecipe,
@@ -550,6 +587,7 @@ public final class FilmRenderer {
         output = applyColorControls(to: output, recipe: safeRecipe)
         output = applyColorCube(to: output, recipe: safeRecipe, quality: quality)
         output = applyMonochromaticColorAxes(to: output, recipe: safeRecipe)
+        output = applySkinColorProtection(to: output, source: processingImage, recipe: safeRecipe)
         output = applyDetailControls(to: output, recipe: safeRecipe)
         output = applyClarity(to: output, recipe: safeRecipe)
         // Halation is light scattered inside the film stack, so derive its
@@ -570,6 +608,17 @@ public final class FilmRenderer {
         // Some finishing filters can expand their extent. Camera and export
         // callers expect the same bounds as the source image.
         return output.cropped(to: sourceExtent)
+    }
+
+    private static func applySkinColorProtection(
+        to image: CIImage,
+        source: CIImage,
+        recipe: FilmRecipe
+    ) -> CIImage {
+        guard !recipe.filmBase.supportsMonochromaticColorAxes,
+              let kernel = immutableResources.skinColorKernel else { return image }
+        return kernel.apply(extent: image.extent, arguments: [source, image])?
+            .cropped(to: image.extent) ?? image
     }
 
     /// Detects portrait subjects once on the full-resolution still path. Live
@@ -795,58 +844,66 @@ public final class FilmRenderer {
         return filter.outputImage?.cropped(to: image.extent) ?? image
     }
 
-    /// Strengthen each family's existing character across preview, capture,
-    /// and imported photos. Keep the neutral utility base neutral, and let
-    /// G7 X use its independently reviewed compact-camera treatment.
+    /// Keep the shared character stage subtle so each built-in stays close to
+    /// its pre-Signature response while retaining a small amount of authored
+    /// tonal and saturation shaping.
     private static func applyRecipeCharacter(to image: CIImage, recipe: FilmRecipe) -> CIImage {
         guard recipe.filmBase != .compactDigital,
               recipe.filmBase != .standard || recipe.creativeCollection != nil else { return image }
 
-        let levels: [CGFloat]
-        let saturation: Double
+        let signatureLevels: [CGFloat]
+        let signatureSaturation: Double
         if recipe.creativeCollection == .instant {
             // Instant film keeps lifted blacks and compressed whites.
-            levels = [0.045, 0.20, 0.55, 0.80, 0.94]
-            saturation = 0.95
+            signatureLevels = [0.045, 0.20, 0.55, 0.80, 0.94]
+            signatureSaturation = 0.95
         } else {
             switch recipe.filmBase {
             case .standard, .provia, .realaAce, .proNegative:
-                levels = [0.0, 0.13, 0.49, 0.85, 0.99]
-                saturation = 1.08
+                signatureLevels = [0.0, 0.13, 0.49, 0.85, 0.99]
+                signatureSaturation = 1.08
             case .classicChrome:
-                levels = [0.014, 0.14, 0.49, 0.80, 0.95]
-                saturation = 0.94
+                signatureLevels = [0.014, 0.14, 0.49, 0.80, 0.95]
+                signatureSaturation = 0.94
             case .velvia:
-                levels = [0.0, 0.115, 0.49, 0.87, 1.0]
-                saturation = 1.08
+                signatureLevels = [0.0, 0.115, 0.49, 0.87, 1.0]
+                signatureSaturation = 1.08
             case .astia, .proNegStandard:
-                levels = [0.015, 0.16, 0.51, 0.83, 0.97]
-                saturation = 1.04
+                signatureLevels = [0.015, 0.16, 0.51, 0.83, 0.97]
+                signatureSaturation = 1.04
             case .eterna:
-                levels = [0.02, 0.13, 0.45, 0.76, 0.93]
-                saturation = 0.94
+                signatureLevels = [0.02, 0.13, 0.45, 0.76, 0.93]
+                signatureSaturation = 0.94
             case .eternaBleachBypass:
-                levels = [0.003, 0.10, 0.46, 0.83, 0.96]
-                saturation = 0.90
+                signatureLevels = [0.003, 0.10, 0.46, 0.83, 0.96]
+                signatureSaturation = 0.90
             case .classicNegative:
-                levels = [0.008, 0.11, 0.47, 0.84, 0.97]
-                saturation = 1.04
+                signatureLevels = [0.008, 0.11, 0.47, 0.84, 0.97]
+                signatureSaturation = 1.04
             case .nostalgicNegative:
-                levels = [0.025, 0.16, 0.53, 0.84, 0.97]
-                saturation = 1.06
+                signatureLevels = [0.025, 0.16, 0.53, 0.84, 0.97]
+                signatureSaturation = 1.06
             case .acros, .acrosYellow, .acrosRed, .acrosGreen, .monochrome:
-                levels = [0.0, 0.10, 0.46, 0.86, 1.0]
-                saturation = 1
+                signatureLevels = [0.0, 0.10, 0.46, 0.86, 1.0]
+                signatureSaturation = 1
             case .sepia:
-                levels = [0.025, 0.14, 0.49, 0.81, 0.955]
-                saturation = 1
+                signatureLevels = [0.025, 0.14, 0.49, 0.81, 0.955]
+                signatureSaturation = 1
             case .compactDigital:
                 return image
             }
         }
+
+        let signatureStrength: CGFloat = 0.25
+        let controlPoints: [CGFloat] = [0, 0.20, 0.50, 0.80, 1]
+        let levels = zip(controlPoints, signatureLevels).map { x, signatureY in
+            x + (signatureY - x) * signatureStrength
+        }
+        let saturation = 1 + (signatureSaturation - 1) * Double(signatureStrength)
+
         guard let curve = CIFilter(name: "CIToneCurve") else { return image }
         curve.setValue(image, forKey: kCIInputImageKey)
-        for (index, x) in [CGFloat(0), 0.20, 0.50, 0.80, 1].enumerated() {
+        for (index, x) in controlPoints.enumerated() {
             curve.setValue(CIVector(x: x, y: levels[index]), forKey: "inputPoint\(index)")
         }
         var output = curve.outputImage?.cropped(to: image.extent) ?? image
@@ -866,9 +923,9 @@ public final class FilmRenderer {
             return image
         }
 
-        // Signature gives ambient captures deep shadows and lower midtones
-        // while retaining a bright shoulder. Flash keeps a separate global
-        // response curve; actual capture facts still determine that treatment.
+        // Ambient captures retain a restrained blend of the pre-Signature and
+        // Signature responses, while flash keeps its distinct global curve.
+        // Capture facts select only between those two whole-frame responses.
         let points: [(CGFloat, CGFloat)] = captureContext.flashFired
             ? [
                 (0.00, 0.002),
@@ -879,9 +936,9 @@ public final class FilmRenderer {
             ]
             : [
                 (0.00, 0.004),
-                (0.18, 0.100),
-                (0.50, 0.430),
-                (0.80, 0.810),
+                (0.18, 0.16375),
+                (0.50, 0.5275),
+                (0.80, 0.8235),
                 (1.00, 0.972)
             ]
 
@@ -1602,10 +1659,9 @@ public final class FilmRenderer {
             let deepShadowWeight = 1 - smoothstep(0.04, 0.26, luma)
             let brightHighlightWeight = smoothstep(0.72, 0.98, luma)
 
-            // Signature warmth grows gently into the brighter tones instead of
-            // turning highlights orange or shifting the whole image's white
-            // balance.
-            nudge(0.010, 0.003, -0.006, by: smoothstep(0.45, 0.90, luma))
+            // Keep the compact-camera warmth at the same restrained quarter
+            // strength as the shared Signature character stage.
+            nudge(0.00875, 0.00175, -0.0075, by: smoothstep(0.45, 0.90, luma))
 
             // Deep shadows and near-white highlights carry less chroma than
             // the midtones. This avoids colorful shadow noise and hard color
