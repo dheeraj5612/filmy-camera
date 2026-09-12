@@ -43,10 +43,14 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         // Bundle resolves device-qualified keys. Read the built file to verify both device families.
         let data = try Data(contentsOf: Bundle.main.bundleURL.appendingPathComponent("Info.plist"))
         let info = try XCTUnwrap(PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any])
-        for key in ["UISupportedInterfaceOrientations", "UISupportedInterfaceOrientations~ipad"] {
-            XCTAssertEqual(info[key] as? [String], ["UIInterfaceOrientationPortrait"])
-        }
-        XCTAssertEqual(info["UIRequiresFullScreen"] as? Bool, true)
+        XCTAssertEqual(info["UISupportedInterfaceOrientations"] as? [String], ["UIInterfaceOrientationPortrait"])
+        XCTAssertEqual(info["UISupportedInterfaceOrientations~ipad"] as? [String], [
+            "UIInterfaceOrientationPortrait",
+            "UIInterfaceOrientationPortraitUpsideDown",
+            "UIInterfaceOrientationLandscapeLeft",
+            "UIInterfaceOrientationLandscapeRight"
+        ])
+        XCTAssertNil(info["UIRequiresFullScreen"])
     }
 
     func testCameraStartsWithAnExplicitIdleAvailability() {

@@ -312,7 +312,8 @@ final class CaptureWorkflowPolicyTests: XCTestCase {
                 let control = try XCTUnwrap(measurements.frames["control-\(index)"])
                 XCTAssertFalse(badge.intersects(control), "The badge must not cover a control")
             }
-            XCTAssertEqual(fitted.height, 92, accuracy: 0.5)
+            let expectedHeight: CGFloat = width >= 700 ? 44 : 92
+            XCTAssertEqual(fitted.height, expectedHeight, accuracy: 0.5)
             var drewHierarchy = false
             let snapshot = UIGraphicsImageRenderer(size: fitted).image { _ in
                 drewHierarchy = host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
