@@ -457,11 +457,13 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertTrue(
             waitUntil(timeout: 10) {
                 let frame = cameraSurface.frame
-                return cameraSurface.exists
-                    && frame.width > 0
-                    && frame.height > frame.width
+                let hasVisibleSurface = cameraSurface.exists && frame.width > 0 && frame.height > 0
+                // iPhone is portrait locked. Wide iPad layouts intentionally use
+                // the landscape edge-control shell after rotation.
+                return hasVisibleSurface
+                    && (UIDevice.current.userInterfaceIdiom == .pad || frame.height > frame.width)
             },
-            "The visible camera preview surface must remain portrait after a device rotation"
+            "The camera preview surface must remain visible after a device rotation"
         )
         defer { XCUIDevice.shared.orientation = .portrait }
         #if !targetEnvironment(simulator)
