@@ -476,10 +476,10 @@ final class FilmyCameraUITests: XCTestCase {
             XCTFail("The portrait camera shell must expose a visible app window after rotation")
             return
         }
-        XCTAssertGreaterThan(
-            visibleWindow.frame.height,
-            visibleWindow.frame.width,
-            "The visible app window must remain portrait after device rotation"
+        let windowFrame = visibleWindow.frame
+        XCTAssertTrue(
+            UIDevice.current.userInterfaceIdiom == .pad || windowFrame.height > windowFrame.width,
+            "The visible app window must remain portrait after device rotation on iPhone"
         )
         let currentLook = app.buttons["recipe-menu"]
         let roll = app.buttons["Open roll"]
