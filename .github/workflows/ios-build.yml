@@ -104,7 +104,9 @@ jobs:
 
   build-and-test:
     needs: change-scope
-    if: needs.change-scope.outputs.ios_changed == 'true'
+    # Keep this required check red when the scope job cannot produce a
+    # trustworthy output; a skipped dependent job can otherwise look green.
+    if: always() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.ios_changed == 'true')
     runs-on: macos-15
     # The 128-look renderer suite, full UI suite, and isolated Photos flows run
     # sequentially. Retain a bounded budget without cutting off later gates.
@@ -116,6 +118,12 @@ jobs:
       SIMULATOR_DEVICE_NAME: "iPhone 16 Pro"
 
     steps:
+      - name: Fail closed when change scoping failed
+        if: needs.change-scope.result != 'success'
+        run: |
+          echo "change-scope did not complete successfully; refusing to skip the required iOS gate" >&2
+          exit 1
+
       - name: Check out repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
