@@ -154,3 +154,19 @@ scripts/release/prepare-upload.sh --upload --export-path build/upload-export
 The check mode is read-only. Export and upload require explicit modes plus valid external signing/App Store credentials. Never commit certificates, profiles, API keys, or upload credentials.
 
 Archive and export destinations must be fresh. Upload performs a new export, so it needs a separate empty directory after a local export. For subsequent releases, set `FILMY_ARCHIVE_PATH`, pass that path as the positional argument to `validate-archive.sh`, and pass it through `--archive` to `prepare-upload.sh` and `validate-ipa.sh`. Replace each export directory with a fresh destination.
+
+
+## App Review hardening gate (September 10, 2026)
+
+Before signing, run the source checks and the regression suite. Distribution CI also inspects the actual Release binary; archive and IPA validation repeat that check against the exact artifacts, not just the checkout.
+
+```sh
+python3 -m unittest discover -s scripts/testing -p 'test_*.py'
+python3 scripts/release/validate-app-review.py
+python3 scripts/release/validate-app-review.py --app /path/to/FilmyCamera.app
+python3 scripts/release/validate-app-review.py --check-live-urls
+```
+
+Only the final command makes network requests, to the public support, privacy, and marketing URLs using bounded HTTPS GETs. It checks reachability and expected page content, not delivery of support email or legal sufficiency. Offline preflight and upload preparation do not contact Apple or those websites.
+
+Do not treat a green preflight or simulator run as App Review approval. Complete the [review hardening acceptance matrix](app-store/review-hardening-2026-09-10.md), verify the actual Resolution Center feedback and saved App Store Connect fields, use the updated age-rating questionnaire, and retain physical-device acceptance evidence. Uploads require Xcode 26 or later with the iOS 26 SDK or later as of April 28, 2026; the separate compatibility lane does not establish distribution eligibility. Allocate a new build number only after checking the latest App Store Connect build, then archive from the clean final source commit.

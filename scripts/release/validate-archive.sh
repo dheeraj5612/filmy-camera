@@ -60,6 +60,7 @@ fi
 
 # Check the archive's recorded build SDK, not whichever Xcode is selected now.
 python3 "${script_dir}/validate-sdk.py" --app-info "${info_plist}"
+python3 "${script_dir}/validate-app-review.py" --app "${app_path}"
 
 plist_value() {
   /usr/libexec/PlistBuddy -c "Print :$1" "${info_plist}" 2>/dev/null

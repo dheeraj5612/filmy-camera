@@ -541,4 +541,171 @@ final class PhotoLibraryMetadataTests: XCTestCase {
 
         XCTAssertFalse(state.canCacheResult())
     }
+
+    func testPhotoLibraryChangeBridgeHopsToMainActor() async {
+        let delivered = expectation(description: "Main-actor library change")
+        let bridge = PhotoLibraryChangeBridge {
+            MainActor.assertIsolated()
+            delivered.fulfill()
+        }
+        DispatchQueue(label: "PhotoLibraryMetadataTests.observer").async {
+            bridge.deliverChange()
+        }
+        await fulfillment(of: [delivered], timeout: 2)
+    }
+
+    func testGalleryRequestKeyChangesWhenAnExistingPhotoIsEdited() {
+        let original = PhotoLibraryGalleryImagePolicy.requestKey(
+            assetIdentifier: "owned-frame",
+            isPhotosAsset: true,
+            authorizationStatus: .authorized,
+            revision: "100x200|1"
+        )
+        let edited = PhotoLibraryGalleryImagePolicy.requestKey(
+            assetIdentifier: "owned-frame",
+            isPhotosAsset: true,
+            authorizationStatus: .authorized,
+            revision: "200x100|2"
+        )
+        XCTAssertNotEqual(original, edited)
+        XCTAssertEqual(original.assetIdentifier, edited.assetIdentifier)
+    }
+
+    @MainActor
+    func testImageRequestTimeoutFinishesWithoutCachingOrHanging() async {
+        let state = PhotoLibraryService.ImageRequestState(imageManager: PHImageManager.default())
+        let finished = expectation(description: "Timed-out request completes")
+        let task = Task { @MainActor in
+            let result: UIImage? = await withCheckedContinuation { continuation in
+                state.install(continuation)
+                state.startTimeout(after: 0.01)
+            }
+            XCTAssertNil(result)
+            XCTAssertFalse(state.canCacheResult())
+            finished.fulfill()
+        }
+        await fulfillment(of: [finished], timeout: 2)
+        state.cancel()
+        await task.value
+    }
+
+    @MainActor
+    func testImageRequestTimeoutPreservesPreviewButRejectsLateFinalResult() async {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { context in
+            UIColor.systemBlue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        }
+        let state = PhotoLibraryService.ImageRequestState(imageManager: PHImageManager.default())
+        state.rememberFallback(image)
+        let finished = expectation(description: "Timed-out request returns preview")
+        let task = Task { @MainActor in
+            let result: UIImage? = await withCheckedContinuation { continuation in
+                state.install(continuation)
+                state.startTimeout(after: 0.01)
+            }
+            XCTAssertEqual(result?.pngData(), image.pngData())
+            state.finish(with: image, cacheable: true)
+            XCTAssertFalse(state.canCacheResult())
+            finished.fulfill()
+        }
+        await fulfillment(of: [finished], timeout: 2)
+        state.cancel()
+        await task.value
+    }
+
+    @MainActor
+    func testCancelledImageRequestDoesNotRestartItsTimeout() async {
+        let state = PhotoLibraryService.ImageRequestState(imageManager: PHImageManager.default())
+        state.cancel()
+        state.startTimeout(after: 0)
+        let result: UIImage? = await withCheckedContinuation { continuation in
+            state.install(continuation)
+        }
+        state.finish(with: nil)
+        XCTAssertNil(result)
+        XCTAssertFalse(state.canCacheResult())
+    }
+
+    func testShareTimeoutCompletesAndCleansUpLatePhotoKitWrite() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = directory.appendingPathComponent("share.jpg")
+        try Data([1, 2, 3]).write(to: destination)
+        let state = PhotoLibraryShareRequest(destination: destination)
+        let finished = expectation(description: "Share wait has a deadline")
+        let task = Task {
+            let result: URL? = await withCheckedContinuation { continuation in
+                state.install(continuation)
+                state.startTimeout(after: 0.01)
+            }
+            XCTAssertNil(result)
+            finished.fulfill()
+        }
+        await fulfillment(of: [finished], timeout: 2)
+        state.cancel()
+        await task.value
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+        // PhotoKit's write API itself cannot be canceled. A late file must
+        // not survive merely because its caller already stopped waiting.
+        try Data([4, 5, 6]).write(to: destination)
+        state.complete(success: true)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+    }
+
+    func testShareCancellationBeforeContinuationDoesNotHang() async {
+        let destination = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let state = PhotoLibraryShareRequest(destination: destination)
+        state.cancel()
+        state.startTimeout(after: 0)
+        let result: URL? = await withCheckedContinuation { continuation in
+            state.install(continuation)
+        }
+        XCTAssertNil(result)
+    }
+
+    func testSuccessfulShareSurvivesDuplicateCallbacksAndLateCancellation() async throws {
+        let destination = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: destination) }
+        try Data([7, 8, 9]).write(to: destination)
+        let state = PhotoLibraryShareRequest(destination: destination)
+        let result: URL? = await withCheckedContinuation { continuation in
+            state.install(continuation)
+            state.startTimeout(after: 60)
+            state.complete(success: true)
+        }
+        state.complete(success: true)
+        state.cancel()
+        XCTAssertEqual(result, destination)
+        XCTAssertEqual(try Data(contentsOf: destination), Data([7, 8, 9]))
+    }
+
+    func testFailedShareDeletesPartialFileAndIgnoresDuplicateFailure() async throws {
+        let destination = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: destination) }
+        try Data([10]).write(to: destination)
+        let state = PhotoLibraryShareRequest(destination: destination)
+        let result: URL? = await withCheckedContinuation { continuation in
+            state.install(continuation)
+            state.complete(success: false)
+        }
+        state.complete(success: false)
+        XCTAssertNil(result)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+    }
+
+    func testShareCancellationWinsOverLateSuccess() async throws {
+        let destination = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: destination) }
+        let state = PhotoLibraryShareRequest(destination: destination)
+        let result: URL? = await withCheckedContinuation { continuation in
+            state.install(continuation)
+            state.cancel()
+        }
+        try Data([11]).write(to: destination)
+        state.complete(success: true)
+        XCTAssertNil(result)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+    }
+
 }

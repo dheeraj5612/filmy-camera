@@ -42,9 +42,9 @@ Filmy Camera uses public camera-control terminology and original rendering param
 
 ## Keywords
 
-`film,camera,analog,grain,recipes,retro,photo,photography,filter,colour,light,editor`
+`film,camera,analog,grain,recipes,retro,photo,photography,filter,color,light,editor`
 
-The keyword field is below Apple's 100-character limit for this localization.
+The keyword field is below Apple's 100-byte UTF-8 limit for this localization.
 
 ## URLs and contact
 
@@ -59,6 +59,8 @@ Meet Filmy Camera: 128 editable looks, a capture timer, framing and composition 
 ## App Review notes
 
 Filmy Camera is a camera-first photo app with an in-app Roll. Camera access is requested when the camera screen is used. Existing-photo import uses Apple's system photo picker, which shares only the photo the user chooses. Photos access is requested when saving a finished photo or when the user taps Allow Photos access in the in-app Roll, and the Roll only reads frames saved by Filmy Camera. The simulator cannot provide camera hardware, so review the capture flow on a physical iPhone or iPad. No account or login is required. All included features are free and no in-app purchases are required. In photo review, select Instant Print to add a white instant-photo border; select Photo to remove it before saving. Manual controls appear under Pro and follow the active camera’s hardware capabilities.
+
+Settings includes an offline Privacy overview plus links to the public privacy policy and support page. Camera, Photos, and optional horizon permissions are independent: denying camera access does not prevent system-picker import and editing. Save to Photos requests add-only access; broader access is optional for the Roll. Limited-library access can be managed with the explicit action in the Roll. An iCloud-only original may require a network connection through Apple Photos. Image loading and share preparation have bounded waits and can be retried. Clearing the local Roll cache does not delete originals in Photos.
 
 ## Screenshot plan
 

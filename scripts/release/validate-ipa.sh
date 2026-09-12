@@ -161,6 +161,7 @@ unzip -qq "${ipa_path}" -d "${work_dir}" || die "IPA is not a valid ZIP archive"
 app_path="${work_dir}/Payload/FilmyCamera.app"
 info_plist="${app_path}/Info.plist"
 [[ -d "${app_path}" && -f "${info_plist}" ]] || die "IPA does not contain FilmyCamera.app"
+python3 "${script_dir}/validate-app-review.py" --app "${app_path}"
 
 bundle_id="$(plist_value CFBundleIdentifier "${info_plist}")"
 version="$(plist_value CFBundleShortVersionString "${info_plist}")"

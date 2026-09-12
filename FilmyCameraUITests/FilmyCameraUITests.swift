@@ -1230,6 +1230,35 @@ final class FilmyCameraUITests: XCTestCase {
         returnToMainCamera(using: app.buttons["settings-back-to-camera"], named: "Scrolled Settings back to camera")
     }
 
+    func testOfflinePrivacyOverviewIsReadableAndDismissible() throws {
+        app.buttons["settings-tab"].tap()
+        let privacy = app.buttons["privacy-overview"]
+        scrollToHittable(privacy, in: app)
+        privacy.tap()
+
+        let content = app.scrollViews["privacy-overview-content"]
+        XCTAssertTrue(content.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["On-device processing"].exists)
+        let cloudSection = app.staticTexts["Apple Photos and iCloud"]
+        // A full fling can skip this heading inside the shorter iPad sheet.
+        // Use small drags and reverse direction if the target moved above us.
+        for _ in 0..<20 where !cloudSection.isHittable {
+            let viewport = content.frame.intersection(app.frame)
+            let moveDown = cloudSection.exists && cloudSection.frame.midY < viewport.midY
+            let start = content.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: moveDown ? 0.45 : 0.75))
+            let end = content.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: moveDown ? 0.75 : 0.45))
+            start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
+        }
+        XCTAssertTrue(cloudSection.isHittable, "Offline overview must disclose Apple-managed cloud behavior")
+        attachScreenshot(named: "privacy-overview-cloud-disclosure")
+        let done = app.buttons["privacy-overview-done"]
+        XCTAssertTrue(done.isHittable, "Privacy overview must always offer a visible return action")
+        done.tap()
+        XCTAssertTrue(app.buttons["settings-back-to-camera"].waitForExistence(timeout: 5))
+        app.buttons["settings-back-to-camera"].tap()
+        XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 5))
+    }
+
     func testEveryTopLevelPageCanReturnToCamera() throws {
         let gallery = app.buttons["roll-tab"]
         gallery.tap()

@@ -1,5 +1,53 @@
 import SwiftUI
 
+/// Automated tests may seed a Debug process, never a shipped app. Keeping all
+/// argument parsing behind one compile-time boundary prevents test switches
+/// from changing permissions, onboarding, or persistence in Release builds.
+struct AppLaunchConfiguration: Equatable, Sendable {
+    let isUITesting: Bool
+    let isOnboardingUITesting: Bool
+    let isViewfinderPreview: Bool
+    let exposesPreviewStatus: Bool
+    let isUnitTestHost: Bool
+    let testDefaultsSuite: String?
+
+    static let production = AppLaunchConfiguration(
+        isUITesting: false,
+        isOnboardingUITesting: false,
+        isViewfinderPreview: false,
+        exposesPreviewStatus: false,
+        isUnitTestHost: false,
+        testDefaultsSuite: nil
+    )
+
+    static let current: AppLaunchConfiguration = {
+        #if DEBUG
+        testing(arguments: ProcessInfo.processInfo.arguments, environment: ProcessInfo.processInfo.environment)
+        #else
+        production
+        #endif
+    }()
+
+    #if DEBUG
+    static func testing(arguments: [String], environment: [String: String]) -> AppLaunchConfiguration {
+        let isUITesting = arguments.contains("-ui-testing")
+        let isOnboardingUITesting = arguments.contains("-ui-testing-onboarding")
+        let requestedSuite = environment["FILMY_TEST_DEFAULTS_SUITE"]
+        let suite = (isUITesting || isOnboardingUITesting)
+            ? requestedSuite.flatMap { $0.hasPrefix("FilmyCameraUITests.") && $0.count > 19 ? $0 : nil }
+            : nil
+        return AppLaunchConfiguration(
+            isUITesting: isUITesting,
+            isOnboardingUITesting: isOnboardingUITesting,
+            isViewfinderPreview: arguments.contains("-ui-testing-viewfinder-chrome"),
+            exposesPreviewStatus: isUITesting || arguments.contains("-ui-testing-preview-status"),
+            isUnitTestHost: environment["XCTestConfigurationFilePath"] != nil,
+            testDefaultsSuite: suite
+        )
+    }
+    #endif
+}
+
 @main
 struct FilmyCameraApp: App {
     @StateObject private var camera = CameraService()
@@ -11,16 +59,11 @@ struct FilmyCameraApp: App {
     private let preferences: UserDefaults
 
     init() {
-        let arguments = ProcessInfo.processInfo.arguments
-        let isUITesting = arguments.contains("-ui-testing")
-        let isOnboardingUITesting = arguments.contains("-ui-testing-onboarding")
-        // Each automated UI case owns its recipe/settings state. Reusing the
-        // suite across relaunches still tests persistence without resetting
-        // the developer's real preferences on a connected device.
-        let requestedSuite = ProcessInfo.processInfo.environment["FILMY_TEST_DEFAULTS_SUITE"]
-        let testSuite = (isUITesting || isOnboardingUITesting)
-            ? requestedSuite.flatMap { $0.hasPrefix("FilmyCameraUITests.") ? $0 : nil }
-            : nil
+        let launch = AppLaunchConfiguration.current
+        let isUITesting = launch.isUITesting
+        let isOnboardingUITesting = launch.isOnboardingUITesting
+        // Each automated UI case owns its preferences, including relaunches.
+        let testSuite = launch.testDefaultsSuite
         let defaults = testSuite.flatMap(UserDefaults.init(suiteName:)) ?? .standard
         preferences = defaults
         _cameraViewModel = StateObject(wrappedValue: CameraViewModel(defaults: defaults))
