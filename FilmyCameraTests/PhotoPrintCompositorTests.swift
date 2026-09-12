@@ -93,6 +93,10 @@ final class PhotoPrintCompositorTests: XCTestCase {
         let layout = PhotoPrintCompositor.layout(for: native48MP, finish: .instantPrint)
 
         XCTAssertNotNil(layout)
+        XCTAssertNotNil(PhotoPrintCompositor.layout(
+            for: CGRect(x: 0, y: 0, width: 8_000, height: 8_000),
+            finish: .instantPrint
+        ))
         XCTAssertEqual(layout?.imageFrame.size, native48MP.size)
         XCTAssertLessThanOrEqual(
             (layout?.canvasExtent.width ?? .infinity) * (layout?.canvasExtent.height ?? .infinity),

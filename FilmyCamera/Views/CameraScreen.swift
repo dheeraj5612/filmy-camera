@@ -105,13 +105,17 @@ struct CameraTopBarLayout<Controls: View, Indicators: View>: View {
     }
 
     var body: some View {
-        // Hardware discovery and status changes must never choose a different
-        // row count. Reserve both rows before the first camera frame arrives.
-        VStack(alignment: .trailing, spacing: 0) {
-            controls.frame(height: 48)
-            indicators
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, minHeight: 44, maxHeight: 44, alignment: .trailing)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                controls
+                indicators.lineLimit(1)
+            }
+            VStack(alignment: .trailing, spacing: 0) {
+                controls.frame(height: 48)
+                indicators
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, minHeight: 44, maxHeight: 44, alignment: .trailing)
+            }
         }
     }
 }
@@ -485,7 +489,7 @@ struct CameraScreen: View {
     }
 
     private var isChromeDisabled: Bool {
-        viewModel.isCapturing || viewModel.isSaving || viewModel.hasPendingCapture || isImporting
+        viewModel.isCapturing || viewModel.isSaving || isImporting
     }
 
     private var portraitControlClearance: CGFloat {
