@@ -1400,7 +1400,7 @@ public final class FilmRenderer {
         return vignette.outputImage?.cropped(to: extent) ?? image
     }
 
-    private static func applyHalation(
+    static func applyHalation(
         to image: CIImage,
         recipe: FilmRecipe,
         quality _: Quality
@@ -1410,13 +1410,20 @@ public final class FilmRenderer {
 
         let extent = image.extent
         let resolutionScale = resolutionScale(for: extent)
-        let highlightMask = image
+        let highlightValues = image
             .applyingFilter("CIColorControls", parameters: [
                 kCIInputSaturationKey: 0,
                 kCIInputContrastKey: 2.4,
                 kCIInputBrightnessKey: -1.15
             ])
-            .applyingFilter("CIMaskToAlpha")
+        // Contrast/brightness can produce negative mask values in
+        // shadows. Bound coverage before the blur, not afterward:
+        // negative lobes must never cancel neighboring highlights.
+        // Keep this an opaque grayscale mask for CIBlendWithMask.
+        // CIMaskToAlpha stores coverage in alpha instead of RGB and
+        // is not interchangeable with a grayscale-mask contract.
+        let highlightMask = clampOutput(toNormalizedRange: highlightValues)
+            .clampedToExtent()
             .applyingFilter("CIGaussianBlur", parameters: [
                 kCIInputRadiusKey: (1.5 + amount * 4.5) * resolutionScale
             ])
