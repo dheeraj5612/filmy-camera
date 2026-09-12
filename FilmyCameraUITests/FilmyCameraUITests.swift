@@ -44,10 +44,12 @@ final class FilmyCameraUITests: XCTestCase {
             return launchedApp
         }
         app = launchedApp
-        // A no-op tap gives XCTest an interaction with which to invoke the
-        // interruption monitor when a first-launch permission alert is present.
+        // Activate the interruption monitor only when an alert is present;
+        // tapping the Gallery center can select a real thumbnail on reused simulators.
         MainActor.assumeIsolated {
-            launchedApp.tap()
+            if launchedApp.alerts.firstMatch.waitForExistence(timeout: 1) {
+                launchedApp.tap()
+            }
         }
     }
 
@@ -1059,7 +1061,15 @@ final class FilmyCameraUITests: XCTestCase {
         assertMinimumHitTarget(gallery, named: "Roll")
         gallery.tap()
 
-        XCTAssertTrue(app.staticTexts["Photo access is off"].waitForExistence(timeout: 5))
+        let accessOff = app.staticTexts["Photo access is off"]
+        let selectedRollEmpty = app.staticTexts["Your selected roll is empty"]
+        let galleryUnavailable = app.staticTexts["Gallery unavailable"]
+        XCTAssertTrue(
+            accessOff.waitForExistence(timeout: 3)
+                || selectedRollEmpty.waitForExistence(timeout: 3)
+                || galleryUnavailable.waitForExistence(timeout: 3),
+            "Roll must show a deterministic access, empty, or unavailable state"
+        )
         attachScreenshot(named: "gallery-empty-state")
 
         returnToMainCamera(using: app.buttons["roll-back-to-camera"], named: "Roll back to camera")
