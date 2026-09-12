@@ -1,0 +1,284 @@
+name: Prepare camera session graph recovery fix
+
+on:
+  push:
+    branches:
+      - codex/session-graph-recovery-audit
+
+permissions:
+  contents: write
+
+jobs:
+  prepare-fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out staging branch
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+
+      - name: Rebase onto audited main and apply graph recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch origin main
+          git checkout -B codex/session-graph-recovery-audit origin/main
+
+          grep -q 'CURRENT_PROJECT_VERSION: "6"' project.yml || {
+            echo "Expected audited build 6 on main before session recovery." >&2
+            exit 1
+          }
+          grep -q 'preferredPhotoDimensions' FilmyCamera/Services/CameraService.swift
+          grep -q 'kCGImagePropertyExifOffsetTimeOriginal' \
+            FilmyCamera/Services/PhotoOutputEncoder.swift
+
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+
+          def replace_once(relative_path: str, old: str, new: str) -> None:
+              path = Path(relative_path)
+              text = path.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(
+                      f"{relative_path}: expected one replacement target, found {count}"
+                  )
+              path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+          replace_once(
+              "FilmyCamera/Services/CameraService.swift",
+              '''        // A stopped session keeps its inputs and outputs. Reuse the existing
+        // graph when returning from background or another tab instead of
+        // trying to add duplicate AVFoundation objects.
+        if isConfigured {
+            guard let device = activeDevice() else {
+                resetCaptureCapabilitiesOnQueue()
+                publishRunning(false)
+                publishAvailability(.needsRecovery)
+                publishStatus("Camera needs to be reopened.")
+                return
+            }
+            refreshCaptureCapabilitiesOnQueue(for: device)
+            configureOrientation()
+            session.startRunning()
+            let running = session.isRunning
+            publishRunning(running)
+            publishAvailability(running ? .running : .unavailable)
+            publishStatus(running ? "Camera ready" : "Camera could not start.")
+            return
+        }
+''',
+              '''        // A stopped session keeps its inputs and outputs. Reuse the existing
+        // graph when returning from background or another tab instead of
+        // trying to add duplicate AVFoundation objects. If AVFoundation lost
+        // the input, tear down the incomplete graph and immediately rebuild it
+        // rather than leaving every future Resume action in needsRecovery.
+        if isConfigured, let device = activeDevice() {
+            refreshCaptureCapabilitiesOnQueue(for: device)
+            configureOrientation()
+            session.startRunning()
+            let running = session.isRunning
+            publishRunning(running)
+            publishAvailability(running ? .running : .unavailable)
+            publishStatus(running ? "Camera ready" : "Camera could not start.")
+            return
+        }
+        if isConfigured {
+            resetSessionGraphOnQueue()
+        }
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/Services/CameraService.swift",
+              '''        guard replaceCameraInputOnQueue(with: desiredDevice) else {
+            publishStatus("The \\(position.title.lowercased()) camera is unavailable right now.")
+            return
+        }
+''',
+              '''        guard replaceCameraInputOnQueue(with: desiredDevice) else {
+            if isConfigured {
+                publishStatus("The \\(position.title.lowercased()) camera is unavailable right now.")
+            } else {
+                publishRunning(false)
+                publishAvailability(.needsRecovery)
+                publishStatus("Camera needs to be reopened.")
+            }
+            return
+        }
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/Services/CameraService.swift",
+              '''        guard replaceCameraInputOnQueue(with: alternateDevice) else {
+            publishStatus("That lens is unavailable right now.")
+            return
+        }
+''',
+              '''        guard replaceCameraInputOnQueue(with: alternateDevice) else {
+            if isConfigured {
+                publishStatus("That lens is unavailable right now.")
+            } else {
+                publishRunning(false)
+                publishAvailability(.needsRecovery)
+                publishStatus("Camera needs to be reopened.")
+            }
+            return
+        }
+'''
+          )
+
+          replace_once(
+              "FilmyCamera/Services/CameraService.swift",
+              '''    private func replaceCameraInputOnQueue(with device: AVCaptureDevice) -> Bool {
+        guard let newInput = try? AVCaptureDeviceInput(device: device) else {
+            return false
+        }
+
+        let oldInput = session.inputs.compactMap { $0 as? AVCaptureDeviceInput }.first
+        session.beginConfiguration()
+        if let oldInput {
+            session.removeInput(oldInput)
+        }
+
+        guard session.canAddInput(newInput) else {
+            if let oldInput, session.canAddInput(oldInput) {
+                session.addInput(oldInput)
+            }
+            session.commitConfiguration()
+            return false
+        }
+
+        session.addInput(newInput)
+        configurePhotoDimensions(for: device)
+        configureOrientation()
+        session.commitConfiguration()
+        return true
+    }
+''',
+              '''    private func replaceCameraInputOnQueue(with device: AVCaptureDevice) -> Bool {
+        guard let newInput = try? AVCaptureDeviceInput(device: device) else {
+            return false
+        }
+
+        let oldInput = session.inputs.compactMap { $0 as? AVCaptureDeviceInput }.first
+        session.beginConfiguration()
+        if let oldInput {
+            session.removeInput(oldInput)
+        }
+
+        guard session.canAddInput(newInput) else {
+            let restoredPreviousInput: Bool
+            if let oldInput, session.canAddInput(oldInput) {
+                session.addInput(oldInput)
+                restoredPreviousInput = true
+            } else {
+                restoredPreviousInput = false
+            }
+            session.commitConfiguration()
+
+            if !restoredPreviousInput {
+                // The session now has no usable input. Remove the remaining
+                // outputs and mark the graph unconfigured so the next start()
+                // call can build a clean graph instead of repeatedly reusing a
+                // structurally broken one.
+                resetSessionGraphOnQueue()
+            }
+            return false
+        }
+
+        session.addInput(newInput)
+        configurePhotoDimensions(for: device)
+        configureOrientation()
+        session.commitConfiguration()
+        return true
+    }
+
+    private func resetSessionGraphOnQueue() {
+        activeConstituentObservation?.invalidate()
+        activeConstituentObservation = nil
+        observedVirtualDeviceID = nil
+
+        session.beginConfiguration()
+        for input in session.inputs {
+            session.removeInput(input)
+        }
+        for output in session.outputs {
+            session.removeOutput(output)
+        }
+        session.commitConfiguration()
+
+        isConfigured = false
+        configuredPhotoDimensions = CMVideoDimensions(width: 0, height: 0)
+        focusExposureLocked = false
+        publishFocusExposureLocked(false)
+        resetCaptureCapabilitiesOnQueue()
+    }
+'''
+          )
+
+          project_path = Path("project.yml")
+          project_text = project_path.read_text(encoding="utf-8")
+          old_version = '    CURRENT_PROJECT_VERSION: "6"'
+          if project_text.count(old_version) != 1:
+              raise SystemExit("project.yml: unexpected build-version target")
+          project_path.write_text(
+              project_text.replace(old_version, '    CURRENT_PROJECT_VERSION: "7"', 1),
+              encoding="utf-8"
+          )
+
+          pbxproj_path = Path("FilmyCamera.xcodeproj/project.pbxproj")
+          pbxproj_text = pbxproj_path.read_text(encoding="utf-8")
+          pbxproj_text, replacement_count = re.subn(
+              r"CURRENT_PROJECT_VERSION = 6;",
+              "CURRENT_PROJECT_VERSION = 7;",
+              pbxproj_text
+          )
+          if replacement_count < 1:
+              raise SystemExit("project.pbxproj: no build-version targets found")
+          pbxproj_path.write_text(pbxproj_text, encoding="utf-8")
+
+          checklist_path = Path("docs/release-checklist.md")
+          checklist = checklist_path.read_text(encoding="utf-8")
+          old_warning = (
+              "> **Submission gate:** Build 5 predates the final camera and "
+              "metadata hardening now in this repository. Do not submit builds "
+              "3, 4, or 5. Archive and upload build 6, then select build 6 in "
+              "App Store Connect before review.\n"
+          )
+          new_warning = (
+              "> **Submission gate:** Build 6 predates the final AVFoundation "
+              "session-graph recovery fix now in this repository. Do not submit "
+              "builds 3 through 6. Archive and upload build 7, then select build "
+              "7 in App Store Connect before review.\n"
+          )
+          if checklist.count(old_warning) != 1:
+              raise SystemExit("release checklist: expected build 6 warning")
+          checklist_path.write_text(
+              checklist.replace(old_warning, new_warning, 1),
+              encoding="utf-8"
+          )
+          PY
+
+          git diff --check
+          grep -q 'resetSessionGraphOnQueue' FilmyCamera/Services/CameraService.swift
+          grep -q 'CURRENT_PROJECT_VERSION: "7"' project.yml
+
+          rm .github/workflows/codex-session-graph-recovery.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- \
+            FilmyCamera/Services/CameraService.swift \
+            FilmyCamera.xcodeproj/project.pbxproj \
+            project.yml \
+            docs/release-checklist.md \
+            .github/workflows/codex-session-graph-recovery.yml
+          git commit -m "Recover from incomplete AVFoundation session graphs"
+          git push --force origin HEAD:codex/session-graph-recovery-audit

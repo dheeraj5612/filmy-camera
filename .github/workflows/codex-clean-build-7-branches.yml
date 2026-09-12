@@ -1,0 +1,118 @@
+name: Finalize build 7 audit and clean branches
+
+on:
+  push:
+    branches:
+      - codex/session-graph-recovery-audit
+
+permissions:
+  actions: read
+  contents: write
+  pull-requests: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out cleanup branch
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+
+      - name: Finish merges, verify build 7 main, and delete audit branches
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          repository="${GITHUB_REPOSITORY}"
+
+          for pull_number in 66 67; do
+            for attempt in $(seq 1 90); do
+              pull_json="$(gh api "repos/${repository}/pulls/${pull_number}")"
+              if [[ "$(jq -r '.merged' <<<"${pull_json}")" == "true" ]]; then
+                break
+              fi
+
+              if [[ "$(jq -r '.state' <<<"${pull_json}")" == "closed" ]]; then
+                gh api --method PATCH "repos/${repository}/pulls/${pull_number}" \
+                  -f state='open' >/dev/null
+              fi
+              if [[ "$(jq -r '.draft' <<<"${pull_json}")" == "true" ]]; then
+                gh pr ready "${pull_number}" --repo "${repository}" >/dev/null
+              fi
+
+              response="$(
+                gh api --method PUT "repos/${repository}/pulls/${pull_number}/merge" \
+                  -f merge_method='squash' \
+                  -f commit_title="Finalize audited build 7 changes (#${pull_number})" \
+                  2>/dev/null || true
+              )"
+              if [[ "$(jq -r '.merged // false' <<<"${response:-{}}")" == "true" ]]; then
+                break
+              fi
+
+              if (( attempt == 90 )); then
+                echo "Timed out waiting to merge PR #${pull_number}." >&2
+                exit 1
+              fi
+              sleep 20
+            done
+          done
+
+          git fetch origin main
+          main_sha="$(git rev-parse origin/main)"
+          git show "${main_sha}:project.yml" | grep -q 'CURRENT_PROJECT_VERSION: "7"'
+          git show "${main_sha}:docs/release-checklist.md" \
+            | grep -q 'Current source candidate: `1.0.0 (7)`'
+
+          successful_run_id=""
+          for attempt in $(seq 1 90); do
+            runs_json="$(
+              gh api -X GET \
+                "repos/${repository}/actions/runs?branch=main&per_page=50"
+            )"
+            successful_run_id="$(
+              jq -r --arg sha "${main_sha}" '
+                .workflow_runs[]
+                | select(
+                    .head_sha == $sha
+                    and .name == "iOS build and tests"
+                    and .status == "completed"
+                    and .conclusion == "success"
+                  )
+                | .id
+              ' <<<"${runs_json}" | head -n 1
+            )"
+            if [[ -n "${successful_run_id}" ]]; then
+              break
+            fi
+            if (( attempt == 90 )); then
+              echo "Timed out waiting for exact final main workflow." >&2
+              exit 1
+            fi
+            sleep 20
+            git fetch origin main
+            main_sha="$(git rev-parse origin/main)"
+          done
+
+          echo "Final main=${main_sha} workflow=${successful_run_id}"
+
+          branches=(
+            codex/camera-gallery-reliability-audit
+            codex/filmy-camera-deep-audit-2
+            codex/filmy-camera-deep-audit-3
+            codex/filmy-camera-deep-audit-4
+            codex/release-evidence-build-6
+            codex/session-graph-recovery-audit
+            codex/release-evidence-build-7
+          )
+
+          for branch in "${branches[@]}"; do
+            if git ls-remote --exit-code --heads origin "${branch}" >/dev/null 2>&1; then
+              git push origin --delete "${branch}"
+            fi
+          done

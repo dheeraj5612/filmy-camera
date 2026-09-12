@@ -1,0 +1,143 @@
+name: Prepare exact build 7 mainline evidence
+
+on:
+  push:
+    branches:
+      - codex/session-graph-recovery-audit
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  prepare-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out audited branch
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+
+      - name: Wait for merge and exact green mainline run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          repository="${GITHUB_REPOSITORY}"
+          matched=false
+
+          for attempt in $(seq 1 90); do
+            git fetch origin main
+            if git diff --quiet origin/main HEAD -- \
+              FilmyCamera/Services/CameraService.swift \
+              FilmyCamera.xcodeproj/project.pbxproj \
+              project.yml \
+              docs/release-checklist.md; then
+              matched=true
+              break
+            fi
+            sleep 20
+          done
+
+          if [[ "${matched}" != "true" ]]; then
+            echo "Build 7 source never appeared on origin/main." >&2
+            exit 1
+          fi
+
+          main_sha="$(git rev-parse origin/main)"
+          successful_run_id=""
+
+          for attempt in $(seq 1 90); do
+            runs_json="$(
+              gh api -X GET \
+                "repos/${repository}/actions/runs?branch=main&per_page=50"
+            )"
+
+            successful_run_id="$(
+              jq -r --arg sha "${main_sha}" '
+                .workflow_runs[]
+                | select(
+                    .head_sha == $sha
+                    and .name == "iOS build and tests"
+                    and .status == "completed"
+                    and .conclusion == "success"
+                  )
+                | .id
+              ' <<<"${runs_json}" | head -n 1
+            )"
+
+            if [[ -n "${successful_run_id}" ]]; then
+              break
+            fi
+
+            failed_conclusion="$(
+              jq -r --arg sha "${main_sha}" '
+                .workflow_runs[]
+                | select(
+                    .head_sha == $sha
+                    and .name == "iOS build and tests"
+                    and .status == "completed"
+                    and .conclusion != "success"
+                    and .conclusion != "cancelled"
+                  )
+                | .conclusion
+              ' <<<"${runs_json}" | head -n 1
+            )"
+            if [[ -n "${failed_conclusion}" ]]; then
+              echo "Exact build 7 mainline workflow failed: ${failed_conclusion}." >&2
+              exit 1
+            fi
+
+            sleep 20
+          done
+
+          if [[ -z "${successful_run_id}" ]]; then
+            echo "Timed out waiting for exact build 7 validation." >&2
+            exit 1
+          fi
+
+          git checkout -B codex/release-evidence-build-7 origin/main
+
+          MAIN_SHA="${main_sha}" RUN_ID="${successful_run_id}" python3 <<'PY'
+          import os
+          from pathlib import Path
+
+          path = Path("docs/release-checklist.md")
+          text = path.read_text(encoding="utf-8")
+          start_marker = "<!-- post-audit-evidence:start -->"
+          end_marker = "<!-- post-audit-evidence:end -->"
+          section = f'''{start_marker}
+## Post-audit mainline evidence
+
+- Audited main SHA: `{os.environ["MAIN_SHA"]}`
+- Exact green hosted workflow run: `{os.environ["RUN_ID"]}`
+- Current source candidate: `1.0.0 (7)`
+- The generated Xcode project, unit suite, UI suite, release project checks, Bash validation, and pinned ShellCheck gate passed for that exact SHA.
+- Physical-iPhone camera QA, a signed build 7 archive, App Store Connect upload/selection, review contact verification, and final submission remain open release gates.
+{end_marker}'''
+
+          if start_marker in text or end_marker in text:
+              if text.count(start_marker) != 1 or text.count(end_marker) != 1:
+                  raise SystemExit("release checklist contains malformed evidence markers")
+              start = text.index(start_marker)
+              end = text.index(end_marker) + len(end_marker)
+              text = text[:start] + section + text[end:]
+          else:
+              text = text.rstrip() + "\n\n" + section + "\n"
+
+          path.write_text(text, encoding="utf-8")
+          PY
+
+          git diff --check
+          grep -q 'Current source candidate: `1.0.0 (7)`' \
+            docs/release-checklist.md
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- docs/release-checklist.md
+          git commit -m "Record audited build 7 mainline evidence"
+          git push --force origin HEAD:codex/release-evidence-build-7
