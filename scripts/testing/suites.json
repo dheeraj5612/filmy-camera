@@ -42,7 +42,8 @@
     "FilmyCameraTests/CameraPreviewGesturePolicyTests": "unit",
     "FilmyCameraUITests/AdditionalInteractionTests": "device",
     "FilmyCameraTests/PhotoLibraryLargeRollTests": "fixtures",
-    "FilmyCameraUITests/NormalRollManagementTests": "photos-e2e"
+    "FilmyCameraUITests/NormalRollManagementTests": "photos-e2e",
+    "FilmyCameraUITests/PhysicalReviewFlowTests": "device"
   },
   "overrides": {
     "FilmyCameraUITests/FilmyCameraUITests/testSimulatorFallbackExposesReadableStateWithoutPreviewAction": "simulator-e2e",
