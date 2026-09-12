@@ -2453,7 +2453,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         ) { [weak self] coordinator, change in
             let angle = change.newValue
                 ?? coordinator.videoRotationAngleForHorizonLevelPreview
-            MainActor.assumeIsolated {
+            Task { @MainActor [weak self] in
                 self?.applyPreviewRotationOnMain(angle, token: token)
             }
         }
@@ -2464,7 +2464,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         ) { [weak self] coordinator, change in
             let angle = change.newValue
                 ?? coordinator.videoRotationAngleForHorizonLevelCapture
-            MainActor.assumeIsolated {
+            Task { @MainActor [weak self] in
                 self?.applyCaptureRotationOnMain(angle, token: token)
             }
         }
