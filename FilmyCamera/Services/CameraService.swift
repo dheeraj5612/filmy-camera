@@ -2391,10 +2391,18 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         session.commitConfiguration()
 
         isConfigured = false
+        needsGraphRebuild = true
         configuredPhotoDimensions = CMVideoDimensions(width: 0, height: 0)
         focusExposureLocked = false
         publishFocusExposureLocked(false)
         resetCaptureCapabilitiesOnQueue()
+        if session.isRunning {
+            session.stopRunning()
+        }
+        publishRunning(false)
+        publishAvailability(.needsRecovery)
+        publishStatus(pendingCaptureStatus)
+        scheduleAutomaticRecoveryOnQueue()
     }
 
     /// Human-readable reason for an `AVCaptureSession` interruption. Reasons
