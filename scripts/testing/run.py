@@ -43,7 +43,7 @@ ENVIRONMENT = {
     "capture-sheet": {"FILMY_RUN_CAPTURE_SHEET": "1", "FILMY_RUN_PHOTOS_WRITE": "1"},
     "store-media": {"FILMY_RUN_STORE_MEDIA": "1", "FILMY_STORE_PRIOR_SAVES": "0"}
 }
-FRESH_PHOTOS_SIMULATOR_PHASES = {"photos-e2e", "store-media"}
+FRESH_PHOTOS_SIMULATOR_PHASES = {"fixtures", "photos-e2e", "store-media"}
 SIMCTL_DEFAULT_TIMEOUT_SECONDS = 60
 SIMULATOR_BOOT_TIMEOUT_SECONDS = 300
 SIMULATOR_MEDIA_TIMEOUT_SECONDS = 300
@@ -198,7 +198,7 @@ def simctl(*arguments, timeout=SIMCTL_DEFAULT_TIMEOUT_SECONDS):
         ) from error
 
 
-def create_photos_simulator(destination):
+def create_photos_simulator(destination, app_path=None):
     match = re.search(r"(?:^|,)id=([^,]+)", destination)
     if not match:
         raise ValueError("Photos E2E needs a simulator id to choose its runtime and device type")
@@ -213,8 +213,11 @@ def create_photos_simulator(destination):
     try:
         simctl("boot", owned, timeout=SIMULATOR_BOOT_TIMEOUT_SECONDS)
         simctl("bootstatus", owned, "-b", timeout=SIMULATOR_BOOT_TIMEOUT_SECONDS)
-        # XCTest installs the app; the normal UI flow handles permission
-        # prompts after installation instead of relying on pre-install grants.
+        # Install before the test host so simctl can grant Photos access without
+        # driving a permission prompt. This is limited to the disposable host.
+        if app_path is not None:
+            simctl("install", owned, str(app_path), timeout=SIMULATOR_MEDIA_TIMEOUT_SECONDS)
+            simctl("privacy", owned, "grant", "photos", "com.dheeraj.filmycamera")
         simctl(
             "addmedia",
             owned,
@@ -258,11 +261,12 @@ def destroy_simulator(owned):
 
 
 @contextmanager
-def isolated_photos_destination(phase, destination):
+def isolated_photos_destination(phase, destination, app_path=None):
     if phase not in FRESH_PHOTOS_SIMULATOR_PHASES:
         yield destination
         return
-    owned = create_photos_simulator(destination)
+    owned = (create_photos_simulator(destination, app_path)
+             if phase == "fixtures" else create_photos_simulator(destination))
     try:
         yield "platform=iOS Simulator,id=" + owned
     except BaseException:
@@ -289,7 +293,7 @@ def summarize_result(result, exit_code):
 
 
 def require_complete_run(phase, selectors, summary):
-    if phase in {"unit", "integration", "core", "e2e", "photos-e2e"} and summary.get("skipped", 0):
+    if phase in {"unit", "integration", "core", "e2e", "photos-e2e", "fixtures"} and summary.get("skipped", 0):
         summary.update(status="failed", reason="Unexpected skipped tests in a deterministic lane")
     actual_count = sum(summary.get(key, 0) for key in ("passed", "failed", "skipped"))
     if actual_count != len(selectors):
@@ -428,7 +432,8 @@ def main(argv=None):
             raise ValueError(f"Refusing to overwrite evidence: {result}; choose another --output-dir")
         started = time.monotonic()
         try:
-            with isolated_photos_destination(phase, destination) as phase_destination:
+            app_path = (args.derived_data / "Build/Products/Debug-iphonesimulator/FilmyCamera.app")
+            with isolated_photos_destination(phase, destination, app_path) as phase_destination:
                 command = xcode_command(phase_destination, args.derived_data, args.coverage)
                 if phase == "photos-e2e" and len(selectors) > 1:
                     summary, code = run_isolated_photos_methods(

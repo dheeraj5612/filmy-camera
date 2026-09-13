@@ -1,14 +1,14 @@
 # Filmy Camera release checklist
 
-The current build 14 candidate carries the consolidated camera and gallery corrections while preserving the refreshed opaque app icon. Its source changes and generated icon provenance are documented in [the icon record](app-store/icon/README.md). Build 12 has already uploaded and finished processing; its distribution binary retains the earlier icon.
+The current build 15 candidate carries the consolidated camera and gallery corrections while preserving the refreshed opaque app icon. Its source changes and generated icon provenance are documented in [the icon record](app-store/icon/README.md). Build 12 has already uploaded and finished processing; its distribution binary retains the earlier icon.
 
-## Build 14 release gates
+## Build 15 release gates
 
-- [x] Integrate the refreshed opaque 1024-pixel icon and consistently increment both project representations to build 14. Preserve the old design and new generated master/prompts outside application resources.
+- [x] Integrate the refreshed opaque 1024-pixel icon and consistently increment both project representations to build 15. Preserve the old design and new generated master/prompts outside application resources.
 - [ ] Complete the consolidated camera/gallery corrections and physical acceptance on the connected iPad. Existing simulator evidence and generic signed-device compilation remain historical diagnostics; they do not replace the required latest-OS iPad run.
-- [ ] Pass required CI and create/validate a signed build 14 archive and IPA from its exact clean source.
-- [ ] Inspect the installed build 14 icon and complete remaining physical acceptance. Synthetic volume-up was inconclusive, volume-down was not reached, and 5× constituent confirmation needs a bright distant scene. See the [device acceptance record](device-acceptance-build12-20260909.md).
-- [ ] Upload build 14, verify Apple processing, and select it with matching listing/media. Build 12 readiness does not establish build 14 readiness.
+- [ ] Pass required CI and create/validate a signed build 15 archive and IPA from its exact clean source.
+- [ ] Inspect the installed build 15 icon and complete remaining physical acceptance. Synthetic volume-up was inconclusive, volume-down was not reached, and 5× constituent confirmation needs a bright distant scene. See the [device acceptance record](device-acceptance-build12-20260909.md).
+- [ ] Upload build 15, verify Apple processing, and select it with matching listing/media. Build 12 readiness does not establish build 15 readiness.
 - [ ] Complete saved portal/privacy/age-rating/support-contact checks and App Review. Keep manual release selected.
 
 ## Build 12 candidate
