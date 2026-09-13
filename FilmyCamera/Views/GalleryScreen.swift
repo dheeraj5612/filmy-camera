@@ -958,10 +958,10 @@ private struct GalleryDetailView: View {
 
     private func moveFrame(_ direction: GalleryPagingDirection) {
         guard !isNavigationLocked, adjacentAsset(direction) != nil else { return }
-        // Keep the current page intact until the pager confirms a completed
-        // transition. The outer drag can end while UIPageViewController is
-        // already handling its interactive transition; clearing here would
-        // blank the page even when the coordinator rejects this move.
+        // Reset only the presentation transform before paging. This keeps a
+        // cached page fit when the user returns to it, while leaving its
+        // loaded image intact if the pager rejects or cancels the move.
+        resetImageTransform()
         switch direction {
         case .previous:
             onPreviousPhoto()

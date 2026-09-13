@@ -489,7 +489,7 @@ struct CameraScreen: View {
     }
 
     private var isChromeDisabled: Bool {
-        viewModel.isCapturing || viewModel.isSaving || isImporting
+        viewModel.isCapturing || viewModel.isSaving || isImporting || viewModel.hasPendingCapture
     }
 
     private var portraitControlClearance: CGFloat {
