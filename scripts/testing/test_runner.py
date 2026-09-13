@@ -469,6 +469,12 @@ class EvidenceTests(unittest.TestCase):
                 run.require_complete_run(lane, ["one", "two"], summary)
                 self.assertEqual(summary["status"], "failed")
 
+    def test_fixture_skips_are_a_failure(self):
+        summary = {"status": "passed", "passed": 3, "failed": 0, "skipped": 1}
+        run.require_complete_run("fixtures", ["one", "two", "three", "four"], summary)
+        self.assertEqual(summary["status"], "failed")
+        self.assertIn("Unexpected skipped tests", summary["reason"])
+
 
 if __name__ == "__main__":
     unittest.main()

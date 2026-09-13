@@ -170,19 +170,28 @@ def validate_build_stamp(path, input_digest, coverage, toolchain):
         raise ValueError("Test build is stale or uses different coverage/Xcode settings; rebuild without --skip-build")
 
 
-def run_logged(command, path, env=None):
+def run_logged(command, path, env=None, on_test_start=None, on_process_start=None):
     print(f"Running {command[0]} -> {path}", flush=True)
     with path.open("w") as log:
         process = subprocess.Popen(command, cwd=ROOT, env=env, stdout=subprocess.PIPE,
                                    stderr=subprocess.STDOUT, text=True)
+        started_callback_called = False
         try:
             for line in process.stdout:
                 log.write(line)
                 print(line, end="", flush=True)
+                if (on_test_start is not None and not started_callback_called
+                        and "Test Suite 'FilmyCameraTests.xctest' started" in line):
+                    on_test_start()
+                    started_callback_called = True
             return process.wait()
-        except KeyboardInterrupt:
+        except BaseException:
             process.terminate()
-            process.wait(timeout=20)
+            try:
+                process.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
             raise
 
 
@@ -444,10 +453,20 @@ def main(argv=None):
                     command += ["-only-testing:" + test for test in selectors]
                     command += ["test-without-building"]
                     log_name = {"core": "unit", "e2e": "ui"}.get(phase, phase)
+                    grant_after_bootstrap = None
+                    if phase == "fixtures":
+                        owned_match = re.search(r"(?:^|,)id=([^,]+)", phase_destination)
+                        if not owned_match:
+                            raise ValueError("Fixture lane needs an owned simulator id")
+                        owned_id = owned_match.group(1)
+                        grant_after_bootstrap = lambda: simctl(
+                            "privacy", owned_id, "grant", "photos", "com.dheeraj.filmycamera"
+                        )
                     code = run_logged(
                         command,
                         output / f"filmycamera-{log_name}-test.log",
                         test_environment(phase),
+                        on_test_start=grant_after_bootstrap,
                     )
                     summary = summarize_result(result, code)
                 require_complete_run(phase, selectors, summary)
