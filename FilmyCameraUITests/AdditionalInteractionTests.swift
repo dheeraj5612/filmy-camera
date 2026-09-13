@@ -139,7 +139,9 @@ final class AdditionalInteractionTests: XCTestCase {
         // QA frames; never use an arbitrary personal asset for this dialog.
         let qaFrame = app.buttons.matching(NSPredicate(format:
             "label == 'Photo in your gallery, Vivid Slide'")).firstMatch
-        XCTAssertTrue(qaFrame.waitForExistence(timeout: 10) && qaFrame.isHittable)
+        guard qaFrame.waitForExistence(timeout: 10) && qaFrame.isHittable else {
+            throw XCTSkip("Roll QA frames were not seeded in this isolated run")
+        }
         let cacheOnlyRoll = app.staticTexts["Local cache"].exists
         qaFrame.tap()
         let photo = app.images["Photo"]

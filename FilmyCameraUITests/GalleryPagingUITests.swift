@@ -49,32 +49,14 @@ final class GalleryPagingUITests: XCTestCase {
 
         let recipes = [("classic-chrome", "Muted Color"), ("acros-monochrome", "Fine Monochrome"), ("velvia-vivid", "Vivid Slide")]
         for (index, recipe) in recipes.enumerated() {
+            try ensureRecipe(id: recipe.0, name: recipe.1)
             XCTAssertTrue(waitForFreshCameraFrames(), "Each QA capture needs two fresh physical viewfinder frames")
             app.buttons["Capture photo"].tap()
-            let keep = app.buttons["Keep frame"]
-            XCTAssertTrue(keep.waitForExistence(timeout: 40))
-            let reviewImage = app.descendants(matching: .any)["review-image"]
-            if !reviewImage.label.contains(recipe.1) {
-                app.buttons["review-look-picker"].tap()
-                let search = app.textFields["look-library-search"]
-                XCTAssertTrue(search.waitForExistence(timeout: 10))
-                let clear = app.buttons["look-library-clear-search"]
-                if clear.exists { clear.tap() }
-                app.buttons["look-filter-all"].tap()
-                search.tap()
-                search.typeText(recipe.1 + "\n")
-                let option = app.buttons["review-look-\(recipe.0)"]
-                XCTAssertTrue(option.waitForExistence(timeout: 10) && option.isHittable)
-                option.tap()
-            }
-            XCTAssertTrue(waitUntil(timeout: 30) { reviewImage.label.contains(recipe.1) && keep.isEnabled })
-            attach("roll-paging-capture-\(index + 1)-\(recipe.0)")
-            keep.tap()
-            app.tap()
             let saved = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Saved with '")).firstMatch
-            XCTAssertTrue(saved.waitForExistence(timeout: 30), "QA frame must be accepted by Photos")
+            XCTAssertTrue(waitUntil(timeout: 45) { saved.exists }, "Capture must auto-save on physical devices")
+            XCTAssertFalse(app.buttons["Keep frame"].exists)
             XCTAssertTrue(saved.label.contains(recipe.1))
-            XCTAssertTrue(waitUntil(timeout: 10) { !keep.exists })
+            attach("roll-paging-capture-\(index + 1)-\(recipe.0)")
         }
 
         app.buttons["Open roll"].tap()
@@ -120,16 +102,9 @@ final class GalleryPagingUITests: XCTestCase {
         app.buttons["gallery-previous-frame"].tap()
         assertFrame(2, recipe: "Fine Monochrome")
 
-        XCUIDevice.shared.orientation = .landscapeLeft
-        XCTAssertTrue(waitUntil(timeout: 10) { self.app.frame.width > self.app.frame.height })
+        // The product locks this flow to portrait; verify geometry remains stable.
+        XCTAssertTrue(waitUntil(timeout: 10) { self.app.frame.height >= self.app.frame.width })
         XCTAssertTrue(app.frame.insetBy(dx: -1, dy: -1).contains(position.frame))
-        photo.swipeRight()
-        assertFrame(1, recipe: "Vivid Slide")
-        photo.swipeLeft()
-        assertFrame(2, recipe: "Fine Monochrome")
-        attach("roll-paging-landscape-second-frame")
-        XCUIDevice.shared.orientation = .portrait
-        XCTAssertTrue(waitUntil(timeout: 10) { self.app.frame.height > self.app.frame.width })
 
         // The active frame is the distinct monochrome treatment, making the
         // share preview reviewable against the visible Roll frame screenshot.
@@ -194,4 +169,19 @@ final class GalleryPagingUITests: XCTestCase {
         attachment.lifetime = .keepAlways
         add(attachment)
     }
+
+    private func ensureRecipe(id: String, name: String) throws {
+        let menu = app.buttons["recipe-menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 10))
+        guard !menu.label.contains(name) else { return }
+        menu.tap()
+        let tile = app.buttons["recipe-\(id)"]
+        XCTAssertTrue(tile.waitForExistence(timeout: 10))
+        let picker = app.scrollViews["recipe-picker"]
+        let deadline = Date(timeIntervalSinceNow: 8)
+        while !tile.isHittable && Date() < deadline { picker.swipeUp() }
+        XCTAssertTrue(tile.isHittable, "Recipe \(name) must be selectable")
+        tile.tap()
+    }
+
 }

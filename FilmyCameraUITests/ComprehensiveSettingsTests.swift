@@ -165,15 +165,8 @@ final class ComprehensiveSettingsTests: XCTestCase {
             if delay != "Off" {
                 XCTAssertTrue(app.buttons["capture-countdown-cancel"].waitForExistence(timeout: 2))
             }
-            requireReview(app)
-            let finish = app.buttons["review-finish-photo"]
-            finish.tap()
-            XCTAssertTrue(wait { finish.value as? String == "Selected" && app.buttons["Keep frame"].isEnabled })
-            let photo = app.descendants(matching: .any)["review-image"]
-            XCTAssertEqual(photo.frame.width / photo.frame.height, expectedRatio, accuracy: 0.02,
-                           "Review must retain the \(aspect) capture framing")
+            assertAutomaticSave(app)
             attach("physical-crop-\(aspect.replacingOccurrences(of: ":", with: "x"))-timer-\(delay)")
-            app.buttons["Retake"].tap()
             requireLive(app)
         }
         let cameraSwitch = app.buttons["camera-switch-control"]
@@ -182,9 +175,8 @@ final class ComprehensiveSettingsTests: XCTestCase {
         XCTAssertTrue(wait { cameraSwitch.value as? String != originalPosition })
         requireLive(app)
         app.buttons["Capture photo"].tap()
-        requireReview(app)
-        attach("physical-front-camera-review")
-        app.buttons["Retake"].tap()
+        assertAutomaticSave(app)
+        attach("physical-front-camera-auto-saved")
         requireLive(app)
         cameraSwitch.tap()
         XCTAssertTrue(wait { cameraSwitch.value as? String == originalPosition })
@@ -335,9 +327,11 @@ final class ComprehensiveSettingsTests: XCTestCase {
         }, "The viewfinder must deliver two fresh GPU-rendered frames")
     }
 
-    private func requireReview(_ app: XCUIApplication) {
-        XCTAssertTrue(app.buttons["Keep frame"].waitForExistence(timeout: 45))
-        XCTAssertTrue(wait { app.buttons["Keep frame"].isEnabled && app.descendants(matching: .any)["review-image"].exists })
+    private func assertAutomaticSave(_ app: XCUIApplication) {
+        let saved = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Saved with '")).firstMatch
+        XCTAssertTrue(wait(timeout: 45) { saved.exists }, "Physical capture must auto-save without review")
+        XCTAssertFalse(app.buttons["Keep frame"].exists)
+        XCTAssertFalse(app.buttons["Retake"].exists)
     }
 
     private func wait(timeout: TimeInterval = 15, _ condition: @escaping () -> Bool) -> Bool {

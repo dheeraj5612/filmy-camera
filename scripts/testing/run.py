@@ -34,6 +34,7 @@ GROUPS = {group for groups in LANES.values() for group in groups}
 PHYSICAL = {"device", "lens", "add-only", "capture-sheet", "performance"}
 PHOTOS_WRITES = {"device", "add-only", "capture-sheet"}
 ENVIRONMENT = {
+    "fixtures": {"FILMY_RUN_LARGE_ROLL_QA": "1"},
     "photos-e2e": {"FILMY_RUN_SEEDED_PHOTOS_E2E": "1"},
     "device": {"FILMY_RUN_PHOTOS_WRITE": "1", "FILMY_RUN_ROLL_QA": "1"},
     "performance": {"FILMY_RUN_PERF": "1"},
