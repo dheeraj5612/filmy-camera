@@ -150,6 +150,21 @@ class SuiteRoutingTests(unittest.TestCase):
         self.assertIn(("install", "owned", "/tmp/FilmyCamera.app"), calls)
         self.assertIn(("privacy", "owned", "grant", "photos", "com.dheeraj.filmycamera"), calls)
 
+    def test_fixture_photos_grant_failure_deletes_only_owned_simulator(self):
+        def fake_simctl(*args, timeout=run.SIMCTL_DEFAULT_TIMEOUT_SECONDS):
+            if args[0] == "list":
+                return json.dumps({"devices": {"runtime": [{"udid": "reference", "deviceTypeIdentifier": "type"}]}})
+            if args[0] == "create":
+                return "owned"
+            if args[0] == "privacy":
+                raise RuntimeError("privacy grant failed")
+            return ""
+
+        with patch.object(run, "simctl", side_effect=fake_simctl), patch.object(run, "destroy_simulator") as destroy:
+            with self.assertRaisesRegex(RuntimeError, "privacy grant failed"):
+                run.create_photos_simulator("platform=iOS Simulator,id=reference", Path("/tmp/FilmyCamera.app"))
+        destroy.assert_called_once_with("owned")
+
     def test_photos_media_timeout_is_bounded_and_deletes_only_owned_simulator(self):
         calls = []
 
