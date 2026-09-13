@@ -12,13 +12,15 @@ final class AdditionalInteractionTests: XCTestCase {
         throw XCTSkip("Additional interaction acceptance requires physical camera hardware")
         #endif
         addUIInterruptionMonitor(withDescription: "Roll QA camera and Photos permissions") { alert in
-            for title in ["Allow", "Allow Full Access", "Allow Access to All Photos", "OK"] {
-                if alert.buttons[title].exists {
-                    alert.buttons[title].tap()
-                    return true
+            MainActor.assumeIsolated {
+                for title in ["Allow", "Allow Full Access", "Allow Access to All Photos", "OK"] {
+                    if alert.buttons[title].exists {
+                        alert.buttons[title].tap()
+                        return true
+                    }
                 }
+                return false
             }
-            return false
         }
     }
 

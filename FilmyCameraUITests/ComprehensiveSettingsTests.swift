@@ -206,13 +206,15 @@ final class ComprehensiveSettingsTests: XCTestCase {
         app.launchArguments = ["-ui-testing-real-roll", "-selectedRecipeID", "g7x-compact"]
         #endif
         addUIInterruptionMonitor(withDescription: "Settings QA camera and Photos permissions") { alert in
-            for title in ["Allow", "Allow Full Access", "Allow Access to All Photos", "OK"] {
-                if alert.buttons[title].exists {
-                    alert.buttons[title].tap()
-                    return true
+            MainActor.assumeIsolated {
+                for title in ["Allow", "Allow Full Access", "Allow Access to All Photos", "OK"] {
+                    if alert.buttons[title].exists {
+                        alert.buttons[title].tap()
+                        return true
+                    }
                 }
+                return false
             }
-            return false
         }
         return app
     }
