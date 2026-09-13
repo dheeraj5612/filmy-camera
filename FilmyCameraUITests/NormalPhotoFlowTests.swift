@@ -13,7 +13,8 @@ final class NormalPhotoFlowTests: XCTestCase {
 
         #if targetEnvironment(simulator)
         try XCTSkipUnless(
-            ProcessInfo.processInfo.environment["FILMY_RUN_SEEDED_PHOTOS_E2E"] == "1",
+            ProcessInfo.processInfo.environment["FILMY_RUN_SEEDED_PHOTOS_E2E"] == "1"
+                || ProcessInfo.processInfo.environment["TEST_RUNNER_FILMY_RUN_SEEDED_PHOTOS_E2E"] == "1",
             "Set FILMY_RUN_SEEDED_PHOTOS_E2E=1 on a disposable simulator seeded with cafe-original.png"
         )
         #else
@@ -111,7 +112,8 @@ final class NormalPhotoFlowTests: XCTestCase {
         landscapeFinish.tap()
         XCTAssertTrue(
             waitUntil(timeout: 30) {
-                app.descendants(matching: .any)["review-image"].label.contains("Instant Print")
+                let image = app.descendants(matching: .any)["review-image"]
+                return image.exists && image.label.contains("Instant Print")
                     && app.buttons["Save filtered photo"].isEnabled
             },
             "Large-text portrait-locked review must finish rendering Instant Print"
@@ -329,10 +331,11 @@ final class NormalPhotoFlowTests: XCTestCase {
         app?.terminate()
         XCUIDevice.shared.orientation = .portrait
         app = XCUIApplication()
-        // Deliberately omit -ui-testing so PhotosPicker and the real save path
-        // are exercised against the disposable seeded library.
+        // Real-roll mode bypasses onboarding while preserving PhotosPicker and
+        // the real save and permission paths.
+        app.launchArguments = ["-ui-testing-real-roll"]
         if let contentSizeCategory {
-            app.launchArguments = ["-UIPreferredContentSizeCategoryName", contentSizeCategory]
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", contentSizeCategory]
         }
         app.launch()
 
@@ -454,7 +457,14 @@ final class NormalPhotoFlowTests: XCTestCase {
             // AX rounds child bounds to display pixels. Allow one point around
             // the target viewport, retaining at least seven points of vertical
             // clearance for the complete control at either scroll limit.
-            let viewport = scrollView.frame.intersection(app.frame).insetBy(dx: 0, dy: 8)
+            var visibleScroll = scrollView.frame.intersection(app.frame)
+            // SwiftUI's safeAreaInset action bar can overlap the AX scroll
+            // frame. Exclude it so a finish tap cannot hit pinned Cancel.
+            let actionBar = app.descendants(matching: .any)["review-action-bar"]
+            if actionBar.exists {
+                visibleScroll.size.height = max(0, min(visibleScroll.maxY, actionBar.frame.minY) - visibleScroll.minY)
+            }
+            let viewport = visibleScroll.insetBy(dx: 0, dy: 8)
             let visibilityBounds = viewport.insetBy(dx: -1, dy: -1)
             let frame = element.frame
             guard viewport.width > 20, viewport.height > 20,

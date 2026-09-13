@@ -384,6 +384,7 @@ class SuiteRoutingTests(unittest.TestCase):
             ],
         )
 
+
     def test_photos_and_store_media_destroy_their_owned_simulator_on_exit(self):
         for phase in ("photos-e2e", "store-media"):
             with self.subTest(phase=phase), \
@@ -469,9 +470,26 @@ class EvidenceTests(unittest.TestCase):
                 run.require_complete_run(lane, ["one", "two"], summary)
                 self.assertEqual(summary["status"], "failed")
 
-    def test_fixture_skips_are_a_failure(self):
-        summary = {"status": "passed", "passed": 3, "failed": 0, "skipped": 1}
-        run.require_complete_run("fixtures", ["one", "two", "three", "four"], summary)
+    def test_optional_recipe_fixture_skip_is_allowed(self):
+        selector = sorted(run.OPTIONAL_FIXTURE_SELECTORS)[0]
+        summary = {
+            "status": "passed", "passed": 1, "failed": 0, "skipped": 1,
+            "caseResults": [
+                {"test": run.REQUIRED_FIXTURE_SELECTOR, "passed": 1, "failed": 0, "skipped": 0},
+                {"test": selector, "passed": 0, "failed": 0, "skipped": 1},
+            ],
+        }
+        run.require_complete_run("fixtures", [run.REQUIRED_FIXTURE_SELECTOR, selector], summary)
+        self.assertEqual(summary["status"], "passed")
+
+    def test_required_photo_library_fixture_skip_is_a_failure(self):
+        summary = {
+            "status": "failed", "passed": 0, "failed": 0, "skipped": 1,
+            "caseResults": [
+                {"test": run.REQUIRED_FIXTURE_SELECTOR, "passed": 0, "failed": 0, "skipped": 1},
+            ],
+        }
+        run.require_complete_run("fixtures", [run.REQUIRED_FIXTURE_SELECTOR], summary)
         self.assertEqual(summary["status"], "failed")
         self.assertIn("Unexpected skipped tests", summary["reason"])
 

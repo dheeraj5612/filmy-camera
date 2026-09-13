@@ -39,8 +39,8 @@ final class GalleryPagingUITests: XCTestCase {
 
     func testPhysicalRollSwipesFreshFramesAndPreservesZoomAndShare() throws {
         app = XCUIApplication()
-        app.launchEnvironment["FILMY_TEST_DEFAULTS_SUITE"] = "GalleryPagingUITests.\(UUID().uuidString)"
-        app.launchArguments = ["-ui-testing-preview-status", "-selectedRecipeID", "classic-chrome"]
+        app.launchEnvironment["FILMY_TEST_DEFAULTS_SUITE"] = "FilmyCameraUITests.GalleryPaging.\(UUID().uuidString)"
+        app.launchArguments = ["-ui-testing-real-roll", "-selectedRecipeID", "classic-chrome"]
         XCUIDevice.shared.orientation = .portrait
         app.launch()
         let skip = app.buttons["onboarding-skip"]

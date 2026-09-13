@@ -663,6 +663,8 @@ struct CaptureReviewView: View {
                 }
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("review-action-bar")
     }
 
     private var saveDisclosure: some View {

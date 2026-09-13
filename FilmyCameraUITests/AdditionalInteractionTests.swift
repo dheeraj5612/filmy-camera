@@ -11,6 +11,15 @@ final class AdditionalInteractionTests: XCTestCase {
         #if targetEnvironment(simulator)
         throw XCTSkip("Additional interaction acceptance requires physical camera hardware")
         #endif
+        addUIInterruptionMonitor(withDescription: "Roll QA camera and Photos permissions") { alert in
+            for title in ["Allow", "Allow Full Access", "Allow Access to All Photos", "OK"] {
+                if alert.buttons[title].exists {
+                    alert.buttons[title].tap()
+                    return true
+                }
+            }
+            return false
+        }
     }
 
     override func tearDownWithError() throws {
@@ -23,7 +32,9 @@ final class AdditionalInteractionTests: XCTestCase {
 
     func testNormalFlashSettingsAndRollLayoutPersistAndDeleteCanBeCanceled() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["FILMY_RUN_ROLL_QA"] == "1",
-                          "Set FILMY_RUN_ROLL_QA=1 after the three Roll QA frames have been saved")
+                          "Set FILMY_RUN_ROLL_QA=1 to run physical Roll acceptance")
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["FILMY_RUN_PHOTOS_WRITE"] == "1",
+                          "Set FILMY_RUN_PHOTOS_WRITE=1 because this flow may seed a QA photo")
         launch(isolated: false)
         XCTAssertTrue(waitForFreshCameraFrames())
         try exerciseFlashSettingsAndRestore()
@@ -138,6 +149,7 @@ final class AdditionalInteractionTests: XCTestCase {
         // The known Vivid Slide treatment is the newest of the three retained
         // QA frames. Seed that exact treatment here when this lane is run
         // without the shared fixture; never use an arbitrary personal asset.
+        var seededFrame = false
         var qaFrame = app.buttons.matching(NSPredicate(format:
             "label == 'Photo in your gallery, Vivid Slide'")).firstMatch
         if !qaFrame.waitForExistence(timeout: 10) || !qaFrame.isHittable {
@@ -163,6 +175,7 @@ final class AdditionalInteractionTests: XCTestCase {
             let saved = app.staticTexts.matching(NSPredicate(format:
                 "label BEGINSWITH 'Saved with '" )).firstMatch
             XCTAssertTrue(waitUntil(timeout: 45) { saved.exists && saved.label.contains("Vivid Slide") })
+            seededFrame = true
             openRoll()
             qaFrame = app.buttons.matching(NSPredicate(format:
                 "label == 'Photo in your gallery, Vivid Slide'")).firstMatch
@@ -200,7 +213,8 @@ final class AdditionalInteractionTests: XCTestCase {
         }
         app.buttons["Close frame"].tap()
         XCTAssertTrue(layout.waitForExistence(timeout: 5))
-        XCTAssertEqual(rollFrameCount(), originalCount, "Canceling Delete must retain every Roll frame")
+        XCTAssertEqual(rollFrameCount(), originalCount + (seededFrame ? 1 : 0),
+                       "Canceling Delete must retain every Roll frame")
         XCTAssertEqual(layout.value as? String, original)
         app.buttons["roll-back-to-camera"].tap()
         XCTAssertTrue(waitForFreshCameraFrames())
@@ -209,9 +223,11 @@ final class AdditionalInteractionTests: XCTestCase {
     private func launch(isolated: Bool) {
         XCUIDevice.shared.orientation = .portrait
         app = XCUIApplication()
-        app.launchArguments = isolated ? ["-ui-testing", "-selectedRecipeID", "classic-chrome"] : ["-ui-testing-preview-status"]
+        app.launchArguments = isolated ? ["-ui-testing", "-selectedRecipeID", "classic-chrome"] : ["-ui-testing-real-roll"]
         if isolated {
             app.launchEnvironment["FILMY_TEST_DEFAULTS_SUITE"] = "FilmyCameraUITests.Additional.\(UUID().uuidString)"
+        } else {
+            app.launchEnvironment["FILMY_TEST_DEFAULTS_SUITE"] = "FilmyCameraUITests.Additional.Roll.\(UUID().uuidString)"
         }
         app.launch()
         let skip = app.buttons["onboarding-skip"]

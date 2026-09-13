@@ -26,12 +26,13 @@ struct FilmyCameraApp: App {
     init() {
         let arguments = ProcessInfo.processInfo.arguments
         let isUITesting = arguments.contains("-ui-testing")
+        let isRealRollQATesting = arguments.contains("-ui-testing-real-roll")
         let isOnboardingUITesting = arguments.contains("-ui-testing-onboarding")
         // Each automated UI case owns its recipe/settings state. Reusing the
         // suite across relaunches still tests persistence without resetting
         // the developer's real preferences on a connected device.
         let requestedSuite = ProcessInfo.processInfo.environment["FILMY_TEST_DEFAULTS_SUITE"]
-        let testSuite = (isUITesting || isOnboardingUITesting)
+        let testSuite = (isUITesting || isRealRollQATesting || isOnboardingUITesting)
             ? requestedSuite.flatMap { $0.hasPrefix("FilmyCameraUITests.") ? $0 : nil }
             : nil
         let defaults = testSuite.flatMap(UserDefaults.init(suiteName:)) ?? .standard
@@ -49,7 +50,7 @@ struct FilmyCameraApp: App {
         // state lets the test tap through to ContentView after completion.
         _isShowingOnboarding = State(
             initialValue: isOnboardingUITesting
-                || (!isUITesting && !hasCompletedOnboarding)
+                || (!isUITesting && !isRealRollQATesting && !hasCompletedOnboarding)
         )
 
         // Compile the film pipeline off the main thread while the camera

@@ -15,17 +15,8 @@ final class PhotoLibraryLargeRollTests: XCTestCase {
         #endif
         try XCTSkipUnless(ProcessInfo.processInfo.environment["FILMY_RUN_LARGE_ROLL_QA"] == "1",
                           "Set FILMY_RUN_LARGE_ROLL_QA=1 only on a disposable simulator")
-        // XCTest can reinstall this disposable host after simctl pre-grants
-        // access. Let the external fixture harness grant once after bootstrap;
-        // no Photos assets or ownership state may change before authorization.
-        if PHPhotoLibrary.authorizationStatus(for: .readWrite) != .authorized {
-            print("LARGE_ROLL_WAIT_FOR_PHOTOS_AUTH")
-            let deadline = Date(timeIntervalSinceNow: 20)
-            while PHPhotoLibrary.authorizationStatus(for: .readWrite) != .authorized,
-                  Date() < deadline {
-                try await Task.sleep(for: .milliseconds(100))
-            }
-        }
+        // The runner installs and authorizes the disposable host before XCTest
+        // launches. Never request access or mutate Photos before this guard.
         try XCTSkipUnless(PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized,
                           "Grant full Photos access before running; this test never requests access")
         try XCTSkipUnless(!ProcessInfo.processInfo.arguments.contains("-ui-testing"),

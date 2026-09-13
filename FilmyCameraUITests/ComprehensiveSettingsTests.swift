@@ -7,7 +7,11 @@ final class ComprehensiveSettingsTests: XCTestCase {
     func testEveryRecipeEditorSettingChangesAndResetRestoresTheLook() {
         continueAfterFailure = false
         let app = makeApp()
+        #if targetEnvironment(simulator)
         app.launchArguments = ["-ui-testing", "-selectedRecipeID", "classic-chrome"]
+        #else
+        app.launchArguments = ["-ui-testing-real-roll", "-selectedRecipeID", "classic-chrome"]
+        #endif
         app.launch()
         defer { app.terminate() }
         XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 20))
@@ -118,7 +122,11 @@ final class ComprehensiveSettingsTests: XCTestCase {
     func testMonochromeEditorAxesChangeAndReset() {
         continueAfterFailure = false
         let app = makeApp()
+        #if targetEnvironment(simulator)
         app.launchArguments = ["-ui-testing", "-selectedRecipeID", "acros-neutral-filter"]
+        #else
+        app.launchArguments = ["-ui-testing-real-roll", "-selectedRecipeID", "acros-neutral-filter"]
+        #endif
         app.launch()
         defer { app.terminate() }
         XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 20))
@@ -192,7 +200,20 @@ final class ComprehensiveSettingsTests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
         app.launchEnvironment["FILMY_TEST_DEFAULTS_SUITE"] = "FilmyCameraUITests.AllSettings.\(UUID().uuidString)"
+        #if targetEnvironment(simulator)
         app.launchArguments = ["-ui-testing", "-selectedRecipeID", "g7x-compact"]
+        #else
+        app.launchArguments = ["-ui-testing-real-roll", "-selectedRecipeID", "g7x-compact"]
+        #endif
+        addUIInterruptionMonitor(withDescription: "Settings QA camera and Photos permissions") { alert in
+            for title in ["Allow", "Allow Full Access", "Allow Access to All Photos", "OK"] {
+                if alert.buttons[title].exists {
+                    alert.buttons[title].tap()
+                    return true
+                }
+            }
+            return false
+        }
         return app
     }
 
