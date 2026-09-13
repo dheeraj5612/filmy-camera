@@ -15,299 +15,196 @@ enum OnboardingStore {
     }
 }
 
+/// One interactive photograph, not a slideshow of instructions. Camera and
+/// Photos permissions remain owned by the destination workflows.
 struct OnboardingView: View {
-    private struct Page: Identifiable {
-        let id: Int
-        let eyebrow: String
-        let title: String
-        let message: String
-        let icon: String
-        let detail: String
-    }
-
-    private static let pages = [
-        Page(
-            id: 0,
-            eyebrow: "CHOOSE A RECIPE",
-            title: "Start with a feeling.",
-            message: "Choose your first look below. It will be ready in the camera, and you can change or tune it anytime.",
-            icon: "film.stack",
-            detail: "Your look, before the shutter"
-        ),
-        Page(
-            id: 1,
-            eyebrow: "COMPOSE IN THE MOOD",
-            title: "See the mood as you compose.",
-            message: "See your recipe in the live viewfinder. Camera access is only requested when you open the camera. You can also import a photo.",
-            icon: "viewfinder",
-            detail: "Processed on your device"
-        ),
-        Page(
-            id: 2,
-            eyebrow: "KEEP THE FRAME",
-            title: "Save the finished photo.",
-            message: "Compare with Original, try another look, then save a new copy to Photos. Your original stays unchanged. Nothing saves until you choose.",
-            icon: "photo.on.rectangle.angled",
-            detail: "No account. No automatic uploads."
-        )
-    ]
-
     var recipes: [FilmRecipe] = FilmRecipe.builtIns
     var initialRecipeID: String = CameraViewModel.defaultRecipeID
     var onSelectRecipe: (FilmRecipe) -> Void = { _ in }
     let onFinish: () -> Void
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @State private var selectedPage = 0
     @State private var chosenRecipeID: String?
-    @State private var featuredRecipeID: String?
+    @State private var isShowingOriginal = false
 
     private var selectedRecipeID: String { chosenRecipeID ?? initialRecipeID }
     private var featuredRecipes: [FilmRecipe] {
-        OnboardingStore.featuredRecipes(from: recipes, selectedRecipeID: featuredRecipeID ?? initialRecipeID)
+        OnboardingStore.featuredRecipes(from: recipes, selectedRecipeID: initialRecipeID)
     }
     private var previewRecipe: FilmRecipe? {
         recipes.first { $0.id == selectedRecipeID } ?? recipes.first
     }
 
     var body: some View {
-        ZStack {
-            FilmyTheme.background.ignoresSafeArea()
-            RadialGradient(
-                colors: [FilmyTheme.accent.opacity(0.14), .clear],
-                center: .top,
-                startRadius: 0,
-                endRadius: 520
-            )
-            .ignoresSafeArea()
-
+        GeometryReader { geometry in
             VStack(spacing: 0) {
                 header
-                TabView(selection: $selectedPage) {
-                    ForEach(Self.pages) { page in
-                        pageView(page).tag(page.id)
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("A look. Your eye.")
+                            .font(.system(.largeTitle).weight(.bold))
+                            .tracking(-1)
+                            .foregroundStyle(FilmyTheme.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityAddTraits(.isHeader)
+
+                        if let recipe = previewRecipe {
+                            sample(recipe, height: max(170, min(360, geometry.size.height * 0.40)))
+                        }
+                        recipeChooser
+                        Text("Camera photos save automatically to Photos. Imported photos save only when you choose.")
+                            .font(.footnote)
+                            .foregroundStyle(FilmyTheme.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("onboarding-save-explanation")
+                        Label("Processed on this device. No account.", systemImage: "lock")
+                            .font(.caption)
+                            .foregroundStyle(FilmyTheme.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 12)
+                    .padding(.bottom, 20)
                 }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-                pageControls
+                .accessibilityIdentifier("onboarding-content")
             }
-            .frame(maxWidth: 680)
+            .frame(maxWidth: 620)
+            .frame(maxWidth: .infinity)
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Button(action: onFinish) {
+                HStack {
+                    Text("Open camera")
+                    Spacer(minLength: 12)
+                    Image(systemName: "arrow.right")
+                }
+            }
+            .buttonStyle(.filmyPrimary)
+            .accessibilityIdentifier("onboarding-continue")
+            .accessibilityHint("Opens the camera with your selected look. Camera permission is requested there.")
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .frame(maxWidth: 620)
+            .frame(maxWidth: .infinity)
+            .background(FilmyTheme.background)
+        }
+        .background(FilmyTheme.background.ignoresSafeArea())
         .preferredColorScheme(.dark)
-        // Give the screen its own accessibility node. Without containment,
-        // SwiftUI can propagate this identifier into Back, Skip, and Continue.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("onboarding-screen")
-        .onAppear {
-            if featuredRecipeID == nil { featuredRecipeID = initialRecipeID }
-        }
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
-            Label("Filmy Camera", systemImage: "camera.aperture")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(FilmyTheme.primary)
-            Spacer(minLength: 8)
+        HStack {
+            FilmyWordmark()
+            Spacer(minLength: 12)
             Button(action: onFinish) {
                 Text("Skip")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(FilmyTheme.secondary)
-                    .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
+                    .frame(minWidth: 44, minHeight: 48)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("onboarding-skip")
-            .accessibilityHint("Open the camera with your current look")
+            .accessibilityHint("Opens the camera with your current look")
         }
-        .padding(.horizontal, 22)
-        .padding(.top, 8)
+        .padding(.horizontal, 20)
+        .padding(.top, 4)
     }
 
-    private func pageView(_ page: Page) -> some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 22) {
-                VStack(alignment: .leading, spacing: 12) {
-                    Eyebrow(text: page.eyebrow, color: FilmyTheme.accent)
-                    Text(page.title)
-                        .font(.system(.largeTitle, design: .serif).weight(.medium))
+    private func sample(_ recipe: FilmRecipe, height: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ZStack {
+                if isShowingOriginal {
+                    Color.clear.overlay {
+                        Image("LookPreviewCafe")
+                            .resizable()
+                            .scaledToFill()
+                    }
+                    .clipped()
+                } else {
+                    RecipeSwatch(recipe: recipe, showsLabel: false)
+                }
+            }
+            .frame(height: height)
+            .clipped()
+            .accessibilityElement(children: .ignore)
+            .accessibilityIdentifier("onboarding-photo")
+            .accessibilityLabel("Sample photograph, \(isShowingOriginal ? "original" : recipe.name)")
+
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    FilmRegistration(color: isShowingOriginal ? FilmyTheme.comparison : FilmyTheme.accent)
+                    Text(isShowingOriginal ? "Original" : recipe.name)
+                        .font(.headline)
                         .foregroundStyle(FilmyTheme.primary)
                         .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isHeader)
-                    Text(page.message)
-                        .font(FilmyTheme.bodyFont)
+                    Text("Sample photo")
+                        .font(.caption)
                         .foregroundStyle(FilmyTheme.secondary)
-                        .lineSpacing(3)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
-
-                if page.id == 0 {
-                    recipeChooser
-                } else {
-                    selectedLookVisual(page)
+                Spacer(minLength: 0)
+                Button {
+                    HapticFeedback.play(.selection)
+                    isShowingOriginal.toggle()
+                } label: {
+                    Label(isShowingOriginal ? "Show look" : "Original", systemImage: "circle.lefthalf.filled")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(FilmyTheme.comparison)
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 48)
+                        .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 12))
+                        .contentShape(Rectangle())
                 }
-
-                Label(page.detail, systemImage: page.icon)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(FilmyTheme.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 16))
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("onboarding-compare")
+                .accessibilityLabel("Compare sample with original")
+                .accessibilityValue(isShowingOriginal ? "Original" : "Look")
             }
-            .padding(.horizontal, 22)
-            .padding(.vertical, 18)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
     private var recipeChooser: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            LazyVGrid(
-                columns: Array(
-                    repeating: GridItem(.flexible(), spacing: 12),
-                    count: dynamicTypeSize.isAccessibilitySize ? 1 : 2
-                ),
-                spacing: 12
-            ) {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: 12) {
                 ForEach(featuredRecipes) { recipe in
-                    recipeCard(recipe)
+                    let selected = selectedRecipeID == recipe.id
+                    Button {
+                        guard !selected else { return }
+                        chosenRecipeID = recipe.id
+                        isShowingOriginal = false
+                        HapticFeedback.play(.selection)
+                        onSelectRecipe(recipe)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            RecipeSwatch(recipe: recipe, showsLabel: false)
+                                .frame(width: 96, height: 64)
+                                .accessibilityHidden(true)
+                            HStack(alignment: .top, spacing: 4) {
+                                if selected {
+                                    Image(systemName: "checkmark")
+                                        .font(.caption.weight(.bold))
+                                }
+                                Text(recipe.name)
+                                    .font(.caption.weight(selected ? .bold : .medium))
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .foregroundStyle(selected ? FilmyTheme.accent : FilmyTheme.primary)
+                            .frame(width: 96, alignment: .leading)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("onboarding-recipe-\(recipe.id)")
+                    .accessibilityLabel(recipe.name)
+                    .accessibilityValue(selected ? "Selected" : "Not selected")
+                    .accessibilityAddTraits(selected ? .isSelected : [])
                 }
             }
-            Text("Sample previews. Your scene will look different in its own light.")
-                .font(.caption)
-                .foregroundStyle(FilmyTheme.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            .padding(.vertical, 4)
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("onboarding-recipe-chooser")
     }
-
-    private func recipeCard(_ recipe: FilmRecipe) -> some View {
-        let isSelected = selectedRecipeID == recipe.id
-        return Button {
-            guard !isSelected else { return }
-            chosenRecipeID = recipe.id
-            onSelectRecipe(recipe)
-            HapticFeedback.play(.controlStep)
-        } label: {
-            VStack(alignment: .leading, spacing: 10) {
-                RecipeSwatch(recipe: recipe, isSelected: isSelected, compact: false, showsLabel: false)
-                    .frame(height: 116)
-                    .clipped()
-                    .accessibilityHidden(true)
-                HStack(alignment: .top, spacing: 6) {
-                    Text(recipe.name)
-                        .font(.subheadline.weight(.semibold))
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 0)
-                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(isSelected ? FilmyTheme.accent : FilmyTheme.secondary)
-                }
-                .foregroundStyle(FilmyTheme.primary)
-                Text(recipe.descriptor)
-                    .font(.caption)
-                    .foregroundStyle(FilmyTheme.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 18))
-            .overlay {
-                RoundedRectangle(cornerRadius: 18)
-                    .strokeBorder(isSelected ? FilmyTheme.accent : FilmyTheme.line, lineWidth: isSelected ? 2 : 1)
-            }
-            .contentShape(RoundedRectangle(cornerRadius: 18))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(recipe.name)
-        .accessibilityValue(isSelected ? "Selected" : "Not selected")
-        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
-        .accessibilityHint("Use this look when you open the camera")
-        .accessibilityIdentifier("onboarding-recipe-\(recipe.id)")
-    }
-
-    private func selectedLookVisual(_ page: Page) -> some View {
-        ZStack(alignment: .bottomLeading) {
-            if let recipe = previewRecipe {
-                RecipeSwatch(recipe: recipe, compact: false, showsLabel: false)
-                LinearGradient(colors: [.clear, .black.opacity(0.8)], startPoint: .center, endPoint: .bottom)
-                VStack(alignment: .leading, spacing: 6) {
-                    Label(page.id == 1 ? "YOUR FIRST LOOK" : "REVIEW BEFORE SAVING", systemImage: page.icon)
-                        .font(.caption.weight(.semibold))
-                    Text(recipe.name).font(.title2.weight(.bold))
-                    Text("Sample preview").font(.caption)
-                }
-                .foregroundStyle(.white)
-                .padding(20)
-            }
-        }
-        .frame(height: 250)
-        .frame(maxWidth: .infinity)
-        .background(FilmyTheme.backgroundRaised)
-        .clipShape(RoundedRectangle(cornerRadius: 24))
-        .accessibilityHidden(true)
-        .dynamicTypeSize(.xSmall ... .xxxLarge)
-    }
-
-    private var pageControls: some View {
-        VStack(spacing: 8) {
-            HStack {
-                Button {
-                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
-                        selectedPage = max(0, selectedPage - 1)
-                    }
-                } label: {
-                    Text("Back")
-                        .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(selectedPage == 0)
-                .opacity(selectedPage == 0 ? 0 : 1)
-                .accessibilityHidden(selectedPage == 0)
-                .accessibilityIdentifier("onboarding-back")
-                Spacer()
-                Text("\(selectedPage + 1) of \(Self.pages.count)")
-                    .font(.caption.weight(.semibold))
-                    .monospacedDigit()
-                    .accessibilityLabel("Introduction page \(selectedPage + 1) of \(Self.pages.count)")
-                Spacer()
-                Button(action: onFinish) {
-                    Text("Skip for now")
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("onboarding-skip-for-now")
-            }
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(FilmyTheme.secondary)
-
-            Button {
-                if selectedPage == Self.pages.count - 1 {
-                    onFinish()
-                } else {
-                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) { selectedPage += 1 }
-                }
-            } label: {
-                Label(
-                    selectedPage == Self.pages.count - 1 ? "Open camera" : "Continue",
-                    systemImage: selectedPage == Self.pages.count - 1 ? "camera.fill" : "arrow.right"
-                )
-                .fixedSize(horizontal: false, vertical: true)
-            }
-            .buttonStyle(.filmyPrimary)
-            .accessibilityIdentifier("onboarding-continue")
-            .accessibilityHint(selectedPage == Self.pages.count - 1 ? "Open the camera with your chosen look" : "Next introduction page")
-        }
-        .padding(.horizontal, 22)
-        .padding(.bottom, 12)
-    }
-}
-
-#Preview {
-    OnboardingView {}
 }
