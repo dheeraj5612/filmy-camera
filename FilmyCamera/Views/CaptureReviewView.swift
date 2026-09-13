@@ -101,6 +101,7 @@ struct CaptureReviewView: View {
                         .padding(.bottom, 16)
                         .frame(maxWidth: .infinity)
                     }
+                    .accessibilityIdentifier("review-content-scroll")
                     .safeAreaInset(edge: .bottom, spacing: 0) {
                         actionBar
                             .frame(maxWidth: FilmyLayout.readableMaxWidth)

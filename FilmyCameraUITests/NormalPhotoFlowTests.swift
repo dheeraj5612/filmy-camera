@@ -98,10 +98,10 @@ final class NormalPhotoFlowTests: XCTestCase {
             "Large-text review must stay portrait after device rotation before compact-layout checks"
         )
         let landscapeFinish = app.buttons["review-finish-instantPrint"]
-        let landscapeScroll = app.scrollViews["review-controls-scroll"]
+        let portraitScroll = app.scrollViews["review-content-scroll"]
         XCTAssertTrue(
-            revealFully(landscapeFinish, in: landscapeScroll),
-            "Large-text portrait-locked Instant Print must scroll fully into view"
+            revealFully(landscapeFinish, in: portraitScroll),
+            "Large-text portrait-locked Instant Print must scroll fully into view in the portrait review"
         )
         assertReviewControl(
             landscapeFinish,
@@ -118,18 +118,10 @@ final class NormalPhotoFlowTests: XCTestCase {
         )
 
         let save = app.buttons["Save filtered photo"]
-        XCTAssertTrue(
-            revealFully(save, in: landscapeScroll),
-            "Large-text portrait-locked Save must scroll fully into view"
-        )
-        assertReviewControl(save, name: "Large-text portrait-locked Save", containedInApp: true)
+        assertReviewControl(save, name: "Large-text portrait-locked pinned Save", containedInApp: true)
 
         let cancel = app.buttons["Cancel"]
-        XCTAssertTrue(
-            revealFully(cancel, in: landscapeScroll),
-            "Large-text portrait-locked Cancel must scroll fully into view"
-        )
-        assertReviewControl(cancel, name: "Large-text portrait-locked Cancel", containedInApp: true)
+        assertReviewControl(cancel, name: "Large-text portrait-locked pinned Cancel", containedInApp: true)
         cancel.tap()
         let review = app.descendants(matching: .any)["review-screen"]
         XCTAssertTrue(waitForDisappearance(review, timeout: 10), "Cancel must dismiss imported review")
