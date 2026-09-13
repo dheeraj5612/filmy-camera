@@ -53,6 +53,12 @@ REQUIRED_FIXTURE_SELECTOR = (
     "FilmyCameraTests/PhotoLibraryLargeRollTests/"
     "testActualPhotoKitRollIncludesAll160OwnedFramesAcrossServiceReload"
 )
+# This existing real-roll UI test drives the Photos permission alert through
+# XCTest before the unit fixture process is started on the same simulator.
+PHOTOS_PERMISSION_BOOTSTRAP_SELECTOR = (
+    "FilmyCameraUITests/NormalPhotoFlowTests/"
+    "testGrantFullPhotosAccessForFixtureLane"
+)
 OPTIONAL_FIXTURE_SELECTORS = {
     "FilmyCameraTests/RecipeRenderGalleryTests/testG7XRenderGallery",
     "FilmyCameraTests/RecipeRenderGalleryTests/testFujiRenderGallery",
@@ -108,11 +114,16 @@ def inventory(root=ROOT, manifest_path=MANIFEST):
 
 def phases(lane, tests):
     groups = LANES[lane]
-    selected = lambda names: sorted(test for test, group in tests.items() if group in names)
+    selected = lambda names, exclude_bootstrap=False: sorted(
+        test for test, group in tests.items()
+        if group in names and (not exclude_bootstrap or test != PHOTOS_PERMISSION_BOOTSTRAP_SELECTOR)
+    )
     if lane == "ci":
         return [("core", selected({"unit", "integration"})),
                 ("e2e", selected({"e2e", "simulator-e2e"})),
-                ("photos-e2e", selected({"photos-e2e"}))]
+                ("photos-e2e", selected({"photos-e2e"}, exclude_bootstrap=True))]
+    if lane == "photos-e2e":
+        return [(lane, selected(set(groups), exclude_bootstrap=True))]
     return [(lane, selected(set(groups)))] if groups else []
 
 
@@ -226,11 +237,11 @@ def create_photos_simulator(destination, app_path=None):
     try:
         simctl("boot", owned, timeout=SIMULATOR_BOOT_TIMEOUT_SECONDS)
         simctl("bootstatus", owned, "-b", timeout=SIMULATOR_BOOT_TIMEOUT_SECONDS)
-        # Install before the test host so simctl can grant Photos access without
-        # driving a permission prompt. This is limited to the disposable host.
+        # Install before the test host. Permission must be granted by the real
+        # UI prompt: simctl privacy grant can leave PhotoKit's readWrite status
+        # at limited/add-only on newer simulator runtimes.
         if app_path is not None:
             simctl("install", owned, str(app_path), timeout=SIMULATOR_MEDIA_TIMEOUT_SECONDS)
-            simctl("privacy", owned, "grant", "photos", "com.dheeraj.filmycamera")
         simctl(
             "addmedia",
             owned,
@@ -416,6 +427,26 @@ def run_isolated_photos_methods(command, selectors, result, output, environment,
     }, aggregate_exit_code
 
 
+def run_photos_permission_bootstrap(command, output, environment):
+    """Resolve full Photos access through the existing real-roll UI flow."""
+    result = output / "FilmyCameraPhotosPermissionBootstrap.xcresult"
+    log = output / "filmycamera-photos-permission-bootstrap-test.log"
+    if result.exists():
+        raise ValueError(f"Refusing to overwrite evidence: {result}; choose another --output-dir")
+    bootstrap_command = command + ["-resultBundlePath", str(result)]
+    bootstrap_command += ["-only-testing:" + PHOTOS_PERMISSION_BOOTSTRAP_SELECTOR,
+                          "test-without-building"]
+    bootstrap_environment = dict(environment)
+    bootstrap_environment["TEST_RUNNER_FILMY_RUN_PHOTOS_PERMISSION_BOOTSTRAP"] = "1"
+    code = run_logged(bootstrap_command, log, bootstrap_environment)
+    summary = summarize_result(result, code)
+    if (code != 0 or summary.get("status") != "passed"
+            or summary.get("passed") != 1 or summary.get("failed", 0)
+            or summary.get("skipped", 0)):
+        raise PhaseFailure(code or 1)
+    return summary
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("lane", choices=[*LANES, "inventory"])
@@ -473,6 +504,13 @@ def main(argv=None):
             app_path = (args.derived_data / "Build/Products/Debug-iphonesimulator/FilmyCamera.app")
             with isolated_photos_destination(phase, destination, app_path) as phase_destination:
                 command = xcode_command(phase_destination, args.derived_data, args.coverage)
+                permission_bootstrap = None
+                if phase == "fixtures":
+                    bootstrap_environment = test_environment("photos-e2e")
+                    bootstrap_environment["TEST_RUNNER_FILMY_RUN_PHOTOS_PERMISSION_BOOTSTRAP"] = "1"
+                    permission_bootstrap = run_photos_permission_bootstrap(
+                        command, output, bootstrap_environment
+                    )
                 if phase in {"photos-e2e", "fixtures"} and len(selectors) > 1:
                     summary, code = run_isolated_photos_methods(
                         command, selectors, result, output, test_environment(phase), phase
@@ -495,6 +533,13 @@ def main(argv=None):
                                 "worktreeDirty": bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip()),
                                 "buildInputDigest": input_digest, "toolchain": toolchain,
                                 "coverageEnabled": args.coverage})
+                if permission_bootstrap is not None:
+                    summary["photosPermissionBootstrap"] = {
+                        "selector": PHOTOS_PERMISSION_BOOTSTRAP_SELECTOR,
+                        "resultBundle": "FilmyCameraPhotosPermissionBootstrap.xcresult",
+                        "log": "filmycamera-photos-permission-bootstrap-test.log",
+                        "status": permission_bootstrap["status"],
+                    }
                 (output / f"filmycamera-{phase}-summary.json").write_text(json.dumps(summary, indent=2) + "\n")
                 print(json.dumps({key: summary.get(key) for key in ("lane", "status", "passed", "failed", "skipped")}), flush=True)
                 if summary["status"] != "passed":

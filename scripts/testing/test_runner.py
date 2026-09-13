@@ -20,10 +20,20 @@ class SuiteRoutingTests(unittest.TestCase):
     def test_routine_ci_includes_all_deterministic_tests_and_no_opt_ins(self):
         tests = run.inventory()
         selected = [test for _, identifiers in run.phases("ci", tests) for test in identifiers]
-        self.assertCountEqual(selected, [test for test, group in tests.items()
-                                         if group in {"unit", "integration", "e2e", "simulator-e2e", "photos-e2e"}])
+        self.assertCountEqual(
+            selected,
+            [test for test, group in tests.items()
+             if group in {"unit", "integration", "e2e", "simulator-e2e", "photos-e2e"}
+             and test != run.PHOTOS_PERMISSION_BOOTSTRAP_SELECTOR],
+        )
         self.assertEqual(len(selected), len(set(selected)), "CI should not rerun tests across phases")
         self.assertFalse(any("/testPhysical" in test for test in selected))
+
+    def test_permission_bootstrap_is_excluded_from_routine_photos_lane(self):
+        tests = run.inventory()
+        photos = run.phases("photos-e2e", tests)[0][1]
+        self.assertIn(run.PHOTOS_PERMISSION_BOOTSTRAP_SELECTOR, tests)
+        self.assertNotIn(run.PHOTOS_PERMISSION_BOOTSTRAP_SELECTOR, photos)
 
     def test_simulator_only_ui_cases_run_in_e2e_and_ci_but_not_on_device(self):
         tests = run.inventory()
@@ -133,7 +143,7 @@ class SuiteRoutingTests(unittest.TestCase):
                 run.create_photos_simulator("platform=iOS Simulator,id=reference")
             destroy.assert_called_once_with("owned")
 
-    def test_fixture_photos_setup_installs_and_grants_owned_simulator(self):
+    def test_fixture_photos_setup_installs_without_simctl_grant(self):
         calls = []
 
         def fake_simctl(*args, timeout=run.SIMCTL_DEFAULT_TIMEOUT_SECONDS):
@@ -148,22 +158,57 @@ class SuiteRoutingTests(unittest.TestCase):
             run.create_photos_simulator("platform=iOS Simulator,id=reference", Path("/tmp/FilmyCamera.app"))
 
         self.assertIn(("install", "owned", "/tmp/FilmyCamera.app"), calls)
-        self.assertIn(("privacy", "owned", "grant", "photos", "com.dheeraj.filmycamera"), calls)
+        self.assertNotIn(("privacy", "owned", "grant", "photos", "com.dheeraj.filmycamera"), calls)
 
-    def test_fixture_photos_grant_failure_deletes_only_owned_simulator(self):
+    def test_fixture_setup_does_not_depend_on_privacy_grant(self):
         def fake_simctl(*args, timeout=run.SIMCTL_DEFAULT_TIMEOUT_SECONDS):
             if args[0] == "list":
                 return json.dumps({"devices": {"runtime": [{"udid": "reference", "deviceTypeIdentifier": "type"}]}})
             if args[0] == "create":
                 return "owned"
-            if args[0] == "privacy":
-                raise RuntimeError("privacy grant failed")
             return ""
 
         with patch.object(run, "simctl", side_effect=fake_simctl), patch.object(run, "destroy_simulator") as destroy:
-            with self.assertRaisesRegex(RuntimeError, "privacy grant failed"):
-                run.create_photos_simulator("platform=iOS Simulator,id=reference", Path("/tmp/FilmyCamera.app"))
-        destroy.assert_called_once_with("owned")
+            run.create_photos_simulator("platform=iOS Simulator,id=reference", Path("/tmp/FilmyCamera.app"))
+        destroy.assert_not_called()
+
+    def test_fixture_permission_bootstrap_runs_real_roll_before_fixture_cases(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(run, "run_logged", return_value=0) as execute, \
+                patch.object(run, "summarize_result", return_value={
+                    "status": "passed", "passed": 1, "failed": 0, "skipped": 0,
+                }):
+            summary = run.run_photos_permission_bootstrap(
+                ["xcodebuild", "-destination", "platform=iOS Simulator,id=owned"],
+                Path(directory),
+                {"TEST_RUNNER_FILMY_RUN_SEEDED_PHOTOS_E2E": "1"},
+            )
+
+        self.assertEqual(summary["status"], "passed")
+        command = execute.call_args.args[0]
+        self.assertIn(
+            "-only-testing:" + run.PHOTOS_PERMISSION_BOOTSTRAP_SELECTOR,
+            command,
+        )
+        self.assertEqual(command[-1], "test-without-building")
+        self.assertEqual(execute.call_args.args[2]["TEST_RUNNER_FILMY_RUN_SEEDED_PHOTOS_E2E"], "1")
+
+        self.assertNotEqual(
+            execute.call_args.args[2].get("TEST_RUNNER_FILMY_RUN_PHOTOS_PERMISSION_BOOTSTRAP"),
+            None,
+        )
+
+    def test_fixture_permission_bootstrap_rejects_a_skipped_ui_case(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(run, "run_logged", return_value=0), \
+                patch.object(run, "summarize_result", return_value={
+                    "status": "passed", "passed": 0, "failed": 0, "skipped": 1,
+                }):
+            with self.assertRaises(run.PhaseFailure):
+                run.run_photos_permission_bootstrap(
+                    ["xcodebuild"], Path(directory),
+                    {"TEST_RUNNER_FILMY_RUN_SEEDED_PHOTOS_E2E": "1"},
+                )
 
     def test_photos_media_timeout_is_bounded_and_deletes_only_owned_simulator(self):
         calls = []
