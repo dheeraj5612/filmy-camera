@@ -1,0 +1,133 @@
+name: Frame Index implementation preparation
+on:
+  push:
+    branches: ['design/frame-index-20260913']
+    paths: ['.github/workflows/frame-index-integrate.yml']
+permissions:
+  contents: write
+jobs:
+  prepare:
+    runs-on: macos-15
+    timeout-minutes: 20
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Apply the exact reviewed implementation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/frame-index"
+          python3 - <<'PY'
+          import base64, hashlib, json, lzma, os, pathlib, subprocess
+          out = pathlib.Path(os.environ['RUNNER_TEMP']) / 'frame-index'
+          parts = ['a83da96a63b4ee016889e91846e4901b113af429', '64097635251e761e97619c03bc487b14cf494ee4', '26c2aa9b15a76a2467b659fda965f8df7c1ea230', '3fadf34dffcdf31dac50ee8d093800e998a0656d', 'c4b19c2145f9b0dc1d81aa72d0ac58be3ade3c1d']
+          data = b''
+          for sha in parts:
+              blob = json.loads(subprocess.check_output(['gh','api',f'repos/{os.environ["GITHUB_REPOSITORY"]}/git/blobs/{sha}'], text=True))
+              raw = base64.b64decode(blob['content'])
+              actual = hashlib.sha1(f'blob {len(raw)}\0'.encode() + raw).hexdigest()
+              if actual != sha: raise SystemExit('Transport blob integrity check failed')
+              data += raw
+          if hashlib.sha256(data).hexdigest() != '9aecc0027ca43f8b1ef7029c6c2b1be21ed44d68522ae382a96a52a2f7485ece':
+              raise SystemExit('Compressed patch integrity check failed')
+          patch = lzma.decompress(data)
+          if hashlib.sha256(patch).hexdigest() != 'f5891fc5d75c295d9e5dbf39a1fadf43d2435304673185fc2bc3838875c20616':
+              raise SystemExit('Reviewed patch integrity check failed')
+          path = out / 'reviewed.patch'
+          path.write_bytes(patch)
+          subprocess.run(['git','apply','--check',str(path)], check=True)
+          subprocess.run(['git','apply',str(path)], check=True)
+          PY
+          python3 scripts/design/generate_identity.py
+          python3 -m unittest discover -s scripts/testing -p 'test_*.py' -v > "$RUNNER_TEMP/frame-index/portable-tests.log" 2>&1
+          git diff --check
+          # Capture, lifecycle, rendering recipes, encoding, privacy and signing inputs stay unchanged.
+          git diff --exit-code 04228ed7754d677ba99db495ecd9b3753db096e2 -- \
+            FilmyCamera/Services FilmyCamera/ViewModels FilmyCamera/ContentView.swift \
+            FilmyCamera/FilmyCameraApp.swift FilmyCamera/Info.plist project.yml
+      - name: Regenerate the Xcode project with the repository's pinned generator
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release download 2.45.4 --repo yonaskolb/XcodeGen --pattern xcodegen.zip --output "$RUNNER_TEMP/xcodegen.zip"
+          echo "090ec29491aad50aec10631bf6e62253fed733c50f3aab0f5ffc86bc170bdbef  $RUNNER_TEMP/xcodegen.zip" | shasum -a 256 --check
+          mkdir -p "$RUNNER_TEMP/pinned-xcodegen"
+          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP/pinned-xcodegen"
+          generator="$RUNNER_TEMP/pinned-xcodegen/xcodegen/bin/xcodegen"
+          [[ -x "$generator" && ! -L "$generator" ]]
+          echo "6aa2b4da95304b343bea12890c59f9655aa428c08b351d57d592cfab4e88a9f1  $generator" | shasum -a 256 --check
+          "$generator" --version | grep -Fx 'Version: 2.45.4'
+          "$generator" generate --spec project.yml
+          # Temporary research and transport runners are not part of the product PR.
+          rm .github/workflows/frame-index-audit.yml .github/workflows/frame-index-references.yml .github/workflows/frame-index-integrate.yml
+          git add -A -- FilmyCamera FilmyCameraTests FilmyCameraUITests FilmyCamera.xcodeproj scripts/design scripts/testing docs/design docs/app-store/icon/README.md README.md DESIGN.md .github/workflows
+          bash scripts/ci/check-tracked-credentials.sh
+          git diff --cached --check
+          git diff --cached --stat > "$RUNNER_TEMP/frame-index/change-stat.txt"
+      - name: Prepare commit objects without updating any branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, hashlib, json, os, pathlib, subprocess
+          out = pathlib.Path(os.environ['RUNNER_TEMP']) / 'frame-index'
+          repo = os.environ['GITHUB_REPOSITORY']
+          parent = os.environ['GITHUB_SHA']
+          def api(endpoint, payload):
+              result = subprocess.run(['gh','api','--method','POST',f'repos/{repo}/{endpoint}','--input','-'],input=json.dumps(payload),text=True,capture_output=True,check=True)
+              return json.loads(result.stdout)
+          entries = []
+          changes = subprocess.check_output(['git','diff','--cached','--name-status','--no-renames','-z']).decode().split('\0')
+          for i in range(0,len(changes)-1,2):
+              status,path = changes[i:i+2]
+              if status == 'D':
+                  entries.append({'path':path,'mode':'100644','type':'blob','sha':None})
+                  continue
+              raw = subprocess.check_output(['git','show',f':{path}'])
+              mode = subprocess.check_output(['git','ls-files','-s','--',path],text=True).split()[0]
+              sha = api('git/blobs',{'content':base64.b64encode(raw).decode(),'encoding':'base64'})['sha']
+              if sha != hashlib.sha1(f'blob {len(raw)}\0'.encode()+raw).hexdigest():
+                  raise SystemExit('Source blob integrity check failed')
+              entries.append({'path':path,'mode':mode,'type':'blob','sha':sha})
+          base_tree = subprocess.check_output(['git','rev-parse',parent+'^{tree}'],text=True).strip()
+          tree = api('git/trees',{'base_tree':base_tree,'tree':entries})['sha']
+          local_tree = subprocess.check_output(['git','write-tree'],text=True).strip()
+          if tree != local_tree: raise SystemExit('Prepared tree differs from inspected source')
+          commit = api('git/commits',{'message':'feat: implement Frame Index camera, comparisons, native identity and regression coverage','tree':tree,'parents':[parent]})['sha']
+          (out/'commit-sha.txt').write_text(commit+'\n')
+          (out/'parent-sha.txt').write_text(parent+'\n')
+          (out/'tree-sha.txt').write_text(tree+'\n')
+          (out/'base-commit.txt').write_text('04228ed7754d677ba99db495ecd9b3753db096e2\n')
+          (out/'changed-entries.json').write_text(json.dumps(entries,indent=2)+'\n')
+          subprocess.run(['git','archive','--format=tar.gz','--output='+str(out/'filmy-camera-frame-index.tar.gz'),local_tree],check=True)
+          print('Prepared source commit:',commit)
+          print('No branch ref has been updated by this workflow.')
+          PY
+      - name: Compile app and tests against the actual iOS simulator SDK without signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version > "$RUNNER_TEMP/frame-index/xcode.txt"
+          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/FrameIndexBuild" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            build-for-testing > "$RUNNER_TEMP/frame-index/xcodebuild.log" 2>&1
+          echo 'Unsigned iOS simulator build-for-testing succeeded; no tests executed by this step.' > "$RUNNER_TEMP/frame-index/build-status.txt"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        if: always()
+        with:
+          name: frame-index-implementation-prepared
+          path: ${{ runner.temp }}/frame-index/
+          retention-days: 7
+          if-no-files-found: error
