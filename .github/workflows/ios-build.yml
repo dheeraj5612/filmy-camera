@@ -109,8 +109,9 @@ jobs:
     if: always() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.ios_changed == 'true')
     runs-on: macos-15
     # The 128-look renderer suite, full UI suite, and isolated Photos flows run
-    # sequentially. Retain a bounded budget without cutting off later gates.
-    timeout-minutes: 45
+    # sequentially. Hosted runs can spend over 45 minutes reaching the final
+    # Photos flows; keep enough bounded time to finish and retain evidence.
+    timeout-minutes: 65
     # Xcode 16.4 ships iOS 18.5 on the hosted runner. Keep one stable lane so
     # the required `build-and-test` check name does not become a matrix suffix.
     env:
