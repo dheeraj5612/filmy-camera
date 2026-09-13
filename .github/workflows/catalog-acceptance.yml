@@ -89,6 +89,18 @@ jobs:
             -only-testing:FilmyCameraTests/CaptureWorkflowPolicyTests \
             -only-testing:FilmyCameraTests/ExpandedCreativeCatalogTests \
             test > "$RUNNER_TEMP/render-evidence/xcodebuild.log" 2>&1
+      - name: Run mandatory 160-photo fixture lane
+        shell: bash
+        run: |
+          set -euo pipefail
+          device_id="$(cat "$RUNNER_TEMP/render-evidence/device-id.txt")"
+          fixture_dir="$RUNNER_TEMP/render-evidence/fixtures"
+          mkdir -p "$fixture_dir"
+          python3 scripts/testing/run.py fixtures \
+            --destination "platform=iOS Simulator,id=$device_id,arch=arm64" \
+            --derived-data "$RUNNER_TEMP/FilmyCatalogBuild" \
+            --output-dir "$fixture_dir" 2>&1 | tee "$fixture_dir/runner.log"
+
       - name: Export per-recipe contact sheets and require complete execution
         if: always()
         shell: bash
