@@ -1,0 +1,185 @@
+name: Temporary Signal Frame native validation
+
+on:
+  push:
+    branches: ['design/filmycam-frame-lab']
+    paths: ['.github/workflows/design-apply.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  apply-design:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      source: ${{ steps.apply.outputs.source }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: design/filmycam-frame-lab
+          fetch-depth: 0
+      - name: Apply checksum-verified source to this isolated branch only
+        id: apply
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/design/filmycam-frame-lab
+          git merge-base --is-ancestor 36928f0da0f961f244a8f996ba63b4e4bb1637c7 HEAD
+          python3 - <<'PY'
+          import base64, hashlib, json, lzma, os, pathlib, subprocess
+          parts = ['579896d5b55c755ae95282940484ad0690baa14b', 'd4cd935bc297555eaff36796420293670c222ded', '3c186f074c0734debc79d0dc12a5fa1260d1957f', 'a43559ab40ab11b5c9afc6e7c64634459adba941']
+          raw = bytearray()
+          for sha in parts:
+              response = json.loads(subprocess.check_output(['gh','api','repos/dheeraj5612/filmy-camera/git/blobs/'+sha], timeout=45))
+              data = base64.b64decode(response['content'])
+              actual = hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()
+              if actual != sha: raise SystemExit('Git blob checksum mismatch')
+              raw.extend(data)
+          patch = lzma.decompress(raw)
+          if hashlib.sha256(patch).hexdigest() != 'fd949bede7e4c4662f3e7f18bf782c4127b83a2d7e00b1eed93b1dd69d77fe23':
+              raise SystemExit('Design patch checksum mismatch')
+          path = pathlib.Path(os.environ['RUNNER_TEMP']) / 'signal-frame.patch'
+          path.write_bytes(patch)
+          subprocess.run(['git','apply','--index',str(path)],check=True)
+          PY
+          git rm .github/workflows/design-evidence-transfer.yml .github/workflows/design-apply.yml
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Introduce Signal Frame identity, thumb-first capture controls, favorites and truthful photo comparison'
+          git push origin HEAD:refs/heads/design/filmycam-frame-lab
+          echo "source=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/source"
+          git archive --format=tar.gz --output="$RUNNER_TEMP/source/source.tar.gz" HEAD
+          git cat-file commit HEAD > "$RUNNER_TEMP/source/commit.raw"
+          git rev-parse HEAD > "$RUNNER_TEMP/source/source-sha.txt"
+          git ls-tree -r HEAD > "$RUNNER_TEMP/source/tree.txt"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: signal-frame-v1-source
+          path: ${{ runner.temp }}/source/
+          retention-days: 14
+          if-no-files-found: error
+  native-ui:
+    needs: apply-design
+    runs-on: macos-15
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        device: ['iPhone SE (3rd generation)', 'iPhone 16 Pro Max']
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      SIMULATOR_RUNTIME: com.apple.CoreSimulator.SimRuntime.iOS-26-2
+      DEVICE_NAME: ${{ matrix.device }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ needs.apply-design.outputs.source }}
+          persist-credentials: false
+      - name: Build and exercise actual iOS UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/design-ui"
+          git rev-parse HEAD > "$RUNNER_TEMP/design-ui/source-sha.txt"
+          xcodebuild -version > "$RUNNER_TEMP/design-ui/xcode.txt"
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess
+          out = pathlib.Path(os.environ['RUNNER_TEMP']) / 'design-ui'
+          types = json.loads(subprocess.check_output(['xcrun','simctl','list','devicetypes','-j']))['devicetypes']
+          match = [d for d in types if d['name'] == os.environ['DEVICE_NAME']]
+          if len(match) != 1: raise SystemExit('Requested device type unavailable')
+          device = subprocess.check_output(['xcrun','simctl','create','Filmy-Signal-v1-'+os.environ['GITHUB_RUN_ID'],match[0]['identifier'],os.environ['SIMULATOR_RUNTIME']],text=True,timeout=45).strip()
+          (out / 'device-id.txt').write_text(device+'\n')
+          (out / 'device-name.txt').write_text(os.environ['DEVICE_NAME']+'\n')
+          subprocess.run(['xcrun','simctl','boot',device],check=True,timeout=45)
+          subprocess.run(['xcrun','simctl','bootstatus',device,'-b'],check=True,timeout=300)
+          PY
+          device="$(cat "$RUNNER_TEMP/design-ui/device-id.txt")"
+          xcodebuild test -project FilmyCamera.xcodeproj -scheme FilmyCamera \
+            -destination "platform=iOS Simulator,id=$device,arch=arm64" \
+            -derivedDataPath "$RUNNER_TEMP/FilmyDesignBuild" \
+            -resultBundlePath "$RUNNER_TEMP/FilmyDesign.xcresult" \
+            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            -only-testing:FilmyCameraTests/ReviewComparisonStateTests \
+            -only-testing:FilmyCameraTests/CameraReviewEditingTests \
+            -only-testing:FilmyCameraTests/CameraReviewSaveTests \
+            -only-testing:FilmyCameraUITests/FilmyCameraUITests/testCameraShellAndRecipeDetails \
+            -only-testing:FilmyCameraUITests/FilmyCameraUITests/testViewfinderFirstChromePreviewKeepsCameraQuiet \
+            -only-testing:FilmyCameraUITests/FilmyCameraUITests/testGalleryAndSettingsNavigation \
+            -only-testing:FilmyCameraUITests/FilmyCameraUITests/testAccessibilitySizeCameraShellKeepsRecipeControlsReachable \
+            -only-testing:FilmyCameraUITests/LaunchOnboardingTests \
+            -only-testing:FilmyCameraUITests/LookLibraryUITests \
+            -only-testing:FilmyCameraUITests/SignalFrameUITests \
+            > "$RUNNER_TEMP/design-ui/xcodebuild.log" 2>&1
+      - name: Export actual screenshots and results, including failures
+        if: always()
+        shell: bash
+        run: |
+          if [[ -d "$RUNNER_TEMP/FilmyDesign.xcresult" ]]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/FilmyDesign.xcresult" --output-path "$RUNNER_TEMP/design-ui/screenshots"
+            xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/FilmyDesign.xcresult" > "$RUNNER_TEMP/design-ui/summary.json"
+          fi
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        if: always()
+        with:
+          name: signal-frame-v1-ui-${{ matrix.device }}
+          path: ${{ runner.temp }}/design-ui/
+          retention-days: 14
+          if-no-files-found: error
+      - name: Clean up only this job's simulator
+        if: always()
+        run: |
+          if [[ -f "$RUNNER_TEMP/design-ui/device-id.txt" ]]; then
+            device="$(cat "$RUNNER_TEMP/design-ui/device-id.txt")"
+            xcrun simctl shutdown "$device" || true
+            xcrun simctl delete "$device" || true
+          fi
+  photos-flow:
+    needs: apply-design
+    runs-on: macos-15
+    timeout-minutes: 50
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ needs.apply-design.outputs.source }}
+          persist-credentials: false
+      - name: Run normal import, split comparison, save, Roll and sharing against seeded Photos
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/photos-evidence"
+          git rev-parse HEAD > "$RUNNER_TEMP/photos-evidence/source-sha.txt"
+          xcodebuild -version > "$RUNNER_TEMP/photos-evidence/xcode.txt"
+          reference=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; devices=json.load(sys.stdin)["devices"]["com.apple.CoreSimulator.SimRuntime.iOS-26-2"]; print(next(d["udid"] for d in devices if d["name"] == "iPhone 16 Pro Max"))')
+          python3 scripts/testing/run.py photos-e2e \
+            --destination "platform=iOS Simulator,id=$reference" \
+            --derived-data "$RUNNER_TEMP/FilmyPhotosBuild" \
+            --output-dir "$RUNNER_TEMP/photos-evidence/run" \
+            > "$RUNNER_TEMP/photos-evidence/runner.log" 2>&1
+      - name: Export real Photos flow screenshot attachments
+        if: always()
+        shell: bash
+        run: |
+          if [[ -d "$RUNNER_TEMP/photos-evidence/run" ]]; then
+            while IFS= read -r -d '' result; do
+              name="$(basename "$result" .xcresult)"
+              xcrun xcresulttool export attachments --path "$result" --output-path "$RUNNER_TEMP/photos-evidence/screenshots-$name" || true
+              xcrun xcresulttool get test-results summary --path "$result" > "$RUNNER_TEMP/photos-evidence/$name-summary.json" || true
+            done < <(find "$RUNNER_TEMP/photos-evidence/run" -type d -name '*.xcresult' -print0)
+          fi
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        if: always()
+        with:
+          name: signal-frame-v1-photos
+          path: ${{ runner.temp }}/photos-evidence/
+          retention-days: 14
+          if-no-files-found: error
