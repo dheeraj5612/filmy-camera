@@ -31,8 +31,8 @@ jobs:
           for sha in parts:
               blob = json.loads(subprocess.check_output(['gh','api',f'repos/{os.environ["GITHUB_REPOSITORY"]}/git/blobs/{sha}'], text=True))
               raw = base64.b64decode(blob['content'])
-              actual = hashlib.sha1(f'blob {len(raw)}\0'.encode() + raw).hexdigest()
-              if actual != sha: raise SystemExit('Transport blob integrity check failed')
+              if hashlib.sha1(f'blob {len(raw)}\0'.encode() + raw).hexdigest() != sha:
+                  raise SystemExit('Transport blob integrity check failed')
               data += raw
           if hashlib.sha256(data).hexdigest() != '9aecc0027ca43f8b1ef7029c6c2b1be21ed44d68522ae382a96a52a2f7485ece':
               raise SystemExit('Compressed patch integrity check failed')
@@ -47,11 +47,10 @@ jobs:
           python3 scripts/design/generate_identity.py
           python3 -m unittest discover -s scripts/testing -p 'test_*.py' -v > "$RUNNER_TEMP/frame-index/portable-tests.log" 2>&1
           git diff --check
-          # Capture, lifecycle, rendering recipes, encoding, privacy and signing inputs stay unchanged.
           git diff --exit-code 04228ed7754d677ba99db495ecd9b3753db096e2 -- \
             FilmyCamera/Services FilmyCamera/ViewModels FilmyCamera/ContentView.swift \
             FilmyCamera/FilmyCameraApp.swift FilmyCamera/Info.plist project.yml
-      - name: Regenerate the Xcode project with the repository's pinned generator
+      - name: Regenerate with the repository's pinned XcodeGen and preserve the source archive
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -66,13 +65,17 @@ jobs:
           echo "6aa2b4da95304b343bea12890c59f9655aa428c08b351d57d592cfab4e88a9f1  $generator" | shasum -a 256 --check
           "$generator" --version | grep -Fx 'Version: 2.45.4'
           "$generator" generate --spec project.yml
-          # Temporary research and transport runners are not part of the product PR.
           rm .github/workflows/frame-index-audit.yml .github/workflows/frame-index-references.yml .github/workflows/frame-index-integrate.yml
           git add -A -- FilmyCamera FilmyCameraTests FilmyCameraUITests FilmyCamera.xcodeproj scripts/design scripts/testing docs/design docs/app-store/icon/README.md README.md DESIGN.md .github/workflows
           bash scripts/ci/check-tracked-credentials.sh
           git diff --cached --check
           git diff --cached --stat > "$RUNNER_TEMP/frame-index/change-stat.txt"
-      - name: Prepare commit objects without updating any branch
+          git write-tree > "$RUNNER_TEMP/frame-index/tree-sha.txt"
+          git rev-parse HEAD > "$RUNNER_TEMP/frame-index/parent-sha.txt"
+          git rev-parse HEAD^{tree} > "$RUNNER_TEMP/frame-index/base-tree-sha.txt"
+          printf '%s\n' 04228ed7754d677ba99db495ecd9b3753db096e2 > "$RUNNER_TEMP/frame-index/base-commit.txt"
+          git archive --format=tar.gz --output="$RUNNER_TEMP/frame-index/filmy-camera-frame-index.tar.gz" "$(git write-tree)"
+      - name: Upload verified source blobs without creating commits or updating refs
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -82,10 +85,6 @@ jobs:
           import base64, hashlib, json, os, pathlib, subprocess
           out = pathlib.Path(os.environ['RUNNER_TEMP']) / 'frame-index'
           repo = os.environ['GITHUB_REPOSITORY']
-          parent = os.environ['GITHUB_SHA']
-          def api(endpoint, payload):
-              result = subprocess.run(['gh','api','--method','POST',f'repos/{repo}/{endpoint}','--input','-'],input=json.dumps(payload),text=True,capture_output=True,check=True)
-              return json.loads(result.stdout)
           entries = []
           changes = subprocess.check_output(['git','diff','--cached','--name-status','--no-renames','-z']).decode().split('\0')
           for i in range(0,len(changes)-1,2):
@@ -95,23 +94,18 @@ jobs:
                   continue
               raw = subprocess.check_output(['git','show',f':{path}'])
               mode = subprocess.check_output(['git','ls-files','-s','--',path],text=True).split()[0]
-              sha = api('git/blobs',{'content':base64.b64encode(raw).decode(),'encoding':'base64'})['sha']
+              payload = {'content':base64.b64encode(raw).decode(),'encoding':'base64'}
+              result = subprocess.run(['gh','api','--method','POST',f'repos/{repo}/git/blobs','--input','-'],input=json.dumps(payload),text=True,capture_output=True)
+              if result.returncode:
+                  print(result.stderr)
+                  raise SystemExit('Source blob upload failed')
+              sha = json.loads(result.stdout)['sha']
               if sha != hashlib.sha1(f'blob {len(raw)}\0'.encode()+raw).hexdigest():
                   raise SystemExit('Source blob integrity check failed')
               entries.append({'path':path,'mode':mode,'type':'blob','sha':sha})
-          base_tree = subprocess.check_output(['git','rev-parse',parent+'^{tree}'],text=True).strip()
-          tree = api('git/trees',{'base_tree':base_tree,'tree':entries})['sha']
-          local_tree = subprocess.check_output(['git','write-tree'],text=True).strip()
-          if tree != local_tree: raise SystemExit('Prepared tree differs from inspected source')
-          commit = api('git/commits',{'message':'feat: implement Frame Index camera, comparisons, native identity and regression coverage','tree':tree,'parents':[parent]})['sha']
-          (out/'commit-sha.txt').write_text(commit+'\n')
-          (out/'parent-sha.txt').write_text(parent+'\n')
-          (out/'tree-sha.txt').write_text(tree+'\n')
-          (out/'base-commit.txt').write_text('04228ed7754d677ba99db495ecd9b3753db096e2\n')
           (out/'changed-entries.json').write_text(json.dumps(entries,indent=2)+'\n')
-          subprocess.run(['git','archive','--format=tar.gz','--output='+str(out/'filmy-camera-frame-index.tar.gz'),local_tree],check=True)
-          print('Prepared source commit:',commit)
-          print('No branch ref has been updated by this workflow.')
+          print(json.dumps(entries,indent=2))
+          print('No trees, commits or branch refs were written. Publication remains a separate authorized connector operation.')
           PY
       - name: Compile app and tests against the actual iOS simulator SDK without signing
         shell: bash
