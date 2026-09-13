@@ -56,3 +56,9 @@ The initial 0.0–0.08 hue feather passed the actual-iPad targeted suite and the
 - ICC-aware comparison of final v19 Mac versus final v19 iPad: matching 2496×3501 output, mean absolute RGB difference **1.0372/255**, p95 **3/255**, p99 **5/255**, max **26/255**. Same pipeline, not bitwise parity. Replay stage PNGs and final JPEG allow quick local iteration with hardware spot checks.
 - Native iPad app readback confirms **1.0.0 (26)** after final refined build; `/tmp/filmy-v19-ipad-app-info.json`. iPad replay provenance matches v19/build26 and the exact source SHA256 above.
 - Initial threshold diagnostics used post-skin crops. Final-stage native RGB diagnostic (`refined-crop-metrics.json`) counts added normalized-red >0.5 pixels at 987 baseline versus 49 refined, p99 0.2993 versus 0.1650. These are different stage measurements, not universal perceptual scores. Visual inspection determines acceptance for this sample; it does not prove every possible skin hue is artifact-free.
+
+## Release handoff
+
+- Final implementation committed as `3f34fc9`; release archive built from clean detached worktree `/tmp/filmy-release-build26`.
+- Archive `/tmp/filmy-build26/FilmyCamera.xcarchive` passed distribution signing and release validation for 1.0.0 (26). App Store Connect upload succeeded at 2026-09-13 15:13 EDT; package is processing. TestFlight processing completion is not yet verified.
+- Physical iPad has the final build26. iPhone installation is pending unlock; do not claim it updated until install succeeds and version is read back.
