@@ -417,33 +417,27 @@ final class NormalPhotoFlowTests: XCTestCase {
         let deadline = Date(timeIntervalSinceNow: timeout)
         while Date() < deadline {
             let pickerViewport = picker.frame.intersection(app.frame).insetBy(dx: 0, dy: 6)
-            let groupFrame = group.frame
-            // A horizontal row can report a content-width frame wider than
-            // the outer picker. Judge only its vertical placement here;
-            // horizontal visibility is handled against the row below. Keep
-            // the whole row inside the viewport so its tiles are not clipped
-            // at an edge; an oversized row can only be partially visible.
-            let groupVerticallyVisible: Bool
-            if groupFrame.height > pickerViewport.height {
-                groupVerticallyVisible = groupFrame.maxY > pickerViewport.minY
-                    && groupFrame.minY < pickerViewport.maxY
-            } else {
-                groupVerticallyVisible = groupFrame.minY >= pickerViewport.minY
-                    && groupFrame.maxY <= pickerViewport.maxY
-            }
-            if !groupVerticallyVisible {
-                let previousFrame = groupFrame
-                if groupFrame.minY < pickerViewport.minY {
+            let tileFrame = tile.frame
+            // The row's accessibility frame can include its content or
+            // padding and extend past the drawer at the content boundary.
+            // Scroll vertically based on the target tile, whose frame is the
+            // actual interaction geometry, while still requiring the entire
+            // tile to be inside the picker viewport before tapping it.
+            if tileFrame.minY < pickerViewport.minY || tileFrame.maxY > pickerViewport.maxY {
+                let previousFrame = tileFrame
+                if tileFrame.minY < pickerViewport.minY {
                     picker.swipeDown()
                 } else {
                     picker.swipeUp()
                 }
-                _ = waitUntil(timeout: 0.8) { group.frame != previousFrame }
+                _ = waitUntil(timeout: 0.8) { tile.frame != previousFrame }
                 continue
             }
 
-            let rowViewport = group.frame.intersection(app.frame).insetBy(dx: 4, dy: 0)
-            let tileFrame = tile.frame
+            // The group's accessibility frame describes its scroll content and
+            // can remain offset at the horizontal content boundary. The drawer
+            // viewport is the actual clipping and interaction region.
+            let rowViewport = pickerViewport
             if rowViewport.contains(tileFrame) && tile.isHittable {
                 return true
             }
