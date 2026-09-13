@@ -126,18 +126,22 @@ enum FilmyCaptureDiagnostics {
                 at: parent,
                 withIntermediateDirectories: true
             )
+            try setCompleteFileProtection(at: parent, fileManager: fileManager)
             try fileManager.createDirectory(
                 at: staging,
                 withIntermediateDirectories: false
             )
+            try setCompleteFileProtection(at: staging, fileManager: fileManager)
 
-            try originalData.write(
+            try writeAtomically(
+                originalData,
                 to: staging.appendingPathComponent("source.capture"),
-                options: .atomic
+                fileManager: fileManager
             )
-            try finalJPEGData.write(
+            try writeAtomically(
+                finalJPEGData,
                 to: staging.appendingPathComponent("final.jpg"),
-                options: .atomic
+                fileManager: fileManager
             )
 
             var completedMetadata = metadata
@@ -152,20 +156,41 @@ enum FilmyCaptureDiagnostics {
             encoder.dateEncodingStrategy = .iso8601
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let metadataData = try encoder.encode(completedMetadata)
-            try metadataData.write(
+            try writeAtomically(
+                metadataData,
                 to: staging.appendingPathComponent("metadata.json"),
-                options: .atomic
+                fileManager: fileManager
             )
 
             if fileManager.fileExists(atPath: latest.path) {
                 try fileManager.removeItem(at: latest)
             }
             try fileManager.moveItem(at: staging, to: latest)
+            try setCompleteFileProtection(at: latest, fileManager: fileManager)
             return true
         } catch {
             try? fileManager.removeItem(at: staging)
             return false
         }
+    }
+
+    private static func writeAtomically(
+        _ data: Data,
+        to url: URL,
+        fileManager: FileManager
+    ) throws {
+        try data.write(to: url, options: [.atomic, .completeFileProtection])
+        try setCompleteFileProtection(at: url, fileManager: fileManager)
+    }
+
+    private static func setCompleteFileProtection(
+        at url: URL,
+        fileManager: FileManager
+    ) throws {
+        try fileManager.setAttributes(
+            [.protectionKey: FileProtectionType.complete],
+            ofItemAtPath: url.path
+        )
     }
 
     private static func defaultDirectory() -> URL? {

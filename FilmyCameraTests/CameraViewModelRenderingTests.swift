@@ -290,6 +290,21 @@ final class CameraViewModelRenderingTests: XCTestCase {
         XCTAssertEqual(saved.previewDrawableSize.height, 2_532)
         XCTAssertEqual(saved.sourceDataByteCount, Data("source-two".utf8).count)
         XCTAssertEqual(saved.finalJPEGByteCount, Data("final-two".utf8).count)
+        for fileName in ["source.capture", "final.jpg", "metadata.json"] {
+            let file = latest.appendingPathComponent(fileName)
+            let protection = try XCTUnwrap(
+                file.resourceValues(forKeys: [.fileProtectionKey]).fileProtection,
+                "Missing file protection for \(fileName)"
+            )
+            XCTAssertEqual(protection, .complete, "Unexpected file protection for \(fileName)")
+        }
+        for directory in [root, latest] {
+            let protection = try XCTUnwrap(
+                directory.resourceValues(forKeys: [.fileProtectionKey]).fileProtection,
+                "Missing file protection for \(directory.lastPathComponent)"
+            )
+            XCTAssertEqual(protection, .complete, "Unexpected directory protection for \(directory.lastPathComponent)")
+        }
         XCTAssertEqual(
             try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).map(\.lastPathComponent),
             ["latest"]

@@ -2555,10 +2555,14 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                           AVCaptureDevice.authorizationStatus(for: .video) == .authorized else {
                         return
                     }
-                    if !self.session.isRunning {
-                        self.session.startRunning()
+                    if self.needsGraphRebuild {
+                        self.configureAndStartOnQueue()
+                    } else {
+                        if !self.session.isRunning {
+                            self.session.startRunning()
+                        }
+                        self.publishStartOutcomeOnQueue(running: self.session.isRunning && !self.session.isInterrupted)
                     }
-                    self.publishStartOutcomeOnQueue(running: self.session.isRunning && !self.session.isInterrupted)
                 }
             }
         ]
