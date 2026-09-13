@@ -1,0 +1,108 @@
+name: Frame Index baseline audit
+
+on:
+  push:
+    branches: ['design/frame-index-20260913']
+    paths: ['.github/workflows/frame-index-audit.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  source-snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: '04228ed7754d677ba99db495ecd9b3753db096e2'
+          persist-credentials: false
+      - name: Archive the exact public source, not credentials or build products
+        run: |
+          mkdir -p "$RUNNER_TEMP/source"
+          git rev-parse HEAD > "$RUNNER_TEMP/source/base-commit.txt"
+          git archive --format=tar.gz HEAD > "$RUNNER_TEMP/source/filmy-camera-base.tar.gz"
+          find . -name AGENTS.md -not -path './.git/*' -print > "$RUNNER_TEMP/source/instruction-paths.txt"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: frame-index-source-base
+          path: ${{ runner.temp }}/source/
+          retention-days: 7
+          if-no-files-found: error
+
+  baseline-ui:
+    runs-on: macos-15
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        device: ['iPhone SE (3rd generation)', 'iPhone 16 Pro Max']
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      DEVICE_NAME: ${{ matrix.device }}
+      SIMULATOR_RUNTIME: com.apple.CoreSimulator.SimRuntime.iOS-26-2
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: '04228ed7754d677ba99db495ecd9b3753db096e2'
+          persist-credentials: false
+      - name: Boot a job-owned simulator and test the unchanged baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/evidence"
+          git rev-parse HEAD > "$RUNNER_TEMP/evidence/source-sha.txt"
+          xcodebuild -version > "$RUNNER_TEMP/evidence/xcode.txt"
+          xcrun simctl list devicetypes -j > "$RUNNER_TEMP/evidence/device-types.json"
+          xcrun simctl list runtimes -j > "$RUNNER_TEMP/evidence/runtimes.json"
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess
+          out = pathlib.Path(os.environ['RUNNER_TEMP']) / 'evidence'
+          types = json.loads((out / 'device-types.json').read_text())['devicetypes']
+          matches = [d for d in types if d['name'] == os.environ['DEVICE_NAME']]
+          if len(matches) != 1:
+              raise SystemExit('Requested device type is not installed')
+          name = 'Filmy-Baseline-' + os.environ['GITHUB_RUN_ID']
+          device = subprocess.check_output(['xcrun','simctl','create', name, matches[0]['identifier'], os.environ['SIMULATOR_RUNTIME']], text=True, timeout=60).strip()
+          (out / 'device-id.txt').write_text(device + '\n')
+          subprocess.run(['xcrun','simctl','boot',device], check=True, timeout=60)
+          subprocess.run(['xcrun','simctl','bootstatus',device,'-b'], check=True, timeout=300)
+          PY
+          device="$(cat "$RUNNER_TEMP/evidence/device-id.txt")"
+          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera \
+            -destination "platform=iOS Simulator,id=$device,arch=arm64" \
+            -derivedDataPath "$RUNNER_TEMP/BaselineBuild" \
+            -resultBundlePath "$RUNNER_TEMP/Baseline.xcresult" \
+            -destination-timeout 60 -parallel-testing-enabled NO \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            -only-testing:FilmyCameraUITests/FilmyCameraUITests/testCameraShellAndRecipeDetails \
+            -only-testing:FilmyCameraUITests/FilmyCameraUITests/testViewfinderFirstChromePreviewKeepsCameraQuiet \
+            -only-testing:FilmyCameraUITests/FilmyCameraUITests/testGalleryAndSettingsNavigation \
+            -only-testing:FilmyCameraUITests/FilmyCameraUITests/testAccessibilitySizeCameraShellKeepsRecipeControlsReachable \
+            -only-testing:FilmyCameraUITests/LaunchOnboardingTests \
+            test > "$RUNNER_TEMP/evidence/xcodebuild.log" 2>&1
+      - name: Export real attachments and results, including failures
+        if: always()
+        shell: bash
+        run: |
+          if [[ -d "$RUNNER_TEMP/Baseline.xcresult" ]]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/Baseline.xcresult" --output-path "$RUNNER_TEMP/evidence/screenshots"
+            xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/Baseline.xcresult" > "$RUNNER_TEMP/evidence/summary.json"
+            cat "$RUNNER_TEMP/evidence/summary.json"
+          fi
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        if: always()
+        with:
+          name: frame-index-baseline-${{ matrix.device }}
+          path: ${{ runner.temp }}/evidence/
+          retention-days: 7
+          if-no-files-found: error
+      - name: Remove only this job's disposable simulator
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f "$RUNNER_TEMP/evidence/device-id.txt" ]]; then
+            device="$(cat "$RUNNER_TEMP/evidence/device-id.txt")"
+            xcrun simctl shutdown "$device" || true
+            xcrun simctl delete "$device" || true
+          fi
