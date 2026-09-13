@@ -148,7 +148,14 @@ final class AdditionalInteractionTests: XCTestCase {
             if !menu.label.contains("Vivid Slide") {
                 menu.tap()
                 let tile = app.buttons["recipe-velvia-vivid"]
-                XCTAssertTrue(tile.waitForExistence(timeout: 10) && tile.isHittable)
+                XCTAssertTrue(tile.waitForExistence(timeout: 10))
+                if !tile.isHittable {
+                    let picker = app.scrollViews["recipe-picker"]
+                    XCTAssertTrue(picker.waitForExistence(timeout: 5))
+                    let deadline = Date(timeIntervalSinceNow: 10)
+                    while !tile.isHittable && Date() < deadline { picker.swipeUp() }
+                }
+                XCTAssertTrue(tile.isHittable)
                 tile.tap()
             }
             XCTAssertTrue(waitForFreshCameraFrames())

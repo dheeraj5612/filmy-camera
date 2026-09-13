@@ -281,6 +281,7 @@ struct GalleryScreen: View {
                         "Photo in your gallery, \($0.recipe.name)"
                     } ?? "Photo in your gallery"
                 )
+                .accessibilityValue("\(asset.pixelWidth)x\(asset.pixelHeight)")
                 .accessibilityHint("Opens frame details")
             }
         }

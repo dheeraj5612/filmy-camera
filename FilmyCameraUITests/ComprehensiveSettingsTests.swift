@@ -343,11 +343,16 @@ final class ComprehensiveSettingsTests: XCTestCase {
         let frame = app.buttons.matching(NSPredicate(format:
             "label BEGINSWITH 'Photo in your gallery'")).firstMatch
         XCTAssertTrue(frame.waitForExistence(timeout: 20) && frame.isHittable)
+        let dimensions = frame.value as? String
+        let parts = dimensions?.split(separator: "x").compactMap { Double($0) }
+        XCTAssertEqual(parts?.count, 2, "The saved gallery tile must expose persisted pixel dimensions")
+        if let parts, parts.count == 2 {
+            XCTAssertEqual(parts[0] / parts[1], Double(expectedRatio), accuracy: 0.03,
+                           "The saved gallery asset must preserve the selected crop")
+        }
         frame.tap()
         let photo = app.images["Photo"]
         XCTAssertTrue(photo.waitForExistence(timeout: 20))
-        XCTAssertEqual(photo.frame.width / photo.frame.height, expectedRatio, accuracy: 0.03,
-                       "The saved gallery image must preserve the selected crop")
         app.buttons["Close frame"].tap()
         XCTAssertTrue(app.buttons["roll-back-to-camera"].waitForExistence(timeout: 5))
         app.buttons["roll-back-to-camera"].tap()
