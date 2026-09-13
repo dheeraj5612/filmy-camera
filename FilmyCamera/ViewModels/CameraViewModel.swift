@@ -1028,7 +1028,8 @@ final class CameraViewModel: ObservableObject {
         }
     }
 
-    private nonisolated static func render(
+    // Internal so local capture replays exercise the exact production still path.
+    nonisolated static func render(
         sourceData: Data,
         recipe: FilmRecipe,
         viewportSize: CGSize,

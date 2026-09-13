@@ -260,9 +260,12 @@ public final class FilmRenderer {
                     float chromaScale = max(sourceLuma, 0.02);
                     float redGreenRatio = (source.r - source.g) / chromaScale;
                     float greenBlueRatio = (source.g - source.b) / chromaScale;
+                    // Fully protect naturally red crease hues while excluding
+                    // near-pure reds. The former 0.08–0.18 feather amplified
+                    // source chroma noise into red speckles in skin creases.
                     float skin = smoothstep(0.03, 0.10, redGreenRatio)
                         * smoothstep(0.015, 0.08, greenBlueRatio)
-                        * smoothstep(0.08, 0.18, huePosition)
+                        * smoothstep(0.07, 0.12, huePosition)
                         * (1.0 - smoothstep(0.65, 0.85, huePosition))
                         * smoothstep(0.08, 0.18, saturation)
                         * mix(1.0, 1.0 - smoothstep(0.68, 0.90, saturation), upperSaturationGate)

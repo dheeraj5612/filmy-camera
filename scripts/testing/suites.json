@@ -17,6 +17,8 @@
     "FilmyCameraTests/PhotoOutputEncoderTests": "integration",
     "FilmyCameraTests/RendererOutputBoundsTests": "integration",
     "FilmyCameraTests/HalationArtifactRegressionTests": "integration",
+    "FilmyCameraTests/RendererRedCreaseRegressionTests": "integration",
+    "FilmyCameraTests/RendererSkinCaptureDiagnosticsTests": "fixtures",
     "FilmyCameraTests/FlashHardwareDeviceTests": "device",
     "FilmyCameraTests/CameraLensAcceptanceTests": "lens",
     "FilmyCameraTests/RendererPerformanceTests": "performance",

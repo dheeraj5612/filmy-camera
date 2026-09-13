@@ -48,9 +48,38 @@ final class RendererSkinCaptureDiagnosticsTests: XCTestCase {
         let framed = input.cropped(to: crop).transformed(by: CGAffineTransform(
             translationX: -crop.minX, y: -crop.minY
         ))
+        let replay = try XCTUnwrap(CameraViewModel.render(
+            sourceData: sourceData,
+            recipe: metadata.recipe,
+            viewportSize: viewport,
+            previewDrawableSize: CGSize(width: metadata.previewDrawableSize.width, height: metadata.previewDrawableSize.height),
+            capturedAt: metadata.capturedAt,
+            flashFired: metadata.flashFired,
+            grainSeed: metadata.grainSeed,
+            finish: metadata.finish
+        ))
+        try replay.data.write(to: outputDirectory.appendingPathComponent("capture-replay.jpg"))
         let compact = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == "g7x-compact" })
-        for recipe in [metadata.recipe, compact] {
-            let destination = outputDirectory.appendingPathComponent(recipe.id, isDirectory: true)
+        let compactLabel = metadata.recipe.id == compact.id ? "g7x-compact-built-in" : compact.id
+        var variants = [(metadata.recipe.id, metadata.recipe), (compactLabel, compact)]
+        if environment["FILMY_SKIN_DIAGNOSTIC_VARIANTS"] == "1" {
+            var noShadow = metadata.recipe
+            noShadow.tone.shadow = 0
+            var noDetail = metadata.recipe
+            noDetail.sharpness = 0
+            noDetail.clarity = 0
+            noDetail.noiseReduction = 0
+            var noHalation = metadata.recipe
+            noHalation.halation = 0
+            variants += [("no-shadow", noShadow), ("no-detail", noDetail), ("no-halation", noHalation)]
+        }
+        let manifest = variants.reduce(into: [String: FilmRecipe]()) { result, entry in
+            result[entry.0] = entry.1
+        }
+        let manifestData = try JSONEncoder().encode(manifest)
+        try manifestData.write(to: outputDirectory.appendingPathComponent("variant-manifest.json"))
+        for (label, recipe) in variants {
+            let destination = outputDirectory.appendingPathComponent(label, isDirectory: true)
             try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
             let phase = CameraViewModel.scaledGrainPhase(
                 metadata.grainSeed,
