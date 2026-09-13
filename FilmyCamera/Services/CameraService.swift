@@ -3195,12 +3195,19 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
     private func configureOrientation() {
         let previewConnection = videoOutput.connection(with: .video)
+        let photoConnection = photoOutput.connection(with: .video)
+        let mirrored = activeDevice()?.position == .front
+        for connection in [previewConnection, photoConnection] {
+            guard let connection, connection.isVideoMirroringSupported else { continue }
+            connection.automaticallyAdjustsVideoMirroring = false
+            connection.isVideoMirrored = mirrored
+        }
         configureRotation(
             previewConnection,
             angle: previewRotationAngleState
         )
         configureRotation(
-            photoOutput.connection(with: .video),
+            photoConnection,
             angle: captureRotationAngleState
         )
         publishPreviewMirroring(previewConnection?.isVideoMirrored ?? false)
