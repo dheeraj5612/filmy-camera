@@ -1,7 +1,7 @@
 import XCTest
 
-/// Reuses the three retained Roll QA frames. No Photos writes, deletes, or
-/// outgoing shares; normal preferences are restored before the test finishes.
+/// Reuses a retained Roll QA frame, seeding the known Vivid Slide frame when
+/// the physical QA lane starts without its shared fixture.
 @MainActor
 final class AdditionalInteractionTests: XCTestCase {
     private nonisolated(unsafe) var app: XCUIApplication!
@@ -136,12 +136,32 @@ final class AdditionalInteractionTests: XCTestCase {
         XCTAssertEqual(layout.value as? String, original)
 
         // The known Vivid Slide treatment is the newest of the three retained
-        // QA frames; never use an arbitrary personal asset for this dialog.
-        let qaFrame = app.buttons.matching(NSPredicate(format:
+        // QA frames. Seed that exact treatment here when this lane is run
+        // without the shared fixture; never use an arbitrary personal asset.
+        var qaFrame = app.buttons.matching(NSPredicate(format:
             "label == 'Photo in your gallery, Vivid Slide'")).firstMatch
-        guard qaFrame.waitForExistence(timeout: 10) && qaFrame.isHittable else {
-            throw XCTSkip("Roll QA frames were not seeded in this isolated run")
+        if !qaFrame.waitForExistence(timeout: 10) || !qaFrame.isHittable {
+            app.buttons["roll-back-to-camera"].tap()
+            XCTAssertTrue(waitForFreshCameraFrames())
+            let menu = app.buttons["recipe-menu"]
+            XCTAssertTrue(menu.waitForExistence(timeout: 10))
+            if !menu.label.contains("Vivid Slide") {
+                menu.tap()
+                let tile = app.buttons["recipe-velvia-vivid"]
+                XCTAssertTrue(tile.waitForExistence(timeout: 10) && tile.isHittable)
+                tile.tap()
+            }
+            XCTAssertTrue(waitForFreshCameraFrames())
+            app.buttons["Capture photo"].tap()
+            let saved = app.staticTexts.matching(NSPredicate(format:
+                "label BEGINSWITH 'Saved with '" )).firstMatch
+            XCTAssertTrue(waitUntil(timeout: 45) { saved.exists && saved.label.contains("Vivid Slide") })
+            openRoll()
+            qaFrame = app.buttons.matching(NSPredicate(format:
+                "label == 'Photo in your gallery, Vivid Slide'")).firstMatch
         }
+        XCTAssertTrue(qaFrame.waitForExistence(timeout: 30) && qaFrame.isHittable,
+                      "The self-seeded Vivid Slide QA frame must be available")
         let cacheOnlyRoll = app.staticTexts["Local cache"].exists
         qaFrame.tap()
         let photo = app.images["Photo"]

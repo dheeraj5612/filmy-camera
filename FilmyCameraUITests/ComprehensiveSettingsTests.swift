@@ -165,7 +165,7 @@ final class ComprehensiveSettingsTests: XCTestCase {
             if delay != "Off" {
                 XCTAssertTrue(app.buttons["capture-countdown-cancel"].waitForExistence(timeout: 2))
             }
-            assertAutomaticSave(app)
+            assertAutomaticSave(app, expectedRatio: expectedRatio)
             attach("physical-crop-\(aspect.replacingOccurrences(of: ":", with: "x"))-timer-\(delay)")
             requireLive(app)
         }
@@ -327,11 +327,30 @@ final class ComprehensiveSettingsTests: XCTestCase {
         }, "The viewfinder must deliver two fresh GPU-rendered frames")
     }
 
-    private func assertAutomaticSave(_ app: XCUIApplication) {
+    private func assertAutomaticSave(_ app: XCUIApplication, expectedRatio: CGFloat? = nil) {
         let saved = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Saved with '")).firstMatch
         XCTAssertTrue(wait(timeout: 45) { saved.exists }, "Physical capture must auto-save without review")
         XCTAssertFalse(app.buttons["Keep frame"].exists)
         XCTAssertFalse(app.buttons["Retake"].exists)
+        guard let expectedRatio else { return }
+
+        // The preview assertion above proves the selected control changed the
+        // viewfinder. Open the newly saved frame as well so the test verifies
+        // the persisted crop, rather than only the pre-capture layout.
+        let openRoll = app.buttons["Open roll"]
+        XCTAssertTrue(openRoll.waitForExistence(timeout: 10))
+        openRoll.tap()
+        let frame = app.buttons.matching(NSPredicate(format:
+            "label BEGINSWITH 'Photo in your gallery'")).firstMatch
+        XCTAssertTrue(frame.waitForExistence(timeout: 20) && frame.isHittable)
+        frame.tap()
+        let photo = app.images["Photo"]
+        XCTAssertTrue(photo.waitForExistence(timeout: 20))
+        XCTAssertEqual(photo.frame.width / photo.frame.height, expectedRatio, accuracy: 0.03,
+                       "The saved gallery image must preserve the selected crop")
+        app.buttons["Close frame"].tap()
+        XCTAssertTrue(app.buttons["roll-back-to-camera"].waitForExistence(timeout: 5))
+        app.buttons["roll-back-to-camera"].tap()
     }
 
     private func wait(timeout: TimeInterval = 15, _ condition: @escaping () -> Bool) -> Bool {
