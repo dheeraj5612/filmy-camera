@@ -89,18 +89,6 @@ jobs:
             -only-testing:FilmyCameraTests/CaptureWorkflowPolicyTests \
             -only-testing:FilmyCameraTests/ExpandedCreativeCatalogTests \
             test > "$RUNNER_TEMP/render-evidence/xcodebuild.log" 2>&1
-      - name: Run mandatory 160-photo fixture lane
-        shell: bash
-        run: |
-          set -euo pipefail
-          device_id="$(cat "$RUNNER_TEMP/render-evidence/device-id.txt")"
-          fixture_dir="$RUNNER_TEMP/render-evidence/fixtures"
-          mkdir -p "$fixture_dir"
-          python3 scripts/testing/run.py fixtures \
-            --destination "platform=iOS Simulator,id=$device_id,arch=arm64" \
-            --derived-data "$RUNNER_TEMP/FilmyCatalogBuild" \
-            --output-dir "$fixture_dir" 2>&1 | tee "$fixture_dir/runner.log"
-
       - name: Export per-recipe contact sheets and require complete execution
         if: always()
         shell: bash
@@ -130,3 +118,42 @@ jobs:
             xcrun simctl shutdown "$device_id" || true
             xcrun simctl delete "$device_id" || true
           fi
+
+  photos-fixtures:
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Run mandatory 160-photo fixture lane
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture_dir="$RUNNER_TEMP/photos-fixture-evidence"
+          mkdir -p "$fixture_dir"
+          git rev-parse HEAD > "$fixture_dir/source-sha.txt"
+          xcodebuild -version > "$fixture_dir/xcode.txt"
+          device_id="$(python3 - <<'PYDEVICE'
+          import json, subprocess
+          devices = json.loads(subprocess.check_output(['xcrun', 'simctl', 'list', 'devices', 'available', '--json'], text=True))['devices']
+          matches = [d for d in devices.get('com.apple.CoreSimulator.SimRuntime.iOS-18-5', []) if d['name'] == 'iPhone 16 Pro' and d['isAvailable']]
+          if len(matches) != 1:
+              raise SystemExit('Expected one iPhone 16 Pro on the pinned iOS 18.5 runtime')
+          print(matches[0]['udid'])
+          PYDEVICE
+          )"
+          # The runner owns and cleans up a fresh copy of this reference device.
+          python3 scripts/testing/run.py fixtures \
+            --destination "platform=iOS Simulator,id=$device_id,arch=arm64" \
+            --derived-data "$RUNNER_TEMP/FilmyPhotosFixtureBuild" \
+            --output-dir "$fixture_dir" 2>&1 | tee "$fixture_dir/runner.log"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        if: always()
+        with:
+          name: filmy-photos-fixtures-${{ github.run_id }}
+          path: ${{ runner.temp }}/photos-fixture-evidence/
+          retention-days: 7
+          if-no-files-found: error

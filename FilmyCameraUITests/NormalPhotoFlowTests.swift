@@ -377,34 +377,75 @@ final class NormalPhotoFlowTests: XCTestCase {
         currentLook.tap()
         let tile = app.buttons["recipe-\(id)"]
         XCTAssertTrue(tile.waitForExistence(timeout: 10), "The seeded flow must expose \(name)")
-        // The picker is a vertically scrolling grouped list. A matching AX
-        // element can exist while its group is still below the viewport.
         let picker = app.scrollViews["recipe-picker"]
-        if picker.waitForExistence(timeout: 5), !tile.isHittable {
-            let deadline = Date(timeIntervalSinceNow: 8)
-            while !tile.isHittable && Date() < deadline {
-                picker.swipeUp()
-                _ = waitUntil(timeout: 0.5) { tile.isHittable }
-            }
-        }
-        if tile.isHittable {
-            tile.tap()
-        } else {
-            let screen = app.frame
-            let frame = tile.frame
-            app.coordinate(withNormalizedOffset: CGVector(
-                dx: (frame.midX - screen.minX) / screen.width,
-                dy: (frame.midY - screen.minY) / screen.height
-            )).tap()
-        }
+        XCTAssertTrue(picker.waitForExistence(timeout: 5), "The look drawer must expose its grouped picker")
+        let group = app.scrollViews["recipe-group-\(recipeGroupID(for: id))"]
+        XCTAssertTrue(group.waitForExistence(timeout: 5), "The look drawer must expose the \(name) recipe group")
         XCTAssertTrue(
-            waitUntil(timeout: 10) { currentLook.label.contains(name) },
-            "Selecting \(name) must update the current look"
+            revealRecipe(tile, in: group, picker: picker),
+            "The \(name) recipe tile must be visible and hittable in its recipe group"
         )
+        guard tile.isHittable else { return }
+        tile.tap()
         let close = app.buttons["recipe-drawer-close"]
         XCTAssertTrue(close.waitForExistence(timeout: 5), "The look drawer must remain dismissible")
         close.tap()
         XCTAssertTrue(waitForDisappearance(close, timeout: 5), "Selecting a look must leave the camera controls available")
+        XCTAssertTrue(
+            waitUntil(timeout: 10) { app.buttons["recipe-menu"].label.contains(name) },
+            "Selecting \(name) must update the current look"
+        )
+    }
+
+    private func recipeGroupID(for recipeID: String) -> String {
+        switch recipeID {
+        case "g7x-compact": return "compact"
+        case "acros-monochrome": return "monochrome"
+        default: return "film"
+        }
+    }
+
+    /// Reveal a recipe by following its grouped picker frames. The selected
+    /// group is centered on open, so the target can be above or below it; each
+    /// row is independently horizontal and may need a second reveal pass.
+    private func revealRecipe(
+        _ tile: XCUIElement,
+        in group: XCUIElement,
+        picker: XCUIElement,
+        timeout: TimeInterval = 12
+    ) -> Bool {
+        let deadline = Date(timeIntervalSinceNow: timeout)
+        while Date() < deadline {
+            let pickerViewport = picker.frame.intersection(app.frame).insetBy(dx: 0, dy: 6)
+            let groupFrame = group.frame
+            if !pickerViewport.contains(groupFrame) {
+                let previousFrame = groupFrame
+                if groupFrame.minY < pickerViewport.minY {
+                    picker.swipeDown()
+                } else {
+                    picker.swipeUp()
+                }
+                _ = waitUntil(timeout: 0.8) { group.frame != previousFrame }
+                continue
+            }
+
+            let rowViewport = group.frame.intersection(app.frame).insetBy(dx: 4, dy: 0)
+            let tileFrame = tile.frame
+            if rowViewport.contains(tileFrame) && tile.isHittable {
+                return true
+            }
+            let previousFrame = tileFrame
+            if tileFrame.minX < rowViewport.minX {
+                group.swipeRight()
+            } else if tileFrame.maxX > rowViewport.maxX {
+                group.swipeLeft()
+            } else {
+                _ = waitUntil(timeout: 0.8) { tile.isHittable }
+                continue
+            }
+            _ = waitUntil(timeout: 0.8) { tile.frame != previousFrame || tile.isHittable }
+        }
+        return false
     }
 
     private func importSeededFixture(newerSavedFrameCount: Int? = nil) throws {

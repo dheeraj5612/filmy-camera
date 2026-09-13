@@ -192,7 +192,7 @@ def validate_build_stamp(path, input_digest, coverage, toolchain):
 
 def run_logged(command, path, env=None):
     print(f"Running {command[0]} -> {path}", flush=True)
-    with path.open("w") as log:
+    with path.open("w", buffering=1) as log:
         process = subprocess.Popen(command, cwd=ROOT, env=env, stdout=subprocess.PIPE,
                                    stderr=subprocess.STDOUT, text=True)
         try:

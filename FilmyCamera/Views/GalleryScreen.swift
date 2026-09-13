@@ -958,12 +958,10 @@ private struct GalleryDetailView: View {
 
     private func moveFrame(_ direction: GalleryPagingDirection) {
         guard !isNavigationLocked, adjacentAsset(direction) != nil else { return }
-        // Clear the old pixels before asking the pager to move. The coordinator
-        // replaces the retained page with the latest asset after transition.
-        image = nil
-        imageLoadFailed = false
-        loadGeneration &+= 1
-        resetImageTransform()
+        // Keep the current page intact until the pager confirms a completed
+        // transition. The outer drag can end while UIPageViewController is
+        // already handling its interactive transition; clearing here would
+        // blank the page even when the coordinator rejects this move.
         switch direction {
         case .previous:
             onPreviousPhoto()
