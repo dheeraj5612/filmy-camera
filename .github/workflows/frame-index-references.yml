@@ -1,0 +1,77 @@
+name: Frame Index reference inspection
+on:
+  push:
+    branches: ['design/frame-index-20260913']
+    paths: ['.github/workflows/frame-index-references.yml']
+permissions:
+  contents: read
+jobs:
+  references:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Inspect public pages without repository credentials or cookies
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/reference-browser"
+          cd "$RUNNER_TEMP/reference-browser"
+          npm init -y >/dev/null
+          npm install --save-exact playwright@1.58.2
+          npx playwright install --with-deps chromium
+          cat > inspect.cjs <<'JS'
+          const { chromium } = require('playwright');
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const targets = [
+            ['halide', 'https://halide.cam/'],
+            ['kino', 'https://www.shotwithkino.com/'],
+            ['leica-lux', 'https://leica-camera.com/en-US/photography/leica-apps/leica-lux'],
+            ['vsco-capture', 'https://www.vsco.co/capture'],
+            ['darkroom', 'https://darkroom.co/'],
+            ['obscura', 'https://obscura.app/obscura/index.html'],
+            ['linear', 'https://linear.app/'],
+            ['raycast', 'https://www.raycast.com/'],
+            ['stripe', 'https://stripe.com/'],
+            ['suno', 'https://suno.com/'],
+            ['readymag', 'https://readymag.com/'],
+            ['user-costing', 'https://f60cdf7b.3d-print-job-costing.pages.dev/'],
+            ['scarcity-trade', 'https://scarcitytrade.com/'],
+            ['command-gate', 'https://www.commandgate.ai/']
+          ];
+          (async () => {
+            const dir = path.join(process.env.RUNNER_TEMP, 'reference-evidence');
+            fs.mkdirSync(dir, {recursive:true});
+            const browser = await chromium.launch({headless:true});
+            const results = [];
+            for (const [name,url] of targets) {
+              const context = await browser.newContext({viewport:{width:1440,height:1100},deviceScaleFactor:1,reducedMotion:'reduce'});
+              const page = await context.newPage();
+              const result = {name, requestedURL:url, inspectedAt:new Date().toISOString()};
+              try {
+                const response = await page.goto(url,{waitUntil:'domcontentloaded',timeout:30000});
+                result.status = response?.status();
+                await page.waitForLoadState('networkidle',{timeout:8000}).catch(()=>{});
+                result.finalURL = page.url();
+                result.title = await page.title();
+                fs.writeFileSync(path.join(dir,name+'.txt'), await page.locator('body').innerText({timeout:8000}));
+                await page.screenshot({path:path.join(dir,name+'-top.png'),timeout:15000});
+                await page.evaluate(()=>window.scrollTo(0,800));
+                await page.screenshot({path:path.join(dir,name+'-detail.png'),timeout:15000});
+              } catch (error) { result.error = String(error); }
+              results.push(result);
+              await context.close();
+            }
+            await browser.close();
+            fs.writeFileSync(path.join(dir,'provenance.json'),JSON.stringify(results,null,2));
+            console.log(JSON.stringify(results,null,2));
+          })().catch(error=>{console.error(error);process.exitCode=1});
+          JS
+          node inspect.cjs
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        if: always()
+        with:
+          name: frame-index-public-reference-inspection
+          path: ${{ runner.temp }}/reference-evidence/
+          retention-days: 7
+          if-no-files-found: error
