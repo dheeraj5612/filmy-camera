@@ -29,6 +29,8 @@ struct CaptureReviewView: View {
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var isShowingOriginal = false
+    @State private var comparisonFraction: CGFloat = 0.5
+    @State private var isConfirmingDiscard = false
     @State private var isShowingLookLibrary = false
 
     var body: some View {
@@ -136,10 +138,16 @@ struct CaptureReviewView: View {
             .presentationBackground(FilmyTheme.background)
             .presentationCornerRadius(28)
         }
+        .confirmationDialog("Discard this edit?", isPresented: $isConfirmingDiscard, titleVisibility: .visible) {
+            Button("Discard edit", role: .destructive, action: onRetake)
+        } message: {
+            Text("The edited copy has not been saved. Your original photo stays unchanged.")
+        }
         .onAppear {
             isShowingOriginal = false
         }
         .onChange(of: recipe.id) { _, _ in
+            comparisonFraction = 0.5
             isShowingOriginal = false
         }
         .onChange(of: pendingReviewRecipeID) { _, _ in
@@ -231,7 +239,7 @@ struct CaptureReviewView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Eyebrow(text: isImported ? "IMPORTED PHOTO" : "REVIEW", color: FilmyTheme.accent)
                 Text(recipe.name)
-                    .font(.system(.title2, design: .serif).weight(.medium))
+                    .font(.system(.title2, design: .default).weight(.medium))
                     .foregroundStyle(FilmyTheme.primary)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -255,67 +263,54 @@ struct CaptureReviewView: View {
         }
     }
 
+    private var supportsSplitComparison: Bool {
+        guard finish == .photo, let reviewOriginalImage else { return false }
+        return PhotoComparisonView.hasMatchingAspect(image.size, reviewOriginalImage.size)
+    }
+
     private func framePreview(maxWidth: CGFloat, maxHeight: CGFloat) -> some View {
         let fitted = Self.fittedSize(
             for: displayImage.size,
             within: CGSize(width: maxWidth, height: maxHeight)
         )
-
-        let image = Image(uiImage: displayImage)
-            .resizable()
-            .scaledToFit()
-            .frame(width: fitted.width, height: fitted.height)
-
-        // An Instant Print finish is a real white border in the rendered
-        // pixels. Keep its outside edge square so the presentation cannot
-        // crop or round the printed frame. Normal photos retain the softer
-        // review treatment.
-        let finishedImage: AnyView
-        if !isShowingOriginal && finish == .instantPrint {
-            finishedImage = AnyView(
-                image
+        return Group {
+            if isShowingOriginal, supportsSplitComparison, let reviewOriginalImage {
+                PhotoComparisonView(original: reviewOriginalImage, look: image, fraction: $comparisonFraction)
+                    .frame(width: fitted.width, height: fitted.height)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("review-image")
+                    .accessibilityLabel("Original and look, \(recipe.name), side by side")
+            } else {
+                Image(uiImage: displayImage)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: fitted.width, height: fitted.height)
+                    // Preserve the real, square Instant Print border. No
+                    // presentation crop or rounded mask changes its edges.
                     .overlay(Rectangle().strokeBorder(FilmyTheme.lineStrong, lineWidth: 1))
-            )
-        } else {
-            finishedImage = AnyView(
-                image
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(FilmyTheme.lineStrong, lineWidth: 1)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityIdentifier("review-image")
+                    .accessibilityLabel(isShowingOriginal
+                        ? "Original source photo, without the Filmy look"
+                        : "\(isImported ? "Imported photo" : "Captured frame") with \(recipe.name), \(finishTitle(finish)), \(resolutionCaption)")
+                    .overlay(alignment: .topLeading) {
+                        if isShowingOriginal {
+                            Text("Original")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .padding(8)
+                                .background(.black.opacity(0.82), in: RoundedRectangle(cornerRadius: 4))
+                                .padding(10)
+                                .accessibilityHidden(true)
+                        }
                     }
-            )
-        }
-
-        return finishedImage
-            .accessibilityElement(children: .ignore)
-            .accessibilityIdentifier("review-image")
-            .accessibilityLabel(
-                isShowingOriginal
-                    ? "Original source photo, without the Filmy look"
-                    : isImported
-                        ? "Imported photo with \(recipe.name), \(finishTitle(finish)), \(resolutionCaption)"
-                        : "Captured frame with \(recipe.name), \(finishTitle(finish)), \(resolutionCaption)"
-            )
-            .overlay(alignment: .topLeading) {
-                if isShowingOriginal {
-                    Text("ORIGINAL")
-                        .font(.system(.caption2, design: .rounded).weight(.bold))
-                        .tracking(0.8)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 6)
-                        .background(Color.black.opacity(0.72), in: Capsule())
-                        .padding(12)
-                        .accessibilityHidden(true)
-                }
             }
-            .shadow(color: .black.opacity(0.4), radius: 22, y: 10)
-            .frame(maxWidth: .infinity)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private var displayImage: UIImage {
-        if isShowingOriginal, let reviewOriginalImage {
+        if isShowingOriginal, !supportsSplitComparison, let reviewOriginalImage {
             return reviewOriginalImage
         }
         return image
@@ -407,14 +402,6 @@ struct CaptureReviewView: View {
                     .accessibilityIdentifier("review-render-error")
             }
 
-            if !compact {
-                Text(isShowingOriginal
-                     ? "Original preview · Save keeps \(recipe.name) · \(finishTitle(finish))"
-                     : "Save \(recipe.name) to Photos")
-                    .font(.system(.caption2, design: .rounded).weight(.medium))
-                    .foregroundStyle(FilmyTheme.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
         }
     }
 
@@ -548,6 +535,7 @@ struct CaptureReviewView: View {
     private var compareButton: some View {
         Button {
             if reviewOriginalImage != nil {
+                comparisonFraction = 0.5
                 isShowingOriginal.toggle()
             } else if !isPreparingReviewOriginal {
                 Task {
@@ -560,7 +548,7 @@ struct CaptureReviewView: View {
                     ProgressView()
                         .tint(FilmyTheme.primary)
                 } else {
-                    Image(systemName: isShowingOriginal ? "photo" : "photo.on.rectangle")
+                    Image(systemName: isShowingOriginal ? "photo" : "circle.lefthalf.filled")
                 }
                 Text(isShowingOriginal ? "Show look" : "Compare")
                     .lineLimit(1)
@@ -581,11 +569,13 @@ struct CaptureReviewView: View {
         .disabled(isSaving || isRenderingReview || isPreparingReviewOriginal)
         .accessibilityIdentifier("review-compare-original")
         .accessibilityLabel("Compare with original")
-        .accessibilityValue(isShowingOriginal ? "Original" : "Look")
+        .accessibilityValue(isShowingOriginal ? (supportsSplitComparison ? "Original and look" : "Original") : "Look")
         .accessibilityHint(
             reviewOriginalImage == nil
                 ? "Loads the original source photo for comparison"
-                : "Switches between the original source photo and the applied look"
+                : supportsSplitComparison
+                    ? "Shows a draggable original and look comparison. Tap again to return to the look."
+                    : "Shows the whole original without the print border. Tap again to return to the finished look."
         )
     }
 
@@ -681,8 +671,8 @@ struct CaptureReviewView: View {
 
     private var retakeButton: some View {
         Button {
-            HapticFeedback.play(.discard)
-            onRetake()
+            HapticFeedback.play(.selection)
+            isConfirmingDiscard = true
         } label: {
             Label(
                 isImported ? "Cancel" : "Retake",
@@ -691,6 +681,8 @@ struct CaptureReviewView: View {
         }
         .buttonStyle(.filmySecondary)
         .disabled(isSaving)
+        .accessibilityIdentifier("review-cancel")
+        .accessibilityHint("Confirms before discarding this unsaved edit")
     }
 
     private var keepFrameAccessibilityLabel: String {
@@ -715,6 +707,7 @@ struct CaptureReviewView: View {
         }
         .buttonStyle(.filmyPrimary)
         .disabled(isSaving || isRenderingReview || isPreparingReviewOriginal)
+        .accessibilityIdentifier("review-save")
         .accessibilityLabel(keepFrameAccessibilityLabel)
         .accessibilityHint("Saves the finished photo to your Photos library")
     }

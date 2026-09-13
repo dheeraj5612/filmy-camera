@@ -10,22 +10,24 @@ Filmy Camera is a native iPhone and iPad camera built around the feeling of choo
 - A dedicated G7 X Compact profile and curated editable film recipes based on public Fujifilm-style controls: film base, tone curve, color, white-balance shift, dynamic range, Color Chrome, FX Blue, sharpness, noise reduction, clarity, grain, grain size, halation, and vignette.
 - 128 editable looks, including original negative, slide, cinema, instant, digital, experimental, and monochrome collections, with search and favorites.
 - A cancelable 3-, 5-, or 10-second capture timer; 4:3, square, 3:2, and 16:9 framing; composition guides; and optional horizon, histogram, clipping zebras, and focus peaking. Preview aids never enter saved photos.
-- Full-resolution capture review with retake or explicit Save to Photos, so a frame is never committed silently. Reviews can keep the full photo edge to edge or add the optional white Instant Print border with its generous bottom margin.
-- Try another look on the same capture or import and compare with Original before saving. Review previews are bounded to 1800 pixels, and changed looks export at full resolution on Save without changing the next shot's recipe.
+- Camera captures save automatically to Photos. A failed save retains the captured frame for Retry; explicit confirmation is required before discarding it. Imported photos open review and save only when you choose Save to Photos, always as a new copy.
+- Compare the live camera with Original without changing the capture recipe. Imported-photo review supports a draggable, aligned original/look comparison; Instant Print uses a whole-original comparison to avoid misleading border alignment. Review previews remain bounded to 1800 pixels, while changed looks export at full resolution on Save without changing the next shot's recipe.
 - System photo picker import that preserves the original framing and applies the selected recipe at full resolution up to the 40 MP processing budget; larger images are resized and labeled in review.
-- First-run recipe-first onboarding with a direct handoff into the camera.
+- A single optional first-use look chooser with renderer-backed sample comparison, accurate automatic-save guidance and contextual privacy explanations.
 - Recipe swatches apply each look to the same bundled café image, making comparisons consistent while the live viewfinder continues independently.
-- Camera-first SwiftUI UI in the shape of an iPhone camera: a letterboxed 4:3 viewfinder on a black body, flash and camera switch in the top bar, Apple-style zoom presets over the frame, a film-strip recipe rail with renderer-backed swatches, a Roll thumbnail and Tune beside the shutter, Liquid Glass chrome on iOS 26 (material fallback earlier), persistent tuning, a recipe detail sheet, capture review, and a three-column contact-sheet Roll with zoom gestures.
+- Frame Index SwiftUI identity: neutral graphite, a custom cut-F/wordmark and restrained acid, ember and cyan control accents. Tune and Original are direct actions; Flip and Roll flank the shutter, with zoom and camera tools at the lower image edge. The full look library is an unboxed photographic index; the quick grouped drawer and native contact-sheet Roll remain.
 - Optional semantic haptics for shutter, recipe and camera selections, focus, editor commits, discards, saves, and failures.
-- Flash sits beside zoom in the on-screen controls and in Settings, and the last explicit choice is remembered; the G7 X profile renders flash frames with subject/ambient separation.
+- Flash remains directly available in the top camera bar and in Settings, and the last explicit choice is remembered; the G7 X profile renders flash frames with subject/ambient separation.
 - Failed starts and runtime errors reconnect with backoff, and interruptions explain the cause (background, another app, multitasking, heat). The session supports iPad Split View and stays warm during review and quick tab switches to reduce restart work when returning to the viewfinder.
 - The film pipeline compiles off the main thread while the session configures, and photo cache maintenance runs after the first frame.
 - iPhone and iPad hardware controls for front/back switching and available-lens selection, with simulator-safe preview behavior.
 - Expandable Pro controls for coupled manual ISO and shutter, sensor white balance by Kelvin and tint, and manual focus on supported hardware. The panel reports applied device values, disables still flash during manual exposure, offers one Reset Auto action, and can switch from a virtual camera to an eligible physical lens when advanced controls require it.
 - The live preview renders into a bounded drawable (about 1.3 MP) with a 30 fps target while stills and exports retain their full processing resolution. Sustained frame pacing and thermals require separate device measurement; isolated renderer timing does not establish camera frame rate.
 - sRGB output normalization plus embedded recipe provenance metadata on saved JPEGs.
-- Simulator-safe empty state: the full interface runs without camera hardware and clearly asks for a physical iPhone or iPad for capture.
+- Simulator-safe sample preview: try the look and Original comparison on the bundled café image, with an explicit non-live badge and disabled capture. Camera permission and interruption states offer actionable Settings or Resume controls.
 - iPad support: readable-width pages, an adaptive Roll contact sheet, and the same viewfinder chrome verified on an iPad Pro and on iPhone-size layouts.
+
+See [DESIGN.md](DESIGN.md) for the design rationale, references, accessibility decisions, original identity assets and exact validation record.
 
 ## Build
 

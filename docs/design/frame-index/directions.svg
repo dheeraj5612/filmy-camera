@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="970" viewBox="0 0 1440 970">
+<title>Filmy — three original visual directions</title>
+<desc>Layout studies, not simulator screenshots. Contact Press, Frame Index, and Night Meter compare different image and control hierarchies.</desc>
+<rect width="1440" height="970" fill="#202020"/>
+<g font-family="Arial, sans-serif" fill="#F5F5F5">
+<text x="52" y="55" font-size="26" font-weight="700">FILMY / THREE DIRECTIONS</text>
+<text x="52" y="82" font-size="14" fill="#B5B5B5">Original layout studies · not app screenshots · 13 September 2026</text>
+<text x="52" y="137" font-size="23" font-weight="700">01  CONTACT PRESS</text>
+<text x="520" y="137" font-size="23" font-weight="700">02  FRAME INDEX</text>
+<text x="986" y="137" font-size="23" font-weight="700">03  NIGHT METER</text>
+</g>
+<!-- Contact Press: paper, asymmetry, editorial margins -->
+<g transform="translate(52 166)">
+<rect width="390" height="670" rx="22" fill="#F1EEE5"/>
+<text x="28" y="54" font-family="Georgia, serif" font-size="38" font-style="italic" fill="#173C32">filmy.</text>
+<text x="300" y="48" font-family="monospace" font-size="12" fill="#B64722">01 / 24</text>
+<rect x="28" y="88" width="334" height="377" fill="#A5B3A6"/>
+<path d="M28 350L162 184L230 312L297 230L362 410V465H28Z" fill="#5C7468"/>
+<circle cx="294" cy="165" r="35" fill="#E7D9B7"/>
+<text x="28" y="493" font-family="Georgia, serif" font-size="25" fill="#173C32">The daylight edit.</text>
+<line x1="28" y1="509" x2="362" y2="509" stroke="#B8B9AD"/>
+<text x="28" y="535" font-family="monospace" font-size="11" fill="#B64722">MUTED / 400</text>
+<rect x="28" y="557" width="64" height="76" fill="#A8B1A1"/>
+<rect x="100" y="557" width="64" height="76" fill="#C0A795"/>
+<rect x="172" y="557" width="64" height="76" fill="#778775"/>
+<circle cx="317" cy="595" r="32" fill="none" stroke="#B64722" stroke-width="2"/>
+<circle cx="317" cy="595" r="25" fill="#B64722"/>
+</g>
+<!-- Frame Index: one image plane and a thumb belt -->
+<g transform="translate(520 166)">
+<rect width="390" height="670" rx="22" fill="#0E0E0E"/>
+<path d="M22 22H47V29H30V34H43V41H30V48L22 52Z" fill="#D9F852"/>
+<text x="59" y="45" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#F5F5F5">filmy</text>
+<g stroke="#F5F5F5" stroke-width="2" fill="none"><path d="M289 25V47M279 36H300"/><circle cx="344" cy="36" r="9"/></g>
+<rect x="12" y="72" width="366" height="430" rx="4" fill="#A5B3A6"/>
+<path d="M12 370L160 182L239 331L307 230L378 440V502H12Z" fill="#5C7468"/>
+<circle cx="310" cy="160" r="38" fill="#E7D9B7"/>
+<rect x="26" y="458" width="42" height="32" rx="5" fill="#111111"/>
+<path d="M38 465V483M47 465V483M57 465V483" stroke="#F5F5F5" stroke-width="2"/>
+<rect x="155" y="458" width="80" height="32" rx="16" fill="#111111"/>
+<text x="181" y="479" font-family="Arial" font-size="13" fill="#D9F852">1×</text>
+<rect x="20" y="519" width="5" height="36" fill="#D9F852"/>
+<text x="36" y="532" font-family="monospace" font-size="9" fill="#D9F852">LOOK</text>
+<text x="36" y="552" font-family="Arial" font-size="20" font-weight="700" fill="#F5F5F5">Muted Color</text>
+<g font-family="Arial" font-size="11" fill="#F5F5F5"><text x="271" y="549">Tune</text><text x="320" y="549">Original</text></g>
+<rect x="30" y="589" width="40" height="40" rx="5" fill="#5C7468"/>
+<circle cx="195" cy="609" r="32" fill="none" stroke="#D9F852" stroke-width="3"/>
+<circle cx="195" cy="609" r="25" fill="#F5F5F5"/>
+<text x="321" y="615" font-family="Arial" font-size="14" fill="#F5F5F5">Flip</text>
+</g>
+<!-- Night Meter: arc-led direct manipulation, deliberately rejected -->
+<g transform="translate(986 166)">
+<rect width="390" height="670" rx="22" fill="#050505"/>
+<text x="23" y="45" font-family="monospace" font-size="24" font-weight="700" fill="#FFD176">FILMY_</text>
+<text x="257" y="42" font-family="monospace" font-size="12" fill="#FFD176">ISO 400</text>
+<rect x="12" y="75" width="366" height="356" fill="#A5B3A6"/>
+<path d="M12 340L144 165L227 302L300 214L378 390V431H12Z" fill="#5C7468"/>
+<circle cx="311" cy="141" r="32" fill="#E7D9B7"/>
+<text x="23" y="462" font-family="monospace" font-size="16" fill="#FFD176">1/125    f/1.8    +0.3</text>
+<path d="M26 646A215 215 0 0 1 373 484" stroke="#FFD176" stroke-width="2" fill="none"/>
+<g stroke="#FFD176" stroke-width="2"><path d="M44 555L58 565M78 514L90 528M124 487L130 504M175 473L177 491M228 470V489M278 475L273 495M327 487L318 505M368 510L355 524"/></g>
+<circle cx="183" cy="610" r="32" fill="none" stroke="#FFD176" stroke-width="2"/>
+<circle cx="183" cy="610" r="24" fill="#FFD176"/>
+<text x="286" y="579" font-family="monospace" font-size="32" fill="#FFD176">+1/3</text>
+<text x="286" y="600" font-family="monospace" font-size="11" fill="#C4A667">EXPOSURE</text>
+</g>
+<g font-family="Arial, sans-serif" font-size="15" fill="#B5B5B5">
+<text x="52" y="875">Paper-led / warm / editorial</text><text x="52" y="901">Rejected: too much margin; warm surround.</text>
+<text x="520" y="875" fill="#D9F852">SELECTED / image-led / precise / direct</text><text x="520" y="901">Identity at the edges. Capture stays immediate.</text>
+<text x="986" y="875">Instrument-led / amber / mechanical</text><text x="986" y="901">Rejected: too much dial; gesture dependence.</text>
+</g>
+</svg>

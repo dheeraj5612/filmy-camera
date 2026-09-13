@@ -87,10 +87,10 @@ enum HapticFeedback {
 /// Color is never the only indication of selection or an actionable state.
 enum FilmyTheme {
     // Surfaces
-    static let background = Color(red: 0.055, green: 0.058, blue: 0.052)
-    static let backgroundRaised = Color(red: 0.082, green: 0.086, blue: 0.076)
-    static let panel = Color(red: 0.115, green: 0.122, blue: 0.108)
-    static let panelRaised = Color(red: 0.165, green: 0.175, blue: 0.157)
+    static let background = Color(white: 0.055)
+    static let backgroundRaised = Color(white: 0.105)
+    static let panel = Color(white: 0.145)
+    static let panelRaised = Color(white: 0.205)
     static let line = Color.white.opacity(0.09)
     static let lineStrong = Color.white.opacity(0.18)
 
@@ -101,9 +101,9 @@ enum FilmyTheme {
     static let tertiary = Color(white: 0.96).opacity(0.56)
 
     // Signal colors
-    static let accent = Color(red: 0.69, green: 0.85, blue: 0.88)
-    static let accentWarm = Color(red: 0.95, green: 0.49, blue: 0.36)
-    static let filmAccent = Color(red: 0.74, green: 0.83, blue: 0.73)
+    static let accent = Color(red: 0.851, green: 0.973, blue: 0.322)
+    static let accentWarm = Color(red: 1.0, green: 0.463, blue: 0.369)
+    static let filmAccent = accent
     static let mint = Color(red: 0.47, green: 0.86, blue: 0.66)
     static let danger = Color(red: 1.0, green: 0.44, blue: 0.40)
 
@@ -113,10 +113,10 @@ enum FilmyTheme {
     /// The letterbox bands around the viewfinder. Pure black, like a camera
     /// body, so the frame reads as the only picture on screen.
     static let viewfinderBand = Color.black
-    static let viewfinderCornerRadius: CGFloat = 10
+    static let viewfinderCornerRadius: CGFloat = 4
 
     static let cornerRadius: CGFloat = 20
-    static let controlRadius: CGFloat = 14
+    static let controlRadius: CGFloat = 10
     static let actionPlateRadius: CGFloat = 20
     static let minimumHitTarget: CGFloat = 44
     /// Tool-strip controls sit behind a presented sheet at times, where iOS
@@ -125,33 +125,15 @@ enum FilmyTheme {
     static let toolControlHeight: CGFloat = 48
     static let pageMargin: CGFloat = 20
 
-    static let titleFont = Font.system(.title2, design: .serif).weight(.medium)
+    static let titleFont = Font.system(.title2).weight(.bold)
     static let bodyFont = Font.system(.body, design: .default)
     static let metadataFont = Font.system(.caption, design: .default).weight(.medium)
 
-    static let pageGradient = LinearGradient(
-        colors: [backgroundRaised, background, background],
-        startPoint: .top,
-        endPoint: .bottom
-    )
+    static let utility = Color(red: 0.412, green: 0.812, blue: 1.0)
+    static let pageGradient = LinearGradient(colors: [background, background], startPoint: .top, endPoint: .bottom)
+    static let panelGradient = LinearGradient(colors: [panel, panel], startPoint: .top, endPoint: .bottom)
+    static let navGradient = LinearGradient(colors: [backgroundRaised, backgroundRaised], startPoint: .top, endPoint: .bottom)
 
-    static let plateGradient = LinearGradient(
-        colors: [panelRaised, panel],
-        startPoint: .top,
-        endPoint: .bottom
-    )
-
-    static let chromeGradient = LinearGradient(
-        colors: [Color.white.opacity(0.06), Color.white.opacity(0.02)],
-        startPoint: .top,
-        endPoint: .bottom
-    )
-
-    static let navBarGradient = LinearGradient(
-        colors: [panelRaised.opacity(0.98), panel.opacity(0.98)],
-        startPoint: .top,
-        endPoint: .bottom
-    )
 }
 
 // MARK: - Backgrounds and chrome
@@ -203,7 +185,7 @@ struct CameraReturnBar: View {
             BackToCameraButton(accessibilityIdentifier: accessibilityIdentifier, action: action)
             Spacer(minLength: 12)
             Text("filmy")
-                .font(.system(.title3, design: .serif).italic())
+                .font(.system(.title3, design: .default).italic())
                 .foregroundStyle(FilmyTheme.secondary)
                 .accessibilityHidden(true)
         }
@@ -294,7 +276,7 @@ struct PressableButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? scale : 1)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? scale : 1)
             .opacity(configuration.isPressed ? 0.86 : 1)
             .animation(
                 reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.72),
@@ -315,7 +297,7 @@ struct FilmyPrimaryButtonStyle: ButtonStyle {
             .padding(.horizontal, 16)
             .background(FilmyTheme.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .opacity(isEnabled ? 1 : 0.5)
-            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
             .animation(
                 reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.72),
                 value: configuration.isPressed
@@ -339,7 +321,7 @@ struct FilmySecondaryButtonStyle: ButtonStyle {
                     .strokeBorder(FilmyTheme.lineStrong, lineWidth: 1)
             }
             .opacity(isEnabled ? 1 : 0.5)
-            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
             .animation(
                 reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.72),
                 value: configuration.isPressed
@@ -423,7 +405,7 @@ struct SectionHeading: View {
                 Eyebrow(text: eyebrow, color: FilmyTheme.accent)
 
                 Text(title)
-                    .font(.system(.largeTitle, design: .serif).weight(.medium))
+                    .font(.system(.largeTitle, design: .default).weight(.medium))
                     .foregroundStyle(FilmyTheme.primary)
             }
 
@@ -834,6 +816,7 @@ struct RecipeSwatch: View {
     var isSelected = false
     var compact = false
     var showsLabel = true
+    var showsOriginal = false
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var thumbnailImage: UIImage?
@@ -851,11 +834,8 @@ struct RecipeSwatch: View {
                     .resizable()
                     .scaledToFill()
             } else {
-                LinearGradient(
-                    colors: recipe.previewColors,
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
+                FilmyTheme.backgroundRaised
+                ProgressView().tint(FilmyTheme.secondary)
             }
         }
         .overlay {
@@ -899,7 +879,7 @@ struct RecipeSwatch: View {
                     lineWidth: isSelected ? 2 : 1
                 )
         }
-        .task(id: recipe, priority: .utility) {
+        .task(id: RecipeSwatchRequest(recipe: recipe, showsOriginal: showsOriginal), priority: .utility) {
             // Clear a prior recipe's image immediately, so a slider change
             // never presents stale settings while the replacement is rendered.
             thumbnailImage = nil
@@ -909,7 +889,7 @@ struct RecipeSwatch: View {
             // predecessor whenever the recipe changes again.
             try? await Task.sleep(for: .milliseconds(150))
             guard !Task.isCancelled else { return }
-            let renderedImage = await RecipeSwatchRenderer.shared.render(recipe: recipe)
+            let renderedImage = await RecipeSwatchRenderer.shared.render(recipe: recipe, showsOriginal: showsOriginal)
             guard !Task.isCancelled else { return }
             thumbnailImage = renderedImage
         }
@@ -919,15 +899,25 @@ struct RecipeSwatch: View {
 /// One swatch at a time can submit GPU work. Actor calls retain their SwiftUI
 /// task's cancellation, so closed drawers and obsolete slider revisions
 /// are discarded before they render, instead of launching N detached jobs.
+private struct RecipeSwatchRequest: Equatable {
+    let recipe: FilmRecipe
+    let showsOriginal: Bool
+}
+
 actor RecipeSwatchRenderer {
     static let shared = RecipeSwatchRenderer()
 
     private final class SampleKey: NSObject {
         let recipe: FilmRecipe
-        init(_ recipe: FilmRecipe) { self.recipe = recipe }
-        override var hash: Int { recipe.hashValue }
+        let showsOriginal: Bool
+        init(_ recipe: FilmRecipe, showsOriginal: Bool) {
+            self.recipe = recipe
+            self.showsOriginal = showsOriginal
+        }
+        override var hash: Int { recipe.hashValue ^ showsOriginal.hashValue }
         override func isEqual(_ object: Any?) -> Bool {
-            (object as? SampleKey)?.recipe == recipe
+            guard let other = object as? SampleKey else { return false }
+            return other.recipe == recipe && other.showsOriginal == showsOriginal
         }
     }
 
@@ -949,14 +939,24 @@ actor RecipeSwatchRenderer {
         return CIImage(cgImage: small)
     }()
 
-    func render(recipe: FilmRecipe) -> UIImage? {
+    func render(recipe: FilmRecipe, showsOriginal: Bool = false) -> UIImage? {
         guard !Task.isCancelled else { return nil }
         return autoreleasepool {
-            let key = SampleKey(recipe)
+            let key = SampleKey(recipe, showsOriginal: showsOriginal)
             if let cached = sampleCache.object(forKey: key) { return cached }
-            guard let sampleScene else { return FilmRenderer.thumbnail(for: recipe) }
-            guard let image = FilmRenderer.previewThumbnail(for: recipe, over: sampleScene),
-                  !Task.isCancelled else { return nil }
+            guard let sampleScene else {
+                // A synthetic fallback is not the original of the displayed
+                // cafe scene. Do not silently substitute it in comparison.
+                return showsOriginal ? nil : FilmRenderer.thumbnail(for: recipe)
+            }
+            let rendered: UIImage?
+            if showsOriginal {
+                rendered = FilmRenderer.outputCGImage(sampleScene, from: sampleScene.extent)
+                    .map { UIImage(cgImage: $0) }
+            } else {
+                rendered = FilmRenderer.previewThumbnail(for: recipe, over: sampleScene)
+            }
+            guard let image = rendered, !Task.isCancelled else { return nil }
             let cost = (image.cgImage?.bytesPerRow ?? 0) * (image.cgImage?.height ?? 0)
             sampleCache.setObject(image, forKey: key, cost: cost)
             return image
@@ -1015,7 +1015,7 @@ struct CaptureButton: View {
         } label: {
             ZStack {
                 Circle()
-                    .strokeBorder(Color.white.opacity(0.95), lineWidth: 4)
+                    .strokeBorder(FilmyTheme.accent, lineWidth: 3)
                     .frame(width: 74, height: 74)
 
                 Circle()
@@ -1033,6 +1033,7 @@ struct CaptureButton: View {
         .buttonStyle(ShutterButtonStyle())
         .opacity(isEnabled ? 1 : 0.4)
         .disabled(isCapturing || !isEnabled)
+        .accessibilityIdentifier("camera-shutter")
         .accessibilityLabel(
             isCapturing
                 ? "Processing photo"
@@ -1051,7 +1052,7 @@ private struct ShutterButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.88 : 1)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.94 : 1)
             .animation(
                 reduceMotion ? nil : .spring(response: 0.2, dampingFraction: 0.65),
                 value: configuration.isPressed
@@ -1259,66 +1260,63 @@ struct PreviewPlaceholder: View {
     var message: String? = nil
     var actionTitle: String?
     var action: (() -> Void)?
+    var showsOriginal = false
+
+    private var isStarting: Bool { message == "Starting the camera…" }
 
     var body: some View {
         GeometryReader { proxy in
             ZStack {
-                LinearGradient(
-                    colors: recipe.previewColors,
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-
-                // Keep the simulator and unavailable-camera states visually useful
-                // without presenting a synthetic image as live camera output. This
-                // is the same clearly non-live demo used by the recipe rail, so a
-                // user can still see how the selected look is meant to feel before
-                // moving to a physical iPhone.
+                Color.black
                 if isSimulator {
-                    RecipeSwatch(recipe: recipe, compact: false, showsLabel: false)
+                    RecipeSwatch(recipe: recipe, showsLabel: false, showsOriginal: showsOriginal)
                         .frame(width: proxy.size.width, height: proxy.size.height)
                         .accessibilityHidden(true)
-                }
-
-                Color.black.opacity(isSimulator ? 0.42 : 0.56)
-
-                VStack(spacing: 14) {
-                    Image(systemName: isSimulator ? "iphone.gen3" : "camera.fill")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 54, height: 54)
-                        .background(.white.opacity(0.12), in: Circle())
-
-                    VStack(spacing: 6) {
-                        Text(isSimulator ? "Preview mode" : "Camera unavailable")
-                            .font(.system(.title3, design: .default).weight(.bold))
+                        // A simulator is useful for trying looks, never proof
+                        // of a working camera. Do not dim or tint the sample.
+                        .overlay(alignment: .topLeading) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Preview mode").font(.caption.weight(.semibold))
+                                Text("Sample photo · capture needs a device").font(.caption2)
+                            }
                             .foregroundStyle(.white)
-                            .multilineTextAlignment(.center)
-                        Text(message ?? (isSimulator ? "Shoot this look on an iPhone or iPad." : "Check camera access in Settings, then try again."))
-                            .font(.system(.subheadline, design: .default).weight(.medium))
-                            .foregroundStyle(.white.opacity(0.74))
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(10)
+                            .background(.black.opacity(0.82), in: RoundedRectangle(cornerRadius: 6))
+                            .padding(12)
+                            .accessibilityIdentifier("camera-preview-mode")
+                        }
+                } else {
+                    VStack(spacing: 14) {
+                        if isStarting {
+                            ProgressView().tint(FilmyTheme.primary)
+                        } else {
+                            Image(systemName: actionTitle == "Open Settings" ? "camera.badge.ellipsis" : "camera")
+                                .font(.system(size: 26, weight: .light))
+                                .foregroundStyle(FilmyTheme.secondary)
+                                .accessibilityHidden(true)
+                        }
+                        Text(isStarting ? "Opening camera" : (actionTitle == "Open Settings" ? "Camera access is off" : "Camera unavailable"))
+                            .font(.headline)
+                            .foregroundStyle(FilmyTheme.primary)
+                        if !isStarting {
+                            Text(message ?? "Allow camera access in Settings to shoot. You can still import a photo.")
+                                .font(.subheadline)
+                                .foregroundStyle(FilmyTheme.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        if let actionTitle, let action {
+                            Button(actionTitle, action: action)
+                                .buttonStyle(.filmyPrimary)
+                                .accessibilityIdentifier(actionTitle == "Open Settings" ? "camera-permission-action" : "camera-recovery-action")
+                                .accessibilityHint(actionTitle == "Open Settings" ? "Opens Filmy Camera permissions" : "Attempts to resume the camera")
+                        }
                     }
-
-                    if let actionTitle, let action {
-                        Button(actionTitle, action: action)
-                            .buttonStyle(.filmyPrimary)
-                            .accessibilityIdentifier(actionTitle == "Open Settings" ? "camera-permission-action" : "camera-recovery-action")
-                            .accessibilityHint(actionTitle == "Open Settings" ? "Opens Filmy Camera permissions" : "Attempts to resume the camera")
-                    }
+                    .multilineTextAlignment(.center)
+                    .padding(20)
+                    .frame(maxWidth: 340)
+                    .frame(maxWidth: .infinity, minHeight: proxy.size.height)
+                    .scrollableWhenTaller()
                 }
-                .padding(.horizontal, 22)
-                .padding(.vertical, 22)
-                .frame(maxWidth: 340)
-                .viewfinderChrome(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                .padding(.horizontal, 20)
-                .padding(.vertical, 24)
-                // Centered inside the viewfinder; on short displays and at
-                // accessibility text sizes the card scrolls instead of
-                // pushing its recovery action out of reach.
-                .frame(maxWidth: .infinity, minHeight: proxy.size.height)
-                .scrollableWhenTaller()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

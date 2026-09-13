@@ -259,7 +259,7 @@ final class LaunchOnboardingTests: XCTestCase {
         XCTAssertTrue(screen.waitForExistence(timeout: 15))
         XCTAssertEqual(app.buttons.matching(identifier: "onboarding-screen").count, 0,
                        "The screen identifier must never replace a button identifier")
-        for identifier in ["onboarding-skip", "onboarding-skip-for-now", "onboarding-continue"] {
+        for identifier in ["onboarding-skip", "onboarding-privacy", "onboarding-continue"] {
             let button = app.buttons[identifier]
             XCTAssertTrue(button.waitForExistence(timeout: 5), identifier)
             XCTAssertTrue(button.isHittable, identifier)
@@ -271,11 +271,9 @@ final class LaunchOnboardingTests: XCTestCase {
         firstUse.lifetime = .keepAlways
         add(firstUse)
         app.buttons["onboarding-continue"].tap()
-        let back = app.buttons["onboarding-back"]
-        XCTAssertTrue(back.waitForExistence(timeout: 5))
-        XCTAssertTrue(back.isHittable)
-        XCTAssertGreaterThanOrEqual(back.frame.width, 44)
-        XCTAssertGreaterThanOrEqual(back.frame.height, 44)
+        XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 15),
+                      "One Continue action must reach the camera, not another explanatory page")
+        XCTAssertFalse(app.otherElements["onboarding-screen"].exists)
     }
 
     func testChosenLookReachesCameraAndSurvivesRelaunch() {
@@ -304,7 +302,7 @@ final class LaunchOnboardingTests: XCTestCase {
         XCTAssertTrue(currentLook.label.contains("Muted Color"))
     }
 
-    func testBackNavigationKeepsChosenLookThroughCompletion() {
+    func testSampleComparisonKeepsChosenLookThroughCompletion() {
         continueAfterFailure = false
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
@@ -316,18 +314,13 @@ final class LaunchOnboardingTests: XCTestCase {
         let muted = app.buttons["onboarding-recipe-classic-chrome"]
         XCTAssertTrue(muted.waitForExistence(timeout: 15))
         muted.tap()
-        let next = app.buttons["onboarding-continue"]
-        next.tap()
-        XCTAssertTrue(app.staticTexts["See the mood as you compose."].waitForExistence(timeout: 5))
-        app.buttons["onboarding-back"].tap()
-        XCTAssertTrue(muted.waitForExistence(timeout: 5))
-        XCTAssertEqual(muted.value as? String, "Selected")
+        let compare = app.buttons["onboarding-compare"]
+        XCTAssertTrue(compare.waitForExistence(timeout: 5))
+        compare.tap()
+        XCTAssertEqual(compare.value as? String, "Original")
+        XCTAssertEqual(muted.value as? String, "Selected", "Comparison must never select a different look")
         XCTAssertEqual(app.buttons["onboarding-recipe-g7x-compact"].value as? String, "Not selected")
-
-        next.tap()
-        next.tap()
-        XCTAssertTrue(app.staticTexts["Save the finished photo."].waitForExistence(timeout: 5))
-        next.tap()
+        app.buttons["onboarding-continue"].tap()
         let currentLook = app.buttons["recipe-menu"]
         XCTAssertTrue(currentLook.waitForExistence(timeout: 15))
         XCTAssertTrue(currentLook.label.contains("Muted Color"))

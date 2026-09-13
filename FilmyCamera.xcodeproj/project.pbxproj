@@ -18,6 +18,7 @@
 		28C6A5B2352ED08BD1E21114 /* CameraViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A9AFC52D1FB5ECED33CB2DA /* CameraViewModel.swift */; };
 		2959F22572BAEE1007915415 /* CameraFrameLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D82A69BBE148C6317A2FA41 /* CameraFrameLayout.swift */; };
 		3D00E159DAA3E3944EACD36E /* CaptureReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53925B09E478B6CD4AF36BE1 /* CaptureReviewView.swift */; };
+		3DAE800A09A85B166423AEC7 /* FrameIndexTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53D88D553FA90EF4E76588D7 /* FrameIndexTests.swift */; };
 		3E434087A6331965A83F900D /* RecipeReferenceCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 348CFAEC84B4CF9E4F843E66 /* RecipeReferenceCatalogTests.swift */; };
 		3F104912E7B0F794D16EC5E3 /* GalleryScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10A0F8269AA5365633E9A3C0 /* GalleryScreen.swift */; };
 		47FDBDD59FA6A75558E422B8 /* FilmRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F56BE8EB7D6BDB867CFD8C3A /* FilmRenderer.swift */; };
@@ -39,6 +40,7 @@
 		7C42415792CAC6505DD18170 /* CameraManualControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E9A15C80F9345FFEE2F001 /* CameraManualControls.swift */; };
 		7DCDAA29B2717548B36D8992 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8F580BECA95D881DF1EB3789 /* Assets.xcassets */; };
 		801054D3CB7F421A0300E64B /* FilteredCameraPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E3E5451BF5130228EAD7B57 /* FilteredCameraPreview.swift */; };
+		81349BC8F73DCA32946DF506 /* FrameIndexControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 855D92276667676A580EFA91 /* FrameIndexControls.swift */; };
 		8B6935AD478A697DD4C23AE6 /* PhotoPrintCompositorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2933638DF96CE284BC58BC2 /* PhotoPrintCompositorTests.swift */; };
 		8C7CB45FC3BFE9E2C786ACCF /* PhotoOutputEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AD7C3AEFA8B673A5F790009 /* PhotoOutputEncoderTests.swift */; };
 		96625C5D9B641248AC46F516 /* NormalRollManagementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82B8CDEF0CFFC1C7810C1E66 /* NormalRollManagementTests.swift */; };
@@ -69,6 +71,7 @@
 		E9619C95C6EF4EC86F964D60 /* PhotoLibraryMetadataTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB68FCDDC4EB7CE97CF2AD4F /* PhotoLibraryMetadataTests.swift */; };
 		EB0B9B31A8898628DD8BD80F /* HalationArtifactRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC88255748574951C8FDBFCB /* HalationArtifactRegressionTests.swift */; };
 		EC2F24E354BEA00F79F85586 /* RecipeInvariantsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33F33B6C5BE2B0CAE0ECA261 /* RecipeInvariantsTests.swift */; };
+		F4093F29E5C91552FB106520 /* FrameIndexUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C08C87820A4FFD4472B70E05 /* FrameIndexUITests.swift */; };
 		F84D685F791EF68BD232EC02 /* FilmRecipe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2742A27161237B210E4D8A3C /* FilmRecipe.swift */; };
 /* End PBXBuildFile section */
 
@@ -114,6 +117,7 @@
 		51B0F84271C9B08AE6A3D78A /* PhotoPrintCompositor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoPrintCompositor.swift; sourceTree = "<group>"; };
 		535194C6145CBC3D755665B3 /* ColorSpaceBoundaryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorSpaceBoundaryTests.swift; sourceTree = "<group>"; };
 		53925B09E478B6CD4AF36BE1 /* CaptureReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureReviewView.swift; sourceTree = "<group>"; };
+		53D88D553FA90EF4E76588D7 /* FrameIndexTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameIndexTests.swift; sourceTree = "<group>"; };
 		57D96867146ACDDA4F134F19 /* CameraScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraScreen.swift; sourceTree = "<group>"; };
 		5DEAF80BF98F3BCC9BB1DBC1 /* CompositionAssistStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompositionAssistStore.swift; sourceTree = "<group>"; };
 		61617C6B4DB09D291F5DEA10 /* FilmyCameraUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmyCameraUITests.swift; sourceTree = "<group>"; };
@@ -126,6 +130,7 @@
 		7423EA06DA8F5FB5EE92E47C /* GalleryPagingUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalleryPagingUITests.swift; sourceTree = "<group>"; };
 		82B8CDEF0CFFC1C7810C1E66 /* NormalRollManagementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NormalRollManagementTests.swift; sourceTree = "<group>"; };
 		8433ABA6CF2F34E7F51023B6 /* PhotoLibraryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibraryService.swift; sourceTree = "<group>"; };
+		855D92276667676A580EFA91 /* FrameIndexControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameIndexControls.swift; sourceTree = "<group>"; };
 		8CB7F2591CB64D86D0681D20 /* CameraPreviewGesturePolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraPreviewGesturePolicyTests.swift; sourceTree = "<group>"; };
 		8D82A69BBE148C6317A2FA41 /* CameraFrameLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraFrameLayout.swift; sourceTree = "<group>"; };
 		8DA89A5E0FC0285D78CD4582 /* CameraManualControlsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraManualControlsTests.swift; sourceTree = "<group>"; };
@@ -138,6 +143,7 @@
 		A89BFC50D79A0FAEB41F1D3C /* ManualCameraControlsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualCameraControlsView.swift; sourceTree = "<group>"; };
 		B2338DC25752A65D0169B8AC /* PhotoLibraryLargeRollTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibraryLargeRollTests.swift; sourceTree = "<group>"; };
 		B23B5C550DB001D0819FC64E /* CameraCatalogHardwareTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraCatalogHardwareTests.swift; sourceTree = "<group>"; };
+		C08C87820A4FFD4472B70E05 /* FrameIndexUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameIndexUITests.swift; sourceTree = "<group>"; };
 		C2E9A15C80F9345FFEE2F001 /* CameraManualControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraManualControls.swift; sourceTree = "<group>"; };
 		C2F0913587D09FEB4D0E8E14 /* RendererOutputBoundsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RendererOutputBoundsTests.swift; sourceTree = "<group>"; };
 		C34BB7CBA412A194086446CD /* FilmyCameraTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = FilmyCameraTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -184,6 +190,7 @@
 				D5373778E34C64A9AC521C02 /* CameraViewModelRenderingTests.swift */,
 				535194C6145CBC3D755665B3 /* ColorSpaceBoundaryTests.swift */,
 				1F50AF57ED0353408C3CC952 /* FlashHardwareDeviceTests.swift */,
+				53D88D553FA90EF4E76588D7 /* FrameIndexTests.swift */,
 				FF42BA8A443489B0CB928D60 /* GalleryPagingPolicyTests.swift */,
 				DC88255748574951C8FDBFCB /* HalationArtifactRegressionTests.swift */,
 				D5D96E086FC9CCF420279875 /* HistogramPlacementTests.swift */,
@@ -251,6 +258,7 @@
 				3B590E685DFF7F8542F446B4 /* AdditionalInteractionTests.swift */,
 				67723B708854007A2748F2D2 /* ComprehensiveSettingsTests.swift */,
 				61617C6B4DB09D291F5DEA10 /* FilmyCameraUITests.swift */,
+				C08C87820A4FFD4472B70E05 /* FrameIndexUITests.swift */,
 				7423EA06DA8F5FB5EE92E47C /* GalleryPagingUITests.swift */,
 				6679CBD245F47B002F564DD8 /* HistogramInteractionTests.swift */,
 				6E79227F5594654480E6C981 /* NormalPhotoFlowTests.swift */,
@@ -268,6 +276,7 @@
 				53925B09E478B6CD4AF36BE1 /* CaptureReviewView.swift */,
 				ED28FA298007EE9E0D94A12B /* Components.swift */,
 				1E3E5451BF5130228EAD7B57 /* FilteredCameraPreview.swift */,
+				855D92276667676A580EFA91 /* FrameIndexControls.swift */,
 				10A0F8269AA5365633E9A3C0 /* GalleryScreen.swift */,
 				A89BFC50D79A0FAEB41F1D3C /* ManualCameraControlsView.swift */,
 				31718B2CA6575E585EA91B06 /* OnboardingView.swift */,
@@ -436,6 +445,7 @@
 				B22522279FEB9D04C091754C /* CameraViewModelRenderingTests.swift in Sources */,
 				D39BB0008BA980EC359FF95F /* ColorSpaceBoundaryTests.swift in Sources */,
 				269C88773100AEDB94BC74A4 /* FlashHardwareDeviceTests.swift in Sources */,
+				3DAE800A09A85B166423AEC7 /* FrameIndexTests.swift in Sources */,
 				6C60E0AC417BE6AEEB8C6FF4 /* GalleryPagingPolicyTests.swift in Sources */,
 				EB0B9B31A8898628DD8BD80F /* HalationArtifactRegressionTests.swift in Sources */,
 				0F78AF03F58F3B9498AA5889 /* HistogramPlacementTests.swift in Sources */,
@@ -472,6 +482,7 @@
 				47FDBDD59FA6A75558E422B8 /* FilmRenderer.swift in Sources */,
 				1FA4D1311CC59621E8A662B9 /* FilmyCameraApp.swift in Sources */,
 				801054D3CB7F421A0300E64B /* FilteredCameraPreview.swift in Sources */,
+				81349BC8F73DCA32946DF506 /* FrameIndexControls.swift in Sources */,
 				5488200BFDDF449BAC261F04 /* GalleryPagingPolicy.swift in Sources */,
 				3F104912E7B0F794D16EC5E3 /* GalleryScreen.swift in Sources */,
 				65E53C2550FDC5D5C9701C96 /* HistogramPlacement.swift in Sources */,
@@ -493,6 +504,7 @@
 				CE8930CAD4D8D206662E65A4 /* AdditionalInteractionTests.swift in Sources */,
 				9CDBE678DD0FD47E87EDCB2D /* ComprehensiveSettingsTests.swift in Sources */,
 				C70373098CEE45627237523A /* FilmyCameraUITests.swift in Sources */,
+				F4093F29E5C91552FB106520 /* FrameIndexUITests.swift in Sources */,
 				9A3B1EEA1EC3911B9B7E0C00 /* GalleryPagingUITests.swift in Sources */,
 				5E04EE2244CF859EEFA14AD4 /* HistogramInteractionTests.swift in Sources */,
 				00493D9DE920BF3A134CCF56 /* NormalPhotoFlowTests.swift in Sources */,

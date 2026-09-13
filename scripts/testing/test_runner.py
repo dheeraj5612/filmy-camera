@@ -40,6 +40,11 @@ class SuiteRoutingTests(unittest.TestCase):
         expected = {
             "FilmyCameraUITests/FilmyCameraUITests/testSimulatorFallbackExposesReadableStateWithoutPreviewAction",
             "FilmyCameraUITests/FilmyCameraUITests/testViewfinderFirstChromePreviewKeepsCameraQuiet",
+            "FilmyCameraUITests/FrameIndexUITests/testOriginalSampleComparisonKeepsCaptureLookAndDisabledShutter",
+            "FilmyCameraUITests/FrameIndexUITests/testTuneIsDirectAndOpeningLooksEndsComparison",
+            "FilmyCameraUITests/FrameIndexUITests/testLargestDynamicTypeKeepsCoreControlsInsideSafeShell",
+            "FilmyCameraUITests/FrameIndexUITests/testSystemLightAppearanceKeepsPhotographicSurroundNeutral",
+            "FilmyCameraUITests/FrameIndexUITests/testOnePageOnboardingPrivacyAndLargestType",
         }
         self.assertEqual({test for test, group in tests.items() if group == "simulator-e2e"}, expected)
         e2e = set(run.phases("e2e", tests)[0][1])

@@ -1,38 +1,26 @@
-name: Frame Index baseline audit
+name: Frame Index UI acceptance
 
 on:
-  push:
-    branches: ['design/frame-index-20260913']
-    paths: ['.github/workflows/frame-index-audit.yml']
+  pull_request:
+    paths:
+      - 'FilmyCamera/**'
+      - 'FilmyCameraTests/FrameIndexTests.swift'
+      - 'FilmyCameraUITests/**'
+      - 'FilmyCamera.xcodeproj/**'
+      - '.github/workflows/frame-index-ui.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-jobs:
-  source-snapshot:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
-        with:
-          ref: '04228ed7754d677ba99db495ecd9b3753db096e2'
-          persist-credentials: false
-      - name: Archive the exact public source, not credentials or build products
-        run: |
-          mkdir -p "$RUNNER_TEMP/source"
-          git rev-parse HEAD > "$RUNNER_TEMP/source/base-commit.txt"
-          git archive --format=tar.gz HEAD > "$RUNNER_TEMP/source/filmy-camera-base.tar.gz"
-          find . -name AGENTS.md -not -path './.git/*' -print > "$RUNNER_TEMP/source/instruction-paths.txt"
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
-        with:
-          name: frame-index-source-base
-          path: ${{ runner.temp }}/source/
-          retention-days: 7
-          if-no-files-found: error
+concurrency:
+  group: frame-index-ui-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-  baseline-ui:
+jobs:
+  small-and-large-iphone:
     runs-on: macos-15
-    timeout-minutes: 35
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -44,9 +32,8 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
-          ref: '04228ed7754d677ba99db495ecd9b3753db096e2'
           persist-credentials: false
-      - name: Boot a job-owned simulator and test the unchanged baseline
+      - name: Boot a job-owned simulator and test the real native views
         shell: bash
         run: |
           set -euo pipefail
@@ -62,8 +49,7 @@ jobs:
           matches = [d for d in types if d['name'] == os.environ['DEVICE_NAME']]
           if len(matches) != 1:
               raise SystemExit('Requested device type is not installed')
-          name = 'Filmy-Baseline-' + os.environ['GITHUB_RUN_ID']
-          device = subprocess.check_output(['xcrun','simctl','create', name, matches[0]['identifier'], os.environ['SIMULATOR_RUNTIME']], text=True, timeout=60).strip()
+          device = subprocess.check_output(['xcrun','simctl','create', 'Filmy-FrameIndex-' + os.environ['GITHUB_RUN_ID'], matches[0]['identifier'], os.environ['SIMULATOR_RUNTIME']], text=True, timeout=60).strip()
           (out / 'device-id.txt').write_text(device + '\n')
           subprocess.run(['xcrun','simctl','boot',device], check=True, timeout=60)
           subprocess.run(['xcrun','simctl','bootstatus',device,'-b'], check=True, timeout=300)
@@ -71,31 +57,38 @@ jobs:
           device="$(cat "$RUNNER_TEMP/evidence/device-id.txt")"
           xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera \
             -destination "platform=iOS Simulator,id=$device,arch=arm64" \
-            -derivedDataPath "$RUNNER_TEMP/BaselineBuild" \
-            -resultBundlePath "$RUNNER_TEMP/Baseline.xcresult" \
+            -derivedDataPath "$RUNNER_TEMP/FrameIndexBuild" \
+            -resultBundlePath "$RUNNER_TEMP/FrameIndex.xcresult" \
             -destination-timeout 60 -parallel-testing-enabled NO \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
-            -only-testing:FilmyCameraUITests/FilmyCameraUITests/testCameraShellAndRecipeDetails \
-            -only-testing:FilmyCameraUITests/FilmyCameraUITests/testViewfinderFirstChromePreviewKeepsCameraQuiet \
-            -only-testing:FilmyCameraUITests/FilmyCameraUITests/testGalleryAndSettingsNavigation \
-            -only-testing:FilmyCameraUITests/FilmyCameraUITests/testAccessibilitySizeCameraShellKeepsRecipeControlsReachable \
+            -only-testing:FilmyCameraTests/FrameIndexControlPolicyTests \
+            -only-testing:FilmyCameraTests/FrameIndexPreviewRenderingTests \
+            -only-testing:FilmyCameraUITests/FrameIndexUITests \
             -only-testing:FilmyCameraUITests/LaunchOnboardingTests \
+            -only-testing:FilmyCameraUITests/LookLibraryUITests \
+            -only-testing:FilmyCameraUITests/FilmyCameraUITests/testCameraShellAndRecipeDetails \
+            -only-testing:FilmyCameraUITests/FilmyCameraUITests/testGalleryAndSettingsNavigation \
             test > "$RUNNER_TEMP/evidence/xcodebuild.log" 2>&1
-      - name: Export real attachments and results, including failures
+      - name: Export actual screenshot attachments and test results
         if: always()
         shell: bash
         run: |
-          if [[ -d "$RUNNER_TEMP/Baseline.xcresult" ]]; then
-            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/Baseline.xcresult" --output-path "$RUNNER_TEMP/evidence/screenshots"
-            xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/Baseline.xcresult" > "$RUNNER_TEMP/evidence/summary.json"
+          set -euo pipefail
+          if [[ -d "$RUNNER_TEMP/FrameIndex.xcresult" ]]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/FrameIndex.xcresult" --output-path "$RUNNER_TEMP/evidence/screenshots"
+            xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/FrameIndex.xcresult" > "$RUNNER_TEMP/evidence/summary.json"
             cat "$RUNNER_TEMP/evidence/summary.json"
+            python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert s["passedTests"] == 20 and s["failedTests"] == 0 and s["skippedTests"] == 0, s' "$RUNNER_TEMP/evidence/summary.json"
+          else
+            echo "No xcresult: build or simulator setup did not reach testing" >&2
+            exit 1
           fi
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         if: always()
         with:
-          name: frame-index-baseline-${{ matrix.device }}
+          name: frame-index-${{ matrix.device }}-${{ github.run_id }}
           path: ${{ runner.temp }}/evidence/
-          retention-days: 7
+          retention-days: 14
           if-no-files-found: error
       - name: Remove only this job's disposable simulator
         if: always()

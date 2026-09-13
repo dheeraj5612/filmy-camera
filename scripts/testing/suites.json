@@ -43,7 +43,10 @@
     "FilmyCameraUITests/AdditionalInteractionTests": "device",
     "FilmyCameraTests/PhotoLibraryLargeRollTests": "fixtures",
     "FilmyCameraUITests/NormalRollManagementTests": "photos-e2e",
-    "FilmyCameraUITests/PhysicalReviewFlowTests": "device"
+    "FilmyCameraUITests/PhysicalReviewFlowTests": "device",
+    "FilmyCameraTests/FrameIndexControlPolicyTests": "unit",
+    "FilmyCameraTests/FrameIndexPreviewRenderingTests": "integration",
+    "FilmyCameraUITests/FrameIndexUITests": "e2e"
   },
   "overrides": {
     "FilmyCameraUITests/FilmyCameraUITests/testSimulatorFallbackExposesReadableStateWithoutPreviewAction": "simulator-e2e",
@@ -59,6 +62,11 @@
     "FilmyCameraUITests/FilmyCameraUITests/testPhysicalTimerCancellationAndSquareCaptureWithLiveHistogram": "device",
     "FilmyCameraUITests/FilmyCameraUITests/testPhysicalVolumeButtonsCaptureAndAutoSave": "device",
     "FilmyCameraUITests/FilmyCameraUITests/testPhysicalLaunchPerformance": "performance",
-    "FilmyCameraUITests/ComprehensiveSettingsTests/testPhysicalEveryAspectAndTimerCapturesThenFrontCameraReturnsLive": "device"
+    "FilmyCameraUITests/ComprehensiveSettingsTests/testPhysicalEveryAspectAndTimerCapturesThenFrontCameraReturnsLive": "device",
+    "FilmyCameraUITests/FrameIndexUITests/testOriginalSampleComparisonKeepsCaptureLookAndDisabledShutter": "simulator-e2e",
+    "FilmyCameraUITests/FrameIndexUITests/testTuneIsDirectAndOpeningLooksEndsComparison": "simulator-e2e",
+    "FilmyCameraUITests/FrameIndexUITests/testLargestDynamicTypeKeepsCoreControlsInsideSafeShell": "simulator-e2e",
+    "FilmyCameraUITests/FrameIndexUITests/testSystemLightAppearanceKeepsPhotographicSurroundNeutral": "simulator-e2e",
+    "FilmyCameraUITests/FrameIndexUITests/testOnePageOnboardingPrivacyAndLargestType": "simulator-e2e"
   }
 }

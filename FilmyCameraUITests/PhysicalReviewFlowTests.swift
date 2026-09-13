@@ -134,7 +134,7 @@ final class PhysicalReviewFlowTests: XCTestCase {
         let compare = app.buttons["review-compare-original"]
         XCTAssertTrue(compare.waitForExistence(timeout: 10))
         compare.tap()
-        XCTAssertTrue(waitUntil(timeout: 15) { (compare.value as? String) == "Original" })
+        XCTAssertTrue(waitUntil(timeout: 15) { (compare.value as? String) == "Original and look" })
         XCTAssertTrue(
             app.descendants(matching: .any)["review-image"].label.contains("Original"),
             "Imported review must expose an Original comparison"

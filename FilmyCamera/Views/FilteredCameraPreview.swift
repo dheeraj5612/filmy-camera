@@ -22,31 +22,36 @@ public struct FilteredCameraPreview: UIViewRepresentable {
     @ObservedObject private var cameraService: CameraService
     private let recipe: FilmRecipe
     private let quality: FilmRenderer.Quality
+    private let showsOriginal: Bool
 
     public init(
         cameraService: CameraService,
         recipe: FilmRecipe,
-        quality: FilmRenderer.Quality = .preview
+        quality: FilmRenderer.Quality = .preview,
+        showsOriginal: Bool = false
     ) {
         _cameraService = ObservedObject(wrappedValue: cameraService)
         self.recipe = recipe
         self.quality = quality
+        self.showsOriginal = showsOriginal
     }
 
     public init(
         service: CameraService,
         recipe: FilmRecipe,
-        quality: FilmRenderer.Quality = .preview
+        quality: FilmRenderer.Quality = .preview,
+        showsOriginal: Bool = false
     ) {
-        self.init(cameraService: service, recipe: recipe, quality: quality)
+        self.init(cameraService: service, recipe: recipe, quality: quality, showsOriginal: showsOriginal)
     }
 
     public init(
         camera: CameraService,
         recipe: FilmRecipe,
-        quality: FilmRenderer.Quality = .preview
+        quality: FilmRenderer.Quality = .preview,
+        showsOriginal: Bool = false
     ) {
-        self.init(cameraService: camera, recipe: recipe, quality: quality)
+        self.init(cameraService: camera, recipe: recipe, quality: quality, showsOriginal: showsOriginal)
     }
 
     public func makeCoordinator() -> Coordinator {
@@ -61,7 +66,8 @@ public struct FilteredCameraPreview: UIViewRepresentable {
         view.update(
             recipe: recipe,
             quality: quality,
-            grainSeed: cameraService.previewGrainSeed
+            grainSeed: cameraService.previewGrainSeed,
+            showsOriginal: showsOriginal
         )
         coordinator.installFrameHandlerIfNeeded()
         view.accessibilityLabel = "Live camera preview"
@@ -82,7 +88,8 @@ public struct FilteredCameraPreview: UIViewRepresentable {
         uiView.update(
             recipe: recipe,
             quality: quality,
-            grainSeed: cameraService.previewGrainSeed
+            grainSeed: cameraService.previewGrainSeed,
+            showsOriginal: showsOriginal
         )
 
         // The coordinator owns one callback for the lifetime of the UIKit
@@ -169,6 +176,8 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
     private var latestImage: CIImage?
     private var recipe = FilmRecipe.builtIns[0]
     private var quality: FilmRenderer.Quality = .preview
+    private var showsOriginal = false
+    private var renderedOriginal = false
     private var grainSeed = FilmRenderer.canonicalGrainSeed
     /// Monotonically identifies the newest frame, recipe, or drawable shape.
     /// If one of these changes while Metal is busy, completion schedules
@@ -288,7 +297,7 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
             }
             let state = isWaitingForSuccessfulRender ? "waiting" : "rendered"
             let visibleRecipeID = renderedRecipeID ?? recipe.id
-            return "state=\(state);revision=\(successfulRenderRevision);recipe=\(visibleRecipeID)"
+            return "state=\(state);revision=\(successfulRenderRevision);recipe=\(visibleRecipeID);mode=\(renderedOriginal ? "original" : "look")"
         }
         set {
             super.accessibilityValue = newValue
@@ -322,15 +331,18 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
     func update(
         recipe: FilmRecipe,
         quality: FilmRenderer.Quality,
-        grainSeed: UInt32
+        grainSeed: UInt32,
+        showsOriginal: Bool = false
     ) {
-        guard self.recipe != recipe || self.quality != quality || self.grainSeed != grainSeed else { return }
-        if self.recipe.id != recipe.id {
+        guard self.recipe != recipe || self.quality != quality || self.grainSeed != grainSeed
+            || self.showsOriginal != showsOriginal else { return }
+        if self.recipe.id != recipe.id || self.showsOriginal != showsOriginal {
             resetRenderReadiness()
         }
         self.recipe = recipe
         self.quality = quality
         self.grainSeed = grainSeed
+        self.showsOriginal = showsOriginal
         requestDisplay()
     }
 
@@ -362,6 +374,7 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
         let renderedRevision = contentRevision
         let renderedReadinessGeneration = renderReadinessGeneration
         let renderedRecipeID = recipe.id
+        let renderedOriginal = showsOriginal
         isRenderInFlight = true
 
         let targetRect = CGRect(origin: .zero, size: drawableSize)
@@ -370,11 +383,12 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
         // frame also keeps preview work proportional to the drawable rather
         // than to the camera sensor's full video dimensions.
         let framed = CameraFrameLayout.aspectFill(image, in: targetRect)
-        let filtered = FilmRenderer.render(
+        let filtered = Self.displayImage(
             framed,
             recipe: recipe,
             quality: quality,
-            grainSeed: grainSeed
+            grainSeed: grainSeed,
+            showsOriginal: showsOriginal
         )
             .cropped(to: targetRect)
         ciContext.render(
@@ -393,11 +407,27 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
                     revision: renderedRevision,
                     readinessGeneration: renderedReadinessGeneration,
                     recipeID: renderedRecipeID,
+                    showsOriginal: renderedOriginal,
                     completedSuccessfully: completedSuccessfully
                 )
             }
         }
         commandBuffer.commit()
+    }
+
+    /// The comparison is a display decision only. The same aspect-filled
+    /// frame and sRGB output path are used in both modes; capture continues to
+    /// own its selected recipe, metadata, quality and grain seed independently.
+    static func displayImage(
+        _ framed: CIImage,
+        recipe: FilmRecipe,
+        quality: FilmRenderer.Quality,
+        grainSeed: UInt32,
+        showsOriginal: Bool
+    ) -> CIImage {
+        showsOriginal ? framed : FilmRenderer.render(
+            framed, recipe: recipe, quality: quality, grainSeed: grainSeed
+        )
     }
 
     public func mtkView(
@@ -422,6 +452,7 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
         revision: UInt64,
         readinessGeneration: UInt64,
         recipeID: String,
+        showsOriginal: Bool,
         completedSuccessfully: Bool
     ) {
         isRenderInFlight = false
@@ -430,6 +461,7 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
            renderReadinessGeneration == readinessGeneration {
             successfulRenderRevision &+= 1
             renderedRecipeID = recipeID
+            renderedOriginal = showsOriginal
             isWaitingForSuccessfulRender = false
         }
         guard latestImage != nil, contentRevision != revision else { return }

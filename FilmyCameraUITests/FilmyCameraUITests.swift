@@ -945,7 +945,7 @@ final class FilmyCameraUITests: XCTestCase {
     func testSimulatorFallbackExposesReadableStateWithoutPreviewAction() throws {
         XCTAssertTrue(app.staticTexts["Preview mode"].waitForExistence(timeout: 8))
         XCTAssertTrue(
-            app.staticTexts["Shoot this look on an iPhone or iPad."].waitForExistence(timeout: 5)
+            app.staticTexts["Sample photo · capture needs a device"].waitForExistence(timeout: 5)
         )
 
         let cameraPreview = app.descendants(matching: .any)["camera-preview"]
@@ -1196,17 +1196,9 @@ final class FilmyCameraUITests: XCTestCase {
             return onboardingApp
         }
 
-        XCTAssertTrue(onboardingApp.staticTexts["Start with a feeling."].waitForExistence(timeout: 8))
-        let firstContinue = onboardingApp.buttons["Continue"]
-        assertMinimumHitTarget(firstContinue, named: "Onboarding continue")
-
-        firstContinue.tap()
-        XCTAssertTrue(onboardingApp.staticTexts["See the mood as you compose."].waitForExistence(timeout: 5))
-        let secondContinue = onboardingApp.buttons["Continue"]
-        assertMinimumHitTarget(secondContinue, named: "Onboarding continue on page two")
-        secondContinue.tap()
-        XCTAssertTrue(onboardingApp.staticTexts["Save the finished photo."].waitForExistence(timeout: 5))
-        let openCamera = onboardingApp.buttons["Open camera"]
+        defer { onboardingApp.terminate() }
+        XCTAssertTrue(onboardingApp.staticTexts["Start with a look."].waitForExistence(timeout: 8))
+        let openCamera = onboardingApp.buttons["onboarding-continue"]
         assertMinimumHitTarget(openCamera, named: "Onboarding open camera")
         openCamera.tap()
 

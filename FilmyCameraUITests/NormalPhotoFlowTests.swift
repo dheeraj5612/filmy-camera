@@ -143,8 +143,11 @@ final class NormalPhotoFlowTests: XCTestCase {
         let cancel = app.buttons["Cancel"]
         assertReviewControl(cancel, name: "Large-text portrait-locked pinned Cancel", containedInApp: true)
         cancel.tap()
+        let discard = app.buttons["Discard edit"]
+        XCTAssertTrue(discard.waitForExistence(timeout: 5), "An accidental Cancel must not destroy the edit")
+        discard.tap()
         let review = app.descendants(matching: .any)["review-screen"]
-        XCTAssertTrue(waitForDisappearance(review, timeout: 10), "Cancel must dismiss imported review")
+        XCTAssertTrue(waitForDisappearance(review, timeout: 10), "Confirmed discard must dismiss imported review")
 
         XCUIDevice.shared.orientation = .portrait
         XCTAssertTrue(
@@ -278,6 +281,54 @@ final class NormalPhotoFlowTests: XCTestCase {
         savedFrame.tap()
         XCTAssertTrue(app.images["Photo"].waitForExistence(timeout: 30))
         XCTAssertEqual(app.images["Photo"].value as? String, "Fit to screen")
+    }
+
+    func testSplitComparisonAndDiscardRecoveryDoNotSave() throws {
+        launchNormalApp()
+        try ensureRecipe(id: "g7x-compact", name: "G7 X Compact")
+        openRoll()
+        let countBefore = try waitForRollFrameCount()
+        app.buttons["roll-back-to-camera"].tap()
+        try importSeededFixture(newerSavedFrameCount: countBefore)
+
+        let compare = app.buttons["review-compare-original"]
+        assertReviewControl(compare, name: "Split comparison")
+        compare.tap()
+        XCTAssertTrue(waitUntil(timeout: 20) { compare.value as? String == "Original and look" })
+        let divider = app.descendants(matching: .any)["review-comparison-divider"]
+        XCTAssertTrue(divider.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(divider.frame.width, 44)
+        let photo = app.descendants(matching: .any)["review-image"]
+        XCTAssertTrue(photo.label.contains("Original and look"))
+        let start = divider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let finish = app.coordinate(withNormalizedOffset: CGVector(
+            dx: (photo.frame.minX + photo.frame.width * 0.8 - app.frame.minX) / app.frame.width,
+            dy: (photo.frame.midY - app.frame.minY) / app.frame.height
+        ))
+        start.press(forDuration: 0.1, thenDragTo: finish)
+        XCTAssertTrue(waitUntil(timeout: 5) {
+            let amount = Int((divider.value as? String ?? "").split(separator: " ").first ?? "") ?? 0
+            return amount >= 70
+        }, "Dragging must reveal more of the aligned original, not move or crop the photo")
+        XCTAssertTrue(app.buttons["review-save"].isEnabled)
+        attachScreenshot(named: "frame-index-review-split-comparison")
+
+        app.buttons["review-cancel"].tap()
+        let discard = app.buttons["Discard edit"]
+        XCTAssertTrue(discard.waitForExistence(timeout: 5))
+        // The system confirmation's Cancel is deliberately distinct from the
+        // covered review action, which has a stable review-cancel identifier.
+        let cancelDialog = app.buttons.matching(NSPredicate(format: "label == 'Cancel' AND identifier != 'review-cancel'")).firstMatch
+        XCTAssertTrue(cancelDialog.waitForExistence(timeout: 5))
+        cancelDialog.tap()
+        XCTAssertTrue(divider.waitForExistence(timeout: 5), "Keep editing must preserve the comparison")
+        XCTAssertTrue(app.buttons["review-save"].isEnabled)
+        app.buttons["review-cancel"].tap()
+        XCTAssertTrue(discard.waitForExistence(timeout: 5))
+        discard.tap()
+        XCTAssertTrue(waitForDisappearance(app.descendants(matching: .any)["review-screen"], timeout: 10))
+        openRoll()
+        XCTAssertEqual(try waitForRollFrameCount(), countBefore, "Comparing and discarding must never save a copy")
     }
 
     private func assertReviewControl(
