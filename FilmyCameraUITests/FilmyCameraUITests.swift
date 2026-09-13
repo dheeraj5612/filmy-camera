@@ -105,12 +105,12 @@ final class FilmyCameraUITests: XCTestCase {
 
         attachScreenshot(named: "pro-controls-portrait")
         XCUIDevice.shared.orientation = .landscapeLeft
-        XCTAssertTrue(waitUntil(timeout: 10) { app.frame.width > app.frame.height },
-                      "Pro controls must finish rotating to landscape")
+        XCTAssertTrue(waitUntil(timeout: 10) { app.frame.height >= app.frame.width },
+                      "The portrait-locked app must retain portrait geometry after rotation")
         XCTAssertTrue(waitForStableHittableFrame(done, timeout: 8),
-                      "Pro controls must remain dismissible at 44pt in landscape")
-        assertMinimumHitTarget(done, named: "Landscape Done with Pro controls")
-        attachScreenshot(named: "pro-controls-landscape")
+                      "Pro controls must remain dismissible at 44pt after rotation")
+        assertMinimumHitTarget(done, named: "Rotated Done with Pro controls")
+        attachScreenshot(named: "pro-controls-rotated")
         #if !targetEnvironment(simulator)
         let reset = app.buttons["manual-controls-reset"]
         scrollToHittable(reset, in: app)
