@@ -13,7 +13,8 @@ final class NormalPhotoFlowTests: XCTestCase {
 
         #if targetEnvironment(simulator)
         try XCTSkipUnless(
-            ProcessInfo.processInfo.environment["FILMY_RUN_SEEDED_PHOTOS_E2E"] == "1",
+            ProcessInfo.processInfo.environment["FILMY_RUN_SEEDED_PHOTOS_E2E"] == "1"
+                || ProcessInfo.processInfo.environment["TEST_RUNNER_FILMY_RUN_SEEDED_PHOTOS_E2E"] == "1",
             "Set FILMY_RUN_SEEDED_PHOTOS_E2E=1 on a disposable simulator seeded with cafe-original.png"
         )
         #else
@@ -46,6 +47,24 @@ final class NormalPhotoFlowTests: XCTestCase {
             }
             launchedApp?.terminate()
         }
+    }
+
+    /// Opens Roll solely to resolve the real Photos permission prompt for the
+    /// disposable fixture simulator. Keep this separate from behavioral UI
+    /// assertions so fixture authorization does not depend on an import flow.
+    func testGrantFullPhotosAccessForFixtureLane() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["FILMY_RUN_PHOTOS_PERMISSION_BOOTSTRAP"] == "1"
+                || ProcessInfo.processInfo.environment["TEST_RUNNER_FILMY_RUN_PHOTOS_PERMISSION_BOOTSTRAP"] == "1",
+            "Permission bootstrap is reserved for the fixture runner"
+        )
+
+        launchNormalApp()
+        openRoll()
+        XCTAssertTrue(
+            app.staticTexts["Roll"].waitForExistence(timeout: 5),
+            "Roll must remain visible after granting full Photos access"
+        )
     }
 
     func testNormalSeededImportSaveRelaunchesIntoRollDetail() throws {

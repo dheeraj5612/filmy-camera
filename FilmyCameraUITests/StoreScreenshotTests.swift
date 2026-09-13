@@ -412,6 +412,8 @@ final class LookLibraryUITests: XCTestCase {
             XCUIDevice.shared.orientation = .portrait
         }
         XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertTrue(waitForStableAppGeometry(app),
+                      "The app window must settle after the device rotation")
         openLibrary(app)
         assertControl(app.buttons["look-library-close"], in: app)
         assertControl(app.buttons["look-filter-all"], in: app)
@@ -421,6 +423,8 @@ final class LookLibraryUITests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
         app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         app.launch()
+        XCTAssertTrue(waitForStableAppGeometry(app),
+                      "The app window must settle before opening the portrait drawer")
         openLibrary(app)
         assertControl(app.buttons["look-library-close"], in: app)
         assertControl(app.buttons["look-filter-all"], in: app)
@@ -615,7 +619,12 @@ private func waitForStationaryControl(_ control: XCUIElement, in app: XCUIApplic
     // finishes. Wait for stable hit geometry; never retry the navigation tap,
     // which could instead close the drawer through the control underneath it.
     repeat {
-        if control.exists && control.isEnabled && control.isHittable {
+        // During an iPad rotation the accessibility frame can be valid before
+        // XCTest has installed a valid activation point. Avoid querying
+        // `isHittable` until the frame has remained inside the app window for
+        // a complete settling interval; that query itself reports an error
+        // while the activation point is temporarily invalid.
+        if control.exists && control.isEnabled {
             let frame = control.frame
             if frame.width >= 44 && frame.height >= 44 && app.frame.contains(frame) {
                 if let previousFrame,
@@ -624,7 +633,7 @@ private func waitForStationaryControl(_ control: XCUIElement, in app: XCUIApplic
                    abs(frame.width - previousFrame.width) <= frameTolerance,
                    abs(frame.height - previousFrame.height) <= frameTolerance {
                     if let stationarySince, Date().timeIntervalSince(stationarySince) >= 0.3 {
-                        return true
+                        return control.isHittable
                     }
                 } else {
                     stationarySince = Date()
@@ -637,6 +646,35 @@ private func waitForStationaryControl(_ control: XCUIElement, in app: XCUIApplic
         } else {
             previousFrame = nil
             stationarySince = nil
+        }
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+    } while Date() < deadline
+    return false
+}
+
+@MainActor
+private func waitForStableAppGeometry(_ app: XCUIApplication) -> Bool {
+    let deadline = Date(timeIntervalSinceNow: 15)
+    var previous: CGRect?
+    var stableSince: Date?
+    repeat {
+        let frame = app.frame
+        if frame.width > 0, frame.height > 0 {
+            if let previous,
+               abs(frame.minX - previous.minX) <= 1,
+               abs(frame.minY - previous.minY) <= 1,
+               abs(frame.width - previous.width) <= 1,
+               abs(frame.height - previous.height) <= 1 {
+                if let stableSince, Date().timeIntervalSince(stableSince) >= 0.5 {
+                    return true
+                }
+            } else {
+                stableSince = Date()
+            }
+            previous = frame
+        } else {
+            previous = nil
+            stableSince = nil
         }
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
     } while Date() < deadline

@@ -1,6 +1,7 @@
 .DS_Store
 
 # Xcode
+/build
 build/
 DerivedData/
 .derived-hardening/

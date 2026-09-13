@@ -7,7 +7,11 @@ final class ComprehensiveSettingsTests: XCTestCase {
     func testEveryRecipeEditorSettingChangesAndResetRestoresTheLook() {
         continueAfterFailure = false
         let app = makeApp()
+        #if targetEnvironment(simulator)
         app.launchArguments = ["-ui-testing", "-selectedRecipeID", "classic-chrome"]
+        #else
+        app.launchArguments = ["-ui-testing-real-roll", "-selectedRecipeID", "classic-chrome"]
+        #endif
         app.launch()
         defer { app.terminate() }
         XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 20))
@@ -118,7 +122,11 @@ final class ComprehensiveSettingsTests: XCTestCase {
     func testMonochromeEditorAxesChangeAndReset() {
         continueAfterFailure = false
         let app = makeApp()
+        #if targetEnvironment(simulator)
         app.launchArguments = ["-ui-testing", "-selectedRecipeID", "acros-neutral-filter"]
+        #else
+        app.launchArguments = ["-ui-testing-real-roll", "-selectedRecipeID", "acros-neutral-filter"]
+        #endif
         app.launch()
         defer { app.terminate() }
         XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 20))
@@ -144,6 +152,10 @@ final class ComprehensiveSettingsTests: XCTestCase {
         #if targetEnvironment(simulator)
         throw XCTSkip("Requires a real iPhone camera")
         #else
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["FILMY_RUN_PHOTOS_WRITE"] == "1",
+            "Set FILMY_RUN_PHOTOS_WRITE=1 because this flow saves six real Photos frames"
+        )
         continueAfterFailure = false
         let app = makeApp()
         app.launch()
@@ -165,15 +177,8 @@ final class ComprehensiveSettingsTests: XCTestCase {
             if delay != "Off" {
                 XCTAssertTrue(app.buttons["capture-countdown-cancel"].waitForExistence(timeout: 2))
             }
-            requireReview(app)
-            let finish = app.buttons["review-finish-photo"]
-            finish.tap()
-            XCTAssertTrue(wait { finish.value as? String == "Selected" && app.buttons["Keep frame"].isEnabled })
-            let photo = app.descendants(matching: .any)["review-image"]
-            XCTAssertEqual(photo.frame.width / photo.frame.height, expectedRatio, accuracy: 0.02,
-                           "Review must retain the \(aspect) capture framing")
+            assertAutomaticSave(app, expectedRatio: expectedRatio)
             attach("physical-crop-\(aspect.replacingOccurrences(of: ":", with: "x"))-timer-\(delay)")
-            app.buttons["Retake"].tap()
             requireLive(app)
         }
         let cameraSwitch = app.buttons["camera-switch-control"]
@@ -182,9 +187,8 @@ final class ComprehensiveSettingsTests: XCTestCase {
         XCTAssertTrue(wait { cameraSwitch.value as? String != originalPosition })
         requireLive(app)
         app.buttons["Capture photo"].tap()
-        requireReview(app)
-        attach("physical-front-camera-review")
-        app.buttons["Retake"].tap()
+        assertAutomaticSave(app)
+        attach("physical-front-camera-auto-saved")
         requireLive(app)
         cameraSwitch.tap()
         XCTAssertTrue(wait { cameraSwitch.value as? String == originalPosition })
@@ -196,7 +200,22 @@ final class ComprehensiveSettingsTests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
         app.launchEnvironment["FILMY_TEST_DEFAULTS_SUITE"] = "FilmyCameraUITests.AllSettings.\(UUID().uuidString)"
+        #if targetEnvironment(simulator)
         app.launchArguments = ["-ui-testing", "-selectedRecipeID", "g7x-compact"]
+        #else
+        app.launchArguments = ["-ui-testing-real-roll", "-selectedRecipeID", "g7x-compact"]
+        #endif
+        addUIInterruptionMonitor(withDescription: "Settings QA camera and Photos permissions") { alert in
+            MainActor.assumeIsolated {
+                for title in ["Allow", "Allow Full Access", "Allow Access to All Photos", "OK"] {
+                    if alert.buttons[title].exists {
+                        alert.buttons[title].tap()
+                        return true
+                    }
+                }
+                return false
+            }
+        }
         return app
     }
 
@@ -335,9 +354,35 @@ final class ComprehensiveSettingsTests: XCTestCase {
         }, "The viewfinder must deliver two fresh GPU-rendered frames")
     }
 
-    private func requireReview(_ app: XCUIApplication) {
-        XCTAssertTrue(app.buttons["Keep frame"].waitForExistence(timeout: 45))
-        XCTAssertTrue(wait { app.buttons["Keep frame"].isEnabled && app.descendants(matching: .any)["review-image"].exists })
+    private func assertAutomaticSave(_ app: XCUIApplication, expectedRatio: CGFloat? = nil) {
+        let saved = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Saved with '")).firstMatch
+        XCTAssertTrue(wait(timeout: 45) { saved.exists }, "Physical capture must auto-save without review")
+        XCTAssertFalse(app.buttons["Keep frame"].exists)
+        XCTAssertFalse(app.buttons["Retake"].exists)
+        guard let expectedRatio else { return }
+
+        // The preview assertion above proves the selected control changed the
+        // viewfinder. Open the newly saved frame as well so the test verifies
+        // the persisted crop, rather than only the pre-capture layout.
+        let openRoll = app.buttons["Open roll"]
+        XCTAssertTrue(openRoll.waitForExistence(timeout: 10))
+        openRoll.tap()
+        let frame = app.buttons.matching(NSPredicate(format:
+            "label BEGINSWITH 'Photo in your gallery'")).firstMatch
+        XCTAssertTrue(frame.waitForExistence(timeout: 20) && frame.isHittable)
+        let dimensions = frame.value as? String
+        let parts = dimensions?.split(separator: "x").compactMap { Double($0) }
+        XCTAssertEqual(parts?.count, 2, "The saved gallery tile must expose persisted pixel dimensions")
+        if let parts, parts.count == 2 {
+            XCTAssertEqual(parts[0] / parts[1], Double(expectedRatio), accuracy: 0.03,
+                           "The saved gallery asset must preserve the selected crop")
+        }
+        frame.tap()
+        let photo = app.images["Photo"]
+        XCTAssertTrue(photo.waitForExistence(timeout: 20))
+        app.buttons["Close frame"].tap()
+        XCTAssertTrue(app.buttons["roll-back-to-camera"].waitForExistence(timeout: 5))
+        app.buttons["roll-back-to-camera"].tap()
     }
 
     private func wait(timeout: TimeInterval = 15, _ condition: @escaping () -> Bool) -> Bool {

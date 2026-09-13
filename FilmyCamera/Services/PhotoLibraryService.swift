@@ -866,11 +866,22 @@ final class PhotoLibraryService: ObservableObject {
         asset: PhotoLibraryGalleryAsset,
         completion: @escaping @MainActor (Result<Void, PhotoLibraryServiceError>) -> Void
     ) {
-        guard case .photos(let photoAsset) = asset else {
-            completion(.failure(.accessDenied))
-            return
+        switch asset {
+        case .cached(let frame):
+            guard ownsAsset(frame.assetIdentifier) else {
+                completion(.failure(.notOwned))
+                return
+            }
+            // Invalidate an in-flight cache write before removing the durable
+            // ownership/index entry, so a late save callback cannot recreate
+            // the frame the user just deleted.
+            cacheWriteGeneration &+= 1
+            forgetSavedAsset(frame.assetIdentifier)
+            completion(.success(()))
+
+        case .photos(let photoAsset):
+            delete(asset: photoAsset, completion: completion)
         }
-        delete(asset: photoAsset, completion: completion)
     }
 
     private func appAlbum() -> PHAssetCollection? {

@@ -281,6 +281,7 @@ struct GalleryScreen: View {
                         "Photo in your gallery, \($0.recipe.name)"
                     } ?? "Photo in your gallery"
                 )
+                .accessibilityValue("\(asset.pixelWidth)x\(asset.pixelHeight)")
                 .accessibilityHint("Opens frame details")
             }
         }
@@ -919,7 +920,7 @@ private struct GalleryDetailView: View {
             }
             .accessibilityLabel("Previous frame")
             .accessibilityIdentifier("gallery-previous-frame")
-            .disabled(adjacentAsset(.previous) == nil || isPagingLocked)
+            .disabled(adjacentAsset(.previous) == nil || isNavigationLocked)
 
             Text("\(currentFrameNumber) of \(photoLibrary.galleryAssets.count)")
                 .font(.system(.caption, design: .rounded).weight(.semibold))
@@ -936,7 +937,7 @@ private struct GalleryDetailView: View {
             }
             .accessibilityLabel("Next frame")
             .accessibilityIdentifier("gallery-next-frame")
-            .disabled(adjacentAsset(.next) == nil || isPagingLocked)
+            .disabled(adjacentAsset(.next) == nil || isNavigationLocked)
         }
         .foregroundStyle(.white)
         .buttonStyle(.plain)
@@ -956,12 +957,10 @@ private struct GalleryDetailView: View {
     }
 
     private func moveFrame(_ direction: GalleryPagingDirection) {
-        guard !isPagingLocked, adjacentAsset(direction) != nil else { return }
-        // Clear the old pixels before asking the pager to move. The coordinator
-        // replaces the retained page with the latest asset after transition.
-        image = nil
-        imageLoadFailed = false
-        loadGeneration &+= 1
+        guard !isNavigationLocked, adjacentAsset(direction) != nil else { return }
+        // Reset only the presentation transform before paging. This keeps a
+        // cached page fit when the user returns to it, while leaving its
+        // loaded image intact if the pager rejects or cancels the move.
         resetImageTransform()
         switch direction {
         case .previous:

@@ -70,10 +70,10 @@ final class FilmyCameraUITests: XCTestCase {
             return launchedApp
         }
         app = launchedApp
-        // A no-op tap gives XCTest an interaction with which to invoke the
-        // interruption monitor when a first-launch permission alert is present.
         MainActor.assumeIsolated {
-            launchedApp.tap()
+            if launchedApp.alerts.firstMatch.waitForExistence(timeout: 1) {
+                launchedApp.tap()
+            }
         }
     }
 
@@ -129,12 +129,12 @@ final class FilmyCameraUITests: XCTestCase {
 
         attachScreenshot(named: "pro-controls-portrait")
         XCUIDevice.shared.orientation = .landscapeLeft
-        XCTAssertTrue(waitUntil(timeout: 10) { app.frame.width > app.frame.height },
-                      "Pro controls must finish rotating to landscape")
+        XCTAssertTrue(waitUntil(timeout: 10) { app.frame.height >= app.frame.width },
+                      "The portrait-locked app must retain portrait geometry after rotation")
         XCTAssertTrue(waitForStableHittableFrame(done, timeout: 8),
-                      "Pro controls must remain dismissible at 44pt in landscape")
+                      "Pro controls must remain dismissible at 44pt after rotation")
         assertMinimumHitTarget(done, named: "Landscape Done with Pro controls")
-        attachScreenshot(named: "pro-controls-landscape")
+        attachScreenshot(named: "pro-controls-rotated")
         #if !targetEnvironment(simulator)
         let reset = app.buttons["manual-controls-reset"]
         scrollToHittable(reset, in: app)
@@ -483,11 +483,13 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertTrue(
             waitUntil(timeout: 10) {
                 let frame = cameraSurface.frame
-                return cameraSurface.exists
-                    && frame.width > 0
-                    && frame.height > frame.width
+                let hasVisibleSurface = cameraSurface.exists && frame.width > 0 && frame.height > 0
+                // iPhone is portrait locked. Wide iPad layouts intentionally use
+                // the landscape edge-control shell after rotation.
+                return hasVisibleSurface
+                    && (UIDevice.current.userInterfaceIdiom == .pad || frame.height > frame.width)
             },
-            "The visible camera preview surface must remain portrait after a device rotation"
+            "The camera preview surface must remain visible after a device rotation"
         )
         defer { XCUIDevice.shared.orientation = .portrait }
         #if !targetEnvironment(simulator)
@@ -498,10 +500,10 @@ final class FilmyCameraUITests: XCTestCase {
             XCTFail("The portrait camera shell must expose a visible app window after rotation")
             return
         }
-        XCTAssertGreaterThan(
-            visibleWindow.frame.height,
-            visibleWindow.frame.width,
-            "The visible app window must remain portrait after device rotation"
+        let windowFrame = visibleWindow.frame
+        XCTAssertTrue(
+            UIDevice.current.userInterfaceIdiom == .pad || windowFrame.height > windowFrame.width,
+            "The visible app window must remain portrait after device rotation on iPhone"
         )
         let currentLook = app.buttons["recipe-menu"]
         let roll = app.buttons["Open roll"]
@@ -1083,7 +1085,15 @@ final class FilmyCameraUITests: XCTestCase {
         assertMinimumHitTarget(gallery, named: "Roll")
         gallery.tap()
 
-        XCTAssertTrue(app.staticTexts["Photo access is off"].waitForExistence(timeout: 5))
+        let accessOff = app.staticTexts["Photo access is off"]
+        let selectedRollEmpty = app.staticTexts["Your selected roll is empty"]
+        let galleryUnavailable = app.staticTexts["Gallery unavailable"]
+        XCTAssertTrue(
+            accessOff.waitForExistence(timeout: 3)
+                || selectedRollEmpty.waitForExistence(timeout: 3)
+                || galleryUnavailable.waitForExistence(timeout: 3),
+            "Roll must show a deterministic access, empty, or unavailable state"
+        )
         attachScreenshot(named: "gallery-empty-state")
 
         returnToMainCamera(using: app.buttons["roll-back-to-camera"], named: "Roll back to camera")

@@ -2396,12 +2396,19 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         session.commitConfiguration()
 
         isConfigured = false
+        needsGraphRebuild = true
         configuredPhotoDimensions = CMVideoDimensions(width: 0, height: 0)
         focusExposureLocked = false
         publishFocusExposureLocked(false)
         resetCaptureCapabilitiesOnQueue()
+        if session.isRunning {
+            session.stopRunning()
+        }
+        publishRunning(false)
+        publishAvailability(.needsRecovery)
+        publishStatus(pendingCaptureStatus)
+        scheduleAutomaticRecoveryOnQueue()
     }
-
     /// Human-readable reason for an `AVCaptureSession` interruption. Reasons
     /// are compared by raw value so newer SDK cases fall through safely.
     static func interruptionStatus(forReasonRawValue rawValue: Int?) -> String {
@@ -2458,7 +2465,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         ) { [weak self] coordinator, change in
             let angle = change.newValue
                 ?? coordinator.videoRotationAngleForHorizonLevelPreview
-            MainActor.assumeIsolated {
+            Task { @MainActor [weak self] in
                 self?.applyPreviewRotationOnMain(angle, token: token)
             }
         }
@@ -2469,7 +2476,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         ) { [weak self] coordinator, change in
             let angle = change.newValue
                 ?? coordinator.videoRotationAngleForHorizonLevelCapture
-            MainActor.assumeIsolated {
+            Task { @MainActor [weak self] in
                 self?.applyCaptureRotationOnMain(angle, token: token)
             }
         }

@@ -101,6 +101,7 @@ struct CaptureReviewView: View {
                         .padding(.bottom, 16)
                         .frame(maxWidth: .infinity)
                     }
+                    .accessibilityIdentifier("review-content-scroll")
                     .safeAreaInset(edge: .bottom, spacing: 0) {
                         actionBar
                             .frame(maxWidth: FilmyLayout.readableMaxWidth)
@@ -662,6 +663,8 @@ struct CaptureReviewView: View {
                 }
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("review-action-bar")
     }
 
     private var saveDisclosure: some View {
