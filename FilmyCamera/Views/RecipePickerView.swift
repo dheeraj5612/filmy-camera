@@ -41,10 +41,10 @@ struct RecipePickerView: View {
         compact ? 10 : 10
     }
 
-    /// Compact tiles keep the name inside the swatch at normal sizes; large
-    /// accessibility text moves it below in a two-line caption.
+    /// Captions stay outside the photograph at every text size.
+    @ScaledMetric(relativeTo: .caption) private var captionSpace: CGFloat = 36
     private var railHeight: CGFloat {
-        compact ? swatchSize.height + 12 : swatchSize.height + 30
+        swatchSize.height + captionSpace + 12
     }
 
     /// Put the compact digital profile in the first glance of the rail. Its
@@ -263,13 +263,12 @@ struct RecipePickerView: View {
                 recipe: recipe,
                 isSelected: isSelected,
                 compact: compact,
-                showsLabel: compact && !dynamicTypeSize.isAccessibilitySize
+                showsLabel: false
             )
             .frame(width: swatchSize.width, height: swatchSize.height)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .clipShape(Rectangle())
 
-            if !compact || dynamicTypeSize.isAccessibilitySize {
-                Text(recipe.name)
+            Text(recipe.name)
                     .font(.system(
                         dynamicTypeSize.isAccessibilitySize ? .caption : .caption2,
                         design: .rounded
@@ -280,10 +279,8 @@ struct RecipePickerView: View {
                     .multilineTextAlignment(.center)
                     .frame(width: swatchSize.width + 8)
                     .fixedSize(horizontal: false, vertical: dynamicTypeSize.isAccessibilitySize)
-            }
         }
         // Do not dim unselected photographs: their colors are the decision.
-        .opacity(1)
         .contentShape(Rectangle())
         .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: isSelected)
     }
@@ -315,8 +312,8 @@ struct CurrentRecipeButton: View {
 
     private var recipeIcon: some View {
         RecipeSwatch(recipe: recipe, compact: true, showsLabel: false)
-            .frame(width: 34, height: 38)
-            .clipShape(RoundedRectangle(cornerRadius: 7))
+            .frame(width: 34, height: 40)
+            .clipShape(Rectangle())
             .accessibilityHidden(true)
     }
 
@@ -329,10 +326,10 @@ struct CurrentRecipeButton: View {
                     .font(.system(.subheadline, design: .rounded).weight(.bold))
                     .foregroundStyle(.white)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                    .minimumScaleFactor(0.72)
+                    .minimumScaleFactor(0.85)
 
-                Text("\(semanticSubtitle) · Explore")
-                    .font(.system(.caption2).weight(.medium))
+                Text(isCustomized ? "LOOKS · CUSTOM" : "LOOKS")
+                    .font(.system(.caption2, design: .monospaced).weight(.semibold))
                     .foregroundStyle(.white.opacity(0.64))
                     .lineLimit(1)
             }
@@ -387,12 +384,8 @@ struct CurrentRecipeButton: View {
                 }
             }
             .frame(maxWidth: .infinity, minHeight: compactLayout ? 64 : FilmyTheme.minimumHitTarget, alignment: .leading)
-            .padding(.horizontal, 11)
-            .background(FilmyTheme.backgroundRaised, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 15, style: .continuous)
-                    .stroke(accentColor.opacity(0.38), lineWidth: 1)
-            }
+            .padding(.horizontal, 4)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.pressable)
         .frame(maxWidth: compactLayout ? 136 : 256)
@@ -681,7 +674,7 @@ struct RecipeDetailView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Eyebrow(text: recipe.filmBase.officialName.uppercased(), color: FilmyTheme.accent)
                 Text(recipe.name)
-                    .font(.system(.largeTitle, design: .serif).weight(.medium))
+                    .font(.system(.largeTitle, design: .default).weight(.medium))
                     .foregroundStyle(FilmyTheme.primary)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(recipe.descriptor)
@@ -1506,11 +1499,8 @@ struct LookLibraryView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .top, spacing: 16) {
                 VStack(alignment: .leading, spacing: 4) {
-                    if !compact {
-                        Eyebrow(text: "THE LOOK LIBRARY", color: FilmyTheme.accent)
-                    }
                     Text("Looks")
-                        .font(.system(compact ? .title2 : .largeTitle, design: .serif).weight(.medium))
+                        .font(.system(compact ? .title2 : .largeTitle).weight(.bold))
                         .foregroundStyle(FilmyTheme.primary)
                         .accessibilityAddTraits(.isHeader)
                 }
@@ -1527,12 +1517,6 @@ struct LookLibraryView: View {
                 .buttonStyle(.pressable)
                 .accessibilityIdentifier("look-library-close")
                 .accessibilityHint("Closes the library without changing your look")
-            }
-            if !compact {
-                Text(subtitle)
-                    .font(.subheadline)
-                    .foregroundStyle(FilmyTheme.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.horizontal, 22)
@@ -1611,50 +1595,33 @@ struct LookLibraryView: View {
     private func lookCard(_ recipe: FilmRecipe) -> some View {
         let selected = recipe.id == selectedRecipeID
         let favorite = favoriteIDs.contains(recipe.id)
-        return ZStack(alignment: .topTrailing) {
+        return VStack(alignment: .leading, spacing: 4) {
             Button {
                 searchIsFocused = false
                 HapticFeedback.play(.selection)
                 onSelect(recipe)
             } label: {
-                VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 8) {
                     Color.clear
-                        .aspectRatio(dynamicTypeSize.isAccessibilitySize ? 2 : 4.0 / 3.0, contentMode: .fit)
+                        .aspectRatio(dynamicTypeSize.isAccessibilitySize ? 1.5 : 0.75, contentMode: .fit)
                         .overlay {
-                            RecipeSwatch(recipe: recipe, compact: false, showsLabel: false)
+                            RecipeSwatch(recipe: recipe, showsLabel: false)
                         }
                         .clipped()
-                        .overlay(alignment: .bottomLeading) {
-                            if selected {
-                                Label("Current", systemImage: "checkmark")
-                                    .font(.caption.weight(.bold))
-                                    .foregroundStyle(FilmyTheme.background)
-                                    .padding(.horizontal, 9)
-                                    .padding(.vertical, 6)
-                                    .background(FilmyTheme.accent, in: Capsule())
-                                    .padding(10)
-                            }
+                    HStack(alignment: .top, spacing: 5) {
+                        if selected {
+                            Image(systemName: "checkmark")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(FilmyTheme.accent)
                         }
-                    VStack(alignment: .leading, spacing: 5) {
                         Text(recipe.name)
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(FilmyTheme.primary)
                             .fixedSize(horizontal: false, vertical: true)
-                        Text(recipe.descriptor)
-                            .font(.caption)
-                            .foregroundStyle(FilmyTheme.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 18))
-                .clipShape(RoundedRectangle(cornerRadius: 18))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 18)
-                        .strokeBorder(selected ? FilmyTheme.accent : FilmyTheme.line, lineWidth: selected ? 2 : 1)
-                }
-                .contentShape(RoundedRectangle(cornerRadius: 18))
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("\(selectionIdentifierPrefix)-\(recipe.id)")
@@ -1662,26 +1629,33 @@ struct LookLibraryView: View {
             .accessibilityValue(selected ? "Selected" : "Not selected")
             .accessibilityAddTraits(selected ? .isSelected : [])
             .accessibilityHint("Applies this look and closes the library")
-            // The favorite button is a sibling overlay, never a nested button in
-            // the selection label. Favoriting must not apply or dismiss a look.
-            Button {
-                var updated = favoriteIDs
-                if favorite { updated.remove(recipe.id) } else { updated.insert(recipe.id) }
-                favoriteData = LookLibraryIndex.encodeFavorites(updated)
-                HapticFeedback.play(.selection)
-            } label: {
-                Image(systemName: favorite ? "heart.fill" : "heart")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(favorite ? FilmyTheme.accent : .white)
-                    .frame(width: 48, height: 48)
-                    .background(Color.black.opacity(0.78), in: Circle())
-                    .contentShape(Circle())
+
+            HStack(alignment: .center, spacing: 4) {
+                Text(recipe.descriptor)
+                    .font(.caption)
+                    .foregroundStyle(FilmyTheme.secondary)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button {
+                    var updated = favoriteIDs
+                    if favorite { updated.remove(recipe.id) } else { updated.insert(recipe.id) }
+                    favoriteData = LookLibraryIndex.encodeFavorites(updated)
+                    HapticFeedback.play(.selection)
+                } label: {
+                    Image(systemName: favorite ? "heart.fill" : "heart")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(favorite ? FilmyTheme.accent : FilmyTheme.primary)
+                        .frame(width: 48, height: 48)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("look-favorite-\(recipe.id)")
+                .accessibilityLabel(favorite ? "Remove \(recipe.name) from favorites" : "Favorite \(recipe.name)")
+                .accessibilityValue(favorite ? "Favorite" : "Not favorite")
             }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("look-favorite-\(recipe.id)")
-            .accessibilityLabel(favorite ? "Remove \(recipe.name) from favorites" : "Favorite \(recipe.name)")
-            .accessibilityValue(favorite ? "Favorite" : "Not favorite")
-            .padding(8)
+            .overlay(alignment: .bottomLeading) {
+                if selected { FilmRegistration() }
+            }
         }
         .accessibilityElement(children: .contain)
     }
@@ -1693,7 +1667,7 @@ struct LookLibraryView: View {
                 .foregroundStyle(FilmyTheme.accent)
                 .accessibilityHidden(true)
             Text(filter == .favorites && query.isEmpty ? "Keep your favorites close." : "No looks found.")
-                .font(.system(.title2, design: .serif))
+                .font(.system(.title2, design: .default))
                 .foregroundStyle(FilmyTheme.primary)
                 .accessibilityIdentifier("look-library-empty")
             Text(filter == .favorites && query.isEmpty

@@ -169,6 +169,9 @@ struct CameraScreen: View {
     @State private var suppressLookSwipeUntil = Date.distantPast
     @State private var viewfinderChromeHeights: [ViewfinderChromeEdge: CGFloat] = [:]
     @State private var isShutterBlinking = false
+    @State private var isConfirmingCaptureDiscard = false
+    @State private var favoritesOnly = false
+    @AppStorage("favoriteRecipeIDs.v1") private var favoriteData = Data()
 
     init(
         camera: CameraService,
@@ -280,6 +283,13 @@ struct CameraScreen: View {
             }
         }
         .modifier(CameraHardwareShutterModifier(enabled: canTriggerShutter, action: capture))
+        .confirmationDialog("Discard this unsaved photo?", isPresented: $isConfirmingCaptureDiscard, titleVisibility: .visible) {
+            Button("Discard photo", role: .destructive) { viewModel.discardReview() }
+                .accessibilityIdentifier("capture-save-confirm-discard")
+            Button("Keep photo", role: .cancel) { }
+        } message: {
+            Text("This photo has not been saved to Photos. Discarding cannot be undone.")
+        }
         .onChange(of: assistOptions, initial: true) { _, _ in updateCompositionAssists() }
         .onChange(of: isCameraVisibleForAssists, initial: true) { _, visible in
             if !visible { countdown.cancel() }
@@ -405,23 +415,34 @@ struct CameraScreen: View {
     /// normal shutter press into an editor or let the next shot overwrite it.
     private func captureSaveRecovery(_ message: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Photo not saved yet").font(.headline)
+            Label("Photo not saved yet", systemImage: "exclamationmark.circle.fill")
+                .font(.headline)
+                .foregroundStyle(FilmyTheme.danger)
             Text(message).font(.subheadline).fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Button("Retry save") { viewModel.saveReview(photoLibrary: photoLibrary) }
-                    .accessibilityIdentifier("capture-save-retry")
-                if viewModel.saveErrorRequiresSettings {
-                    Button("Photos Settings", action: openSystemSettings)
-                        .accessibilityIdentifier("capture-save-settings")
-                }
-                Button("Discard", role: .destructive) { viewModel.discardReview() }
-                    .accessibilityIdentifier("capture-save-discard")
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { captureRecoveryActions }
+                VStack(alignment: .leading, spacing: 8) { captureRecoveryActions }
             }
             .buttonStyle(.bordered)
         }
         .padding(14)
         .viewfinderChrome(RoundedRectangle(cornerRadius: 16))
         .accessibilityIdentifier("capture-save-recovery")
+    }
+
+    @ViewBuilder
+    private var captureRecoveryActions: some View {
+        Button("Retry save") { viewModel.saveReview(photoLibrary: photoLibrary) }
+            .frame(minHeight: 44)
+            .accessibilityIdentifier("capture-save-retry")
+        if viewModel.saveErrorRequiresSettings {
+            Button("Photos Settings", action: openSystemSettings)
+                .frame(minHeight: 44)
+                .accessibilityIdentifier("capture-save-settings")
+        }
+        Button("Discard", role: .destructive) { isConfirmingCaptureDiscard = true }
+            .frame(minHeight: 44)
+            .accessibilityIdentifier("capture-save-discard")
     }
 
     // MARK: - Shells
@@ -763,17 +784,12 @@ struct CameraScreen: View {
                     .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
                     .fixedSize(horizontal: true, vertical: false)
 
-                cameraSwitchButton
-                    .opacity(camera.availableCameraPositions.count > 1 ? 1 : 0)
-                    .disabled(camera.availableCameraPositions.count < 2)
-                    .accessibilityHidden(camera.availableCameraPositions.count < 2)
+                importButton
 
                 Spacer(minLength: 0)
 
                 ViewThatFits(in: .horizontal) {
-                    Text("filmy")
-                        .font(.system(.title3, design: .serif).italic())
-                        .foregroundStyle(FilmyTheme.primary)
+                    FilmyWordmark(compact: true)
                         .accessibilityHidden(true)
                     Color.clear.frame(width: 0, height: 0)
                 }
@@ -784,8 +800,6 @@ struct CameraScreen: View {
                 captureSetupButton
                 settingsButton
 
-                toolsToggle
-                    .disabled(!camera.isRunning && !isViewfinderChromePreview)
             }
         } indicators: {
             HStack(spacing: 8) {
@@ -924,8 +938,8 @@ struct CameraScreen: View {
                 isShowingTools.toggle()
             }
         } label: {
-            Image(systemName: isShowingTools ? "chevron.up" : "chevron.down")
-                .font(.system(size: 14, weight: .bold))
+            Image(systemName: isShowingTools ? "xmark" : "slider.horizontal.3")
+                .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(isShowingTools ? FilmyTheme.accent : .white)
                 .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
                 .background { ChromeShapeBackground(shape: Circle()) }
@@ -933,6 +947,7 @@ struct CameraScreen: View {
         }
         .buttonStyle(.pressable)
         .accessibilityIdentifier("camera-chrome-toggle")
+        .accessibilityValue(isShowingTools ? "Expanded" : "Collapsed")
         .accessibilityLabel(isShowingTools ? "Hide camera controls" : "Show camera controls")
         .accessibilityHint(
             isShowingTools
@@ -944,23 +959,58 @@ struct CameraScreen: View {
     // MARK: - Primary controls and look drawer
 
     private var primaryBottomBar: some View {
-        VStack(spacing: 4) {
-            currentRecipeButton()
+        VStack(spacing: 6) {
+            HStack(spacing: 6) {
+                currentRecipeButton()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                favoriteCurrentLookButton
+                toolsToggle
+                    .disabled(!camera.isRunning && !isViewfinderChromePreview)
+            }
 
-            ZStack {
-                HStack {
-                    rollButton
-                    Spacer(minLength: 0)
-                    importButton
-                }
-
+            HStack(alignment: .center, spacing: 0) {
+                rollButton.frame(width: 76)
+                Spacer(minLength: 0)
                 captureControl
+                Spacer(minLength: 0)
+                VStack(spacing: 2) {
+                    cameraSwitchButton
+                        .disabled(camera.availableCameraPositions.count < 2)
+                    Text("Flip")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(FilmyTheme.secondary)
+                        .accessibilityHidden(true)
+                }
+                .frame(width: 76)
             }
             .frame(minHeight: 80)
         }
-        .padding(.horizontal, 6)
         .frame(maxWidth: FilmyLayout.dockMaxWidth)
         .frame(maxWidth: .infinity)
+    }
+
+    private var favoriteIDs: Set<String> { LookLibraryIndex.favorites(from: favoriteData) }
+
+    private var favoriteCurrentLookButton: some View {
+        let recipe = viewModel.selectedRecipe
+        let favorite = favoriteIDs.contains(recipe.id)
+        return Button {
+            var updated = favoriteIDs
+            if favorite { updated.remove(recipe.id) } else { updated.insert(recipe.id) }
+            favoriteData = LookLibraryIndex.encodeFavorites(updated)
+            HapticFeedback.play(.selection)
+        } label: {
+            Image(systemName: favorite ? "heart.fill" : "heart")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(favorite ? FilmyTheme.accent : FilmyTheme.primary)
+                .frame(width: 44, height: 48)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.pressable)
+        .accessibilityIdentifier("camera-favorite-look")
+        .accessibilityLabel(favorite ? "Remove \(recipe.name) from favorites" : "Favorite \(recipe.name)")
+        .accessibilityValue(favorite ? "Favorite" : "Not favorite")
+        .accessibilityHint("Favorites are shared with the look library. This does not change your look.")
     }
 
     /// Wide iPad layouts use the edge column even in portrait so the picture
@@ -975,7 +1025,13 @@ struct CameraScreen: View {
 
             HStack(spacing: 8) {
                 rollButton
-                importButton
+                cameraSwitchButton
+                    .disabled(camera.availableCameraPositions.count < 2)
+            }
+            HStack(spacing: 8) {
+                favoriteCurrentLookButton
+                toolsToggle
+                    .disabled(!camera.isRunning && !isViewfinderChromePreview)
             }
 
             Spacer(minLength: 0)
@@ -1017,8 +1073,8 @@ struct CameraScreen: View {
                         text: recipeEyebrow,
                         color: isCompactDigitalMode ? FilmyTheme.accent : FilmyTheme.filmAccent
                     )
-                    Text("Choose a look")
-                        .font(.system(.title3, design: .serif).weight(.medium))
+                    Text("Looks")
+                        .font(.system(.title3).weight(.bold))
                         .foregroundStyle(FilmyTheme.primary)
                 }
 
@@ -1057,13 +1113,61 @@ struct CameraScreen: View {
             .padding(.horizontal, 8)
             .layoutPriority(1)
 
-            RecipePickerView(
-                recipes: viewModel.recipes,
-                selectedRecipeID: $viewModel.selectedRecipeID,
-                onOpenDetail: openRecipeDetail,
-                compact: true
-            )
-            .frame(maxHeight: max(maxHeight - 122, 70))
+            HStack(spacing: 8) {
+                Button {
+                    favoritesOnly = false
+                    HapticFeedback.play(.selection)
+                } label: {
+                    Text("All")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(!favoritesOnly ? FilmyTheme.primary : FilmyTheme.secondary)
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 44)
+                        .overlay(alignment: .bottom) {
+                            if !favoritesOnly { FilmRegistration() }
+                        }
+                        .contentShape(Rectangle())
+                }
+                .accessibilityIdentifier("camera-looks-all")
+                .accessibilityAddTraits(!favoritesOnly ? .isSelected : [])
+                Button {
+                    favoritesOnly = true
+                    HapticFeedback.play(.selection)
+                } label: {
+                    Label("Favorites", systemImage: "heart")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(favoritesOnly ? FilmyTheme.primary : FilmyTheme.secondary)
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 44)
+                        .overlay(alignment: .bottom) {
+                            if favoritesOnly { FilmRegistration() }
+                        }
+                        .contentShape(Rectangle())
+                }
+                .accessibilityIdentifier("camera-looks-favorites")
+                .accessibilityAddTraits(favoritesOnly ? .isSelected : [])
+                Spacer(minLength: 0)
+            }
+            .buttonStyle(.plain)
+
+            if favoritesOnly && favoriteIDs.intersection(viewModel.recipes.map(\.id)).isEmpty {
+                Text("Heart a look to keep it here.")
+                    .font(.subheadline)
+                    .foregroundStyle(FilmyTheme.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 70)
+                    .accessibilityIdentifier("camera-favorites-empty")
+            } else {
+                RecipePickerView(
+                    recipes: favoritesOnly
+                        ? viewModel.recipes.filter { favoriteIDs.contains($0.id) }
+                        : viewModel.recipes,
+                    selectedRecipeID: $viewModel.selectedRecipeID,
+                    onOpenDetail: openRecipeDetail,
+                    compact: !favoritesOnly
+                )
+                .frame(maxHeight: max(maxHeight - 176, 70))
+                .id(favoritesOnly)
+            }
 
             Button {
                 HapticFeedback.play(.selection)
@@ -1071,7 +1175,7 @@ struct CameraScreen: View {
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "square.grid.2x2")
-                    Text("Explore all \(viewModel.recipes.count) looks")
+                    Text("All \(viewModel.recipes.count) looks")
                     Spacer(minLength: 0)
                     Image(systemName: "arrow.up.right")
                 }
@@ -1079,7 +1183,7 @@ struct CameraScreen: View {
                 .foregroundStyle(FilmyTheme.accent)
                 .padding(.horizontal, 12)
                 .frame(minHeight: 48)
-                .background(FilmyTheme.accent.opacity(0.09), in: RoundedRectangle(cornerRadius: 14))
+                .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 12))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.pressable)
@@ -1194,10 +1298,15 @@ struct CameraScreen: View {
             closeControlDrawers()
             onOpenGallery()
         } label: {
-            RollThumbnail(asset: photoLibrary.galleryAssets.first, photoLibrary: photoLibrary)
-                .frame(width: 52, height: 52)
-                .frame(width: 64, height: 64)
-                .contentShape(Rectangle())
+            VStack(spacing: 3) {
+                RollThumbnail(asset: photoLibrary.galleryAssets.first, photoLibrary: photoLibrary)
+                    .frame(width: 44, height: 44)
+                Text("Roll")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(FilmyTheme.secondary)
+            }
+            .frame(width: 64, height: 64)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.pressable)
         .accessibilityIdentifier("roll-tab")
@@ -1228,8 +1337,7 @@ struct CameraScreen: View {
                         .foregroundStyle(FilmyTheme.primary)
                 }
             }
-            .frame(width: 52, height: 52)
-            .frame(width: 64, height: 64)
+            .frame(width: 44, height: 44)
             .contentShape(Rectangle())
         }
         .buttonStyle(.pressable)
@@ -1244,7 +1352,9 @@ struct CameraScreen: View {
     private func toolStrip(minWidth: CGFloat) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ExposureControl(value: camera.exposureBias) { direction in
+                ExposureControl(value: camera.exposureBias, onReset: {
+                    camera.setExposureBias(0)
+                }) { direction in
                     let delta: Float = direction == .increment ? (1.0 / 3.0) : -(1.0 / 3.0)
                     camera.setExposureBias(camera.exposureBias + delta)
                 }

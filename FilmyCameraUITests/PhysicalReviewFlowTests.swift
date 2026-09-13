@@ -124,7 +124,7 @@ final class PhysicalReviewFlowTests: XCTestCase {
         }
         tapCenter(of: firstPhoto)
 
-        XCTAssertTrue(app.staticTexts["IMPORTED PHOTO"].waitForExistence(timeout: 40))
+        XCTAssertTrue(app.staticTexts["review-heading"].waitForExistence(timeout: 40))
         XCTAssertTrue(app.descendants(matching: .any)["review-screen"].waitForExistence(timeout: 10))
         XCTAssertTrue(
             app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Filter applied'")).firstMatch.exists,

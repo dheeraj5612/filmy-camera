@@ -565,7 +565,7 @@ final class FilmyCameraUITests: XCTestCase {
         ).tap()
 
         XCTAssertTrue(
-            app.staticTexts["IMPORTED PHOTO"].waitForExistence(timeout: 30),
+            app.staticTexts["review-heading"].waitForExistence(timeout: 30),
             "The imported image should reach filtered review"
         )
         // Whichever library photo the picker lists first, the caption must
@@ -967,7 +967,7 @@ final class FilmyCameraUITests: XCTestCase {
 
     #if targetEnvironment(simulator)
     func testSimulatorFallbackExposesReadableStateWithoutPreviewAction() throws {
-        XCTAssertTrue(app.staticTexts["Preview mode"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["Sample · not a live camera"].waitForExistence(timeout: 8))
         XCTAssertTrue(
             app.staticTexts["Shoot this look on an iPhone or iPad."].waitForExistence(timeout: 5)
         )

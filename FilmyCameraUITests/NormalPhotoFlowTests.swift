@@ -166,6 +166,59 @@ final class NormalPhotoFlowTests: XCTestCase {
         )
     }
 
+    func testSplitComparisonMovesResetsAndSavesOnlyTheSelectedLook() throws {
+        launchNormalApp()
+        try ensureRecipe(id: "g7x-compact", name: "G7 X Compact")
+        try importSeededFixture()
+
+        let split = app.buttons["review-compare-split"]
+        let scroll = app.scrollViews["review-content-scroll"]
+        XCTAssertTrue(revealFully(split, in: scroll))
+        assertReviewControl(split, name: "Split comparison")
+        split.tap()
+        XCTAssertTrue(waitUntil(timeout: 20) { split.value as? String == "On" })
+        let divider = app.descendants(matching: .any)["review-comparison-divider"]
+        XCTAssertTrue(divider.waitForExistence(timeout: 5))
+        XCTAssertTrue(revealFully(divider, in: scroll))
+        XCTAssertEqual(divider.value as? String, "Original 50 percent")
+        let photo = app.descendants(matching: .any)["review-image"]
+        XCTAssertTrue(photo.label.contains("Original on the left"))
+        let start = divider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let end = start.withOffset(CGVector(dx: -photo.frame.width * 0.25, dy: 0))
+        start.press(forDuration: 0.15, thenDragTo: end)
+        XCTAssertTrue(waitUntil(timeout: 5) { divider.value as? String != "Original 50 percent" },
+                      "Direct manipulation must update the original fraction")
+        attachScreenshot(named: "signal-frame-review-split")
+
+        let printFinish = app.buttons["review-finish-instantPrint"]
+        XCTAssertTrue(revealFully(printFinish, in: scroll))
+        printFinish.tap()
+        let save = app.buttons["Save filtered photo"]
+        XCTAssertTrue(waitUntil(timeout: 30) { photo.label.contains("Instant Print") && save.isEnabled })
+        XCTAssertFalse(split.exists, "Different print geometry must not expose an aligned split")
+        XCTAssertFalse(divider.exists)
+        let plain = app.buttons["review-finish-photo"]
+        XCTAssertTrue(revealFully(plain, in: scroll))
+        plain.tap()
+        XCTAssertTrue(waitUntil(timeout: 30) { split.exists && save.isEnabled })
+        XCTAssertEqual(split.value as? String, "Off")
+        XCTAssertTrue(revealFully(split, in: scroll))
+        split.tap()
+        XCTAssertTrue(waitUntil(timeout: 10) { split.value as? String == "On" })
+        XCTAssertEqual(divider.value as? String, "Original 50 percent", "Changing finish resets comparison intent")
+        // Saving while comparing must still export the selected treatment,
+        // not an original preview or a composited divider screenshot.
+        save.tap()
+        app.tap()
+        try waitForSaveCompletion()
+        openRoll()
+        let frame = app.buttons.matching(NSPredicate(format: "label == 'Photo in your gallery, G7 X Compact'")).firstMatch
+        XCTAssertTrue(frame.waitForExistence(timeout: 30))
+        frame.tap()
+        XCTAssertTrue(app.images["Photo"].waitForExistence(timeout: 20))
+        attachScreenshot(named: "signal-frame-split-saved-look")
+    }
+
     func testNormalReviewComparesAndSwitchesLookBeforeSaving() throws {
         launchNormalApp()
         try ensureRecipe(id: "g7x-compact", name: "G7 X Compact")
@@ -443,7 +496,7 @@ final class NormalPhotoFlowTests: XCTestCase {
             dy: (sourceFrame.midY - appFrame.minY) / appFrame.height
         )).tap()
 
-        XCTAssertTrue(app.staticTexts["IMPORTED PHOTO"].waitForExistence(timeout: 40))
+        XCTAssertTrue(app.staticTexts["review-heading"].waitForExistence(timeout: 40))
         XCTAssertTrue(app.descendants(matching: .any)["review-screen"].waitForExistence(timeout: 10))
         let metadata = app.staticTexts.matching(
             NSPredicate(format: "label BEGINSWITH 'Filter applied'")

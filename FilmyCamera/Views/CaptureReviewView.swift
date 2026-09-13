@@ -28,7 +28,7 @@ struct CaptureReviewView: View {
     var onApplyReviewFinish: (PhotoFinish) -> Void = { _ in }
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @State private var isShowingOriginal = false
+    @State private var comparison = ReviewComparisonState()
     @State private var isShowingLookLibrary = false
 
     var body: some View {
@@ -125,7 +125,7 @@ struct CaptureReviewView: View {
                 subtitle: "Choose a treatment for this photo.",
                 onSelect: { candidate in
                     guard !isSaving, !isPreparingReviewOriginal else { return }
-                    isShowingOriginal = false
+                    comparison.reset()
                     isShowingLookLibrary = false
                     onApplyReviewRecipe(candidate)
                 },
@@ -137,24 +137,25 @@ struct CaptureReviewView: View {
             .presentationCornerRadius(28)
         }
         .onAppear {
-            isShowingOriginal = false
+            comparison.reset()
         }
         .onChange(of: recipe.id) { _, _ in
-            isShowingOriginal = false
+            comparison.reset()
         }
         .onChange(of: pendingReviewRecipeID) { _, _ in
-            isShowingOriginal = false
+            comparison.reset()
         }
         .onChange(of: finish) { _, _ in
-            isShowingOriginal = false
+            comparison.reset()
         }
         .onChange(of: pendingReviewFinish) { _, _ in
-            isShowingOriginal = false
+            comparison.reset()
         }
         .onChange(of: reviewOriginalImage != nil) { _, hasOriginal in
-            if hasOriginal {
-                isShowingOriginal = true
-            }
+            if hasOriginal { comparison.originalDidLoad(splitSupported: supportsSplit) }
+        }
+        .onChange(of: isPreparingReviewOriginal) { _, preparing in
+            if !preparing && reviewOriginalImage == nil { comparison.preparationFailed() }
         }
     }
 
@@ -228,17 +229,23 @@ struct CaptureReviewView: View {
 
     private var header: some View {
         HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Eyebrow(text: isImported ? "IMPORTED PHOTO" : "REVIEW", color: FilmyTheme.accent)
-                Text(recipe.name)
-                    .font(.system(.title2, design: .serif).weight(.medium))
-                    .foregroundStyle(FilmyTheme.primary)
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
+            Text(isImported ? "Edit photo" : "Review")
+                .font(.title2.weight(.bold))
+                .foregroundStyle(FilmyTheme.primary)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier("review-heading")
             Spacer(minLength: 8)
+            Label("New copy", systemImage: "square.on.square")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(FilmyTheme.secondary)
         }
+    }
+
+    private var isShowingOriginal: Bool { comparison.mode == .original }
+
+    private var supportsSplit: Bool {
+        guard let original = reviewOriginalImage else { return finish == .photo }
+        return ReviewComparisonGeometry.supportsSplit(original: original.size, edited: image.size, finish: finish)
     }
 
     private var isImported: Bool {
@@ -261,57 +268,93 @@ struct CaptureReviewView: View {
             within: CGSize(width: maxWidth, height: maxHeight)
         )
 
-        let image = Image(uiImage: displayImage)
-            .resizable()
-            .scaledToFit()
-            .frame(width: fitted.width, height: fitted.height)
+        return VStack(spacing: 8) {
+            ZStack {
+                Image(uiImage: displayImage)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: fitted.width, height: fitted.height)
 
-        // An Instant Print finish is a real white border in the rendered
-        // pixels. Keep its outside edge square so the presentation cannot
-        // crop or round the printed frame. Normal photos retain the softer
-        // review treatment.
-        let finishedImage: AnyView
-        if !isShowingOriginal && finish == .instantPrint {
-            finishedImage = AnyView(
-                image
-                    .overlay(Rectangle().strokeBorder(FilmyTheme.lineStrong, lineWidth: 1))
-            )
-        } else {
-            finishedImage = AnyView(
-                image
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(FilmyTheme.lineStrong, lineWidth: 1)
-                    }
-            )
-        }
-
-        return finishedImage
-            .accessibilityElement(children: .ignore)
-            .accessibilityIdentifier("review-image")
-            .accessibilityLabel(
-                isShowingOriginal
-                    ? "Original source photo, without the Filmy look"
-                    : isImported
-                        ? "Imported photo with \(recipe.name), \(finishTitle(finish)), \(resolutionCaption)"
-                        : "Captured frame with \(recipe.name), \(finishTitle(finish)), \(resolutionCaption)"
-            )
-            .overlay(alignment: .topLeading) {
-                if isShowingOriginal {
-                    Text("ORIGINAL")
-                        .font(.system(.caption2, design: .rounded).weight(.bold))
-                        .tracking(0.8)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 6)
-                        .background(Color.black.opacity(0.72), in: Capsule())
-                        .padding(12)
+                if comparison.mode == .split, let original = reviewOriginalImage, supportsSplit {
+                    Image(uiImage: original)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: fitted.width, height: fitted.height)
+                        .mask(alignment: .leading) {
+                            Rectangle()
+                                .frame(width: fitted.width * comparison.originalFraction)
+                        }
+                        .allowsHitTesting(false)
                         .accessibilityHidden(true)
+                    comparisonDivider(in: fitted)
                 }
             }
-            .shadow(color: .black.opacity(0.4), radius: 22, y: 10)
-            .frame(maxWidth: .infinity)
+            .frame(width: fitted.width, height: fitted.height)
+            .coordinateSpace(name: "review-comparison-space")
+            .accessibilityElement(children: comparison.mode == .split ? .contain : .ignore)
+            .accessibilityIdentifier("review-image")
+            .accessibilityLabel(
+                comparison.mode == .split
+                    ? "Original on the left, \(recipe.name) on the right"
+                    : isShowingOriginal
+                        ? "Original source photo, without the Filmy look"
+                        : isImported
+                            ? "Imported photo with \(recipe.name), \(finishTitle(finish)), \(resolutionCaption)"
+                            : "Captured frame with \(recipe.name), \(finishTitle(finish)), \(resolutionCaption)"
+            )
+
+            if comparison.mode != .look {
+                HStack(spacing: 8) {
+                    Text("Original")
+                    Spacer(minLength: 0)
+                    if comparison.mode == .split { Text(recipe.name) }
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(FilmyTheme.comparison)
+                .frame(width: fitted.width)
+                .accessibilityHidden(true)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func comparisonDivider(in size: CGSize) -> some View {
+        let splitX = size.width * comparison.originalFraction
+        let handleX = min(max(splitX, 22), max(size.width - 22, 22))
+        return ZStack {
+            Rectangle()
+                .fill(Color.black)
+                .frame(width: 4, height: size.height)
+                .overlay { Rectangle().fill(Color.white).frame(width: 2) }
+                .position(x: splitX, y: size.height / 2)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            Image(systemName: "arrow.left.and.right")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(FilmyTheme.background)
+                .frame(width: 44, height: 44)
+                .background(FilmyTheme.comparison, in: Circle())
+                .overlay { Circle().strokeBorder(.black, lineWidth: 2) }
+                .contentShape(Circle())
+                .gesture(
+                    DragGesture(minimumDistance: 0, coordinateSpace: .named("review-comparison-space"))
+                        .onChanged { value in
+                            comparison.moveDivider(to: value.location.x / max(size.width, 1))
+                        }
+                )
+                .accessibilityElement(children: .ignore)
+                .accessibilityIdentifier("review-comparison-divider")
+                .accessibilityLabel("Before and after divider")
+                .accessibilityValue("Original \(Int((comparison.originalFraction * 100).rounded())) percent")
+                .accessibilityHint("Drag left or right, or swipe up or down to adjust. Double tap to center.")
+                .accessibilityAdjustableAction { direction in
+                    comparison.stepDivider(increasing: direction == .increment)
+                    HapticFeedback.play(.controlStep)
+                }
+                .accessibilityAction { comparison.moveDivider(to: 0.5) }
+                .offset(x: handleX - size.width / 2, y: size.height * 0.15)
+        }
+        .frame(width: size.width, height: size.height)
     }
 
     private var displayImage: UIImage {
@@ -362,19 +405,21 @@ struct CaptureReviewView: View {
                 HStack(alignment: .top, spacing: 10) {
                     lookPicker
                         .frame(maxWidth: .infinity)
-                    compareButton
+                    comparisonControls
                     finishPicker(stacked: false)
                         .frame(width: 280, alignment: .leading)
                 }
             } else if stacked || dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 10) {
                     lookPicker
-                    compareButton
+                    comparisonControls
                 }
             } else {
-                HStack(alignment: .center, spacing: 10) {
+                // Preserve readable names on small iPhones. Comparison has
+                // two explicit actions; it must not squeeze the active look.
+                VStack(alignment: .leading, spacing: 10) {
                     lookPicker
-                    compareButton
+                    comparisonControls
                 }
             }
 
@@ -407,14 +452,7 @@ struct CaptureReviewView: View {
                     .accessibilityIdentifier("review-render-error")
             }
 
-            if !compact {
-                Text(isShowingOriginal
-                     ? "Original preview · Save keeps \(recipe.name) · \(finishTitle(finish))"
-                     : "Save \(recipe.name) to Photos")
-                    .font(.system(.caption2, design: .rounded).weight(.medium))
-                    .foregroundStyle(FilmyTheme.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+
         }
     }
 
@@ -461,10 +499,12 @@ struct CaptureReviewView: View {
                 }
             }
 
-            Text(finishDescription(selectedReviewFinish))
-                .font(.system(.caption2, design: .rounded).weight(.medium))
-                .foregroundStyle(FilmyTheme.tertiary)
-                .fixedSize(horizontal: false, vertical: true)
+            if selectedReviewFinish == .instantPrint {
+                Text(finishDescription(selectedReviewFinish))
+                    .font(.caption)
+                    .foregroundStyle(FilmyTheme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("review-finish-picker")
@@ -474,20 +514,13 @@ struct CaptureReviewView: View {
         let isSelected = selectedReviewFinish == candidate
         return Button {
             guard !isSaving, !isPreparingReviewOriginal else { return }
-            isShowingOriginal = false
+            comparison.reset()
             onApplyReviewFinish(candidate)
         } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(finishTitle(candidate))
-                    .font(.system(.subheadline, design: .rounded).weight(.bold))
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.85)
-                Text(candidate == .instantPrint ? "White border" : "Full frame")
-                    .font(.system(.caption2, design: .rounded).weight(.medium))
-                    .foregroundStyle(isSelected ? FilmyTheme.background.opacity(0.82) : FilmyTheme.tertiary)
-                    .lineLimit(2)
-            }
-            .foregroundStyle(isSelected ? FilmyTheme.background : FilmyTheme.primary)
+            Label(finishTitle(candidate), systemImage: candidate == .instantPrint ? "rectangle.inset.filled" : "rectangle")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(isSelected ? FilmyTheme.background : FilmyTheme.secondary)
+                .lineLimit(2)
             .frame(maxWidth: .infinity, minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
             .padding(.horizontal, 12)
             .background(
@@ -545,37 +578,58 @@ struct CaptureReviewView: View {
         .frame(maxWidth: .infinity)
     }
 
+    private var comparisonControls: some View {
+        HStack(spacing: 8) {
+            compareButton
+            if supportsSplit {
+                Button {
+                    requestComparison(comparison.mode == .split ? .look : .split)
+                } label: {
+                    Label(comparison.mode == .split ? "Done" : "Split", systemImage: "rectangle.lefthalf.filled")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(comparison.mode == .split ? FilmyTheme.background : FilmyTheme.comparison)
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 48)
+                        .background(comparison.mode == .split ? FilmyTheme.comparison : FilmyTheme.panel, in: Capsule())
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.pressable)
+                .disabled(isSaving || isRenderingReview || isPreparingReviewOriginal)
+                .accessibilityIdentifier("review-compare-split")
+                .accessibilityLabel("Split comparison")
+                .accessibilityValue(comparison.mode == .split ? "On" : "Off")
+                .accessibilityHint("Compare original and look at the same position. Drag the divider on the photo.")
+            }
+        }
+    }
+
+    private func requestComparison(_ mode: ReviewComparisonState.Mode) {
+        guard !isSaving, !isRenderingReview, !isPreparingReviewOriginal else { return }
+        HapticFeedback.play(.selection)
+        if comparison.select(mode, originalAvailable: reviewOriginalImage != nil, splitSupported: supportsSplit) {
+            Task { await onPrepareReviewOriginal() }
+        }
+    }
+
     private var compareButton: some View {
         Button {
-            if reviewOriginalImage != nil {
-                isShowingOriginal.toggle()
-            } else if !isPreparingReviewOriginal {
-                Task {
-                    await onPrepareReviewOriginal()
-                }
-            }
+            requestComparison(isShowingOriginal ? .look : .original)
         } label: {
             HStack(spacing: 7) {
                 if isPreparingReviewOriginal {
-                    ProgressView()
-                        .tint(FilmyTheme.primary)
+                    ProgressView().tint(FilmyTheme.comparison)
                 } else {
-                    Image(systemName: isShowingOriginal ? "photo" : "photo.on.rectangle")
+                    Image(systemName: "circle.lefthalf.filled")
                 }
-                Text(isShowingOriginal ? "Show look" : "Compare")
+                Text(isShowingOriginal ? "Show look" : "Original")
                     .lineLimit(1)
             }
-            .font(.system(.caption, design: .rounded).weight(.bold))
-            .foregroundStyle(FilmyTheme.primary)
+            .font(.caption.weight(.bold))
+            .foregroundStyle(isShowingOriginal ? FilmyTheme.background : FilmyTheme.comparison)
             .padding(.horizontal, 12)
-            .frame(minHeight: FilmyTheme.minimumHitTarget)
-            .background(FilmyTheme.backgroundRaised, in: Capsule())
-            .overlay {
-                Capsule().strokeBorder(
-                    isShowingOriginal ? FilmyTheme.filmAccent : FilmyTheme.lineStrong,
-                    lineWidth: 1
-                )
-            }
+            .frame(minHeight: 48)
+            .background(isShowingOriginal ? FilmyTheme.comparison : FilmyTheme.panel, in: Capsule())
+            .contentShape(Capsule())
         }
         .buttonStyle(.pressable)
         .disabled(isSaving || isRenderingReview || isPreparingReviewOriginal)
@@ -668,8 +722,8 @@ struct CaptureReviewView: View {
     }
 
     private var saveDisclosure: some View {
-        Text(isShowingOriginal
-             ? "Viewing original. Saves \(recipe.name) with the \(finishTitle(finish)) finish."
+        Text(comparison.mode != .look
+             ? "Saves \(recipe.name) · \(finishTitle(finish)), not the original preview."
              : isImported
                 ? "Save a new copy. Your original stays unchanged."
                 : "Only the finished photo is saved to Photos.")
@@ -690,6 +744,7 @@ struct CaptureReviewView: View {
             )
         }
         .buttonStyle(.filmySecondary)
+        .accessibilityIdentifier("review-cancel")
         .disabled(isSaving)
     }
 
@@ -714,6 +769,7 @@ struct CaptureReviewView: View {
             }
         }
         .buttonStyle(.filmyPrimary)
+        .accessibilityIdentifier("review-save")
         .disabled(isSaving || isRenderingReview || isPreparingReviewOriginal)
         .accessibilityLabel(keepFrameAccessibilityLabel)
         .accessibilityHint("Saves the finished photo to your Photos library")
