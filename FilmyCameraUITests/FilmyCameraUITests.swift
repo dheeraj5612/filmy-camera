@@ -5,6 +5,32 @@ final class FilmyCameraUITests: XCTestCase {
     private nonisolated(unsafe) var app: XCUIApplication!
     private nonisolated(unsafe) var defaultsSuiteName = ""
 
+    func testLiveRecipeAdjustmentsPersistAndReset() {
+        app.terminate()
+        app.launchArguments += ["-ui-testing-viewfinder-chrome"]
+        app.launch()
+        let adjust = app.buttons["live-recipe-adjustments"]
+        XCTAssertTrue(adjust.waitForExistence(timeout: 10))
+        adjust.tap()
+        let exposure = app.sliders["Exposure"]
+        XCTAssertTrue(exposure.waitForExistence(timeout: 5))
+        let original = exposure.value as? String
+        exposure.adjust(toNormalizedSliderPosition: 1)
+        let changed = "+2.0 EV"
+        let settled = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", changed), object: exposure
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 5), .completed)
+        XCTAssertNotEqual(original, changed)
+        app.buttons["Done"].tap()
+        adjust.tap()
+        XCTAssertEqual(exposure.value as? String, changed)
+        app.buttons["Reset recipe controls"].tap()
+        XCTAssertEqual(exposure.value as? String, original)
+        app.buttons["Done"].tap()
+        XCTAssertFalse(exposure.exists)
+    }
+
     override func setUpWithError() throws {
         continueAfterFailure = false
         let suiteName = "FilmyCameraUITests.\(UUID().uuidString)"

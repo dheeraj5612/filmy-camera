@@ -1723,3 +1723,62 @@ struct LookLibraryView: View {
         .frame(maxWidth: .infinity)
     }
 }
+
+/// Compact camera overlay; writes the same recipe used by preview and capture.
+struct LiveRecipeControlsView: View {
+    let recipe: FilmRecipe
+    let onUpdate: (FilmRecipe) -> Void
+    let onReset: () -> Void
+    let onClose: () -> Void
+    @State private var control = "Exposure"
+    private let controls = ["Exposure", "Highlights", "Shadows", "Contrast", "Dynamic range", "D Range Priority"]
+
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Text("Live adjustments").font(.headline)
+                Spacer()
+                Button("Reset", action: onReset)
+                    .accessibilityLabel("Reset recipe controls")
+                    .frame(minHeight: 44)
+                Button("Done", action: onClose).frame(minHeight: 44)
+            }
+            Picker("Adjustment", selection: $control) {
+                ForEach(controls, id: \.self) { Text($0).tag($0) }
+            }
+            .pickerStyle(.menu)
+            .accessibilityIdentifier("live-adjustment-picker")
+            switch control {
+            case "Highlights":
+                RecipeSliderRow(title: control, value: binding(\.tone.highlight), range: -1...1, format: "%+.2f")
+            case "Shadows":
+                RecipeSliderRow(title: control, value: binding(\.tone.shadow), range: -1...1, format: "%+.2f")
+            case "Contrast":
+                RecipeSliderRow(title: control, value: binding(\.contrast), range: 0.5...1.7, format: "%.2f")
+            case "Dynamic range":
+                Picker(control, selection: binding(\.dynamicRange)) {
+                    ForEach(FilmRecipe.DynamicRange.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                }.frame(minHeight: 44)
+            case "D Range Priority":
+                Picker(control, selection: binding(\.dRangePriority)) {
+                    ForEach(FilmRecipe.DRangePriority.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                }.frame(minHeight: 44)
+            default:
+                RecipeSliderRow(title: "Exposure", value: binding(\.exposure), range: -2...2, format: "%+.1f EV")
+            }
+        }
+        .padding(12)
+        .foregroundStyle(FilmyTheme.primary)
+        .tint(FilmyTheme.accent)
+        .background(FilmyTheme.background.opacity(0.94), in: RoundedRectangle(cornerRadius: 18))
+        .accessibilityIdentifier("live-recipe-controls")
+    }
+
+    private func binding<Value>(_ keyPath: WritableKeyPath<FilmRecipe, Value>) -> Binding<Value> {
+        Binding(get: { recipe[keyPath: keyPath] }, set: { value in
+            var updated = recipe
+            updated[keyPath: keyPath] = value
+            onUpdate(updated)
+        })
+    }
+}

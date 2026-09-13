@@ -158,6 +158,7 @@ struct CameraScreen: View {
     @State private var recipeForDetail: FilmRecipe?
     @State private var isShowingTools: Bool
     @State private var isShowingManualControls = false
+    @State private var isShowingLiveAdjustments = false
     @State private var isShowingLookDrawer = false
     @State private var isShowingLookLibrary = false
     @State private var focusPoint: CGPoint?
@@ -707,7 +708,15 @@ struct CameraScreen: View {
     @ViewBuilder
     private func viewfinderFooter(width: CGFloat) -> some View {
         VStack(spacing: 8) {
-            if isShowingTools {
+            if isShowingLiveAdjustments {
+                LiveRecipeControlsView(
+                    recipe: viewModel.selectedRecipe,
+                    onUpdate: viewModel.update,
+                    onReset: { viewModel.reset(recipeID: viewModel.selectedRecipeID) },
+                    onClose: { isShowingLiveAdjustments = false }
+                )
+            }
+            if isShowingTools && !isShowingLiveAdjustments {
                 toolStrip(minWidth: width - 24)
             }
 
@@ -975,12 +984,29 @@ struct CameraScreen: View {
     }
 
     private func currentRecipeButton(compact: Bool = false) -> some View {
-        CurrentRecipeButton(
-            recipe: viewModel.selectedRecipe,
-            isCustomized: viewModel.isCustomized(viewModel.selectedRecipe),
-            compactLayout: compact,
-            action: toggleLookDrawer
-        )
+        let layout = compact || dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: 4))
+            : AnyLayout(HStackLayout(spacing: 8))
+        return layout {
+            CurrentRecipeButton(
+                recipe: viewModel.selectedRecipe,
+                isCustomized: viewModel.isCustomized(viewModel.selectedRecipe),
+                compactLayout: compact,
+                action: toggleLookDrawer
+            )
+            Button {
+                let shouldOpen = !isShowingLiveAdjustments
+                closeControlDrawers()
+                isShowingLiveAdjustments = shouldOpen
+            } label: {
+                Label("Adjust", systemImage: "slider.horizontal.3")
+                    .font(.system(.caption, design: .rounded).weight(.bold))
+                    .frame(minHeight: 44)
+            }
+            .tint(FilmyTheme.accent)
+            .accessibilityIdentifier("live-recipe-adjustments")
+            .accessibilityHint("Adjust the look while watching the live camera preview")
+        }
     }
 
     private func lookDrawer(maxHeight: CGFloat) -> some View {
@@ -1396,6 +1422,7 @@ struct CameraScreen: View {
     private func closeControlDrawers() {
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) {
             isShowingLookDrawer = false
+            isShowingLiveAdjustments = false
             isShowingTools = false
         }
     }
@@ -1408,6 +1435,7 @@ struct CameraScreen: View {
     private func toggleLookDrawer() {
         withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.84)) {
             if !isShowingLookDrawer {
+                isShowingLiveAdjustments = false
                 isShowingTools = false
             }
             isShowingLookDrawer.toggle()
