@@ -364,6 +364,16 @@ final class NormalPhotoFlowTests: XCTestCase {
         currentLook.tap()
         let tile = app.buttons["recipe-\(id)"]
         XCTAssertTrue(tile.waitForExistence(timeout: 10), "The seeded flow must expose \(name)")
+        // The picker is a vertically scrolling grouped list. A matching AX
+        // element can exist while its group is still below the viewport.
+        let picker = app.scrollViews["recipe-picker"]
+        if picker.waitForExistence(timeout: 5), !tile.isHittable {
+            let deadline = Date(timeIntervalSinceNow: 8)
+            while !tile.isHittable && Date() < deadline {
+                picker.swipeUp()
+                _ = waitUntil(timeout: 0.5) { tile.isHittable }
+            }
+        }
         if tile.isHittable {
             tile.tap()
         } else {
@@ -508,6 +518,14 @@ final class NormalPhotoFlowTests: XCTestCase {
             // control past the opposite edge during the positioning gesture.
             start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
             _ = waitUntil(timeout: 0.75) { element.frame != previousFrame }
+            if element.frame == previousFrame {
+                if boundedShift < 0 {
+                    scrollView.swipeUp()
+                } else {
+                    scrollView.swipeDown()
+                }
+                _ = waitUntil(timeout: 0.75) { element.frame != previousFrame }
+            }
         } while Date() < deadline
 
         let viewport = scrollView.frame.intersection(app.frame).insetBy(dx: 0, dy: 8)
