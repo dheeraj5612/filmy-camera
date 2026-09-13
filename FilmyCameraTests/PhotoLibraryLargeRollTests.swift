@@ -6,7 +6,8 @@ import XCTest
 
 /// Run only on a disposable simulator with Photos already fully authorized:
 /// FILMY_RUN_LARGE_ROLL_QA=1. Creates 160 owned frames and one unrecorded
-/// sentinel, then deletes only those test-created assets in async teardown.
+/// sentinel on the runner-owned disposable simulator. The runner destroys
+/// that simulator after the test; XCTest only restores app defaults.
 final class PhotoLibraryLargeRollTests: XCTestCase {
     @MainActor
     func testActualPhotoKitRollIncludesAll160OwnedFramesAcrossServiceReload() async throws {
@@ -15,6 +16,8 @@ final class PhotoLibraryLargeRollTests: XCTestCase {
         #endif
         try XCTSkipUnless(ProcessInfo.processInfo.environment["FILMY_RUN_LARGE_ROLL_QA"] == "1",
                           "Set FILMY_RUN_LARGE_ROLL_QA=1 only on a disposable simulator")
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["FILMY_RUN_OWNED_PHOTOS_FIXTURE"] == "1",
+                          "The large-roll fixture requires the runner-owned disposable simulator")
         // The runner installs and authorizes the disposable host before XCTest
         // launches. Never request access or mutate Photos before this guard.
         try XCTSkipUnless(PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized,
@@ -26,14 +29,10 @@ final class PhotoLibraryLargeRollTests: XCTestCase {
 
         let savedDefaults = try DefaultsSnapshot()
         let fixtureIdentifiers = FixtureIdentifiers()
-        // Register before the first mutation so partial PhotoKit failures also
-        // clean up. Never derive deletion candidates from the ownership index.
+        // Restore defaults even when fixture creation or verification fails.
+        // Photos assets are cleaned up by destroying the runner-owned simulator;
+        // deleting them here can block on the Photos confirmation UI.
         addTeardownBlock {
-            do {
-                try await Self.deleteCreatedAssets(fixtureIdentifiers.values)
-            } catch {
-                XCTFail("Could not clean test-created Photos fixtures: \(error)")
-            }
             try await MainActor.run {
                 try savedDefaults.restore()
                 XCTAssertEqual(try DefaultsSnapshot(), savedDefaults,
@@ -134,17 +133,6 @@ final class PhotoLibraryLargeRollTests: XCTestCase {
             }
         }
         try await performChanges(changes)
-    }
-
-    private static func deleteCreatedAssets(_ identifiers: [String]) async throws {
-        guard !identifiers.isEmpty else { return }
-        let changes: @Sendable () -> Void = {
-            let created = PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: nil)
-            if created.count > 0 { PHAssetChangeRequest.deleteAssets(created) }
-        }
-        try await performChanges(changes)
-        XCTAssertEqual(PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: nil).count, 0,
-                       "Every test-created fixture must be removed from the active photo library")
     }
 
     private static func performChanges(_ changes: @escaping @Sendable () -> Void) async throws {

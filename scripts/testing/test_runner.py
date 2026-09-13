@@ -94,6 +94,13 @@ class SuiteRoutingTests(unittest.TestCase):
         self.assertEqual(env, {"PATH": "/test/bin"})
         self.assertEqual(run.test_environment("photos-e2e", {}),
                          {"TEST_RUNNER_FILMY_RUN_SEEDED_PHOTOS_E2E": "1"})
+        fixture = run.fixture_test_environment({"FILMY_RUN_OWNED_PHOTOS_FIXTURE": "1"})
+        self.assertEqual(fixture["TEST_RUNNER_FILMY_RUN_OWNED_PHOTOS_FIXTURE"], "1")
+        self.assertNotIn("FILMY_RUN_OWNED_PHOTOS_FIXTURE", fixture)
+        self.assertEqual(run.test_environment("core", {
+            "FILMY_RUN_OWNED_PHOTOS_FIXTURE": "1",
+            "TEST_RUNNER_FILMY_RUN_OWNED_PHOTOS_FIXTURE": "1",
+        }), {})
         self.assertEqual(
             run.test_environment("store-media", {
                 "FILMY_STORE_PRIOR_SAVES": "4",

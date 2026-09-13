@@ -53,6 +53,7 @@ REQUIRED_FIXTURE_SELECTOR = (
     "FilmyCameraTests/PhotoLibraryLargeRollTests/"
     "testActualPhotoKitRollIncludesAll160OwnedFramesAcrossServiceReload"
 )
+OWNED_PHOTOS_FIXTURE_ENV = "TEST_RUNNER_FILMY_RUN_OWNED_PHOTOS_FIXTURE"
 # This existing real-roll UI test drives the Photos permission alert through
 # XCTest before the unit fixture process is started on the same simulator.
 PHOTOS_PERMISSION_BOOTSTRAP_SELECTOR = (
@@ -160,6 +161,13 @@ def test_environment(phase, inherited=None):
             del env[key]
     for key, value in ENVIRONMENT.get(phase, {}).items():
         env["TEST_RUNNER_" + key] = value
+    return env
+
+
+def fixture_test_environment(inherited=None):
+    """Enable fixture Photos writes only for the disposable fixture lane."""
+    env = test_environment("fixtures", inherited)
+    env[OWNED_PHOTOS_FIXTURE_ENV] = "1"
     return env
 
 
@@ -504,6 +512,8 @@ def main(argv=None):
             app_path = (args.derived_data / "Build/Products/Debug-iphonesimulator/FilmyCamera.app")
             with isolated_photos_destination(phase, destination, app_path) as phase_destination:
                 command = xcode_command(phase_destination, args.derived_data, args.coverage)
+                phase_environment = (fixture_test_environment()
+                                     if phase == "fixtures" else test_environment(phase))
                 permission_bootstrap = None
                 if phase == "fixtures":
                     bootstrap_environment = test_environment("photos-e2e")
@@ -513,7 +523,7 @@ def main(argv=None):
                     )
                 if phase in {"photos-e2e", "fixtures"} and len(selectors) > 1:
                     summary, code = run_isolated_photos_methods(
-                        command, selectors, result, output, test_environment(phase), phase
+                        command, selectors, result, output, phase_environment, phase
                     )
                 else:
                     command += ["-resultBundlePath", str(result)]
@@ -523,7 +533,7 @@ def main(argv=None):
                     code = run_logged(
                         command,
                         output / f"filmycamera-{log_name}-test.log",
-                        test_environment(phase),
+                        phase_environment,
                     )
                     summary = summarize_result(result, code)
                 require_complete_run(phase, selectors, summary)

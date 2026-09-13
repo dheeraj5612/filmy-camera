@@ -418,7 +418,20 @@ final class NormalPhotoFlowTests: XCTestCase {
         while Date() < deadline {
             let pickerViewport = picker.frame.intersection(app.frame).insetBy(dx: 0, dy: 6)
             let groupFrame = group.frame
-            if !pickerViewport.contains(groupFrame) {
+            // A horizontal row can report a content-width frame wider than
+            // the outer picker. Judge only its vertical placement here;
+            // horizontal visibility is handled against the row below. Keep
+            // the whole row inside the viewport so its tiles are not clipped
+            // at an edge; an oversized row can only be partially visible.
+            let groupVerticallyVisible: Bool
+            if groupFrame.height > pickerViewport.height {
+                groupVerticallyVisible = groupFrame.maxY > pickerViewport.minY
+                    && groupFrame.minY < pickerViewport.maxY
+            } else {
+                groupVerticallyVisible = groupFrame.minY >= pickerViewport.minY
+                    && groupFrame.maxY <= pickerViewport.maxY
+            }
+            if !groupVerticallyVisible {
                 let previousFrame = groupFrame
                 if groupFrame.minY < pickerViewport.minY {
                     picker.swipeDown()
