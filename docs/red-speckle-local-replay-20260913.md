@@ -62,3 +62,11 @@ The initial 0.0–0.08 hue feather passed the actual-iPad targeted suite and the
 - Final implementation committed as `3f34fc9`; release archive built from clean detached worktree `/tmp/filmy-release-build26`.
 - Archive `/tmp/filmy-build26/FilmyCamera.xcarchive` passed distribution signing and release validation for 1.0.0 (26). App Store Connect upload succeeded at 2026-09-13 15:13 EDT; package is processing. TestFlight processing completion is not yet verified.
 - Physical iPad has the final build26. iPhone installation is pending unlock; do not claim it updated until install succeeds and version is read back.
+
+## User follow-up and regression guard
+
+User reports “nice i think that fixed things” after build26. This supports the sample-level visual verification; it is not a guarantee for every capture.
+
+Cause in plain language: naturally red skin-crease pixels fell near the edge of the skin-color correction mask. Neighboring pixels received different amounts of correction, so the film color transform amplified tiny color differences into red speckles. Adjusting the lower hue transition makes correction consistent across those crease colors. Shadow processing was ruled out by replay ablations and remains enabled.
+
+Regression coverage is committed in `FilmyCameraTests/RendererRedCreaseRegressionTests.swift` and registered in the integration suite. It checks that neighboring crease hues do not develop an exaggerated red contour, while preserving source color and luminance texture. The old renderer fails this fixture; the shipped correction passes. Existing G7X red/sky separation coverage guards against overcorrecting red objects. The 100-test simulator and 18-test physical-iPad suites passed before release; no implementation changed in this follow-up, so those results remain applicable.
