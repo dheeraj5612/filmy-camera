@@ -66,7 +66,7 @@ jobs:
             -only-testing:FilmyCameraUITests/FilmyCameraUITests/testCameraShellAndRecipeDetails \
             -only-testing:FilmyCameraUITests/FilmyCameraUITests/testViewfinderFirstChromePreviewKeepsCameraQuiet \
             -only-testing:FilmyCameraUITests/FilmyCameraUITests/testGalleryAndSettingsNavigation \
-            -only-testing:FilmyCameraUITests/FilmyCameraUITests/testLandscapeCameraShell \
+            -only-testing:FilmyCameraUITests/FilmyCameraUITests/testPortraitCameraShellIgnoresDeviceRotation \
             -only-testing:FilmyCameraUITests/FilmyCameraUITests/testAccessibilitySizeCameraShellKeepsRecipeControlsReachable \
             -only-testing:FilmyCameraUITests/LaunchOnboardingTests \
             -only-testing:FilmyCameraUITests/LookLibraryUITests \

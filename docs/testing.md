@@ -79,7 +79,7 @@ python3 scripts/testing/run.py device \
 | `performance` | Physical-device renderer/import/detector and launch benchmarks. Compare the same device, build configuration, scene, and thermal state. |
 | `lens` | Physical iPhone 16 Pro lens/telephoto acceptance. Unsupported hardware is reported as skipped. |
 | `add-only` | Configure **Add Photos Only** in Settings first; requires `--allow-photos-writes`. Checks readable local Roll/cache after save and relaunch. |
-| `capture-sheet` | Physical device with a stable scene; attaches recipe captures without saving them to Photos. |
+| `capture-sheet` | Physical device with a stable scene; saves recipe captures to Photos and therefore requires `--allow-photos-writes`. |
 | `fixtures` | Local render fixtures under `FilmyCameraTests/Fixtures`; regenerate the project after adding them. Private fixture files and results stay untracked. Empty fixture sets skip explicitly. |
 | `store-media` | Pass any reference simulator UUID. The runner creates a fresh simulator with the same device type/runtime, seeds only `docs/app-store/screenshots/demo-source/cafe-original.png`, forces zero prior saves, and destroys its owned simulator afterward. The reference simulator is untouched. Screenshots are attached to the result bundle. |
 

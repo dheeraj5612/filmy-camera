@@ -108,13 +108,26 @@ struct CameraTopBarLayout<Controls: View, Indicators: View>: View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 8) {
                 controls
-                indicators.fixedSize(horizontal: true, vertical: false)
+                indicators.lineLimit(1)
             }
-            VStack(alignment: .trailing, spacing: 4) {
-                controls
-                indicators.fixedSize(horizontal: true, vertical: false)
+            VStack(alignment: .trailing, spacing: 0) {
+                controls.frame(height: 48)
+                indicators
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, minHeight: 44, maxHeight: 44, alignment: .trailing)
             }
         }
+    }
+}
+
+private enum ViewfinderChromeEdge: Hashable, Sendable { case top, bottom }
+
+private struct ViewfinderChromeHeightKey: PreferenceKey {
+    static let defaultValue: [ViewfinderChromeEdge: CGFloat] = [:]
+
+    static func reduce(value: inout [ViewfinderChromeEdge: CGFloat],
+                       nextValue: () -> [ViewfinderChromeEdge: CGFloat]) {
+        value.merge(nextValue(), uniquingKeysWith: max)
     }
 }
 
@@ -155,6 +168,9 @@ struct CameraScreen: View {
     @State private var focusNormalizedPoint: CGPoint?
     @State private var pinchStartZoom: CGFloat = 1
     @State private var isPinching = false
+    @State private var previewDragMaySelectLook: Bool?
+    @State private var suppressLookSwipeUntil = Date.distantPast
+    @State private var viewfinderChromeHeights: [ViewfinderChromeEdge: CGFloat] = [:]
     @State private var isShutterBlinking = false
 
     init(
@@ -211,13 +227,25 @@ struct CameraScreen: View {
             }
             .background(FilmyTheme.viewfinderBand.ignoresSafeArea())
             .overlay(alignment: .top) {
-                if let toastMessage = viewModel.toastMessage {
-                    ToastView(message: toastMessage, style: viewModel.toastStyle)
-                        .padding(.top, 56)
-                        .transition(.move(edge: .top).combined(with: .opacity))
+                VStack(spacing: 8) {
+                    if viewModel.hasPendingCapture, let error = viewModel.saveErrorMessage {
+                        captureSaveRecovery(error)
+                    } else if viewModel.hasPendingCapture && viewModel.isSaving {
+                        Label("Saving photo", systemImage: "photo.badge.arrow.down")
+                            .font(.subheadline.weight(.semibold))
+                            .padding(12)
+                            .viewfinderChrome(Capsule())
+                            .accessibilityIdentifier("capture-saving")
+                    } else if let toastMessage = viewModel.toastMessage {
+                        ToastView(message: toastMessage, style: viewModel.toastStyle)
+                            .transition(.opacity)
+                    }
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 82)
+                // Animate feedback only, not the camera's geometry transaction.
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: viewModel.toastMessage)
             }
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: viewModel.toastMessage)
             .allowsHitTesting(!isReviewing && !countdown.state.isActive)
             .disabled(isReviewing || countdown.state.isActive)
             .accessibilityElement(children: .contain)
@@ -225,7 +253,7 @@ struct CameraScreen: View {
 
             if countdown.state.isActive { countdownOverlay.zIndex(2) }
 
-            if let image = viewModel.reviewImage, let recipe = viewModel.reviewRecipe {
+            if viewModel.isReviewingImport, let image = viewModel.reviewImage, let recipe = viewModel.reviewRecipe {
                 CaptureReviewView(
                     image: image,
                     recipe: recipe,
@@ -261,6 +289,12 @@ struct CameraScreen: View {
             updateCompositionAssists()
         }
         .onChange(of: captureAspect) { _, _ in countdown.cancel(); assists.stop(); updateCompositionAssists() }
+        .onChange(of: canTriggerShutter) { _, enabled in
+            if !enabled {
+                isPinching = false
+                previewDragMaySelectLook = nil
+            }
+        }
         .onChange(of: camera.previewViewportSize) { _, _ in
             // A mask from the previous crop must not stretch over a newly
             // rotated or resized viewfinder while its replacement renders.
@@ -342,7 +376,7 @@ struct CameraScreen: View {
             updateCameraActivity()
             updateIdleTimer()
         }
-        .onChange(of: viewModel.reviewImage != nil) { _, hasReview in
+        .onChange(of: viewModel.isReviewingImport) { _, hasReview in
             if hasReview {
                 camera.setFrameDeliveryPaused(true)
             }
@@ -353,7 +387,7 @@ struct CameraScreen: View {
             if isCapturing {
                 blinkShutter()
             }
-            guard !isCapturing, viewModel.reviewImage == nil else { return }
+            guard !isCapturing, !viewModel.isReviewingImport else { return }
             updateCameraActivity()
         }
         .onChange(of: viewModel.isImporting) { _, _ in
@@ -368,6 +402,29 @@ struct CameraScreen: View {
         // non-zero ideal size. Keep that child from expanding the camera shell
         // beyond the window proposal and shifting the chrome offscreen.
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// A failed write keeps the exact captured bytes for retry. Never turn a
+    /// normal shutter press into an editor or let the next shot overwrite it.
+    private func captureSaveRecovery(_ message: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Photo not saved yet").font(.headline)
+            Text(message).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button("Retry save") { viewModel.saveReview(photoLibrary: photoLibrary) }
+                    .accessibilityIdentifier("capture-save-retry")
+                if viewModel.saveErrorRequiresSettings {
+                    Button("Photos Settings", action: openSystemSettings)
+                        .accessibilityIdentifier("capture-save-settings")
+                }
+                Button("Discard", role: .destructive) { viewModel.discardReview() }
+                    .accessibilityIdentifier("capture-save-discard")
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(14)
+        .viewfinderChrome(RoundedRectangle(cornerRadius: 16))
+        .accessibilityIdentifier("capture-save-recovery")
     }
 
     // MARK: - Shells
@@ -432,7 +489,7 @@ struct CameraScreen: View {
     }
 
     private var isChromeDisabled: Bool {
-        viewModel.isCapturing || isImporting
+        viewModel.isCapturing || viewModel.isSaving || isImporting
     }
 
     private var portraitControlClearance: CGFloat {
@@ -470,8 +527,14 @@ struct CameraScreen: View {
             }
 
             if camera.isRunning && !isReviewing {
-                CompositionAssistOverlay(store: assists, showHistogram: showHistogram, showLevel: showHorizonLevel)
-                    .allowsHitTesting(false)
+                CompositionAssistOverlay(
+                    store: assists,
+                    showHistogram: showHistogram,
+                    showLevel: showHorizonLevel,
+                    topClearance: overlaysTopBar ? (viewfinderChromeHeights[.top] ?? 54) + 8 : 8,
+                    bottomClearance: (viewfinderChromeHeights[.bottom] ?? 52) + 8
+                )
+                .allowsHitTesting(canTriggerShutter)
             }
 
             if let focusPoint {
@@ -505,6 +568,12 @@ struct CameraScreen: View {
                     .padding(.horizontal, 10)
                     .padding(.top, 8)
                     .disabled(isChromeDisabled)
+                    .background {
+                        GeometryReader { proxy in
+                            Color.clear.preference(key: ViewfinderChromeHeightKey.self,
+                                                   value: [.top: proxy.size.height])
+                        }
+                    }
             }
         }
         .overlay(alignment: .bottom) {
@@ -512,6 +581,17 @@ struct CameraScreen: View {
                 .padding(.horizontal, 12)
                 .padding(.bottom, 12)
                 .disabled(isChromeDisabled)
+                .background {
+                    GeometryReader { proxy in
+                        Color.clear.preference(key: ViewfinderChromeHeightKey.self,
+                                               value: [.bottom: proxy.size.height])
+                    }
+                }
+        }
+        .onPreferenceChange(ViewfinderChromeHeightKey.self) { heights in
+            // Only chrome contributes measurements; the histogram's frame
+            // never feeds back into the values used to place it.
+            if viewfinderChromeHeights != heights { viewfinderChromeHeights = heights }
         }
         .clipShape(RoundedRectangle(cornerRadius: FilmyTheme.viewfinderCornerRadius, style: .continuous))
     }
@@ -528,41 +608,41 @@ struct CameraScreen: View {
                 )
                 .accessibilityLabel("Live camera preview")
                 .accessibilityValue(camera.isRunning ? "Showing the \(viewModel.selectedRecipe.name) look" : camera.statusMessage)
-                .accessibilityHint("Tap the preview to focus at that point. VoiceOver users can use the Focus and expose at center action.")
+                .accessibilityHint("Tap to focus, swipe left or right to change looks, double tap to switch cameras, or pinch to zoom. These controls are also available as accessibility actions.")
                 .accessibilityAction(named: "Focus and expose at center") {
-                    HapticFeedback.play(.focus)
-                    let normalizedPoint = CGPoint(x: 0.5, y: 0.5)
-                    camera.focus(at: normalizedPoint)
-                    focusNormalizedPoint = normalizedPoint
-                    withAnimation(reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.72)) {
-                        focusPoint = CGPoint(x: proxy.size.width / 2, y: proxy.size.height / 2)
-                    }
+                    focusPreview(at: CGPoint(x: proxy.size.width / 2, y: proxy.size.height / 2), in: proxy.size)
                 }
+                .accessibilityAction(named: "Next look") { selectAdjacentLook(.next) }
+                .accessibilityAction(named: "Previous look") { selectAdjacentLook(.previous) }
+                .accessibilityAction(named: "Switch camera", switchCameraFromPreview)
                 .accessibilityIdentifier(
                     shouldShowCameraEmptyState ? "camera-preview-unavailable" : "camera-preview"
                 )
                 .accessibilityHidden(shouldShowCameraEmptyState)
                 .gesture(
-                    SpatialTapGesture().onEnded { value in
-                        HapticFeedback.play(.focus)
-                        let normalizedPoint = normalizedFocusPoint(
-                            for: value.location,
-                            in: proxy.size
-                        )
-                        camera.focus(at: normalizedPoint)
-                        focusNormalizedPoint = normalizedPoint
-                        withAnimation(reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.72)) {
-                            focusPoint = value.location
+                    SpatialTapGesture(count: 2)
+                        .exclusively(before: SpatialTapGesture())
+                        .onEnded { value in
+                            switch value {
+                            case .first:
+                                switchCameraFromPreview()
+                            case .second(let tap):
+                                focusPreview(at: tap.location, in: proxy.size)
+                            }
                         }
-                    }
                 )
+                .simultaneousGesture(previewLookSwipe(in: proxy.size))
                 .onAppear { camera.updateOrientation(for: proxy.size) }
                 .onChange(of: proxy.size) { _, size in
+                    isPinching = false
+                    previewDragMaySelectLook = nil
                     camera.updateOrientation(for: size)
                 }
                 .simultaneousGesture(
                     MagnificationGesture()
                         .onChanged { scale in
+                            guard canTriggerShutter else { return }
+                            if previewDragMaySelectLook != nil { previewDragMaySelectLook = false }
                             if !isPinching {
                                 isPinching = true
                                 pinchStartZoom = camera.zoomFactor
@@ -572,9 +652,58 @@ struct CameraScreen: View {
                         .onEnded { _ in
                             isPinching = false
                             pinchStartZoom = camera.zoomFactor
+                            suppressLookSwipeUntil = Date(timeIntervalSinceNow: 0.3)
                         }
                 )
         }
+    }
+
+    private func focusPreview(at location: CGPoint, in size: CGSize) {
+        guard canTriggerShutter, !isPinching else { return }
+        HapticFeedback.play(.focus)
+        let normalizedPoint = normalizedFocusPoint(for: location, in: size)
+        camera.focus(at: normalizedPoint)
+        focusNormalizedPoint = normalizedPoint
+        withAnimation(reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.72)) {
+            focusPoint = location
+        }
+    }
+
+    private func switchCameraFromPreview() {
+        guard canTriggerShutter, !isPinching, camera.availableCameraPositions.count > 1 else { return }
+        focusPoint = nil
+        focusNormalizedPoint = nil
+        HapticFeedback.play(.selection)
+        camera.toggleCameraPosition()
+    }
+
+    private func selectAdjacentLook(_ direction: CameraLookDirection) {
+        guard canTriggerShutter, !isPinching,
+              let recipe = CameraPreviewGesturePolicy.targetRecipe(
+                in: viewModel.recipes, selectedIdentifier: viewModel.selectedRecipeID,
+                direction: direction
+              ) else { return }
+        viewModel.select(recipe: recipe)
+        HapticFeedback.play(.selection)
+    }
+
+    private func previewLookSwipe(in size: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 12)
+            .onChanged { _ in
+                let enabled = canTriggerShutter && !isPinching && Date() >= suppressLookSwipeUntil
+                if previewDragMaySelectLook == nil { previewDragMaySelectLook = enabled }
+                if !enabled { previewDragMaySelectLook = false }
+            }
+            .onEnded { value in
+                defer { previewDragMaySelectLook = nil }
+                guard let direction = CameraPreviewGesturePolicy.lookDirection(
+                    translation: value.translation,
+                    viewportWidth: size.width,
+                    interactionEnabled: canTriggerShutter && previewDragMaySelectLook == true,
+                    includesPinch: isPinching || Date() < suppressLookSwipeUntil
+                ) else { return }
+                selectAdjacentLook(direction)
+            }
     }
 
     /// Controls that float along the bottom edge of the frame. Zoom stays
@@ -625,11 +754,13 @@ struct CameraScreen: View {
     private var topBar: some View {
         CameraTopBarLayout {
             HStack(spacing: 8) {
-                flashControl
+                ZStack { Color.clear; flashControl }
+                    .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
 
-                if camera.availableCameraPositions.count > 1 {
-                    cameraSwitchButton
-                }
+                cameraSwitchButton
+                    .opacity(camera.availableCameraPositions.count > 1 ? 1 : 0)
+                    .disabled(camera.availableCameraPositions.count < 2)
+                    .accessibilityHidden(camera.availableCameraPositions.count < 2)
 
                 Spacer(minLength: 4)
 
@@ -647,21 +778,20 @@ struct CameraScreen: View {
                 captureSetupButton
                 settingsButton
 
-                if camera.isRunning || isViewfinderChromePreview {
-                    toolsToggle
-                }
+                toolsToggle
+                    .disabled(!camera.isRunning && !isViewfinderChromePreview)
             }
         } indicators: {
             HStack(spacing: 8) {
                 activeCaptureIndicators
 
-                if !isLive {
-                    CameraStatusPill(
-                        isRunning: camera.isRunning,
-                        availability: camera.availability,
-                        message: camera.statusMessage
-                    )
-                }
+                CameraStatusPill(
+                    isRunning: camera.isRunning,
+                    availability: camera.availability,
+                    message: camera.statusMessage
+                )
+                .opacity(isLive ? 0 : 1)
+                .accessibilityHidden(isLive)
             }
         }
     }
@@ -880,8 +1010,12 @@ struct CameraScreen: View {
                         .font(.system(size: 12, weight: .bold, design: .rounded))
                         .foregroundStyle(FilmyTheme.primary)
                         .padding(.horizontal, 12)
-                        .frame(minHeight: FilmyTheme.minimumHitTarget)
+                        // In the iPad portrait compatibility window, the
+                        // drawer scales down in landscape. Keep the real
+                        // button target at 44pt after that transform.
+                        .frame(minHeight: 64)
                         .background(FilmyTheme.panel, in: Capsule())
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.pressable)
                 .accessibilityLabel("Tune \(viewModel.selectedRecipe.name)")
@@ -892,6 +1026,8 @@ struct CameraScreen: View {
                         .foregroundStyle(FilmyTheme.secondary)
                         .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
                         .background(FilmyTheme.panel, in: Circle())
+                        .frame(width: 64, height: 64)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.pressable)
                 .accessibilityIdentifier("recipe-drawer-close")
@@ -1039,7 +1175,7 @@ struct CameraScreen: View {
         } label: {
             RollThumbnail(asset: photoLibrary.galleryAssets.first, photoLibrary: photoLibrary)
                 .frame(width: 52, height: 52)
-                .frame(width: 60, height: 60)
+                .frame(width: 64, height: 64)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.pressable)
@@ -1072,7 +1208,7 @@ struct CameraScreen: View {
                 }
             }
             .frame(width: 52, height: 52)
-            .frame(width: 60, height: 60)
+            .frame(width: 64, height: 64)
             .contentShape(Rectangle())
         }
         .buttonStyle(.pressable)
@@ -1192,7 +1328,7 @@ struct CameraScreen: View {
     }
 
     private var isReviewing: Bool {
-        viewModel.reviewImage != nil
+        viewModel.isReviewingImport
     }
 
     private var isViewfinderChromePreview: Bool {
@@ -1253,11 +1389,11 @@ struct CameraScreen: View {
         guard canTriggerShutter else { return }
         closeControlDrawers()
         if captureDelay == .off {
-            viewModel.capture(camera: camera)
+            viewModel.capture(camera: camera, photoLibrary: photoLibrary)
         } else {
             countdown.start(seconds: captureDelay.rawValue) {
                 guard canTriggerShutter else { return }
-                viewModel.capture(camera: camera)
+                viewModel.capture(camera: camera, photoLibrary: photoLibrary)
             }
         }
     }
@@ -1311,7 +1447,7 @@ struct CameraScreen: View {
         }
 
         let action = CameraActivityPolicy.action(
-            hasReview: viewModel.reviewImage != nil,
+            hasReview: viewModel.isReviewingImport,
             sceneIsActive: scenePhase == .active,
             isCameraTabActive: isCameraTabActive,
             availability: camera.availability
@@ -1501,7 +1637,7 @@ extension CameraScreen {
             && !isShowingManualControls && !isShowingCaptureSetup
     }
     private var canTriggerShutter: Bool {
-        isCameraVisibleForAssists && !viewModel.isSaving && !camera.manualControls.isApplying && !countdown.state.isActive && framingIsReady
+        isCameraVisibleForAssists && viewModel.reviewImage == nil && !viewModel.isSaving && !camera.manualControls.isApplying && !countdown.state.isActive && framingIsReady
     }
     private var framingIsReady: Bool {
         guard captureAspect != .viewfinder else { return true }
@@ -1578,12 +1714,15 @@ struct CaptureSetupView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("captureDelay") private var delay = CaptureDelay.off
     @AppStorage("captureAspect") private var aspect = CaptureAspect.viewfinder
+    @AppStorage("captureFinish") private var finish = PhotoFinish.photo
     @AppStorage("compositionGuide") private var guide = CompositionGuide.thirds
     @AppStorage("showGrid") private var showGrid = true
     @AppStorage("showHistogram") private var histogram = false
     @AppStorage("showZebras") private var zebras = false
     @AppStorage("showFocusPeaking") private var peaking = false
     @AppStorage("showHorizonLevel") private var level = false
+    @AppStorage(HistogramPlacement.horizontalPreferenceKey) private var histogramPositionX = 0.0
+    @AppStorage(HistogramPlacement.verticalPreferenceKey) private var histogramPositionY = 0.0
 
     var body: some View {
         NavigationStack {
@@ -1595,6 +1734,10 @@ struct CaptureSetupView: View {
                     Picker("Photo aspect", selection: $aspect) {
                         ForEach(CaptureAspect.allCases) { Text($0.title).tag($0) }
                     }.accessibilityIdentifier("capture-aspect-picker")
+                    Picker("Photo finish", selection: $finish) {
+                        Text("Photo").tag(PhotoFinish.photo)
+                        Text("Instant Print").tag(PhotoFinish.instantPrint)
+                    }.accessibilityIdentifier("capture-finish-picker")
                 } header: { Text("Capture") } footer: {
                     Text("The viewfinder and saved photo use the same crop. Timer cancellation, leaving the camera, or an interruption prevents the shot. Imports keep their original aspect.")
                 }
@@ -1607,6 +1750,13 @@ struct CaptureSetupView: View {
                 }
                 Section {
                     Toggle("Luminance histogram", isOn: $histogram).accessibilityIdentifier("capture-histogram-toggle")
+                    if histogram {
+                        Button("Reset histogram position") {
+                            histogramPositionX = 0
+                            histogramPositionY = 0
+                        }
+                        .accessibilityIdentifier("capture-histogram-reset")
+                    }
                     Toggle("Highlight zebras", isOn: $zebras).accessibilityIdentifier("capture-zebras-toggle")
                     Toggle("Focus peaking", isOn: $peaking).accessibilityIdentifier("capture-peaking-toggle")
                 } header: { Text("Live preview aids") } footer: {
@@ -1667,6 +1817,16 @@ private struct CompositionAssistOverlay: View {
     @ObservedObject var store: CompositionAssistStore
     let showHistogram: Bool
     let showLevel: Bool
+    let topClearance: CGFloat
+    let bottomClearance: CGFloat
+    @AppStorage(HistogramPlacement.horizontalPreferenceKey) private var histogramPositionX = 0.0
+    @AppStorage(HistogramPlacement.verticalPreferenceKey) private var histogramPositionY = 0.0
+    @GestureState private var dragTranslation = CGSize.zero
+
+    private var savedPosition: CGPoint {
+        HistogramPlacement.sanitized(CGPoint(x: histogramPositionX, y: histogramPositionY))
+    }
+
     var body: some View {
         ZStack {
             if let image = store.overlay {
@@ -1685,29 +1845,90 @@ private struct CompositionAssistOverlay: View {
                 .accessibilityLabel("Horizon \(String(format: "%.0f", degrees)) degrees")
             }
         }
-        .overlay(alignment: .topLeading) {
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Zebras and the level must never consume tap-to-focus or pinch zoom.
+        // Hit testing is enabled only on the histogram card added below.
+        .allowsHitTesting(false)
+        .overlay {
             if showHistogram, !store.histogram.isEmpty {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("PREVIEW LUMA").font(.system(size: 9, weight: .bold))
-                    Canvas { context, size in
-                        let maximum = max(store.histogram.max() ?? 1, 1)
-                        let step = size.width / CGFloat(store.histogram.count)
-                        var path = Path()
-                        for (index, value) in store.histogram.enumerated() {
-                            let height = size.height * CGFloat(value) / CGFloat(maximum)
-                            path.addRect(CGRect(x: CGFloat(index) * step, y: size.height - height,
-                                                width: max(step - 0.5, 0.5), height: height))
+                GeometryReader { proxy in
+                    let placement = HistogramPlacement(viewport: proxy.size,
+                                                       topClearance: topClearance,
+                                                       bottomClearance: bottomClearance)
+                    histogramCard(size: placement.cardSize)
+                        .frame(width: placement.cardSize.width, height: placement.cardSize.height)
+                        .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 10))
+                        .contentShape(RoundedRectangle(cornerRadius: 10))
+                        .gesture(
+                            DragGesture(minimumDistance: 3, coordinateSpace: .named("histogram-viewfinder"))
+                                .updating($dragTranslation) { value, translation, _ in
+                                    translation = value.translation
+                                }
+                                .onEnded { value in
+                                    let center = placement.center(normalizedPosition: savedPosition,
+                                                                  translation: value.translation)
+                                    savePosition(placement.normalizedPosition(for: center, fallback: savedPosition))
+                                }
+                        )
+                        .contextMenu {
+                            Button("Reset histogram position", systemImage: "arrow.uturn.backward", action: resetPosition)
                         }
-                        context.fill(path, with: .color(.white))
-                    }.frame(width: 102, height: 36)
-                    Text(String(format: "Highlights %.1f%%", store.clippingPercent)).font(.system(size: 9))
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityIdentifier("camera-histogram")
+                        .accessibilityLabel("Preview luminance histogram. \(String(format: "%.1f", store.clippingPercent)) percent highlight warning")
+                        .accessibilityValue("Horizontal \(Int(savedPosition.x * 100)) percent, vertical \(Int(savedPosition.y * 100)) percent")
+                        .accessibilityHint("Drag to move. Touch and hold to reset the position. Movement actions are also available.")
+                        .accessibilityAction(named: "Reset histogram position", resetPosition)
+                        .accessibilityAction(named: "Move histogram left") { moveBy(x: -0.1, y: 0) }
+                        .accessibilityAction(named: "Move histogram right") { moveBy(x: 0.1, y: 0) }
+                        .accessibilityAction(named: "Move histogram up") { moveBy(x: 0, y: -0.1) }
+                        .accessibilityAction(named: "Move histogram down") { moveBy(x: 0, y: 0.1) }
+                        .position(placement.center(normalizedPosition: savedPosition, translation: dragTranslation))
                 }
-                .foregroundStyle(.white).padding(8)
-                .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 10))
-                .padding(.leading, 8).padding(.top, 62)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Preview luminance histogram. \(String(format: "%.1f", store.clippingPercent)) percent highlight warning")
+                .coordinateSpace(name: "histogram-viewfinder")
             }
         }
+    }
+
+    private func histogramCard(size: CGSize) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            if size.height >= 32 {
+                HStack(spacing: 3) {
+                    Text("PREVIEW LUMA")
+                    Spacer(minLength: 0)
+                    Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+                }
+                .font(.system(size: 9, weight: .bold))
+            }
+            Canvas { context, size in
+                let maximum = max(store.histogram.max() ?? 1, 1)
+                let step = size.width / CGFloat(store.histogram.count)
+                var path = Path()
+                for (index, value) in store.histogram.enumerated() {
+                    let height = size.height * CGFloat(value) / CGFloat(maximum)
+                    path.addRect(CGRect(x: CGFloat(index) * step, y: size.height - height,
+                                        width: max(step - 0.5, 0.5), height: height))
+                }
+                context.fill(path, with: .color(.white))
+            }
+            .frame(maxHeight: 36)
+            if size.height >= 56 {
+                Text(String(format: "Highlights %.1f%%", store.clippingPercent)).font(.system(size: 9))
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(min(8, size.height / 4))
+    }
+
+    private func savePosition(_ point: CGPoint) {
+        let point = HistogramPlacement.sanitized(point)
+        histogramPositionX = point.x
+        histogramPositionY = point.y
+    }
+
+    private func resetPosition() { savePosition(.zero) }
+
+    private func moveBy(x: CGFloat, y: CGFloat) {
+        savePosition(CGPoint(x: savedPosition.x + x, y: savedPosition.y + y))
     }
 }

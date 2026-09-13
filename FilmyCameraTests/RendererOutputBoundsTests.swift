@@ -500,6 +500,35 @@ final class RendererOutputBoundsTests: XCTestCase {
         XCTAssertLessThan(grayChroma, 0.020, "Neutral subjects should not receive a strong color cast")
     }
 
+    func testG7XRedAndSkySeparationSurvivesHighlightEditsAcrossQualityTiers() throws {
+        let extent = CGRect(x: 0, y: 0, width: 8, height: 8)
+        let context = CIContext(options: FilmRenderer.testContextOptions)
+        let reference = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == "g7x-compact" })
+        for highlight in [-0.25, 0, 0.25] {
+            var compact = reference
+            compact.tone.highlight = highlight
+            let neutral = replacingFilmBase(of: compact, with: .standard)
+            for quality in [FilmRenderer.Quality.preview, .photo, .export] {
+                for (name, color, dominant) in [
+                    ("red", CIColor(red: 0.72, green: 0.16, blue: 0.12), 0),
+                    ("sky", CIColor(red: 0.16, green: 0.42, blue: 0.78), 2)
+                ] {
+                    let input = CIImage(color: color).cropped(to: extent)
+                    let result = renderFloatPixels(
+                        FilmRenderer.render(input, recipe: compact, quality: quality),
+                        extent: extent, context: context)
+                    let control = renderFloatPixels(
+                        FilmRenderer.render(input, recipe: neutral, quality: quality),
+                        extent: extent, context: context)
+                    let opposite = dominant == 0 ? max(result[1], result[2]) : result[0]
+                    let controlOpposite = dominant == 0 ? max(control[1], control[2]) : control[0]
+                    XCTAssertGreaterThan(result[dominant] - opposite, control[dominant] - controlOpposite,
+                                         "\(name) separation lost with Highlights=\(highlight), quality=\(quality)")
+                }
+            }
+        }
+    }
+
     func testEmptyInputIsReturnedWithoutExpandingBounds() {
         let empty = CIImage.empty()
         let output = FilmRenderer.render(
@@ -1166,11 +1195,11 @@ final class RendererOutputBoundsTests: XCTestCase {
 
         var harderHighlights = base
         harderHighlights.tone.highlight = 1
-        var liftedHighlights = base
-        liftedHighlights.tone.highlight = -1
-        XCTAssertLessThan(
+        var softerHighlights = base
+        softerHighlights.tone.highlight = -1
+        XCTAssertGreaterThan(
             luma(for: CIColor(red: 0.80, green: 0.80, blue: 0.80, alpha: 1), recipe: harderHighlights),
-            luma(for: CIColor(red: 0.80, green: 0.80, blue: 0.80, alpha: 1), recipe: liftedHighlights)
+            luma(for: CIColor(red: 0.80, green: 0.80, blue: 0.80, alpha: 1), recipe: softerHighlights)
         )
     }
 

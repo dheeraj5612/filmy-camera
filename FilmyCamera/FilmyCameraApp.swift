@@ -1,7 +1,20 @@
 import SwiftUI
+import UIKit
+
+/// Enforce the same portrait contract for presented UIKit controllers as for
+/// SwiftUI, including the system share and photo-picker presentations.
+final class FilmyAppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        supportedInterfaceOrientationsFor window: UIWindow?
+    ) -> UIInterfaceOrientationMask {
+        .portrait
+    }
+}
 
 @main
 struct FilmyCameraApp: App {
+    @UIApplicationDelegateAdaptor(FilmyAppDelegate.self) private var appDelegate
     @StateObject private var camera = CameraService()
     @StateObject private var cameraViewModel: CameraViewModel
     @StateObject private var photoLibrary = PhotoLibraryService()

@@ -158,7 +158,7 @@ enum PhotoLibrarySaveError: LocalizedError, Equatable, Sendable {
         case .accessDenied:
             return "Photo access is needed to save this frame. Enable Photos access in Settings, then try again."
         case .writeFailed:
-            return "Photos could not save this frame. Keep the review open and try again in a moment."
+            return "Photos could not save this frame. Keep Filmy Camera open and retry the save in a moment."
         }
     }
 
@@ -232,39 +232,35 @@ enum PhotoLibraryCompletionBridge {
 }
 
 enum PhotoLibraryAssetOwnership {
+    static let defaultsKey = "filmyCamera.savedAssetIdentifiers"
+
+    /// Ownership is durable history, independent of thumbnail and disk cache
+    /// budgets. Forgetting an older ID hides a photo still present in Photos.
+    static func load(defaults: UserDefaults = .standard) -> [String] {
+        normalized(defaults.stringArray(forKey: defaultsKey) ?? [])
+    }
+
+    static func persist(_ identifiers: [String], defaults: UserDefaults = .standard) {
+        defaults.set(normalized(identifiers), forKey: defaultsKey)
+    }
+
     static func contains(_ assetIdentifier: String, in savedIdentifiers: [String]) -> Bool {
         guard !assetIdentifier.isEmpty else { return false }
         return savedIdentifiers.contains(assetIdentifier)
     }
 
-    static func adding(
-        _ assetIdentifier: String,
-        to savedIdentifiers: [String],
-        limit: Int
-    ) -> [String] {
-        guard limit > 0 else { return [] }
-        guard !assetIdentifier.isEmpty else {
-            return normalized(savedIdentifiers, limit: limit)
-        }
-
-        return normalized(
-            [assetIdentifier] + savedIdentifiers,
-            limit: limit
-        )
+    static func adding(_ assetIdentifier: String, to savedIdentifiers: [String]) -> [String] {
+        guard !assetIdentifier.isEmpty else { return normalized(savedIdentifiers) }
+        return normalized([assetIdentifier] + savedIdentifiers)
     }
 
     static func removing(_ assetIdentifier: String, from savedIdentifiers: [String]) -> [String] {
         savedIdentifiers.filter { $0 != assetIdentifier }
     }
 
-    static func normalized(_ savedIdentifiers: [String], limit: Int) -> [String] {
-        guard limit > 0 else { return [] }
-
+    static func normalized(_ savedIdentifiers: [String]) -> [String] {
         var seen = Set<String>()
-        return savedIdentifiers
-            .filter { !$0.isEmpty && seen.insert($0).inserted }
-            .prefix(limit)
-            .map { $0 }
+        return savedIdentifiers.filter { !$0.isEmpty && seen.insert($0).inserted }
     }
 }
 
@@ -475,7 +471,6 @@ final class PhotoLibraryService: ObservableObject {
     @Published private(set) var isLoading = false
 
     private let albumTitle = "Filmy Camera"
-    private let savedAssetIdentifiersKey = "filmyCamera.savedAssetIdentifiers"
     private let savedFrameMetadataKey = "filmyCamera.savedFrameMetadata"
     private nonisolated static let savedFrameResourcesKey = "filmyCamera.savedFrameResources"
     private var savedFrameResourcesKey: String { Self.savedFrameResourcesKey }
@@ -486,6 +481,8 @@ final class PhotoLibraryService: ObservableObject {
     private let thumbnailCache = NSCache<NSString, UIImage>()
     private var thumbnailCacheGeneration: UInt64 = 0
     private var savedFrameResourcesCache: [String: SavedFrameResource]?
+    private var savedAssetIdentifiersCache: [String]?
+    private var ownedAssetIdentifierSet = Set<String>()
 
     private func invalidateThumbnailCache() {
         thumbnailCacheGeneration &+= 1
@@ -592,10 +589,7 @@ final class PhotoLibraryService: ObservableObject {
 
     func canDelete(asset: PhotoLibraryGalleryAsset) -> Bool {
         guard case .photos(let photoAsset) = asset else { return false }
-        return canDeletePhotos && PhotoLibraryAssetOwnership.contains(
-            photoAsset.localIdentifier,
-            in: savedAssetIdentifiers
-        )
+        return canDeletePhotos && ownsAsset(photoAsset.localIdentifier)
     }
 
     var galleryAssets: [PhotoLibraryGalleryAsset] {
@@ -669,6 +663,10 @@ final class PhotoLibraryService: ObservableObject {
     }
 
     func refresh() {
+        // A refresh may follow a mutation by another service instance. Cell
+        // and image queries between refreshes reuse the normalized index.
+        savedAssetIdentifiersCache = nil
+        ownedAssetIdentifierSet.removeAll(keepingCapacity: true)
         if isUITesting {
             authorizationStatus = .denied
             addOnlyAuthorizationStatus = .denied
@@ -685,15 +683,18 @@ final class PhotoLibraryService: ObservableObject {
         }
 
         let options = PHFetchOptions()
-        options.fetchLimit = 60
+        options.fetchLimit = 0
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         // The album is only an organizational convenience. Never treat every
         // asset in a user-created album with the same title as an app-owned
         // frame; ownership is the persisted local identifier recorded at save.
-        assets = Array(fetchSavedAssets(
+        // PHAsset values are lightweight metadata handles. Fetch every
+        // recorded owned ID; decoding remains lazy and the thumbnail cache
+        // retains its independent 80-image / 48 MiB budget.
+        assets = fetchSavedAssets(
             options: options,
             reconcileMissing: authorizationStatus == .authorized
-        ).prefix(60))
+        )
         refreshCachedFrames(excluding: Set(assets.map(\.localIdentifier)))
     }
 
@@ -831,7 +832,7 @@ final class PhotoLibraryService: ObservableObject {
         }
 
         let assetIdentifier = asset.localIdentifier
-        guard PhotoLibraryAssetOwnership.contains(assetIdentifier, in: savedAssetIdentifiers) else {
+        guard ownsAsset(assetIdentifier) else {
             completion(.failure(.notOwned))
             return
         }
@@ -865,11 +866,22 @@ final class PhotoLibraryService: ObservableObject {
         asset: PhotoLibraryGalleryAsset,
         completion: @escaping @MainActor (Result<Void, PhotoLibraryServiceError>) -> Void
     ) {
-        guard case .photos(let photoAsset) = asset else {
-            completion(.failure(.accessDenied))
-            return
+        switch asset {
+        case .cached(let frame):
+            guard ownsAsset(frame.assetIdentifier) else {
+                completion(.failure(.notOwned))
+                return
+            }
+            // Invalidate an in-flight cache write before removing the durable
+            // ownership/index entry, so a late save callback cannot recreate
+            // the frame the user just deleted.
+            cacheWriteGeneration &+= 1
+            forgetSavedAsset(frame.assetIdentifier)
+            completion(.success(()))
+
+        case .photos(let photoAsset):
+            delete(asset: photoAsset, completion: completion)
         }
-        delete(asset: photoAsset, completion: completion)
     }
 
     private func appAlbum() -> PHAssetCollection? {
@@ -884,17 +896,24 @@ final class PhotoLibraryService: ObservableObject {
 
     private var savedAssetIdentifiers: [String] {
         get {
-            PhotoLibraryAssetOwnership.normalized(
-                UserDefaults.standard.stringArray(forKey: savedAssetIdentifiersKey) ?? [],
-                limit: 120
-            )
+            if let savedAssetIdentifiersCache { return savedAssetIdentifiersCache }
+            let identifiers = PhotoLibraryAssetOwnership.load()
+            savedAssetIdentifiersCache = identifiers
+            ownedAssetIdentifierSet = Set(identifiers)
+            return identifiers
         }
         set {
-            UserDefaults.standard.set(
-                PhotoLibraryAssetOwnership.normalized(newValue, limit: 120),
-                forKey: savedAssetIdentifiersKey
-            )
+            let identifiers = PhotoLibraryAssetOwnership.normalized(newValue)
+            savedAssetIdentifiersCache = identifiers
+            ownedAssetIdentifierSet = Set(identifiers)
+            PhotoLibraryAssetOwnership.persist(identifiers)
         }
+    }
+
+    private func ownsAsset(_ identifier: String) -> Bool {
+        guard !identifier.isEmpty else { return false }
+        _ = savedAssetIdentifiers
+        return ownedAssetIdentifierSet.contains(identifier)
     }
 
     /// The persisted local-copy index. Readable from any thread so background
@@ -934,8 +953,7 @@ final class PhotoLibraryService: ObservableObject {
     ) async {
         savedAssetIdentifiers = PhotoLibraryAssetOwnership.adding(
             identifier,
-            to: savedAssetIdentifiers,
-            limit: 120
+            to: savedAssetIdentifiers
         )
         metadataByAssetIdentifier[identifier] = metadata
         let retainedIdentifiers = Set(savedAssetIdentifiers)
@@ -1069,7 +1087,7 @@ final class PhotoLibraryService: ObservableObject {
             try? FileManager.default.removeItem(at: resourceURL)
             return
         }
-        guard PhotoLibraryAssetOwnership.contains(identifier, in: savedAssetIdentifiers) else {
+        guard ownsAsset(identifier) else {
             try? FileManager.default.removeItem(at: resourceURL)
             return
         }
@@ -1356,10 +1374,7 @@ final class PhotoLibraryService: ObservableObject {
     func shareURL(for asset: PhotoLibraryGalleryAsset) async -> URL? {
         switch asset {
         case .cached(let frame):
-            guard PhotoLibraryAssetOwnership.contains(
-                frame.assetIdentifier,
-                in: savedAssetIdentifiers
-            ),
+            guard ownsAsset(frame.assetIdentifier),
             let filename = savedFrameResources[frame.assetIdentifier]?.filename,
             let url = localFrameURL(for: filename) else { return nil }
             return FileManager.default.fileExists(atPath: url.path) ? url : nil
@@ -1368,7 +1383,7 @@ final class PhotoLibraryService: ObservableObject {
             let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
             let resources = PHAssetResource.assetResources(for: photoAsset)
             guard PhotoLibraryAuthorizationPolicy.canRead(status),
-                  savedAssetIdentifiers.contains(photoAsset.localIdentifier),
+                  ownsAsset(photoAsset.localIdentifier),
                   let resource = resources.first(where: { $0.type == .photo }) ?? resources.first,
                   let cachesURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
                 return nil
@@ -1530,7 +1545,7 @@ final class PhotoLibraryService: ObservableObject {
             )
         case .cached(let frame):
             guard let resource = savedFrameResources[frame.assetIdentifier],
-                  PhotoLibraryAssetOwnership.contains(frame.assetIdentifier, in: savedAssetIdentifiers),
+                  ownsAsset(frame.assetIdentifier),
                   let resourceURL = localFrameURL(for: resource.filename) else {
                 return nil
             }

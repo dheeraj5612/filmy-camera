@@ -32,14 +32,14 @@ LANES = {
 }
 GROUPS = {group for groups in LANES.values() for group in groups}
 PHYSICAL = {"device", "lens", "add-only", "capture-sheet", "performance"}
-PHOTOS_WRITES = {"device", "add-only"}
+PHOTOS_WRITES = {"device", "add-only", "capture-sheet"}
 ENVIRONMENT = {
     "photos-e2e": {"FILMY_RUN_SEEDED_PHOTOS_E2E": "1"},
     "device": {"FILMY_RUN_PHOTOS_WRITE": "1", "FILMY_RUN_ROLL_QA": "1"},
     "performance": {"FILMY_RUN_PERF": "1"},
     "lens": {"FILMY_RUN_LENS_ACCEPTANCE": "1"},
     "add-only": {"FILMY_RUN_PHOTOS_WRITE": "1", "FILMY_RUN_ADD_ONLY_CACHE_QA": "1"},
-    "capture-sheet": {"FILMY_RUN_CAPTURE_SHEET": "1"},
+    "capture-sheet": {"FILMY_RUN_CAPTURE_SHEET": "1", "FILMY_RUN_PHOTOS_WRITE": "1"},
     "store-media": {"FILMY_RUN_STORE_MEDIA": "1", "FILMY_STORE_PRIOR_SAVES": "0"}
 }
 FRESH_PHOTOS_SIMULATOR_PHASES = {"photos-e2e", "store-media"}

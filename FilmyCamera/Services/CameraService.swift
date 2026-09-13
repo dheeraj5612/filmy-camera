@@ -852,6 +852,14 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         )
     }
 
+    /// A failed input swap is recoverable only when the previous input was
+    /// restored. Otherwise the remaining outputs belong to an unusable graph.
+    static func shouldResetSessionGraphAfterFailedInputReplacement(
+        restoredPreviousInput: Bool
+    ) -> Bool {
+        !restoredPreviousInput
+    }
+
     /// Captures a still through AVCapturePhotoOutput. The completion is
     /// delivered on the main queue and receives nil for permission, hardware,
     /// or photo-processing failures.
@@ -901,7 +909,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
     }
 
-    /// Sets continuous focus and exposure at a normalized preview location.
+    /// Meters focus once and tracks exposure at a normalized preview location.
     /// The point uses the capture device's normalized coordinate system. The
     /// preview converts its rotation, mirroring and crop before calling this.
     public func focus(at normalizedPoint: CGPoint) {
@@ -914,7 +922,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 defer { device.unlockForConfiguration() }
 
                 if self.usesAutoFocusOnQueue(for: device) {
-                    self.applyAutoFocusOnQueue(to: device, at: point)
+                    self.applyAutoFocusOnQueue(to: device, at: point, isUserInitiated: true)
                 }
 
                 if self.desiredManualExposure == .auto {
@@ -1089,13 +1097,15 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     public func lockCurrentWhiteBalance() {
         sessionQueue.async { [weak self] in
             guard let self, let device = self.activeDevice() else { return }
-            let current = device.temperatureAndTintValues(
-                for: device.deviceWhiteBalanceGains
-            )
+            let gains = device.deviceWhiteBalanceGains
+            guard let current = Self.whiteBalanceTemperatureAndTint(for: gains, device: device) else {
+                self.publishStatus("White balance is still settling. Try again in a moment.")
+                return
+            }
             self.setManualWhiteBalanceOnQueue(
                 kelvin: current.temperature,
                 tint: current.tint,
-                preferredGains: device.deviceWhiteBalanceGains
+                preferredGains: gains
             )
         }
     }
@@ -1297,21 +1307,21 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             return
         }
 
-        let current = device.temperatureAndTintValues(for: device.deviceWhiteBalanceGains)
+        let current = Self.whiteBalanceTemperatureAndTint(for: device.deviceWhiteBalanceGains, device: device)
         let request: (kelvin: Float, tint: Float)
         let converted: AVCaptureDevice.WhiteBalanceGains
         if let preferredGains {
             // `lockCurrentWhiteBalance` freezes the legal sensor gains exactly,
             // even when their temperature/tint conversion sits beyond the
             // normal editing range.
-            request = (current.temperature, current.tint)
+            request = (current?.temperature ?? kelvin, current?.tint ?? tint)
             converted = preferredGains
         } else {
             request = CameraManualControls.sanitizedWhiteBalanceRequest(
                 kelvin: kelvin,
                 tint: tint,
-                currentKelvin: current.temperature,
-                currentTint: current.tint
+                currentKelvin: current?.temperature ?? kelvin,
+                currentTint: current?.tint ?? tint
             )
             converted = device.deviceWhiteBalanceGains(
                 for: AVCaptureDevice.WhiteBalanceTemperatureAndTintValues(
@@ -1348,17 +1358,17 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                           self.manualWhiteBalanceGeneration == requestGeneration,
                           self.activeDevice()?.uniqueID == deviceID else { return }
                     self.isApplyingManualWhiteBalance = false
-                    let applied = device.temperatureAndTintValues(
-                        for: device.deviceWhiteBalanceGains
-                    )
-                    self.desiredManualWhiteBalance = .manual(
-                        ManualWhiteBalanceValues(
-                            kelvin: applied.temperature,
-                            tint: applied.tint,
-                            gains: device.deviceWhiteBalanceGains,
-                            gainsDeviceID: device.uniqueID
+                    let appliedGains = device.deviceWhiteBalanceGains
+                    if let applied = Self.whiteBalanceTemperatureAndTint(for: appliedGains, device: device) {
+                        self.desiredManualWhiteBalance = .manual(
+                            ManualWhiteBalanceValues(
+                                kelvin: applied.temperature,
+                                tint: applied.tint,
+                                gains: appliedGains,
+                                gainsDeviceID: device.uniqueID
+                            )
                         )
-                    )
+                    }
                     self.publishManualControlsOnQueue(for: device)
                     self.publishStatus("Manual white balance applied")
                     self.captureDeferredPhotoWhenManualControlsSettleOnQueue()
@@ -1475,6 +1485,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             if device.isFocusPointOfInterestSupported {
                 device.focusPointOfInterest = CGPoint(x: 0.5, y: 0.5)
             }
+            if device.isSmoothAutoFocusSupported { device.isSmoothAutoFocusEnabled = true }
             device.focusMode = mode
             if focusExposureLocked, desiredManualExposure == .auto {
                 applyAutoExposureOnQueue(to: device, at: CGPoint(x: 0.5, y: 0.5))
@@ -1582,14 +1593,28 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
     /// These metering helpers require the caller's device configuration lock.
     /// Set the point before the mode: changing the point alone does not start AF.
-    private func applyAutoFocusOnQueue(to device: AVCaptureDevice, at point: CGPoint) {
-        guard let mode = Self.preferredFocusUnlockMode(
-            supportsContinuous: device.isFocusModeSupported(.continuousAutoFocus),
-            supportsAuto: device.isFocusModeSupported(.autoFocus)
-        ) else { return }
-        if device.isFocusPointOfInterestSupported {
-            device.focusPointOfInterest = point
-        }
+    static func preferredTapFocusMode(supportsAuto: Bool, supportsContinuous: Bool) -> AVCaptureDevice.FocusMode? {
+        if supportsAuto { return .autoFocus }
+        if supportsContinuous { return .continuousAutoFocus }
+        return nil
+    }
+
+    private func applyAutoFocusOnQueue(to device: AVCaptureDevice, at point: CGPoint, isUserInitiated: Bool = false) {
+        let mode = isUserInitiated
+            ? Self.preferredTapFocusMode(
+                supportsAuto: device.isFocusModeSupported(.autoFocus),
+                supportsContinuous: device.isFocusModeSupported(.continuousAutoFocus)
+            )
+            : Self.preferredFocusUnlockMode(
+                supportsContinuous: device.isFocusModeSupported(.continuousAutoFocus),
+                supportsAuto: device.isFocusModeSupported(.autoFocus)
+            )
+        guard let mode else { return }
+        let pointChanged = device.isFocusPointOfInterestSupported && device.focusPointOfInterest != point
+        // Repeated capability refreshes must not restart a settled lens. An
+        // explicit tap still performs a new one-shot focus at the same point.
+        guard isUserInitiated || pointChanged || device.focusMode != mode else { return }
+        if pointChanged { device.focusPointOfInterest = point }
         device.focusMode = mode
     }
 
@@ -1812,6 +1837,34 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         )
     }
 
+    /// AVFoundation raises an Objective-C exception for invalid gain inputs;
+    /// Swift error handling cannot recover from it. A newly selected camera
+    /// can briefly publish uninitialized gains, so validate readback before
+    /// conversion and leave unavailable values unmeasured rather than invent
+    /// a temperature by clamping the sensor reading.
+    static func validatedWhiteBalanceTemperatureAndTint(
+        for gains: AVCaptureDevice.WhiteBalanceGains,
+        maximumGain: Float,
+        convert: (AVCaptureDevice.WhiteBalanceGains) -> AVCaptureDevice.WhiteBalanceTemperatureAndTintValues
+    ) -> AVCaptureDevice.WhiteBalanceTemperatureAndTintValues? {
+        guard maximumGain.isFinite, maximumGain >= 1,
+              [gains.redGain, gains.greenGain, gains.blueGain].allSatisfy({
+                  $0.isFinite && $0 >= 1 && $0 <= maximumGain
+              }) else { return nil }
+        let values = convert(gains)
+        guard values.temperature.isFinite, values.temperature > 0, values.tint.isFinite else { return nil }
+        return values
+    }
+
+    private static func whiteBalanceTemperatureAndTint(
+        for gains: AVCaptureDevice.WhiteBalanceGains,
+        device: AVCaptureDevice
+    ) -> AVCaptureDevice.WhiteBalanceTemperatureAndTintValues? {
+        validatedWhiteBalanceTemperatureAndTint(for: gains, maximumGain: device.maxWhiteBalanceGain) {
+            device.temperatureAndTintValues(for: $0)
+        }
+    }
+
     private func manualUnavailableStatus(_ control: String, for device: AVCaptureDevice) -> String {
         if device.isVirtualDevice,
            makePhysicalManualLensOptionsOnQueue(for: device).contains(where: \.supportsAnyManualControl) {
@@ -1853,16 +1906,10 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         let exposureSupported = device.isExposureModeSupported(.custom) && bounds != nil
         let whiteBalanceSupported = Self.supportsManualWhiteBalance(device)
         let focusSupported = Self.supportsManualFocus(device)
-        let temperatureAndTint = device.temperatureAndTintValues(
-            for: device.deviceWhiteBalanceGains
-        )
+        let temperatureAndTint = Self.whiteBalanceTemperatureAndTint(for: device.deviceWhiteBalanceGains, device: device)
         let physicalLenses = makePhysicalManualLensOptionsOnQueue(for: device)
-        let currentKelvin = temperatureAndTint.temperature.isFinite
-            ? temperatureAndTint.temperature
-            : 0
-        let currentTint = temperatureAndTint.tint.isFinite
-            ? temperatureAndTint.tint
-            : 0
+        let currentKelvin = temperatureAndTint?.temperature ?? 0
+        let currentTint = temperatureAndTint?.tint ?? 0
         let desiredWhiteBalanceIsManual: Bool
         if case .manual = desiredManualWhiteBalance {
             desiredWhiteBalanceIsManual = true
@@ -2311,6 +2358,53 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         resetCaptureCapabilitiesOnQueue()
     }
 
+    private func resetSessionGraphOnQueue(pendingCaptureStatus: String) {
+        cancelPendingPhotoOnQueue(status: pendingCaptureStatus)
+        activeConstituentObservation?.invalidate()
+        activeConstituentObservation = nil
+        observedVirtualDeviceID = nil
+
+        let rotationToken = UUID()
+        rotationCoordinatorToken = rotationToken
+        rotationCoordinatorDeviceID = nil
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  self.rotationCoordinatorToken == rotationToken else {
+                return
+            }
+            self.previewRotationObservation?.invalidate()
+            self.captureRotationObservation?.invalidate()
+            self.previewRotationObservation = nil
+            self.captureRotationObservation = nil
+            self.rotationCoordinator = nil
+            self.activeRotationToken = nil
+            self.rotationDevice = nil
+        }
+
+        session.beginConfiguration()
+        for input in session.inputs {
+            session.removeInput(input)
+        }
+        for output in session.outputs {
+            session.removeOutput(output)
+        }
+        session.commitConfiguration()
+
+        isConfigured = false
+        needsGraphRebuild = true
+        configuredPhotoDimensions = CMVideoDimensions(width: 0, height: 0)
+        focusExposureLocked = false
+        publishFocusExposureLocked(false)
+        resetCaptureCapabilitiesOnQueue()
+        if session.isRunning {
+            session.stopRunning()
+        }
+        publishRunning(false)
+        publishAvailability(.needsRecovery)
+        publishStatus(pendingCaptureStatus)
+        scheduleAutomaticRecoveryOnQueue()
+    }
+
     /// Human-readable reason for an `AVCaptureSession` interruption. Reasons
     /// are compared by raw value so newer SDK cases fall through safely.
     static func interruptionStatus(forReasonRawValue rawValue: Int?) -> String {
@@ -2367,7 +2461,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         ) { [weak self] coordinator, change in
             let angle = change.newValue
                 ?? coordinator.videoRotationAngleForHorizonLevelPreview
-            MainActor.assumeIsolated {
+            Task { @MainActor [weak self] in
                 self?.applyPreviewRotationOnMain(angle, token: token)
             }
         }
@@ -2378,7 +2472,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         ) { [weak self] coordinator, change in
             let angle = change.newValue
                 ?? coordinator.videoRotationAngleForHorizonLevelCapture
-            MainActor.assumeIsolated {
+            Task { @MainActor [weak self] in
                 self?.applyCaptureRotationOnMain(angle, token: token)
             }
         }
@@ -2811,10 +2905,22 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
 
         guard session.canAddInput(newInput) else {
+            let restoredPreviousInput: Bool
             if let oldInput, session.canAddInput(oldInput) {
                 session.addInput(oldInput)
+                restoredPreviousInput = true
+            } else {
+                restoredPreviousInput = false
             }
             session.commitConfiguration()
+
+            if Self.shouldResetSessionGraphAfterFailedInputReplacement(
+                restoredPreviousInput: restoredPreviousInput
+            ) {
+                resetSessionGraphOnQueue(
+                    pendingCaptureStatus: "Camera needs to be reopened."
+                )
+            }
             return false
         }
 

@@ -5,6 +5,6 @@ enum PhotoFinish: String, CaseIterable, Codable, Sendable {
     /// Preserve the existing edge-to-edge photo output.
     case photo
 
-    /// Place the unscaled photo on warm-white instant-print paper.
+    /// Place the unscaled photo on neutral-white instant-print paper.
     case instantPrint
 }
