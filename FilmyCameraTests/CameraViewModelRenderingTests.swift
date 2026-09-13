@@ -290,6 +290,9 @@ final class CameraViewModelRenderingTests: XCTestCase {
         XCTAssertEqual(saved.previewDrawableSize.height, 2_532)
         XCTAssertEqual(saved.sourceDataByteCount, Data("source-two".utf8).count)
         XCTAssertEqual(saved.finalJPEGByteCount, Data("final-two".utf8).count)
+#if !targetEnvironment(simulator)
+        // The simulator accepts the complete-protection attribute but does not
+        // implement device Data Protection, so its effective class is weaker.
         for fileName in ["source.capture", "final.jpg", "metadata.json"] {
             let file = latest.appendingPathComponent(fileName)
             let protection = try XCTUnwrap(
@@ -305,6 +308,7 @@ final class CameraViewModelRenderingTests: XCTestCase {
             )
             XCTAssertEqual(protection, .complete, "Unexpected directory protection for \(directory.lastPathComponent)")
         }
+#endif
         XCTAssertEqual(
             try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).map(\.lastPathComponent),
             ["latest"]
