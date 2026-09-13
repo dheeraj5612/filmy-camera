@@ -144,6 +144,10 @@ final class ComprehensiveSettingsTests: XCTestCase {
         #if targetEnvironment(simulator)
         throw XCTSkip("Requires a real iPhone camera")
         #else
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["FILMY_RUN_PHOTOS_WRITE"] == "1",
+            "Set FILMY_RUN_PHOTOS_WRITE=1 because this flow saves six real Photos frames"
+        )
         continueAfterFailure = false
         let app = makeApp()
         app.launch()
