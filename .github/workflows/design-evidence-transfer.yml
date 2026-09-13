@@ -1,0 +1,103 @@
+name: Temporary FilmyCam design evidence
+
+on:
+  push:
+    branches: ['design/filmycam-frame-lab']
+    paths: ['.github/workflows/design-evidence-transfer.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  source-snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: 36928f0da0f961f244a8f996ba63b4e4bb1637c7
+          persist-credentials: false
+      - name: Export exact public source without credentials or runner state
+        run: |
+          mkdir -p "$RUNNER_TEMP/source-evidence"
+          git archive --format=tar.gz --output="$RUNNER_TEMP/source-evidence/source.tar.gz" HEAD
+          git cat-file commit HEAD > "$RUNNER_TEMP/source-evidence/commit.raw"
+          git rev-parse HEAD > "$RUNNER_TEMP/source-evidence/base-sha.txt"
+          git ls-tree -r HEAD > "$RUNNER_TEMP/source-evidence/tree.txt"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: filmy-design-source-36928f0
+          path: ${{ runner.temp }}/source-evidence/
+          retention-days: 7
+          if-no-files-found: error
+  baseline-screenshots:
+    runs-on: macos-15
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        device: ['iPhone SE (3rd generation)', 'iPhone 16 Pro Max']
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      SIMULATOR_RUNTIME: com.apple.CoreSimulator.SimRuntime.iOS-26-2
+      DEVICE_NAME: ${{ matrix.device }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: 36928f0da0f961f244a8f996ba63b4e4bb1637c7
+          persist-credentials: false
+      - name: Build and exercise the unmodified baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/design-baseline"
+          git rev-parse HEAD > "$RUNNER_TEMP/design-baseline/source-sha.txt"
+          xcodebuild -version > "$RUNNER_TEMP/design-baseline/xcode.txt"
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess
+          out = pathlib.Path(os.environ['RUNNER_TEMP']) / 'design-baseline'
+          types = json.loads(subprocess.check_output(['xcrun','simctl','list','devicetypes','-j']))['devicetypes']
+          match = [d for d in types if d['name'] == os.environ['DEVICE_NAME']]
+          if len(match) != 1: raise SystemExit('Requested device type unavailable')
+          device = subprocess.check_output(['xcrun','simctl','create','Filmy-Design-Baseline-'+os.environ['GITHUB_RUN_ID'],match[0]['identifier'],os.environ['SIMULATOR_RUNTIME']],text=True,timeout=45).strip()
+          (out / 'device-id.txt').write_text(device+'\n')
+          (out / 'device-name.txt').write_text(os.environ['DEVICE_NAME']+'\n')
+          subprocess.run(['xcrun','simctl','boot',device],check=True,timeout=45)
+          subprocess.run(['xcrun','simctl','bootstatus',device,'-b'],check=True,timeout=300)
+          PY
+          device="$(cat "$RUNNER_TEMP/design-baseline/device-id.txt")"
+          xcodebuild test -project FilmyCamera.xcodeproj -scheme FilmyCamera \
+            -destination "platform=iOS Simulator,id=$device,arch=arm64" \
+            -derivedDataPath "$RUNNER_TEMP/FilmyDesignBuild" \
+            -resultBundlePath "$RUNNER_TEMP/FilmyBaseline.xcresult" \
+            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            -only-testing:FilmyCameraUITests/FilmyCameraUITests/testCameraShellAndRecipeDetails \
+            -only-testing:FilmyCameraUITests/FilmyCameraUITests/testViewfinderFirstChromePreviewKeepsCameraQuiet \
+            -only-testing:FilmyCameraUITests/FilmyCameraUITests/testGalleryAndSettingsNavigation \
+            -only-testing:FilmyCameraUITests/FilmyCameraUITests/testAccessibilitySizeCameraShellKeepsRecipeControlsReachable \
+            -only-testing:FilmyCameraUITests/LaunchOnboardingTests \
+            -only-testing:FilmyCameraUITests/LookLibraryUITests \
+            > "$RUNNER_TEMP/design-baseline/xcodebuild.log" 2>&1
+      - name: Preserve real evidence even when a test fails
+        if: always()
+        shell: bash
+        run: |
+          if [[ -d "$RUNNER_TEMP/FilmyBaseline.xcresult" ]]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/FilmyBaseline.xcresult" --output-path "$RUNNER_TEMP/design-baseline/screenshots"
+            xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/FilmyBaseline.xcresult" > "$RUNNER_TEMP/design-baseline/summary.json"
+          fi
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        if: always()
+        with:
+          name: filmy-design-baseline-${{ matrix.device }}
+          path: ${{ runner.temp }}/design-baseline/
+          retention-days: 7
+          if-no-files-found: error
+      - name: Remove only the simulator created by this job
+        if: always()
+        run: |
+          if [[ -f "$RUNNER_TEMP/design-baseline/device-id.txt" ]]; then
+            device="$(cat "$RUNNER_TEMP/design-baseline/device-id.txt")"
+            xcrun simctl shutdown "$device" || true
+            xcrun simctl delete "$device" || true
+          fi
