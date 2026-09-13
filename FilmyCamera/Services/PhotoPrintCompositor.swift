@@ -5,14 +5,14 @@ import CoreImage
 /// finished photo. Core Image keeps this composition lazy until export.
 enum PhotoPrintCompositor {
     static let maximumSourcePixelCount: CGFloat = 64_000_000
-    static let maximumOutputPixelCount: CGFloat = 80_000_000
+    static let maximumOutputPixelCount: CGFloat = 90_000_000
 
-    static let sideAndTopFraction: CGFloat = 0.035
-    static let bottomFraction: CGFloat = 0.12
+    static let sideAndTopFraction: CGFloat = 0.05
+    static let bottomFraction: CGFloat = 0.16
 
-    static let paperRed: CGFloat = 0.97
-    static let paperGreen: CGFloat = 0.96
-    static let paperBlue: CGFloat = 0.93
+    static let paperRed: CGFloat = 0.98
+    static let paperGreen: CGFloat = 0.98
+    static let paperBlue: CGFloat = 0.98
 
     struct Layout: Equatable {
         let sourcePixelExtent: CGRect

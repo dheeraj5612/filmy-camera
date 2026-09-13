@@ -92,6 +92,107 @@ final class CameraReviewSaveTests: XCTestCase {
         XCTAssertNil(viewModel.reviewRecipe)
     }
 
+    func testCameraCaptureSavesImmediatelyWithoutPresentingImportReview() throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = CameraViewModel(defaults: defaults)
+        let saver = ControlledPhotoSaver()
+        let photo = try capturedPhoto()
+        let recipe = model.selectedRecipe
+
+        model.saveCapturedPhoto(photo, recipe: recipe, finish: .instantPrint, photoLibrary: saver)
+
+        XCTAssertEqual(saver.requests.count, 1, "The capture must start saving without a UI Save action")
+        XCTAssertTrue(model.isSaving)
+        XCTAssertTrue(model.hasPendingCapture)
+        XCTAssertFalse(model.isReviewingImport)
+        XCTAssertFalse(model.isRenderingReview)
+        XCTAssertEqual(model.reviewFinish, .instantPrint)
+        XCTAssertEqual(saver.requests[0].imageData, photo.data)
+        XCTAssertEqual(saver.requests[0].capturedAt, photo.capturedAt)
+        saver.completeLast(with: .success(()))
+        XCTAssertFalse(model.hasPendingCapture)
+        XCTAssertFalse(model.isSaving)
+        XCTAssertNil(model.reviewImage)
+        XCTAssertEqual(model.lastCaptureDate, photo.capturedAt)
+    }
+
+    func testCameraSaveFailureRetainsExactBytesAndBlocksOverwritingTheFrame() throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = CameraViewModel(defaults: defaults)
+        let saver = ControlledPhotoSaver()
+        let photo = try capturedPhoto()
+        let recipe = model.selectedRecipe
+        model.saveCapturedPhoto(photo, recipe: recipe, finish: .instantPrint, photoLibrary: saver)
+        saver.completeLast(with: .failure(.accessDenied))
+        XCTAssertFalse(model.isSaving)
+        XCTAssertFalse(model.isReviewingImport, "Failure must not bring back Retake/Save review")
+        XCTAssertTrue(model.hasPendingCapture)
+        XCTAssertTrue(model.saveErrorRequiresSettings)
+
+        model.select(recipe: try XCTUnwrap(model.recipes.first { $0.id != recipe.id }))
+        model.saveCapturedPhoto(try capturedPhoto(), recipe: model.selectedRecipe, photoLibrary: saver)
+        XCTAssertEqual(saver.requests.count, 1, "A failed photo must not be replaced by a new shutter result")
+        XCTAssertTrue(model.reviewImage === photo.image)
+        model.saveReview(photoLibrary: saver)
+        XCTAssertEqual(saver.requests.count, 2)
+        XCTAssertEqual(saver.requests[1].imageData, photo.data)
+        XCTAssertEqual(saver.requests[1].recipe, recipe)
+        XCTAssertEqual(saver.requests[1].capturedAt, photo.capturedAt)
+        XCTAssertEqual(model.reviewFinish, .instantPrint)
+        saver.completeLast(with: .success(()))
+        XCTAssertFalse(model.hasPendingCapture)
+    }
+
+    func testRepeatedAndLateSaveCallbacksCannotSettleAnotherAttempt() throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = CameraViewModel(defaults: defaults)
+        let saver = ControlledPhotoSaver()
+        let photo = try capturedPhoto()
+        model.saveCapturedPhoto(photo, recipe: model.selectedRecipe, photoLibrary: saver)
+        let first = try XCTUnwrap(saver.requests.first)
+        model.saveReview(photoLibrary: saver)
+        model.saveCapturedPhoto(photo, recipe: model.selectedRecipe, photoLibrary: saver)
+        XCTAssertEqual(saver.requests.count, 1)
+        first.completion(.failure(.writeFailed))
+        first.completion(.success(()))
+        XCTAssertTrue(model.hasPendingCapture, "A duplicate completion must not override a failed save")
+        XCTAssertNil(model.lastCaptureDate)
+        model.saveReview(photoLibrary: saver)
+        first.completion(.success(()))
+        XCTAssertTrue(model.isSaving, "An old callback cannot settle a newer retry")
+        XCTAssertTrue(model.hasPendingCapture)
+        saver.completeLast(with: .success(()))
+        first.completion(.failure(.accessDenied))
+        XCTAssertNil(model.saveErrorMessage)
+        XCTAssertFalse(model.hasPendingCapture)
+    }
+
+    func testCameraCaptureCannotReplaceAnImportedPhotoBeingEdited() async throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = try await makeImportedReview(defaults: defaults)
+        let original = model.reviewImage
+        let saver = ControlledPhotoSaver()
+        model.saveCapturedPhoto(try capturedPhoto(), recipe: model.selectedRecipe, photoLibrary: saver)
+        XCTAssertTrue(saver.requests.isEmpty)
+        XCTAssertTrue(model.isReviewingImport)
+        XCTAssertTrue(model.reviewImage === original)
+    }
+
+    private func capturedPhoto() throws -> CameraViewModel.RenderedPhoto {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 12, height: 16)).image { context in
+            UIColor.orange.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 12, height: 16))
+        }
+        return CameraViewModel.RenderedPhoto(
+            image: image, data: try XCTUnwrap(image.jpegData(compressionQuality: 0.9)),
+            capturedAt: Date(timeIntervalSince1970: 1_800_000_000)
+        )
+    }
+
     private func makeImportedReview(defaults: UserDefaults) async throws -> CameraViewModel {
         let viewModel = CameraViewModel(defaults: defaults)
         try await importReview(into: viewModel)

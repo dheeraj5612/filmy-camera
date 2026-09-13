@@ -34,7 +34,7 @@ final class RecipeInvariantsTests: XCTestCase {
     private var previousRecipeOverrides: Data?
 
     func testRendererVersionTracksCurrentParametricPipeline() {
-        XCTAssertEqual(FilmRecipe.rendererVersion, "core-image-parametric-v10")
+        XCTAssertEqual(FilmRecipe.rendererVersion, "core-image-parametric-v11")
     }
 
     override func setUp() {
@@ -576,7 +576,8 @@ final class RecipeInvariantsTests: XCTestCase {
 
         // The session is intentionally never started. CameraService must
         // report this as a clean, recoverable capture failure on any device.
-        await model.capture(camera: camera)
+        let saver = await ControlledPhotoSaver()
+        await model.capture(camera: camera, photoLibrary: saver)
 
         for _ in 0..<100 {
             if await model.isCapturing == false { break }

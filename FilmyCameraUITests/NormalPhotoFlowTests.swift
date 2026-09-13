@@ -13,7 +13,8 @@ final class NormalPhotoFlowTests: XCTestCase {
 
         #if targetEnvironment(simulator)
         try XCTSkipUnless(
-            ProcessInfo.processInfo.environment["FILMY_RUN_SEEDED_PHOTOS_E2E"] == "1",
+            ProcessInfo.processInfo.environment["FILMY_RUN_SEEDED_PHOTOS_E2E"] == "1"
+                || ProcessInfo.processInfo.environment["TEST_RUNNER_FILMY_RUN_SEEDED_PHOTOS_E2E"] == "1",
             "Set FILMY_RUN_SEEDED_PHOTOS_E2E=1 on a disposable simulator seeded with cafe-original.png"
         )
         #else
@@ -46,6 +47,24 @@ final class NormalPhotoFlowTests: XCTestCase {
             }
             launchedApp?.terminate()
         }
+    }
+
+    /// Opens Roll solely to resolve the real Photos permission prompt for the
+    /// disposable fixture simulator. Keep this separate from behavioral UI
+    /// assertions so fixture authorization does not depend on an import flow.
+    func testGrantFullPhotosAccessForFixtureLane() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["FILMY_RUN_PHOTOS_PERMISSION_BOOTSTRAP"] == "1"
+                || ProcessInfo.processInfo.environment["TEST_RUNNER_FILMY_RUN_PHOTOS_PERMISSION_BOOTSTRAP"] == "1",
+            "Permission bootstrap is reserved for the fixture runner"
+        )
+
+        launchNormalApp()
+        openRoll()
+        XCTAssertTrue(
+            app.staticTexts["Roll"].waitForExistence(timeout: 5),
+            "Roll must remain visible after granting full Photos access"
+        )
     }
 
     func testNormalSeededImportSaveRelaunchesIntoRollDetail() throws {
@@ -94,42 +113,35 @@ final class NormalPhotoFlowTests: XCTestCase {
         XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }
         XCTAssertTrue(
-            waitUntil(timeout: 10) { app.frame.width > app.frame.height },
-            "Large-text review must settle into landscape before compact-layout checks"
+            waitUntil(timeout: 10) { app.frame.height > app.frame.width },
+            "Large-text review must stay portrait after device rotation before compact-layout checks"
         )
         let landscapeFinish = app.buttons["review-finish-instantPrint"]
-        let landscapeScroll = app.scrollViews["review-controls-scroll"]
+        let portraitScroll = app.scrollViews["review-content-scroll"]
         XCTAssertTrue(
-            revealFully(landscapeFinish, in: landscapeScroll),
-            "Large-text landscape Instant Print must scroll fully into view"
+            revealFully(landscapeFinish, in: portraitScroll),
+            "Large-text portrait-locked Instant Print must scroll fully into view in the portrait review"
         )
         assertReviewControl(
             landscapeFinish,
-            name: "Large-text landscape Instant Print",
+            name: "Large-text portrait-locked Instant Print",
             containedInApp: true
         )
         landscapeFinish.tap()
         XCTAssertTrue(
             waitUntil(timeout: 30) {
-                app.descendants(matching: .any)["review-image"].label.contains("Instant Print")
+                let image = app.descendants(matching: .any)["review-image"]
+                return image.exists && image.label.contains("Instant Print")
                     && app.buttons["Save filtered photo"].isEnabled
             },
-            "Large-text landscape review must finish rendering Instant Print"
+            "Large-text portrait-locked review must finish rendering Instant Print"
         )
 
         let save = app.buttons["Save filtered photo"]
-        XCTAssertTrue(
-            revealFully(save, in: landscapeScroll),
-            "Large-text landscape Save must scroll fully into view"
-        )
-        assertReviewControl(save, name: "Large-text landscape Save", containedInApp: true)
+        assertReviewControl(save, name: "Large-text portrait-locked pinned Save", containedInApp: true)
 
         let cancel = app.buttons["Cancel"]
-        XCTAssertTrue(
-            revealFully(cancel, in: landscapeScroll),
-            "Large-text landscape Cancel must scroll fully into view"
-        )
-        assertReviewControl(cancel, name: "Large-text landscape Cancel", containedInApp: true)
+        assertReviewControl(cancel, name: "Large-text portrait-locked pinned Cancel", containedInApp: true)
         cancel.tap()
         let review = app.descendants(matching: .any)["review-screen"]
         XCTAssertTrue(waitForDisappearance(review, timeout: 10), "Cancel must dismiss imported review")
@@ -211,31 +223,31 @@ final class NormalPhotoFlowTests: XCTestCase {
         XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }
         XCTAssertTrue(
-            waitUntil(timeout: 10) { app.frame.width > app.frame.height },
-            "The review must settle into landscape before layout assertions"
+            waitUntil(timeout: 10) { app.frame.height > app.frame.width },
+            "The review must stay portrait after device rotation before layout assertions"
         )
-        assertReviewControl(compare, name: "Landscape Original comparison", containedInApp: true)
-        assertReviewControl(lookPicker, name: "Landscape review look picker", containedInApp: true)
-        assertReviewControl(printFinish, name: "Landscape Instant Print", containedInApp: true)
+        assertReviewControl(compare, name: "Portrait-locked Original comparison", containedInApp: true)
+        assertReviewControl(lookPicker, name: "Portrait-locked review look picker", containedInApp: true)
+        assertReviewControl(printFinish, name: "Portrait-locked Instant Print", containedInApp: true)
         assertReviewControl(
             app.buttons["Save filtered photo"],
-            name: "Landscape Save filtered photo",
+            name: "Portrait-locked Save filtered photo",
             containedInApp: true
         )
         let landscapePhoto = app.descendants(matching: .any)["review-image"]
-        XCTAssertTrue(landscapePhoto.waitForExistence(timeout: 10), "Landscape review must keep its photo visible")
+        XCTAssertTrue(landscapePhoto.waitForExistence(timeout: 10), "Portrait-locked review must keep its photo visible")
         XCTAssertTrue(
             app.frame.insetBy(dx: -1, dy: -1).contains(landscapePhoto.frame),
-            "Landscape review photo must remain inside the app frame"
+            "Portrait-locked review photo must remain inside the app frame"
         )
         XCTAssertGreaterThan(
             landscapePhoto.frame.height,
             120,
-            "Landscape review must reserve usable height for the fitted photo"
+            "Portrait-locked review must reserve usable height for the fitted photo"
         )
         XCTAssertTrue(
             landscapePhoto.frame.intersection(app.buttons["Save filtered photo"].frame).isNull,
-            "Landscape actions must not cover the fitted photo"
+            "Portrait-locked actions must not cover the fitted photo"
         )
         attachScreenshot(named: "review-monochrome-landscape")
 
@@ -292,14 +304,56 @@ final class NormalPhotoFlowTests: XCTestCase {
         add(attachment)
     }
 
+    func testGallerySlidesBetweenSavedPhotosAndPreservesZoomBehavior() throws {
+        launchNormalApp()
+        // Two distinct look labels prove that paging changed the actual
+        // asset, not just a counter or recycled image placeholder.
+        for (id, name) in [("g7x-compact", "G7 X Compact"), ("acros-monochrome", "Fine Monochrome")] {
+            try ensureRecipe(id: id, name: name)
+            try importSeededFixture()
+            app.buttons["Save filtered photo"].tap()
+            try waitForSaveCompletion()
+        }
+        openRoll()
+        let newest = app.buttons.matching(NSPredicate(format: "label == 'Photo in your gallery, Fine Monochrome'")).firstMatch
+        XCTAssertTrue(newest.waitForExistence(timeout: 20))
+        newest.tap()
+        let photo = app.images["Photo"]
+        let pager = app.descendants(matching: .any)["gallery-pager"]
+        XCTAssertTrue(photo.waitForExistence(timeout: 20))
+        XCTAssertTrue(waitUntil(timeout: 10) { (pager.value as? String)?.hasPrefix("1 of ") == true })
+        photo.swipeLeft()
+        XCTAssertTrue(waitUntil(timeout: 10) { (pager.value as? String)?.hasPrefix("2 of ") == true })
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(
+            format: "label == %@", "Selected gallery photo, G7 X Compact"
+        )).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(photo.waitForExistence(timeout: 20))
+        photo.pinch(withScale: 2, velocity: 1)
+        XCTAssertTrue(waitUntil(timeout: 5) { (photo.value as? String)?.hasPrefix("Zoomed ") == true })
+        photo.swipeRight()
+        XCTAssertTrue((pager.value as? String)?.hasPrefix("2 of ") == true, "Zoomed panning must not change the photo")
+        photo.doubleTap()
+        XCTAssertTrue(waitUntil(timeout: 5) { photo.value as? String == "Fit to screen" })
+        photo.swipeRight()
+        XCTAssertTrue(waitUntil(timeout: 10) { (pager.value as? String)?.hasPrefix("1 of ") == true })
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(
+            format: "label == %@", "Selected gallery photo, Fine Monochrome"
+        )).firstMatch.waitForExistence(timeout: 10))
+        photo.swipeRight()
+        XCTAssertTrue((pager.value as? String)?.hasPrefix("1 of ") == true, "The first photo must not wrap to the last")
+        app.buttons["Close frame"].tap()
+        XCTAssertTrue(app.buttons["roll-back-to-camera"].waitForExistence(timeout: 10))
+    }
+
     private func launchNormalApp(contentSizeCategory: String? = nil) {
         app?.terminate()
         XCUIDevice.shared.orientation = .portrait
         app = XCUIApplication()
-        // Deliberately omit -ui-testing so PhotosPicker and the real save path
-        // are exercised against the disposable seeded library.
+        // Real-roll mode bypasses onboarding while preserving PhotosPicker and
+        // the real save and permission paths.
+        app.launchArguments = ["-ui-testing-real-roll"]
         if let contentSizeCategory {
-            app.launchArguments = ["-UIPreferredContentSizeCategoryName", contentSizeCategory]
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", contentSizeCategory]
         }
         app.launch()
 
@@ -323,24 +377,82 @@ final class NormalPhotoFlowTests: XCTestCase {
         currentLook.tap()
         let tile = app.buttons["recipe-\(id)"]
         XCTAssertTrue(tile.waitForExistence(timeout: 10), "The seeded flow must expose \(name)")
-        if tile.isHittable {
-            tile.tap()
-        } else {
-            let screen = app.frame
-            let frame = tile.frame
-            app.coordinate(withNormalizedOffset: CGVector(
-                dx: (frame.midX - screen.minX) / screen.width,
-                dy: (frame.midY - screen.minY) / screen.height
-            )).tap()
-        }
+        let picker = app.scrollViews["recipe-picker"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 5), "The look drawer must expose its grouped picker")
+        let group = app.scrollViews["recipe-group-\(recipeGroupID(for: id))"]
+        XCTAssertTrue(group.waitForExistence(timeout: 5), "The look drawer must expose the \(name) recipe group")
         XCTAssertTrue(
-            waitUntil(timeout: 10) { currentLook.label.contains(name) },
-            "Selecting \(name) must update the current look"
+            revealRecipe(tile, in: group, picker: picker),
+            "The \(name) recipe tile must be visible and hittable in its recipe group"
         )
+        guard tile.isHittable else { return }
+        tile.tap()
         let close = app.buttons["recipe-drawer-close"]
         XCTAssertTrue(close.waitForExistence(timeout: 5), "The look drawer must remain dismissible")
         close.tap()
         XCTAssertTrue(waitForDisappearance(close, timeout: 5), "Selecting a look must leave the camera controls available")
+        XCTAssertTrue(
+            waitUntil(timeout: 10) { app.buttons["recipe-menu"].label.contains(name) },
+            "Selecting \(name) must update the current look"
+        )
+    }
+
+    private func recipeGroupID(for recipeID: String) -> String {
+        switch recipeID {
+        case "g7x-compact": return "compact"
+        case "acros-monochrome": return "monochrome"
+        default: return "film"
+        }
+    }
+
+    /// Reveal a recipe by following its grouped picker frames. The selected
+    /// group is centered on open, so the target can be above or below it; each
+    /// row is independently horizontal and may need a second reveal pass.
+    private func revealRecipe(
+        _ tile: XCUIElement,
+        in group: XCUIElement,
+        picker: XCUIElement,
+        timeout: TimeInterval = 12
+    ) -> Bool {
+        let deadline = Date(timeIntervalSinceNow: timeout)
+        while Date() < deadline {
+            let pickerViewport = picker.frame.intersection(app.frame).insetBy(dx: 0, dy: 6)
+            let tileFrame = tile.frame
+            // The row's accessibility frame can include its content or
+            // padding and extend past the drawer at the content boundary.
+            // Scroll vertically based on the target tile, whose frame is the
+            // actual interaction geometry, while still requiring the entire
+            // tile to be inside the picker viewport before tapping it.
+            if tileFrame.minY < pickerViewport.minY || tileFrame.maxY > pickerViewport.maxY {
+                let previousFrame = tileFrame
+                if tileFrame.minY < pickerViewport.minY {
+                    picker.swipeDown()
+                } else {
+                    picker.swipeUp()
+                }
+                _ = waitUntil(timeout: 0.8) { tile.frame != previousFrame }
+                continue
+            }
+
+            // The group's accessibility frame describes its scroll content and
+            // can remain offset at the horizontal content boundary. The drawer
+            // viewport is the actual clipping and interaction region.
+            let rowViewport = pickerViewport
+            if rowViewport.contains(tileFrame) && tile.isHittable {
+                return true
+            }
+            let previousFrame = tileFrame
+            if tileFrame.minX < rowViewport.minX {
+                group.swipeRight()
+            } else if tileFrame.maxX > rowViewport.maxX {
+                group.swipeLeft()
+            } else {
+                _ = waitUntil(timeout: 0.8) { tile.isHittable }
+                continue
+            }
+            _ = waitUntil(timeout: 0.8) { tile.frame != previousFrame || tile.isHittable }
+        }
+        return false
     }
 
     private func importSeededFixture(newerSavedFrameCount: Int? = nil) throws {
@@ -411,7 +523,14 @@ final class NormalPhotoFlowTests: XCTestCase {
             // AX rounds child bounds to display pixels. Allow one point around
             // the target viewport, retaining at least seven points of vertical
             // clearance for the complete control at either scroll limit.
-            let viewport = scrollView.frame.intersection(app.frame).insetBy(dx: 0, dy: 8)
+            var visibleScroll = scrollView.frame.intersection(app.frame)
+            // SwiftUI's safeAreaInset action bar can overlap the AX scroll
+            // frame. Exclude it so a finish tap cannot hit pinned Cancel.
+            let actionBar = app.descendants(matching: .any)["review-action-bar"]
+            if actionBar.exists {
+                visibleScroll.size.height = max(0, min(visibleScroll.maxY, actionBar.frame.minY) - visibleScroll.minY)
+            }
+            let viewport = visibleScroll.insetBy(dx: 0, dy: 8)
             let visibilityBounds = viewport.insetBy(dx: -1, dy: -1)
             let frame = element.frame
             guard viewport.width > 20, viewport.height > 20,
@@ -467,6 +586,14 @@ final class NormalPhotoFlowTests: XCTestCase {
             // control past the opposite edge during the positioning gesture.
             start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
             _ = waitUntil(timeout: 0.75) { element.frame != previousFrame }
+            if element.frame == previousFrame {
+                if boundedShift < 0 {
+                    scrollView.swipeUp()
+                } else {
+                    scrollView.swipeDown()
+                }
+                _ = waitUntil(timeout: 0.75) { element.frame != previousFrame }
+            }
         } while Date() < deadline
 
         let viewport = scrollView.frame.intersection(app.frame).insetBy(dx: 0, dy: 8)

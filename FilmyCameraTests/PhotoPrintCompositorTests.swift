@@ -18,9 +18,9 @@ final class PhotoPrintCompositorTests: XCTestCase {
         XCTAssertEqual(layout.sourcePixelExtent, CGRect(x: 17, y: -9, width: 80, height: 60))
         XCTAssertEqual(layout.sideMargin, 3)
         XCTAssertEqual(layout.topMargin, 3)
-        XCTAssertEqual(layout.bottomMargin, 8)
-        XCTAssertEqual(layout.imageFrame, CGRect(x: 3, y: 8, width: 80, height: 60))
-        XCTAssertEqual(layout.canvasExtent, CGRect(x: 0, y: 0, width: 86, height: 71))
+        XCTAssertEqual(layout.bottomMargin, 10)
+        XCTAssertEqual(layout.imageFrame, CGRect(x: 3, y: 10, width: 80, height: 60))
+        XCTAssertEqual(layout.canvasExtent, CGRect(x: 0, y: 0, width: 86, height: 73))
         XCTAssertEqual(output.extent, layout.canvasExtent)
         XCTAssertGreaterThan(layout.bottomMargin, layout.topMargin)
     }
@@ -52,9 +52,9 @@ final class PhotoPrintCompositorTests: XCTestCase {
 
         let borderedPixels = try rgbaPixels(output, extent: output.extent)
         XCTAssertGreaterThan(borderedPixels[2], 230)
-        XCTAssertGreaterThanOrEqual(borderedPixels[1], borderedPixels[2])
-        XCTAssertGreaterThanOrEqual(borderedPixels[0], borderedPixels[1])
-        XCTAssertEqual(borderedPixels[3], 255, "The warm-white paper must be opaque")
+        XCTAssertEqual(borderedPixels[1], borderedPixels[2])
+        XCTAssertEqual(borderedPixels[0], borderedPixels[1])
+        XCTAssertEqual(borderedPixels[3], 255, "The neutral-white paper must be opaque")
 
         let transparentSource = CIImage(color: CIColor(red: 0.2, green: 0.4, blue: 0.8, alpha: 0.25))
             .cropped(to: CGRect(x: 0, y: 0, width: 4, height: 4))
@@ -93,6 +93,10 @@ final class PhotoPrintCompositorTests: XCTestCase {
         let layout = PhotoPrintCompositor.layout(for: native48MP, finish: .instantPrint)
 
         XCTAssertNotNil(layout)
+        XCTAssertNotNil(PhotoPrintCompositor.layout(
+            for: CGRect(x: 0, y: 0, width: 8_000, height: 8_000),
+            finish: .instantPrint
+        ))
         XCTAssertEqual(layout?.imageFrame.size, native48MP.size)
         XCTAssertLessThanOrEqual(
             (layout?.canvasExtent.width ?? .infinity) * (layout?.canvasExtent.height ?? .infinity),
@@ -112,6 +116,29 @@ final class PhotoPrintCompositorTests: XCTestCase {
             finish: .instantPrint
         ))
         XCTAssertNil(PhotoPrintCompositor.layout(for: .zero, finish: .instantPrint))
+    }
+
+    func testPrintBordersAreSymmetricAndProportionalWithoutChangingImageAspect() throws {
+        let sizes = [
+            CGSize(width: 1_000, height: 1_400),
+            CGSize(width: 2_000, height: 2_800),
+            CGSize(width: 3_000, height: 4_200)
+        ]
+
+        for size in sizes {
+            let layout = try XCTUnwrap(
+                PhotoPrintCompositor.layout(
+                    for: CGRect(origin: .zero, size: size),
+                    finish: .instantPrint
+                )
+            )
+            let shortEdge = min(size.width, size.height)
+            XCTAssertEqual(layout.imageFrame.size, size)
+            XCTAssertEqual(layout.imageFrame.minX, layout.canvasExtent.maxX - layout.imageFrame.maxX)
+            XCTAssertEqual(layout.sideMargin, layout.topMargin)
+            XCTAssertEqual(layout.sideMargin, ceil(shortEdge * 0.05))
+            XCTAssertEqual(layout.bottomMargin, ceil(shortEdge * 0.16))
+        }
     }
 
     private func detailedImage(width: Int, height: Int) throws -> CGImage {

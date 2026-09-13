@@ -16,6 +16,7 @@ public struct FilteredCameraPreview: UIViewRepresentable {
         let arguments = ProcessInfo.processInfo.arguments
         return arguments.contains("-ui-testing")
             || arguments.contains("-ui-testing-preview-status")
+            || arguments.contains("-ui-testing-real-roll")
     }()
 
     @ObservedObject private var cameraService: CameraService

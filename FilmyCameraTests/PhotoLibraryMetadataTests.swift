@@ -99,7 +99,7 @@ final class PhotoLibraryMetadataTests: XCTestCase {
         XCTAssertEqual(PhotoLibrarySaveError.failure(for: .restricted), .accessDenied)
         XCTAssertEqual(PhotoLibrarySaveError.failure(for: .authorized), .writeFailed)
         XCTAssertTrue(PhotoLibrarySaveError.accessDenied.localizedDescription.contains("Settings"))
-        XCTAssertTrue(PhotoLibrarySaveError.writeFailed.localizedDescription.contains("try again"))
+        XCTAssertTrue(PhotoLibrarySaveError.writeFailed.localizedDescription.localizedCaseInsensitiveContains("retry"))
     }
 
     func testCachedFrameDimensionsComeFromFullResolutionJPEG() throws {
@@ -277,21 +277,63 @@ final class PhotoLibraryMetadataTests: XCTestCase {
         XCTAssertFalse(PhotoLibraryAssetOwnership.contains("", in: savedIdentifiers))
     }
 
-    func testAssetOwnershipPersistsNewestUniqueBoundedIdentifiers() {
+    func testAssetOwnershipPreservesEveryUniqueIdentifierInNewestFirstOrder() {
         let savedIdentifiers = ["oldest", "middle", "newest"]
+        XCTAssertEqual(PhotoLibraryAssetOwnership.adding("middle", to: savedIdentifiers),
+                       ["middle", "oldest", "newest"])
+        XCTAssertEqual(PhotoLibraryAssetOwnership.adding("created-now", to: savedIdentifiers),
+                       ["created-now", "oldest", "middle", "newest"])
+        XCTAssertEqual(PhotoLibraryAssetOwnership.adding("", to: ["", "known", "known"]), ["known"])
+    }
 
-        XCTAssertEqual(
-            PhotoLibraryAssetOwnership.adding("middle", to: savedIdentifiers, limit: 3),
-            ["middle", "oldest", "newest"]
-        )
-        XCTAssertEqual(
-            PhotoLibraryAssetOwnership.adding("created-now", to: savedIdentifiers, limit: 2),
-            ["created-now", "oldest"]
-        )
-        XCTAssertEqual(
-            PhotoLibraryAssetOwnership.adding("", to: ["", "known", "known"], limit: 10),
-            ["known"]
-        )
+    func testOwnershipPersistenceBeyond120KeepsEveryEarlierSavedFrame() throws {
+        let suite = "PhotoLibraryMetadataTests.Ownership.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let existing = (0..<120).reversed().map { "owned-\($0)" }
+        // Read the same defaults format used by existing installations.
+        defaults.set(existing, forKey: "filmyCamera.savedAssetIdentifiers")
+        for index in 120..<160 {
+            let current = PhotoLibraryAssetOwnership.load(defaults: defaults)
+            PhotoLibraryAssetOwnership.persist(
+                PhotoLibraryAssetOwnership.adding("owned-\(index)", to: current), defaults: defaults
+            )
+        }
+        let reopenedDefaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let restored = PhotoLibraryAssetOwnership.load(defaults: reopenedDefaults)
+        XCTAssertEqual(restored, (0..<160).reversed().map { "owned-\($0)" })
+        XCTAssertTrue(PhotoLibraryAssetOwnership.contains("owned-0", in: restored))
+        XCTAssertFalse(PhotoLibraryAssetOwnership.contains("personal-unrecorded-photo", in: restored))
+    }
+
+    func testPersistedOwnershipFeedsEveryPagingDestinationBeyond120() throws {
+        let suite = "PhotoLibraryMetadataTests.Paging.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let expected = (0..<160).reversed().map { "owned-\($0)" }
+        PhotoLibraryAssetOwnership.persist(expected, defaults: defaults)
+        let restored = PhotoLibraryAssetOwnership.load(defaults: defaults)
+        var selected = try XCTUnwrap(restored.first)
+        var visited = [selected]
+        while let next = GalleryPagingPolicy.targetIdentifier(in: restored, selectedIdentifier: selected,
+                                                              direction: .next) {
+            selected = next
+            visited.append(next)
+        }
+        XCTAssertEqual(visited, expected)
+        XCTAssertEqual(selected, "owned-0")
+        XCTAssertEqual(GalleryPagingPolicy.targetIdentifier(in: restored, selectedIdentifier: selected,
+                                                           direction: .previous), "owned-1")
+    }
+
+    func testOwnershipNormalizationKeepsLargeHistoryAndRejectsEmptyDuplicates() {
+        let identifiers = (0..<1_000).map { "owned-\($0)" }
+        XCTAssertEqual(PhotoLibraryAssetOwnership.normalized([""] + identifiers + identifiers + [""]), identifiers)
+        let removed = PhotoLibraryAssetOwnership.removing("owned-500", from: identifiers)
+        XCTAssertEqual(removed.count, 999)
+        XCTAssertTrue(removed.contains("owned-0"))
+        XCTAssertTrue(removed.contains("owned-999"))
+        XCTAssertFalse(removed.contains("owned-500"))
     }
 
     func testAssetOwnershipRemovalIsExact() {

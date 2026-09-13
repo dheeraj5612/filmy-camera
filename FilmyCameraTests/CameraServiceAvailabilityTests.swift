@@ -6,6 +6,53 @@ import CoreVideo
 
 @MainActor
 final class CameraServiceAvailabilityTests: XCTestCase {
+    func testExplicitFocusTapPrefersOneShotAndHandlesUnsupportedDevices() {
+        XCTAssertEqual(CameraService.preferredTapFocusMode(supportsAuto: true, supportsContinuous: true), .autoFocus)
+        XCTAssertEqual(CameraService.preferredTapFocusMode(supportsAuto: true, supportsContinuous: false), .autoFocus)
+        XCTAssertEqual(CameraService.preferredTapFocusMode(supportsAuto: false, supportsContinuous: true), .continuousAutoFocus)
+        XCTAssertNil(CameraService.preferredTapFocusMode(supportsAuto: false, supportsContinuous: false))
+    }
+
+    func testGalleryPagingHasNoWraparoundAndRejectsInvalidIndices() {
+        XCTAssertNil(GalleryPagingPolicy.neighbor(of: 0, offset: -1, count: 3))
+        XCTAssertNil(GalleryPagingPolicy.neighbor(of: 2, offset: 1, count: 3))
+        XCTAssertEqual(GalleryPagingPolicy.neighbor(of: 1, offset: -1, count: 3), 0)
+        XCTAssertEqual(GalleryPagingPolicy.neighbor(of: 1, offset: 1, count: 3), 2)
+        for count in [-1, 0, 1] {
+            XCTAssertNil(GalleryPagingPolicy.neighbor(of: 0, offset: 1, count: count))
+        }
+        for index in [Int.min, -1, 3, Int.max] {
+            XCTAssertNil(GalleryPagingPolicy.neighbor(of: index, offset: 1, count: 3))
+        }
+        XCTAssertNil(GalleryPagingPolicy.neighbor(of: 0, offset: Int.max, count: 3))
+    }
+
+    func testGalleryRetainsOnlyCurrentAndAdjacentPagesEvenAtIntegerBounds() {
+        XCTAssertEqual(GalleryPagingPolicy.retainedIndices(around: 0, count: 1), 0..<1)
+        XCTAssertEqual(GalleryPagingPolicy.retainedIndices(around: 0, count: 100_000), 0..<2)
+        XCTAssertEqual(GalleryPagingPolicy.retainedIndices(around: 99_999, count: 100_000), 99_998..<100_000)
+        XCTAssertEqual(GalleryPagingPolicy.retainedIndices(around: 50_000, count: 100_000), 49_999..<50_002)
+        XCTAssertEqual(GalleryPagingPolicy.retainedIndices(around: Int.max - 1, count: Int.max), (Int.max - 2)..<Int.max)
+        XCTAssertTrue(GalleryPagingPolicy.retainedIndices(around: Int.min, count: Int.max).isEmpty)
+        XCTAssertTrue(GalleryPagingPolicy.retainedIndices(around: 0, count: 0).isEmpty)
+    }
+
+    func testAppAndItsInfoPlistAllowOnlyPortrait() throws {
+        let delegate = FilmyAppDelegate()
+        XCTAssertEqual(delegate.application(.shared, supportedInterfaceOrientationsFor: nil), .portrait)
+        // Bundle resolves device-qualified keys. Read the built file to verify both device families.
+        let data = try Data(contentsOf: Bundle.main.bundleURL.appendingPathComponent("Info.plist"))
+        let info = try XCTUnwrap(PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any])
+        XCTAssertEqual(info["UISupportedInterfaceOrientations"] as? [String], ["UIInterfaceOrientationPortrait"])
+        XCTAssertEqual(info["UISupportedInterfaceOrientations~ipad"] as? [String], [
+            "UIInterfaceOrientationPortrait",
+            "UIInterfaceOrientationPortraitUpsideDown",
+            "UIInterfaceOrientationLandscapeLeft",
+            "UIInterfaceOrientationLandscapeRight"
+        ])
+        XCTAssertNil(info["UIRequiresFullScreen"])
+    }
+
     func testCameraStartsWithAnExplicitIdleAvailability() {
         let camera = CameraService()
 

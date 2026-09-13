@@ -81,7 +81,9 @@ struct ManualCameraControlsView: View {
                     .font(.system(.body, design: .rounded).weight(.semibold))
                     .foregroundStyle(FilmyTheme.accent)
                     .padding(.horizontal, 16)
-                    .frame(minWidth: 64, minHeight: FilmyTheme.minimumHitTarget)
+                    // Inset medium sheets scale their content slightly;
+                    // preserve a displayed target of at least 44 points.
+                    .frame(minWidth: 64, minHeight: 48)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

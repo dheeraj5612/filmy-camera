@@ -452,12 +452,18 @@ final class CameraViewModel: ObservableObject {
         defaults.set(data, forKey: Self.recipeOverridesKey)
     }
 
-    func capture(camera: CameraService) {
-        guard !isCapturing, !isImporting else { return }
+    var isReviewingImport: Bool { reviewSource == .photoLibrary && reviewImage != nil }
+    var hasPendingCapture: Bool { reviewSource == .camera && reviewImage != nil }
+
+    func capture(camera: CameraService, photoLibrary: any PhotoSaving) {
+        guard !isCapturing, !isImporting, !isSaving, reviewImage == nil else { return }
         isCapturing = true
+        toastTask?.cancel()
+        toastMessage = nil
         saveErrorMessage = nil
         saveErrorRequiresSettings = false
         let recipe = selectedRecipe
+        let finish = PhotoFinish(rawValue: defaults.string(forKey: "captureFinish") ?? "") ?? .photo
         let viewportSize = camera.previewViewportSize
         // Use the drawable the viewfinder really rendered into: its scale
         // comes from the window's screen (which can differ from the main
@@ -493,14 +499,12 @@ final class CameraViewModel: ObservableObject {
                     return
                 }
 
-                // The review sheet is a deliberate pause in the camera flow.
-                // Keep the session warm so Retake returns to a live viewfinder
-                // instantly, but stop feeding preview frames while the still
-                // renders; CameraScreen decides when the session itself stops.
-                camera.setFrameDeliveryPaused(true)
-
-                DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                    let renderedPhoto = autoreleasepool {
+                // The camera stays live. Rendering and Photos IO must not
+                // stop the session or present a Retake/Save interstitial.
+                // Keep the Photos saver on the main actor; only the render
+                // inputs cross into the detached background task.
+                let renderedPhoto = await Task.detached(priority: .userInitiated) {
+                    autoreleasepool {
                         Self.render(
                             sourceData: capturedPhoto.fileData,
                             recipe: recipe,
@@ -508,54 +512,50 @@ final class CameraViewModel: ObservableObject {
                             previewDrawableSize: previewDrawableSize,
                             capturedAt: capturedPhoto.capturedAt,
                             flashFired: capturedPhoto.flashFired,
-                            grainSeed: grainSeed
+                            grainSeed: grainSeed,
+                            finish: finish
                         )
                     }
+                }.value
 
-                    DispatchQueue.main.async {
-                        guard let self else {
-                            camera.setFrameDeliveryPaused(false)
-                            return
-                        }
-                        guard let renderedPhoto else {
-                            // CameraScreen owns session lifecycle. Ending the
-                            // capture without a review lets its visibility-aware
-                            // policy decide whether the camera should resume.
-                            camera.setFrameDeliveryPaused(false)
-                            self.isCapturing = false
-                            self.showToast("The selected look could not be rendered. Try the capture again.", style: .error)
-                            return
-                        }
-                        self.reviewImage = renderedPhoto.image
-                        self.reviewImageData = renderedPhoto.data
-                        self.reviewCapturedAt = renderedPhoto.capturedAt
-                        self.reviewRecipe = recipe
-                        self.reviewFinish = .photo
-                        self.reviewSource = .camera
-                        self.reviewIsFullResolution = true
-                        self.reviewFlashFired = renderedPhoto.flashFired
-                        self.reviewRenderSource = ReviewRenderSource(
-                            data: capturedPhoto.fileData,
-                            capturedAt: capturedPhoto.capturedAt,
-                            mode: .camera(
-                                viewportSize: viewportSize,
-                                previewDrawableSize: previewDrawableSize,
-                                flashFired: capturedPhoto.flashFired,
-                                grainSeed: grainSeed
-                            ),
-                            normalizedSubjectRegions: renderedPhoto.normalizedSubjectRegions
-                        )
-                        self.fullResolutionReviewRecipe = recipe
-                        self.fullResolutionReviewFinish = .photo
-                        self.fullResolutionReviewImage = renderedPhoto.image
-                        self.fullResolutionReviewIsFullResolution = renderedPhoto.isFullResolution
-                        self.fullResolutionReviewFlashFired = renderedPhoto.flashFired
-                        self.reviewRenderErrorMessage = nil
-                        self.isCapturing = false
-                    }
+                guard let renderedPhoto else {
+                    // CameraScreen owns session lifecycle. Ending the capture
+                    // without a review lets its visibility-aware policy decide
+                    // whether the camera should resume.
+                    camera.setFrameDeliveryPaused(false)
+                    self.isCapturing = false
+                    self.showToast("The selected look could not be rendered. Try the capture again.", style: .error)
+                    return
                 }
+                self.saveCapturedPhoto(
+                    renderedPhoto, recipe: recipe, finish: finish, photoLibrary: photoLibrary
+                )
+                self.isCapturing = false
             }
         }
+    }
+
+    /// Shares the tested, generation-guarded save transaction with imports,
+    /// but camera frames never enter the visible review editor. Retain only
+    /// finished pixels and encoded data, not a second full sensor original.
+    func saveCapturedPhoto(
+        _ photo: RenderedPhoto,
+        recipe: FilmRecipe,
+        finish: PhotoFinish = .photo,
+        photoLibrary: any PhotoSaving
+    ) {
+        guard !isSaving, !isImporting, reviewImage == nil else { return }
+        reviewSource = .camera
+        reviewImage = photo.image
+        reviewImageData = photo.data
+        reviewCapturedAt = photo.capturedAt
+        reviewRecipe = recipe
+        reviewFinish = finish
+        reviewIsFullResolution = photo.isFullResolution
+        reviewFlashFired = photo.flashFired
+        fullResolutionReviewRecipe = recipe
+        fullResolutionReviewFinish = finish
+        saveReview(photoLibrary: photoLibrary)
     }
 
     func importPhoto(data: Data, camera: CameraService? = nil) async {
@@ -865,7 +865,7 @@ final class CameraViewModel: ObservableObject {
             recipe: recipe,
             capturedAt: capturedAt
         ) { [weak self] result in
-            guard let self, self.reviewWorkGeneration == generation else { return }
+            guard let self, self.reviewWorkGeneration == generation, self.isSaving else { return }
             self.isSaving = false
             switch result {
             case .success:

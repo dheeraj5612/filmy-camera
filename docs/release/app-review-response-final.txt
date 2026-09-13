@@ -1,0 +1,27 @@
+1. Device launch and representative flow
+
+Attached: FilmyCamera-Build15-Physical-iPad-Review.mp4. Recorded from build 1.0.0 (15) on a physical iPad Pro 11-inch (2nd generation), iPadOS 26.6.2.
+
+The recording begins with launching the app and shows choosing a look, capturing a photo with automatic Photos saving, opening Roll and the saved frame, importing a photo through Apple's system picker, comparing Original, choosing Instant Print, and saving. Camera captures save automatically; imported photos have an explicit review-and-save step.
+
+2. Purpose, audience, and value
+
+Filmy Camera is a native iPhone/iPad camera and photo editor for people who want to choose a visual style before shooting. Its live preview helps users frame the final look, while imported photos can be compared with their original before saving. It offers 128 editable looks, search and favorites, framing aids, supported-camera manual controls, and an optional Instant Print border.
+
+3. Setup, access, and main features
+
+No account, login, credentials, purchase, subscription, or special sample file is required. Complete first-launch recipe onboarding, open Camera, and allow camera access. Choose a look and capture: the finished photo saves automatically to Photos and appears in Roll. Open Roll to view saved photos and re-edit them. For import, select a photo through Apple's system picker, adjust its look, compare Original, select Photo or Instant Print, then tap Save. The optional café sample is included locally. Pro controls depend on the active camera's hardware.
+
+Photos permission is requested when saving or when allowing access in Roll. The system picker shares only the selected imported photo. Roll reads frames saved by Filmy Camera. There are no user accounts, account-deletion flow, public posts, social feed, user-to-user content, reporting/blocking features, or paid features.
+
+4. External services, tools, and platforms
+
+Core capture and image processing run on the device using Apple frameworks, including AVFoundation, Core Image, Metal, Photos, PhotosUI, and Core Motion. There is no app-owned backend, authentication service, advertising, analytics, payment service, or third-party runtime SDK. Apple Photos/iCloud synchronization and destinations selected through the system share sheet follow the user's settings. Support, privacy, and informational reference links do not provide core functionality.
+
+5. Regional differences
+
+The app has no country-specific feature gates or eligibility rules. Functionality is consistent where distributed, subject to device and camera capabilities. The iPad camera interface uses portrait orientation.
+
+6. Regulated industry and third-party material
+
+This is a creative photography utility, with no regulated medical, financial, legal, or gambling service. Looks use app-authored rendering parameters informed by public camera terminology and settings. The app is not affiliated with Fujifilm, Canon, or Fuji X Weekly and does not contain their firmware, proprietary LUTs, or calibration data. The included café sample is original.

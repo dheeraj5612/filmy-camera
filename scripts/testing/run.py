@@ -32,22 +32,39 @@ LANES = {
 }
 GROUPS = {group for groups in LANES.values() for group in groups}
 PHYSICAL = {"device", "lens", "add-only", "capture-sheet", "performance"}
-PHOTOS_WRITES = {"device", "add-only"}
+PHOTOS_WRITES = {"device", "add-only", "capture-sheet"}
 ENVIRONMENT = {
+    "fixtures": {"FILMY_RUN_LARGE_ROLL_QA": "1"},
     "photos-e2e": {"FILMY_RUN_SEEDED_PHOTOS_E2E": "1"},
     "device": {"FILMY_RUN_PHOTOS_WRITE": "1", "FILMY_RUN_ROLL_QA": "1"},
     "performance": {"FILMY_RUN_PERF": "1"},
     "lens": {"FILMY_RUN_LENS_ACCEPTANCE": "1"},
     "add-only": {"FILMY_RUN_PHOTOS_WRITE": "1", "FILMY_RUN_ADD_ONLY_CACHE_QA": "1"},
-    "capture-sheet": {"FILMY_RUN_CAPTURE_SHEET": "1"},
+    "capture-sheet": {"FILMY_RUN_CAPTURE_SHEET": "1", "FILMY_RUN_PHOTOS_WRITE": "1"},
     "store-media": {"FILMY_RUN_STORE_MEDIA": "1", "FILMY_STORE_PRIOR_SAVES": "0"}
 }
-FRESH_PHOTOS_SIMULATOR_PHASES = {"photos-e2e", "store-media"}
+FRESH_PHOTOS_SIMULATOR_PHASES = {"fixtures", "photos-e2e", "store-media"}
 SIMCTL_DEFAULT_TIMEOUT_SECONDS = 60
 SIMULATOR_BOOT_TIMEOUT_SECONDS = 300
 SIMULATOR_MEDIA_TIMEOUT_SECONDS = 300
 SIMULATOR_SHUTDOWN_TIMEOUT_SECONDS = 60
 SIMULATOR_DELETE_TIMEOUT_SECONDS = 60
+REQUIRED_FIXTURE_SELECTOR = (
+    "FilmyCameraTests/PhotoLibraryLargeRollTests/"
+    "testActualPhotoKitRollIncludesAll160OwnedFramesAcrossServiceReload"
+)
+OWNED_PHOTOS_FIXTURE_ENV = "TEST_RUNNER_FILMY_RUN_OWNED_PHOTOS_FIXTURE"
+# This existing real-roll UI test drives the Photos permission alert through
+# XCTest before the unit fixture process is started on the same simulator.
+PHOTOS_PERMISSION_BOOTSTRAP_SELECTOR = (
+    "FilmyCameraUITests/NormalPhotoFlowTests/"
+    "testGrantFullPhotosAccessForFixtureLane"
+)
+OPTIONAL_FIXTURE_SELECTORS = {
+    "FilmyCameraTests/RecipeRenderGalleryTests/testG7XRenderGallery",
+    "FilmyCameraTests/RecipeRenderGalleryTests/testFujiRenderGallery",
+    "FilmyCameraTests/RecipeRenderGalleryTests/testCreatorRenderGallery",
+}
 
 
 class PhaseFailure(Exception):
@@ -98,11 +115,16 @@ def inventory(root=ROOT, manifest_path=MANIFEST):
 
 def phases(lane, tests):
     groups = LANES[lane]
-    selected = lambda names: sorted(test for test, group in tests.items() if group in names)
+    selected = lambda names, exclude_bootstrap=False: sorted(
+        test for test, group in tests.items()
+        if group in names and (not exclude_bootstrap or test != PHOTOS_PERMISSION_BOOTSTRAP_SELECTOR)
+    )
     if lane == "ci":
         return [("core", selected({"unit", "integration"})),
                 ("e2e", selected({"e2e", "simulator-e2e"})),
-                ("photos-e2e", selected({"photos-e2e"}))]
+                ("photos-e2e", selected({"photos-e2e"}, exclude_bootstrap=True))]
+    if lane == "photos-e2e":
+        return [(lane, selected(set(groups), exclude_bootstrap=True))]
     return [(lane, selected(set(groups)))] if groups else []
 
 
@@ -142,6 +164,13 @@ def test_environment(phase, inherited=None):
     return env
 
 
+def fixture_test_environment(inherited=None):
+    """Enable fixture Photos writes only for the disposable fixture lane."""
+    env = test_environment("fixtures", inherited)
+    env[OWNED_PHOTOS_FIXTURE_ENV] = "1"
+    return env
+
+
 def build_input_digest(root=ROOT):
     paths = [root / "project.yml", root / "FilmyCamera.xcodeproj/project.pbxproj"]
     for directory in ("FilmyCamera", "FilmyCameraTests", "FilmyCameraUITests",
@@ -171,7 +200,7 @@ def validate_build_stamp(path, input_digest, coverage, toolchain):
 
 def run_logged(command, path, env=None):
     print(f"Running {command[0]} -> {path}", flush=True)
-    with path.open("w") as log:
+    with path.open("w", buffering=1) as log:
         process = subprocess.Popen(command, cwd=ROOT, env=env, stdout=subprocess.PIPE,
                                    stderr=subprocess.STDOUT, text=True)
         try:
@@ -179,9 +208,13 @@ def run_logged(command, path, env=None):
                 log.write(line)
                 print(line, end="", flush=True)
             return process.wait()
-        except KeyboardInterrupt:
+        except BaseException:
             process.terminate()
-            process.wait(timeout=20)
+            try:
+                process.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
             raise
 
 
@@ -197,7 +230,7 @@ def simctl(*arguments, timeout=SIMCTL_DEFAULT_TIMEOUT_SECONDS):
         ) from error
 
 
-def create_photos_simulator(destination):
+def create_photos_simulator(destination, app_path=None):
     match = re.search(r"(?:^|,)id=([^,]+)", destination)
     if not match:
         raise ValueError("Photos E2E needs a simulator id to choose its runtime and device type")
@@ -212,8 +245,11 @@ def create_photos_simulator(destination):
     try:
         simctl("boot", owned, timeout=SIMULATOR_BOOT_TIMEOUT_SECONDS)
         simctl("bootstatus", owned, "-b", timeout=SIMULATOR_BOOT_TIMEOUT_SECONDS)
-        # XCTest installs the app; the normal UI flow handles permission
-        # prompts after installation instead of relying on pre-install grants.
+        # Install before the test host. Permission must be granted by the real
+        # UI prompt: simctl privacy grant can leave PhotoKit's readWrite status
+        # at limited/add-only on newer simulator runtimes.
+        if app_path is not None:
+            simctl("install", owned, str(app_path), timeout=SIMULATOR_MEDIA_TIMEOUT_SECONDS)
         simctl(
             "addmedia",
             owned,
@@ -257,11 +293,12 @@ def destroy_simulator(owned):
 
 
 @contextmanager
-def isolated_photos_destination(phase, destination):
+def isolated_photos_destination(phase, destination, app_path=None):
     if phase not in FRESH_PHOTOS_SIMULATOR_PHASES:
         yield destination
         return
-    owned = create_photos_simulator(destination)
+    owned = (create_photos_simulator(destination, app_path)
+             if phase == "fixtures" else create_photos_simulator(destination))
     try:
         yield "platform=iOS Simulator,id=" + owned
     except BaseException:
@@ -288,23 +325,48 @@ def summarize_result(result, exit_code):
 
 
 def require_complete_run(phase, selectors, summary):
-    if phase in {"unit", "integration", "core", "e2e", "photos-e2e"} and summary.get("skipped", 0):
+    optional_fixture_skip = False
+    if phase == "fixtures" and selectors:
+        case_results = summary.get("caseResults")
+        if case_results is None:
+            optional_fixture_skip = set(selectors).issubset(OPTIONAL_FIXTURE_SELECTORS)
+        else:
+            required_cases = [case for case in case_results
+                              if case.get("test") == REQUIRED_FIXTURE_SELECTOR]
+            skipped_cases = [case for case in case_results if case.get("skipped", 0)]
+            optional_fixture_skip = (
+                len(required_cases) == 1
+                and required_cases[0].get("passed", 0) == 1
+                and required_cases[0].get("failed", 0) == 0
+                and required_cases[0].get("skipped", 0) == 0
+                and all(case.get("test") in OPTIONAL_FIXTURE_SELECTORS
+                        for case in skipped_cases)
+            )
+    if (phase in {"unit", "integration", "core", "e2e", "photos-e2e", "fixtures"}
+            and summary.get("skipped", 0)
+            and not optional_fixture_skip):
         summary.update(status="failed", reason="Unexpected skipped tests in a deterministic lane")
+    elif (optional_fixture_skip and summary.get("failed", 0) == 0
+          and summary.get("exitCode", 0) == 0):
+        # xcresult summaries with only an intentional skip have no passedTests,
+        # so summarize_result cannot classify them as successful on its own.
+        summary["status"] = "passed"
     actual_count = sum(summary.get(key, 0) for key in ("passed", "failed", "skipped"))
     if actual_count != len(selectors):
         summary.update(status="failed", reason=f"Selected {len(selectors)} tests but XCTest reported {actual_count}; check target membership/build products")
 
 
-def run_isolated_photos_methods(command, selectors, result, output, environment):
-    """Run each Photos picker case in a fresh XCTest invocation on one simulator."""
+def run_isolated_photos_methods(command, selectors, result, output, environment, phase="photos-e2e"):
+    """Run each selected case in a separate XCTest invocation for per-test evidence."""
     case_results = []
     case_logs = []
     aggregate_exit_code = 0
+    result_prefix = "FilmyCamera" + phase.title().replace("-", "")
 
     for index, selector in enumerate(selectors, start=1):
         method = re.sub(r"[^A-Za-z0-9_-]", "-", selector.rsplit("/", 1)[-1])
-        artifact_stem = f"photos-e2e-{index:02d}-{method}"
-        case_result = output / f"FilmyCameraPhotosE2E-{index:02d}-{method}.xcresult"
+        artifact_stem = f"{phase}-{index:02d}-{method}"
+        case_result = output / f"{result_prefix}-{index:02d}-{method}.xcresult"
         case_log = output / f"filmycamera-{artifact_stem}-test.log"
         if case_result.exists():
             raise ValueError(
@@ -315,7 +377,7 @@ def run_isolated_photos_methods(command, selectors, result, output, environment)
         case_command += ["-only-testing:" + selector, "test-without-building"]
         code = run_logged(case_command, case_log, environment)
         case_summary = summarize_result(case_result, code)
-        require_complete_run("photos-e2e", [selector], case_summary)
+        require_complete_run(phase, [selector], case_summary)
         if case_summary["status"] != "passed" and aggregate_exit_code == 0:
             aggregate_exit_code = code or 1
         case_results.append({
@@ -333,7 +395,7 @@ def run_isolated_photos_methods(command, selectors, result, output, environment)
         })
         case_logs.append(case_log)
 
-    aggregate_log = output / "filmycamera-photos-e2e-test.log"
+    aggregate_log = output / f"filmycamera-{phase}-test.log"
     with aggregate_log.open("w") as combined:
         for case, case_log in zip(case_results, case_logs):
             combined.write(f"===== {case['test']} =====\n")
@@ -371,6 +433,26 @@ def run_isolated_photos_methods(command, selectors, result, output, environment)
         "mergedResultBundle": result.name if merge_error is None else None,
         "caseResults": case_results,
     }, aggregate_exit_code
+
+
+def run_photos_permission_bootstrap(command, output, environment):
+    """Resolve full Photos access through the existing real-roll UI flow."""
+    result = output / "FilmyCameraPhotosPermissionBootstrap.xcresult"
+    log = output / "filmycamera-photos-permission-bootstrap-test.log"
+    if result.exists():
+        raise ValueError(f"Refusing to overwrite evidence: {result}; choose another --output-dir")
+    bootstrap_command = command + ["-resultBundlePath", str(result)]
+    bootstrap_command += ["-only-testing:" + PHOTOS_PERMISSION_BOOTSTRAP_SELECTOR,
+                          "test-without-building"]
+    bootstrap_environment = dict(environment)
+    bootstrap_environment["TEST_RUNNER_FILMY_RUN_PHOTOS_PERMISSION_BOOTSTRAP"] = "1"
+    code = run_logged(bootstrap_command, log, bootstrap_environment)
+    summary = summarize_result(result, code)
+    if (code != 0 or summary.get("status") != "passed"
+            or summary.get("passed") != 1 or summary.get("failed", 0)
+            or summary.get("skipped", 0)):
+        raise PhaseFailure(code or 1)
+    return summary
 
 
 def main(argv=None):
@@ -427,11 +509,21 @@ def main(argv=None):
             raise ValueError(f"Refusing to overwrite evidence: {result}; choose another --output-dir")
         started = time.monotonic()
         try:
-            with isolated_photos_destination(phase, destination) as phase_destination:
+            app_path = (args.derived_data / "Build/Products/Debug-iphonesimulator/FilmyCamera.app")
+            with isolated_photos_destination(phase, destination, app_path) as phase_destination:
                 command = xcode_command(phase_destination, args.derived_data, args.coverage)
-                if phase == "photos-e2e" and len(selectors) > 1:
+                phase_environment = (fixture_test_environment()
+                                     if phase == "fixtures" else test_environment(phase))
+                permission_bootstrap = None
+                if phase == "fixtures":
+                    bootstrap_environment = test_environment("photos-e2e")
+                    bootstrap_environment["TEST_RUNNER_FILMY_RUN_PHOTOS_PERMISSION_BOOTSTRAP"] = "1"
+                    permission_bootstrap = run_photos_permission_bootstrap(
+                        command, output, bootstrap_environment
+                    )
+                if phase in {"photos-e2e", "fixtures"} and len(selectors) > 1:
                     summary, code = run_isolated_photos_methods(
-                        command, selectors, result, output, test_environment(phase)
+                        command, selectors, result, output, phase_environment, phase
                     )
                 else:
                     command += ["-resultBundlePath", str(result)]
@@ -441,7 +533,7 @@ def main(argv=None):
                     code = run_logged(
                         command,
                         output / f"filmycamera-{log_name}-test.log",
-                        test_environment(phase),
+                        phase_environment,
                     )
                     summary = summarize_result(result, code)
                 require_complete_run(phase, selectors, summary)
@@ -451,6 +543,13 @@ def main(argv=None):
                                 "worktreeDirty": bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip()),
                                 "buildInputDigest": input_digest, "toolchain": toolchain,
                                 "coverageEnabled": args.coverage})
+                if permission_bootstrap is not None:
+                    summary["photosPermissionBootstrap"] = {
+                        "selector": PHOTOS_PERMISSION_BOOTSTRAP_SELECTOR,
+                        "resultBundle": "FilmyCameraPhotosPermissionBootstrap.xcresult",
+                        "log": "filmycamera-photos-permission-bootstrap-test.log",
+                        "status": permission_bootstrap["status"],
+                    }
                 (output / f"filmycamera-{phase}-summary.json").write_text(json.dumps(summary, indent=2) + "\n")
                 print(json.dumps({key: summary.get(key) for key in ("lane", "status", "passed", "failed", "skipped")}), flush=True)
                 if summary["status"] != "passed":
