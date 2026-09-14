@@ -541,6 +541,8 @@ struct CameraScreen: View {
             // review instead of announcing "Camera unavailable".
             if shouldShowCameraEmptyState, !isReviewing {
                 cameraPlaceholder
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("camera-placeholder")
             } else if isReviewing {
                 Color.black.opacity(0.55)
                     .allowsHitTesting(false)
@@ -622,67 +624,70 @@ struct CameraScreen: View {
 
     private var previewSurface: some View {
         GeometryReader { proxy in
-            FilteredCameraPreview(camera: camera, recipe: viewModel.selectedRecipe)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .contentShape(Rectangle())
-                .accessibilityElement(
-                    children: FilteredCameraPreview.exposesRenderStatusForUITesting
-                        ? .contain
-                        : .ignore
-                )
-                .accessibilityLabel("Live camera preview")
-                .accessibilityValue(camera.isRunning ? "Showing the \(viewModel.selectedRecipe.name) look" : camera.statusMessage)
-                .accessibilityHint("Tap to focus, swipe left or right to change looks, double tap to switch cameras, or pinch to zoom. These controls are also available as accessibility actions.")
-                .accessibilityAction(named: "Focus and expose at center") {
-                    focusPreview(at: CGPoint(x: proxy.size.width / 2, y: proxy.size.height / 2), in: proxy.size)
+            ZStack {
+                // Keep the renderer mounted across camera start/stop so its
+                // frame handler and render-status probe retain their lifetime.
+                FilteredCameraPreview(camera: camera, recipe: viewModel.selectedRecipe)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .allowsHitTesting(false)
+
+                if !shouldShowCameraEmptyState {
+                    livePreviewControls(in: proxy.size)
                 }
-                .accessibilityAction(named: "Next look") { selectAdjacentLook(.next) }
-                .accessibilityAction(named: "Previous look") { selectAdjacentLook(.previous) }
-                .accessibilityAction(named: "Switch camera", switchCameraFromPreview)
-                .accessibilityIdentifier(
-                    shouldShowCameraEmptyState ? "camera-preview-unavailable" : "camera-preview"
-                )
-                .accessibilityHidden(shouldShowCameraEmptyState)
-                .gesture(
-                    SpatialTapGesture(count: 2)
-                        .exclusively(before: SpatialTapGesture())
-                        .onEnded { value in
-                            switch value {
-                            case .first:
-                                switchCameraFromPreview()
-                            case .second(let tap):
-                                focusPreview(at: tap.location, in: proxy.size)
-                            }
-                        }
-                )
-                .simultaneousGesture(previewLookSwipe(in: proxy.size))
-                .onAppear { camera.updateOrientation(for: proxy.size) }
-                .onChange(of: proxy.size) { _, size in
-                    isPinching = false
-                    previewDragMaySelectLook = nil
-                    camera.updateOrientation(for: size)
-                }
-                .simultaneousGesture(
-                    MagnificationGesture()
-                        .onChanged { scale in
-                            guard canTriggerShutter else { return }
-                            if previewDragMaySelectLook != nil { previewDragMaySelectLook = false }
-                            if !isPinching {
-                                isPinching = true
-                                pinchStartZoom = camera.zoomFactor
-                            }
-                            camera.setZoom(pinchStartZoom * scale)
-                        }
-                        .onEnded { _ in
-                            isPinching = false
-                            pinchStartZoom = camera.zoomFactor
-                            suppressLookSwipeUntil = Date(timeIntervalSinceNow: 0.3)
-                        }
-                )
-                // Include every gesture in the disabled hit-testing region
-                // while a simulator or unavailable placeholder is displayed.
-                .allowsHitTesting(!shouldShowCameraEmptyState)
+            }
+            .onAppear { camera.updateOrientation(for: proxy.size) }
+            .onChange(of: proxy.size) { _, size in
+                isPinching = false
+                previewDragMaySelectLook = nil
+                camera.updateOrientation(for: size)
+            }
         }
+    }
+
+    private func livePreviewControls(in size: CGSize) -> some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Live camera preview")
+            .accessibilityValue("Showing the \(viewModel.selectedRecipe.name) look")
+            .accessibilityHint("Tap to focus, swipe left or right to change looks, double tap to switch cameras, or pinch to zoom. These controls are also available as accessibility actions.")
+            .accessibilityAction(named: "Focus and expose at center") {
+                focusPreview(at: CGPoint(x: size.width / 2, y: size.height / 2), in: size)
+            }
+            .accessibilityAction(named: "Next look") { selectAdjacentLook(.next) }
+            .accessibilityAction(named: "Previous look") { selectAdjacentLook(.previous) }
+            .accessibilityAction(named: "Switch camera", switchCameraFromPreview)
+            .accessibilityIdentifier("camera-preview")
+            .gesture(
+                SpatialTapGesture(count: 2)
+                    .exclusively(before: SpatialTapGesture())
+                    .onEnded { value in
+                        switch value {
+                        case .first:
+                            switchCameraFromPreview()
+                        case .second(let tap):
+                            focusPreview(at: tap.location, in: size)
+                        }
+                    }
+            )
+            .simultaneousGesture(previewLookSwipe(in: size))
+            .simultaneousGesture(
+                MagnificationGesture()
+                    .onChanged { scale in
+                        guard canTriggerShutter else { return }
+                        if previewDragMaySelectLook != nil { previewDragMaySelectLook = false }
+                        if !isPinching {
+                            isPinching = true
+                            pinchStartZoom = camera.zoomFactor
+                        }
+                        camera.setZoom(pinchStartZoom * scale)
+                    }
+                    .onEnded { _ in
+                        isPinching = false
+                        pinchStartZoom = camera.zoomFactor
+                        suppressLookSwipeUntil = Date(timeIntervalSinceNow: 0.3)
+                    }
+            )
     }
 
     private func focusPreview(at location: CGPoint, in size: CGSize) {

@@ -467,7 +467,7 @@ final class FilmyCameraUITests: XCTestCase {
 
     func testPortraitCameraShellIgnoresDeviceRotation() throws {
         let livePreview = app.descendants(matching: .any)["camera-preview"]
-        let unavailablePreview = app.descendants(matching: .any)["camera-preview-unavailable"]
+        let unavailablePreview = app.descendants(matching: .any)["camera-placeholder"]
         // Simulator camera sessions expose the unavailable placeholder, while
         // a physical iPad exposes the live preview. Either visible surface is
         // the app content whose geometry proves the portrait policy; the
@@ -971,14 +971,14 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertTrue(demoLabel.waitForExistence(timeout: 8))
         XCTAssertEqual(demoLabel.label, "Sample · not a live camera")
         XCTAssertFalse(
-            app.descendants(matching: .any)["camera-preview-unavailable"].isHittable,
+            app.descendants(matching: .any)["camera-preview-unavailable"].exists,
             "Simulator sample mode must not expose an actionable unavailable live preview"
         )
 
         let cameraPreview = app.descendants(matching: .any)["camera-preview"]
         XCTAssertFalse(
-            cameraPreview.isHittable,
-            "The unavailable camera preview must not remain an actionable target"
+            cameraPreview.exists,
+            "The unavailable camera preview must not expose live controls"
         )
     }
     #endif
