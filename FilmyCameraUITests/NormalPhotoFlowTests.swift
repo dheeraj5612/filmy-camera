@@ -105,7 +105,11 @@ final class NormalPhotoFlowTests: XCTestCase {
         XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 10))
 
         try importSeededFixture(newerSavedFrameCount: countBefore)
-        let reviewScroll = app.scrollViews["review-content-scroll"]
+        // SwiftUI promotes the outer review identifier onto its sole scroll
+        // container when the accessibility layout has no pinned action bar.
+        let reviewScroll = app.scrollViews.matching(
+            NSPredicate(format: "identifier IN %@", ["review-content-scroll", "review-screen"])
+        ).firstMatch
         for (identifier, name) in [
             ("review-look-picker", "Large-text review look picker"),
             ("review-compare-original", "Large-text Original comparison"),
