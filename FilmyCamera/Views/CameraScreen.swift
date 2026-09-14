@@ -178,9 +178,13 @@ struct CameraScreen: View {
     @State private var favoritesOnly = false
     @AppStorage("favoriteRecipeIDs.v1") private var favoriteData = Data()
     @AppStorage("cameraGripUseLeftHanded.v1") private var useLeftHandedGrip = false
+    @State private var hardwareShutterCaptureRequest = 0
 #if DEBUG
     @State private var hardwareShutterEventCount = 0
     @State private var hardwareShutterLastPhase = "none"
+    @State private var hardwareShutterActionCount = 0
+    @State private var hardwareShutterEventReadiness = "unset"
+    @State private var hardwareShutterCaptureReadiness = "unset"
 #endif
 
     init(
@@ -300,13 +304,14 @@ struct CameraScreen: View {
 #endif
         }
 #if DEBUG
-        .modifier(CameraHardwareShutterModifier(enabled: canTriggerShutter, action: capture) { phase in
+        .modifier(CameraHardwareShutterModifier(enabled: canTriggerShutter, action: { hardwareShutterCaptureRequest &+= 1 }) { phase in
             guard hardwareShutterDiagnosticsEnabled else { return }
             hardwareShutterEventCount += 1
             hardwareShutterLastPhase = phase
+            hardwareShutterEventReadiness = "ready=\(canTriggerShutter);blocker=\(hardwareShutterBlockingReason)"
         })
 #else
-        .modifier(CameraHardwareShutterModifier(enabled: canTriggerShutter, action: capture))
+        .modifier(CameraHardwareShutterModifier(enabled: canTriggerShutter, action: { hardwareShutterCaptureRequest &+= 1 }))
 #endif
         .confirmationDialog("Discard this unsaved photo?", isPresented: $isConfirmingCaptureDiscard, titleVisibility: .visible) {
             Button("Discard photo", role: .destructive) { viewModel.discardReview() }
@@ -327,6 +332,9 @@ struct CameraScreen: View {
                 previewDragMaySelectLook = nil
             }
         }
+        // Re-enter through current SwiftUI state after the system callback,
+        // avoiding a retained callback snapshot with stale scene values.
+        .onChange(of: hardwareShutterCaptureRequest) { _, _ in capture() }
         .onChange(of: camera.previewViewportSize) { _, _ in
             // A mask from the previous crop must not stretch over a newly
             // rotated or resized viewfinder while its replacement renders.
@@ -1603,6 +1611,12 @@ struct CameraScreen: View {
     // MARK: - Actions
 
     private func capture() {
+#if DEBUG
+        if hardwareShutterDiagnosticsEnabled {
+            hardwareShutterActionCount += 1
+            hardwareShutterCaptureReadiness = "ready=\(canTriggerShutter);blocker=\(hardwareShutterBlockingReason)"
+        }
+#endif
         guard canTriggerShutter else { return }
         closeControlDrawers()
         if captureDelay == .off {
@@ -1884,7 +1898,7 @@ extension CameraScreen {
     }
 
     private var hardwareShutterDiagnosticsValue: String {
-        "ready=\(canTriggerShutter);blocker=\(hardwareShutterBlockingReason);events=\(hardwareShutterEventCount);lastPhase=\(hardwareShutterLastPhase);capture=\(viewModel.captureTimingStatus)"
+        "ready=\(canTriggerShutter);blocker=\(hardwareShutterBlockingReason);events=\(hardwareShutterEventCount);lastPhase=\(hardwareShutterLastPhase);actions=\(hardwareShutterActionCount);eventReady=\(hardwareShutterEventReadiness);captureReady=\(hardwareShutterCaptureReadiness);capture=\(viewModel.captureTimingStatus)"
     }
 
     private var hardwareShutterDiagnostics: some View {
