@@ -19,7 +19,7 @@ final class SignalFrameUITests: XCTestCase {
         XCTAssertEqual(favorite.value as? String, "Favorite")
         XCTAssertEqual(look.label, initialLook)
         look.tap()
-        app.buttons["camera-looks-favorites"].tap()
+        tapWhenStable(app.buttons["camera-looks-favorites"], in: app)
         XCTAssertTrue(app.buttons["recipe-g7x-compact"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["recipe-classic-chrome"].exists)
         snapshot("signal-frame-quick-favorites")
@@ -30,10 +30,10 @@ final class SignalFrameUITests: XCTestCase {
         XCTAssertEqual(favorite.value as? String, "Favorite")
         favorite.tap()
         look.tap()
-        app.buttons["camera-looks-favorites"].tap()
+        tapWhenStable(app.buttons["camera-looks-favorites"], in: app)
         XCTAssertTrue(app.staticTexts["camera-favorites-empty"].waitForExistence(timeout: 5))
         assertReachable(app.buttons["camera-looks-all"], in: app)
-        app.buttons["camera-looks-all"].tap()
+        tapWhenStable(app.buttons["camera-looks-all"], in: app)
         XCTAssertTrue(app.buttons["recipe-g7x-compact"].waitForExistence(timeout: 5))
         app.buttons["recipe-drawer-close"].tap()
         XCTAssertEqual(look.label, initialLook)
@@ -63,6 +63,26 @@ final class SignalFrameUITests: XCTestCase {
         app.launchEnvironment["FILMY_TEST_DEFAULTS_SUITE"] = "FilmyCameraUITests.SignalFrame.\(UUID().uuidString)"
         app.launchArguments = ["-ui-testing", "-ui-testing-viewfinder-chrome", "-selectedRecipeID", "g7x-compact"]
         return app
+    }
+
+    private func tapWhenStable(_ control: XCUIElement, in app: XCUIApplication,
+                               file: StaticString = #filePath, line: UInt = #line) {
+        var previousFrame: CGRect?
+        var stableSamples = 0
+        let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            guard control.exists, control.isHittable else {
+                previousFrame = nil
+                stableSamples = 0
+                return false
+            }
+            let frame = control.frame
+            stableSamples = frame == previousFrame ? stableSamples + 1 : 0
+            previousFrame = frame
+            return stableSamples >= 2 && app.frame.contains(frame)
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 8), .completed,
+                       "Drawer control must settle before tapping", file: file, line: line)
+        control.tap()
     }
 
     private func assertReachable(_ control: XCUIElement, in app: XCUIApplication,

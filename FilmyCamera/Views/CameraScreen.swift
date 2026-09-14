@@ -108,7 +108,7 @@ struct CameraTopBarLayout<Controls: View, Indicators: View>: View {
         // Hardware discovery and status changes must never choose a different
         // row count. Reserve both rows before the first camera frame arrives.
         VStack(alignment: .trailing, spacing: 0) {
-            controls.frame(height: 48)
+            controls.frame(height: UIDevice.current.userInterfaceIdiom == .pad ? 64 : 48)
             indicators
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, minHeight: 44, maxHeight: 44, alignment: .trailing)
@@ -132,6 +132,12 @@ private struct ViewfinderChromeHeightKey: PreferenceKey {
 /// primary controls in an edge column; compact layouts keep them below the
 /// frame within thumb reach.
 struct CameraScreen: View {
+    // The portrait-only iPad window scales to 75% in landscape. Preserve
+    // a physical target above 44 points for compact camera controls.
+    private var cameraHitTarget: CGFloat {
+        UIDevice.current.userInterfaceIdiom == .pad ? 64 : FilmyTheme.minimumHitTarget
+    }
+
     @ObservedObject var camera: CameraService
     @ObservedObject var viewModel: CameraViewModel
     @ObservedObject var photoLibrary: PhotoLibraryService
@@ -494,8 +500,8 @@ struct CameraScreen: View {
             if isShowingLookDrawer {
                 lookDrawer(
                     maxHeight: isLandscape
-                        ? max(160, min(240, availableHeight - 130))
-                        : max(180, min(360, availableHeight - 190))
+                        ? max(160, min(UIDevice.current.userInterfaceIdiom == .pad ? 460 : 240, availableHeight - 130))
+                        : max(180, min(UIDevice.current.userInterfaceIdiom == .pad ? 460 : 360, availableHeight - 190))
                 )
                     .padding(.leading, 12)
                     .padding(.trailing, 160)
@@ -899,7 +905,7 @@ struct CameraScreen: View {
             Image(systemName: "arrow.triangle.2.circlepath.camera")
                 .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(.white)
-                .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+                .frame(width: cameraHitTarget, height: cameraHitTarget)
                 .background { ChromeShapeBackground(shape: Circle()) }
                 .contentShape(Circle())
         }
@@ -919,7 +925,7 @@ struct CameraScreen: View {
             Image(systemName: "gearshape.fill")
                 .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(.white)
-                .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+                .frame(width: cameraHitTarget, height: cameraHitTarget)
                 .background { ChromeShapeBackground(shape: Circle()) }
                 .contentShape(Circle())
         }
@@ -941,7 +947,7 @@ struct CameraScreen: View {
             Image(systemName: isShowingTools ? "xmark" : "slider.horizontal.3")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(isShowingTools ? FilmyTheme.accent : .white)
-                .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+                .frame(width: cameraHitTarget, height: cameraHitTarget)
                 .background { ChromeShapeBackground(shape: Circle()) }
                 .contentShape(Circle())
         }
@@ -1003,7 +1009,7 @@ struct CameraScreen: View {
             Image(systemName: favorite ? "heart.fill" : "heart")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(favorite ? FilmyTheme.accent : FilmyTheme.primary)
-                .frame(width: 44, height: 48)
+                .frame(width: cameraHitTarget, height: max(48, cameraHitTarget))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.pressable)
@@ -1066,7 +1072,11 @@ struct CameraScreen: View {
     }
 
     private func lookDrawer(maxHeight: CGFloat) -> some View {
-        VStack(spacing: 6) {
+        // Header, filters, footer, three gaps, and outer padding must all
+        // fit before assigning the remaining height to scrolling recipes.
+        let chromeHeight = 64 + cameraHitTarget + max(48, cameraHitTarget) + 38
+
+        return VStack(spacing: 6) {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 1) {
                     Eyebrow(
@@ -1101,7 +1111,7 @@ struct CameraScreen: View {
                     Image(systemName: "xmark")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(FilmyTheme.secondary)
-                        .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+                        .frame(width: cameraHitTarget, height: cameraHitTarget)
                         .background(FilmyTheme.panel, in: Circle())
                         .frame(width: 64, height: 64)
                         .contentShape(Rectangle())
@@ -1122,7 +1132,7 @@ struct CameraScreen: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(!favoritesOnly ? FilmyTheme.primary : FilmyTheme.secondary)
                         .padding(.horizontal, 12)
-                        .frame(minHeight: 44)
+                        .frame(minWidth: cameraHitTarget, minHeight: cameraHitTarget)
                         .overlay(alignment: .bottom) {
                             if !favoritesOnly { FilmRegistration() }
                         }
@@ -1138,7 +1148,7 @@ struct CameraScreen: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(favoritesOnly ? FilmyTheme.primary : FilmyTheme.secondary)
                         .padding(.horizontal, 12)
-                        .frame(minHeight: 44)
+                        .frame(minWidth: cameraHitTarget, minHeight: cameraHitTarget)
                         .overlay(alignment: .bottom) {
                             if favoritesOnly { FilmRegistration() }
                         }
@@ -1165,7 +1175,7 @@ struct CameraScreen: View {
                     onOpenDetail: openRecipeDetail,
                     compact: !favoritesOnly
                 )
-                .frame(maxHeight: max(maxHeight - 176, 70))
+                .frame(maxHeight: max(maxHeight - chromeHeight, 70))
                 .id(favoritesOnly)
             }
 
@@ -1182,7 +1192,7 @@ struct CameraScreen: View {
                 .font(.system(.subheadline).weight(.semibold))
                 .foregroundStyle(FilmyTheme.accent)
                 .padding(.horizontal, 12)
-                .frame(minHeight: 48)
+                .frame(minHeight: max(48, cameraHitTarget))
                 .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 12))
                 .contentShape(Rectangle())
             }
@@ -1337,7 +1347,7 @@ struct CameraScreen: View {
                         .foregroundStyle(FilmyTheme.primary)
                 }
             }
-            .frame(width: 44, height: 44)
+            .frame(width: cameraHitTarget, height: cameraHitTarget)
             .contentShape(Rectangle())
         }
         .buttonStyle(.pressable)
@@ -1793,7 +1803,7 @@ extension CameraScreen {
             Image(systemName: captureDelay == .off ? "viewfinder" : "timer")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(captureDelay == .off ? FilmyTheme.primary : FilmyTheme.accent)
-                .frame(width: 44, height: 44)
+                .frame(width: cameraHitTarget, height: cameraHitTarget)
                 .background { ChromeShapeBackground(shape: Circle()) }
                 .contentShape(Circle())
         }

@@ -436,16 +436,22 @@ final class NormalPhotoFlowTests: XCTestCase {
         currentLook.tap()
         let tile = app.buttons["recipe-\(id)"]
         XCTAssertTrue(tile.waitForExistence(timeout: 10), "The seeded flow must expose \(name)")
-        if tile.isHittable {
-            tile.tap()
-        } else {
-            let screen = app.frame
-            let frame = tile.frame
-            app.coordinate(withNormalizedOffset: CGVector(
-                dx: (frame.midX - screen.minX) / screen.width,
-                dy: (frame.midY - screen.minY) / screen.height
-            )).tap()
+        let picker = app.scrollViews["recipe-picker"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 5), "The look drawer must expose its vertical picker")
+        let rails = app.scrollViews.matching(
+            NSPredicate(format: "identifier BEGINSWITH 'recipe-group-'")
+        )
+        guard let rail = rails.allElementsBoundByIndex.first(where: {
+            $0.buttons["recipe-\(id)"].exists
+        }) else {
+            XCTFail("The look drawer must expose a scrollable rail for \(name)")
+            return
         }
+        guard revealRecipeTile(tile, in: picker, rail: rail) else {
+            XCTFail("The \(name) tile must be scrolled fully into a stable, hittable frame")
+            return
+        }
+        tile.tap()
         XCTAssertTrue(
             waitUntil(timeout: 10) { currentLook.label.contains(name) },
             "Selecting \(name) must update the current look"
@@ -505,6 +511,82 @@ final class NormalPhotoFlowTests: XCTestCase {
             metadata.waitForExistence(timeout: 5),
             "Imported review must state the applied resolution"
         )
+    }
+
+    /// Scrolls the recipe rail in the direction of the named tile, then waits
+    /// for two matching accessibility frames before allowing a selection.
+    private func revealRecipeTile(
+        _ element: XCUIElement,
+        in picker: XCUIElement,
+        rail: XCUIElement,
+        timeout: TimeInterval = 15
+    ) -> Bool {
+        guard picker.waitForExistence(timeout: 5),
+              rail.waitForExistence(timeout: 5),
+              element.waitForExistence(timeout: 5) else { return false }
+
+        let deadline = Date(timeIntervalSinceNow: timeout)
+        var previousFrame: CGRect?
+        var stableSamples = 0
+
+        repeat {
+            // The horizontal rails live inside the expanded picker's outer
+            // vertical scroll view. Resolve vertical clipping first so a
+            // coordinate derived from the tile can never land on the camera
+            // controls below the drawer.
+            let pickerViewport = picker.frame.intersection(app.frame).insetBy(dx: 1, dy: 1)
+            let frame = element.frame
+            guard pickerViewport.width > 20, pickerViewport.height > 20 else {
+                return false
+            }
+            let verticallyVisible = frame.minY >= pickerViewport.minY && frame.maxY <= pickerViewport.maxY
+            if !verticallyVisible {
+                previousFrame = nil
+                stableSamples = 0
+                if frame.minY < pickerViewport.minY {
+                    guard picker.isHittable else { return false }
+                    picker.swipeDown()
+                } else if frame.maxY > pickerViewport.maxY {
+                    guard picker.isHittable else { return false }
+                    picker.swipeUp()
+                } else {
+                    return false
+                }
+            } else {
+                let railViewport = rail.frame.intersection(pickerViewport).insetBy(dx: 1, dy: 1)
+                guard railViewport.width > 20, railViewport.height > 20 else {
+                    return false
+                }
+                if railViewport.contains(frame), element.isHittable {
+                    if let previousFrame,
+                       abs(frame.minX - previousFrame.minX) < 0.25,
+                       abs(frame.minY - previousFrame.minY) < 0.25,
+                       abs(frame.width - previousFrame.width) < 0.25,
+                       abs(frame.height - previousFrame.height) < 0.25 {
+                        stableSamples += 1
+                    } else {
+                        stableSamples = 1
+                    }
+                    previousFrame = frame
+                    if stableSamples >= 2 { return true }
+                } else {
+                    previousFrame = nil
+                    stableSamples = 0
+                    if frame.minX < railViewport.minX {
+                        guard rail.isHittable else { return false }
+                        rail.swipeRight()
+                    } else if frame.maxX > railViewport.maxX {
+                        guard rail.isHittable else { return false }
+                        rail.swipeLeft()
+                    } else if !picker.isHittable || !rail.isHittable {
+                        return false
+                    }
+                }
+            }
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+        } while Date() < deadline
+
+        return false
     }
 
     /// Moves only the named review-controls scroll view by the distance needed

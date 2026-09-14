@@ -802,10 +802,9 @@ private struct GalleryDetailView: View {
                     .presentationDetents([.medium, .large])
             }
         }
-        .confirmationDialog(
+        .alert(
             "Delete this frame?",
             isPresented: $isShowingDeleteConfirmation,
-            titleVisibility: .visible
         ) {
             Button("Delete Frame", role: .destructive) {
                 deleteFrame()

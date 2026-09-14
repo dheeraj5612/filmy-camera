@@ -400,7 +400,9 @@ struct CaptureReviewView: View {
         compact: Bool = false,
         wide: Bool = false
     ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let finishInTopRow = dynamicTypeSize.isAccessibilitySize && !compact
+
+        return VStack(alignment: .leading, spacing: 10) {
             if wide && !dynamicTypeSize.isAccessibilitySize {
                 HStack(alignment: .top, spacing: 10) {
                     lookPicker
@@ -409,7 +411,15 @@ struct CaptureReviewView: View {
                     finishPicker(stacked: false)
                         .frame(width: 280, alignment: .leading)
                 }
-            } else if stacked || dynamicTypeSize.isAccessibilitySize {
+            } else if finishInTopRow {
+                HStack(alignment: .top, spacing: 10) {
+                    lookPicker
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    finishPicker(stacked: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                comparisonControls
+            } else if stacked {
                 VStack(alignment: .leading, spacing: 10) {
                     lookPicker
                     comparisonControls
@@ -423,7 +433,7 @@ struct CaptureReviewView: View {
                 }
             }
 
-            if !wide || dynamicTypeSize.isAccessibilitySize {
+            if (!wide || dynamicTypeSize.isAccessibilitySize) && !finishInTopRow {
                 finishPicker(stacked: stacked || dynamicTypeSize.isAccessibilitySize)
             }
 

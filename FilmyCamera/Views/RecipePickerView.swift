@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 
 /// The film-strip rail. Each tile is a renderer-backed swatch with the recipe
 /// name beneath it, so choosing a recipe reads like choosing a film stock.
@@ -1430,6 +1431,18 @@ struct LookLibraryView: View {
     @State private var filter: LookLibraryFilter = .all
     @FocusState private var searchIsFocused: Bool
 
+    // The hosted iPad review runs with a 0.75 compatibility scale, so a
+    // nominal 48-point control is exposed as only 36 physical points. Keep
+    // the phone sizing intact while giving every library action a full iPad
+    // touch target.
+    private var libraryButtonTarget: CGFloat {
+        UIDevice.current.userInterfaceIdiom == .pad ? 64 : 48
+    }
+
+    private var librarySearchHeight: CGFloat {
+        UIDevice.current.userInterfaceIdiom == .pad ? 64 : 52
+    }
+
     private var favoriteIDs: Set<String> { LookLibraryIndex.favorites(from: favoriteData) }
 
     private var results: [FilmRecipe] {
@@ -1510,7 +1523,10 @@ struct LookLibraryView: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(FilmyTheme.primary)
                         .padding(.horizontal, 16)
-                        .frame(minWidth: 52, minHeight: 48)
+                        .frame(
+                            minWidth: UIDevice.current.userInterfaceIdiom == .pad ? 64 : 52,
+                            minHeight: libraryButtonTarget
+                        )
                         .background(FilmyTheme.panel, in: Capsule())
                         .contentShape(Capsule())
                 }
@@ -1543,7 +1559,7 @@ struct LookLibraryView: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(FilmyTheme.secondary)
-                        .frame(width: 48, height: 48)
+                        .frame(width: libraryButtonTarget, height: libraryButtonTarget)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -1553,7 +1569,7 @@ struct LookLibraryView: View {
         }
         .padding(.leading, 14)
         .padding(.trailing, query.isEmpty ? 14 : 2)
-        .frame(minHeight: 52)
+        .frame(minHeight: librarySearchHeight)
         .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 16))
         .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(FilmyTheme.lineStrong, lineWidth: 1) }
         .padding(.horizontal, 22)
@@ -1577,7 +1593,7 @@ struct LookLibraryView: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(filter == option ? FilmyTheme.background : FilmyTheme.secondary)
                         .padding(.horizontal, 16)
-                        .frame(minHeight: 48)
+                        .frame(minHeight: libraryButtonTarget)
                         .background(filter == option ? FilmyTheme.accent : FilmyTheme.panel, in: Capsule())
                         .contentShape(Capsule())
                     }
@@ -1645,7 +1661,7 @@ struct LookLibraryView: View {
                     Image(systemName: favorite ? "heart.fill" : "heart")
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(favorite ? FilmyTheme.accent : FilmyTheme.primary)
-                        .frame(width: 48, height: 48)
+                        .frame(width: libraryButtonTarget, height: libraryButtonTarget)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -1683,7 +1699,7 @@ struct LookLibraryView: View {
                 Text("Show all looks")
                     .font(.subheadline.weight(.semibold))
                     .padding(.horizontal, 20)
-                    .frame(minHeight: 48)
+                    .frame(minHeight: libraryButtonTarget)
             }
             .buttonStyle(.plain)
             .foregroundStyle(FilmyTheme.background)

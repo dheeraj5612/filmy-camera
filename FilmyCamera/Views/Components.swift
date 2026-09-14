@@ -571,7 +571,10 @@ struct FlashControl: View {
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
             .padding(.horizontal, 6)
-            .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
+            .frame(
+                minWidth: UIDevice.current.userInterfaceIdiom == .pad ? 64 : FilmyTheme.minimumHitTarget,
+                minHeight: UIDevice.current.userInterfaceIdiom == .pad ? 64 : FilmyTheme.minimumHitTarget
+            )
             .viewfinderCapsule(interactive: true)
         }
         .buttonStyle(.pressable)
