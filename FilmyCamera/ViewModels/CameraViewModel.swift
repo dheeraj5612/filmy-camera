@@ -553,7 +553,7 @@ final class CameraViewModel: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self else { return }
 #if DEBUG
-                if ProcessInfo.processInfo.arguments.contains("-ui-testing") { captureTimingStatus = "capture-complete:\(captureStartedAt.duration(to: .now).components.seconds)s" }
+                if ProcessInfo.processInfo.arguments.contains("-ui-testing") { self.captureTimingStatus = "capture-complete:\(captureStartedAt.duration(to: .now).components.seconds)s" }
 #endif
 
                 guard let capturedPhoto else {
@@ -595,7 +595,7 @@ final class CameraViewModel: ObservableObject {
                     return
                 }
 #if DEBUG
-                if ProcessInfo.processInfo.arguments.contains("-ui-testing") { captureTimingStatus = "render-complete:\(captureStartedAt.duration(to: .now).components.seconds)s" }
+                if ProcessInfo.processInfo.arguments.contains("-ui-testing") { self.captureTimingStatus = "render-complete:\(captureStartedAt.duration(to: .now).components.seconds)s" }
 #endif
 #if DEBUG
                 if FilmyCaptureDiagnostics.isEnabled() {
