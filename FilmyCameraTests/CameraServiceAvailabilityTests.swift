@@ -43,14 +43,10 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         // Bundle resolves device-qualified keys. Read the built file to verify both device families.
         let data = try Data(contentsOf: Bundle.main.bundleURL.appendingPathComponent("Info.plist"))
         let info = try XCTUnwrap(PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any])
-        XCTAssertEqual(info["UISupportedInterfaceOrientations"] as? [String], ["UIInterfaceOrientationPortrait"])
-        XCTAssertEqual(info["UISupportedInterfaceOrientations~ipad"] as? [String], [
-            "UIInterfaceOrientationPortrait",
-            "UIInterfaceOrientationPortraitUpsideDown",
-            "UIInterfaceOrientationLandscapeLeft",
-            "UIInterfaceOrientationLandscapeRight"
-        ])
-        XCTAssertNil(info["UIRequiresFullScreen"])
+        for key in ["UISupportedInterfaceOrientations", "UISupportedInterfaceOrientations~ipad"] {
+            XCTAssertEqual(info[key] as? [String], ["UIInterfaceOrientationPortrait"])
+        }
+        XCTAssertEqual(info["UIRequiresFullScreen"] as? Bool, true)
     }
 
     func testCameraStartsWithAnExplicitIdleAvailability() {
@@ -230,6 +226,25 @@ final class CameraServiceAvailabilityTests: XCTestCase {
 
         camera.removeFrameHandler(newerHandler)
         XCTAssertFalse(camera.hasFrameHandlers)
+    }
+
+    func testFlashPreferenceDefaultsToOnAndPreservesEachSavedMode() throws {
+        let suite = "FlashPreferenceTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertEqual(CameraService.rememberedFlashMode(defaults: defaults), .on)
+        for mode in CameraService.FlashMode.allCases {
+            defaults.set(mode.rawValue, forKey: CameraService.flashModeDefaultsKey)
+            XCTAssertEqual(CameraService.rememberedFlashMode(defaults: defaults), mode)
+        }
+        defaults.set(99, forKey: CameraService.flashModeDefaultsKey)
+        XCTAssertEqual(CameraService.rememberedFlashMode(defaults: defaults), .on)
+    }
+
+    func testFlashStatusLabelsAreExplicit() {
+        XCTAssertEqual(CameraService.FlashMode.on.statusTitle, "Flash On")
+        XCTAssertEqual(CameraService.FlashMode.off.statusTitle, "Flash Off")
+        XCTAssertEqual(CameraService.FlashMode.auto.statusTitle, "Auto Flash")
     }
 
     func testFlashDefaultsToSafeOffAndUnsupportedBeforeCameraConfiguration() {
@@ -681,6 +696,64 @@ final class CameraServiceAvailabilityTests: XCTestCase {
                 remembered: .on,
                 supportedModeRawValues: [CameraService.FlashMode.off.rawValue, CameraService.FlashMode.on.rawValue],
                 restoringRememberedSelection: false
+            ),
+            .off
+        )
+        // Once the user turns flash off, a recipe/capability refresh must not
+        // restore a previous On preference over the visible Off selection.
+        XCTAssertEqual(
+            CameraService.resolvedFlashSelection(
+                current: .off,
+                remembered: .on,
+                supportedModeRawValues: supported,
+                restoringRememberedSelection: false
+            ),
+            .off
+        )
+    }
+
+    func testFlashCycleKeepsOffAvailableWhileHardwareIsTemporarilyUnavailable() {
+        let supported: Set<Int> = [
+            CameraService.FlashMode.off.rawValue,
+            CameraService.FlashMode.auto.rawValue,
+            CameraService.FlashMode.on.rawValue
+        ]
+        XCTAssertEqual(
+            CameraService.flashModesForCycle(
+                availability: .temporarilyUnavailable,
+                supportedModeRawValues: supported
+            ),
+            [.off]
+        )
+        XCTAssertEqual(
+            CameraService.flashModesForCycle(
+                availability: .available,
+                supportedModeRawValues: supported
+            ),
+            [.off, .auto, .on]
+        )
+        XCTAssertEqual(
+            CameraService.flashModesForCycle(
+                availability: .unsupported,
+                supportedModeRawValues: supported
+            ),
+            []
+        )
+        XCTAssertEqual(
+            CameraService.nextFlashMode(
+                current: .on,
+                availability: .temporarilyUnavailable,
+                supportedModeRawValues: supported,
+                manualExposureActive: false
+            ),
+            .off
+        )
+        XCTAssertEqual(
+            CameraService.nextFlashMode(
+                current: .on,
+                availability: .available,
+                supportedModeRawValues: supported,
+                manualExposureActive: true
             ),
             .off
         )

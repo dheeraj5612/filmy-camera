@@ -182,7 +182,7 @@ struct GalleryScreen: View {
                     RollEmptyState(
                         systemName: "photo.on.rectangle.angled",
                         title: "Your frames will live here",
-                        message: "Take a photo, choose your look, then save it to see it here."
+                        message: "Photos you take with Filmy Camera save here automatically. You can also import and edit a photo."
                     )
                     .padding(.horizontal, FilmyTheme.pageMargin)
                 }
@@ -265,6 +265,7 @@ struct GalleryScreen: View {
                 .strokeBorder(FilmyTheme.line, lineWidth: 1)
         }
         .accessibilityHint("Choose which saved Filmy Camera frames can be viewed in the Roll")
+        .accessibilityIdentifier("gallery-manage-limited-access")
     }
 
     private var galleryGrid: some View {
@@ -283,6 +284,7 @@ struct GalleryScreen: View {
                 )
                 .accessibilityValue("\(asset.pixelWidth)x\(asset.pixelHeight)")
                 .accessibilityHint("Opens frame details")
+                .accessibilityIdentifier("roll-frame-\(asset.id)")
             }
         }
         .padding(.horizontal, 6)
@@ -414,6 +416,8 @@ private struct RollEmptyState: View {
     var actionTitle: String?
     var action: (() -> Void)?
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     private var sampleRecipes: [FilmRecipe] {
         Array(FilmRecipe.builtIns.prefix(3))
     }
@@ -472,20 +476,30 @@ private struct RollEmptyState: View {
                             .font(.system(.title3, design: .default).weight(.bold))
                             .foregroundStyle(FilmyTheme.primary)
                             .fixedSize(horizontal: false, vertical: true)
+                        if dynamicTypeSize.isAccessibilitySize {
+                            actionControl
+                        }
                         Text(message)
                             .font(.system(.subheadline, design: .default).weight(.medium))
                             .foregroundStyle(FilmyTheme.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
-                    if let actionTitle, let action {
-                        Button(actionTitle, action: action)
-                            .buttonStyle(.filmyPrimary)
-                            .accessibilityHint("Opens the relevant permission settings")
+                    if !dynamicTypeSize.isAccessibilitySize {
+                        actionControl
                     }
                 }
                 .padding(18)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var actionControl: some View {
+        if let actionTitle, let action {
+            Button(actionTitle, action: action)
+                .buttonStyle(.filmyPrimary)
+                .accessibilityHint("Opens the relevant permission settings")
         }
     }
 }
@@ -800,10 +814,9 @@ private struct GalleryDetailView: View {
                     .presentationDetents([.medium, .large])
             }
         }
-        .confirmationDialog(
+        .alert(
             "Delete this frame?",
             isPresented: $isShowingDeleteConfirmation,
-            titleVisibility: .visible
         ) {
             Button("Delete Frame", role: .destructive) {
                 deleteFrame()
@@ -1071,6 +1084,7 @@ private struct GalleryDetailView: View {
             }
             .buttonStyle(.pressable)
             .accessibilityLabel("Share frame")
+            .accessibilityIdentifier("gallery-share-frame")
             .disabled(image == nil || isDeleting || isPreparingShare)
 
             if photoLibrary.canDelete(asset: asset) {
@@ -1086,6 +1100,7 @@ private struct GalleryDetailView: View {
                 }
                 .buttonStyle(.pressable)
                 .accessibilityLabel("Delete frame")
+                .accessibilityIdentifier("gallery-delete-frame")
                 .disabled(isDeleting || isPreparingShare)
             }
         }

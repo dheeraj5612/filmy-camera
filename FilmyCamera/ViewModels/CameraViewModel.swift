@@ -29,7 +29,7 @@ extension FilmRecipe {
         case "classic-negative": return "Warm highlights, restrained greens, and a textured negative feel for street scenes and quiet rooms."
         case "nostalgic-negative": return "Amber light, softened blues, and gentle contrast for a memory-like everyday palette."
         case "reala-ace": return "Natural color, open shadows, and a clean negative finish that lets the scene stay itself."
-        case "g7x-compact": return "The default social compact-camera profile: bright warm portraits, peach/pink skin, crisp reds and blues, a protected highlight shoulder, and gentle subject-aware smoothing. Real flash captures deepen the ambient background while device optics and depth of field remain unchanged."
+        case "g7x-compact": return "The default compact-camera profile: restrained warmth, crisp reds and blues, a protected highlight shoulder, and clean detail. Flash captures use a global tone response while device optics and depth of field remain unchanged."
         default: return subtitle
         }
     }
@@ -86,9 +86,9 @@ extension FilmRecipe {
     var controlSummary: [(String, String)] {
         if filmBase == .compactDigital {
             return [
-                ("Tone", "Social pop"),
-                ("Color", "Peach vivid"),
-                ("Detail", "Soft skin"),
+                ("Tone", "Balanced"),
+                ("Color", "Subtle warmth"),
+                ("Detail", "Clean"),
                 ("Grain", grainEffectLevel.displayName)
             ]
         }
@@ -125,6 +125,7 @@ final class CameraViewModel: ObservableObject {
             .recipes.values.first(where: { $0.id == base.id }) else {
             return base
         }
+        if isSupersededG7XDefault(saved, parent: base) { return base }
         var resolved = base
         resolved.applyControlValues(from: saved)
         resolved.markUserModified(parentRecipeID: base.id)
@@ -351,6 +352,7 @@ final class CameraViewModel: ObservableObject {
             guard let parent = Self.builtInRecipesByID[savedRecipe.id] else {
                 continue
             }
+            if Self.isSupersededG7XDefault(savedRecipe, parent: parent) { continue }
             var migratedRecipe = parent
             migratedRecipe.applyControlValues(from: savedRecipe)
             migratedRecipe.markUserModified(parentRecipeID: parent.id)
@@ -361,6 +363,61 @@ final class CameraViewModel: ObservableObject {
         if decoded.shouldRewrite || migratedRecipes != decoded.recipes {
             persistRecipeOverrides()
         }
+    }
+
+    /// A slider round trip could persist an older G7 X default as a
+    /// customization. Upgrade only unchanged v11/v12 looks; intentional edits
+    /// remain overrides.
+    nonisolated private static func isSupersededG7XDefault(
+        _ saved: FilmRecipe,
+        parent: FilmRecipe
+    ) -> Bool {
+        let rendererVersion = saved.provenance.rendererVersion
+        guard saved.id == "g7x-compact",
+              saved.filmBase == .compactDigital,
+              rendererVersion == "core-image-parametric-v11"
+                || rendererVersion == "core-image-parametric-v12" else { return false }
+
+        let previousExposure: Double
+        let previousSaturation: Double
+        let previousContrast: Double
+        switch rendererVersion {
+        case "core-image-parametric-v11":
+            previousExposure = 0.12
+            previousSaturation = 1.12
+            previousContrast = 1.10
+        case "core-image-parametric-v12":
+            previousExposure = -0.15
+            previousSaturation = 1.16
+            previousContrast = 1.14
+        default:
+            return false
+        }
+
+        var previousDefault = parent
+        previousDefault.exposure = previousExposure
+        previousDefault.tone = FilmRecipe.Tone(highlight: 0.12, shadow: 0.16)
+        previousDefault.saturation = previousSaturation
+        previousDefault.contrast = previousContrast
+        previousDefault.whiteBalance = FilmRecipe.WhiteBalanceShift(
+            temperature: 0.012,
+            tint: 0.012,
+            mode: .ambiencePriority,
+            kelvin: FilmRecipe.asShotKelvin
+        )
+        previousDefault.sharpness = 0.10
+        previousDefault.noiseReduction = 0.20
+        previousDefault.clarity = -0.08
+        previousDefault.grain = 0
+        previousDefault.grainSize = 0.75
+        previousDefault.vignette = 0
+        previousDefault.halation = 0
+        return saved.dynamicRange == previousDefault.dynamicRange
+            && saved.dRangePriority == previousDefault.dRangePriority
+            && saved.whiteBalance.mode == previousDefault.whiteBalance.mode
+            && FilmRecipe.Control.allCases.allSatisfy {
+                abs($0.value(in: saved) - $0.value(in: previousDefault)) < 0.000_001
+            }
     }
 
     nonisolated static func decodeRecipeOverrides(
@@ -527,6 +584,40 @@ final class CameraViewModel: ObservableObject {
                     self.showToast("The selected look could not be rendered. Try the capture again.", style: .error)
                     return
                 }
+#if DEBUG
+                if FilmyCaptureDiagnostics.isEnabled() {
+                    let metadata = FilmyCaptureDiagnostics.Metadata(
+                        capturedAt: capturedPhoto.capturedAt,
+                        sourceDimensions: .init(
+                            width: Int(capturedPhoto.dimensions.width),
+                            height: Int(capturedPhoto.dimensions.height)
+                        ),
+                        viewportSize: .init(
+                            width: viewportSize.width.isFinite ? max(viewportSize.width, 0) : 0,
+                            height: viewportSize.height.isFinite ? max(viewportSize.height, 0) : 0
+                        ),
+                        previewDrawableSize: .init(
+                            width: previewDrawableSize.width.isFinite ? max(previewDrawableSize.width, 0) : 0,
+                            height: previewDrawableSize.height.isFinite ? max(previewDrawableSize.height, 0) : 0
+                        ),
+                        grainSeed: grainSeed,
+                        flashFired: capturedPhoto.flashFired,
+                        finish: finish,
+                        appVersion: PhotoOutputEncoder.currentApplicationVersion,
+                        appBuild: PhotoOutputEncoder.currentApplicationBuild,
+                        recipe: recipe
+                    )
+                    let originalData = capturedPhoto.fileData
+                    let finalJPEGData = renderedPhoto.data
+                    Task.detached(priority: .utility) {
+                        _ = await FilmyCaptureDiagnostics.persist(
+                            originalData: originalData,
+                            finalJPEGData: finalJPEGData,
+                            metadata: metadata
+                        )
+                    }
+                }
+#endif
                 self.saveCapturedPhoto(
                     renderedPhoto, recipe: recipe, finish: finish, photoLibrary: photoLibrary
                 )
@@ -937,7 +1028,8 @@ final class CameraViewModel: ObservableObject {
         }
     }
 
-    private nonisolated static func render(
+    // Internal so local capture replays exercise the exact production still path.
+    nonisolated static func render(
         sourceData: Data,
         recipe: FilmRecipe,
         viewportSize: CGSize,

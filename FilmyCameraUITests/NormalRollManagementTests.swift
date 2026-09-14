@@ -186,7 +186,7 @@ final class NormalRollManagementTests: XCTestCase {
         let source = photos.element(boundBy: newerSavedFrameCount)
         XCTAssertTrue(app.frame.contains(source.frame), "Never tap an offscreen or unknown Photos tile")
         source.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-        XCTAssertTrue(app.staticTexts["IMPORTED PHOTO"].waitForExistence(timeout: 40))
+        XCTAssertTrue(app.staticTexts["review-heading"].waitForExistence(timeout: 40))
         let save = app.buttons["Save filtered photo"]
         XCTAssertTrue(waitUntil(timeout: 30) { save.exists && save.isEnabled })
         XCTAssertTrue(app.descendants(matching: .any)["review-image"].label.contains(recipeName))

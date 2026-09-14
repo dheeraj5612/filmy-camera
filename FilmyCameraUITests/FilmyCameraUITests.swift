@@ -5,6 +5,32 @@ final class FilmyCameraUITests: XCTestCase {
     private nonisolated(unsafe) var app: XCUIApplication!
     private nonisolated(unsafe) var defaultsSuiteName = ""
 
+    func testLiveRecipeAdjustmentsPersistAndReset() {
+        app.terminate()
+        app.launchArguments += ["-ui-testing-viewfinder-chrome"]
+        app.launch()
+        let adjust = app.buttons["live-recipe-adjustments"]
+        XCTAssertTrue(adjust.waitForExistence(timeout: 10))
+        adjust.tap()
+        let exposure = app.sliders["Exposure"]
+        XCTAssertTrue(exposure.waitForExistence(timeout: 5))
+        let original = exposure.value as? String
+        exposure.adjust(toNormalizedSliderPosition: 1)
+        let changed = "+2.0 EV"
+        let settled = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", changed), object: exposure
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 5), .completed)
+        XCTAssertNotEqual(original, changed)
+        app.buttons["Done"].tap()
+        adjust.tap()
+        XCTAssertEqual(exposure.value as? String, changed)
+        app.buttons["Reset recipe controls"].tap()
+        XCTAssertEqual(exposure.value as? String, original)
+        app.buttons["Done"].tap()
+        XCTAssertFalse(exposure.exists)
+    }
+
     override func setUpWithError() throws {
         continueAfterFailure = false
         let suiteName = "FilmyCameraUITests.\(UUID().uuidString)"
@@ -44,8 +70,6 @@ final class FilmyCameraUITests: XCTestCase {
             return launchedApp
         }
         app = launchedApp
-        // Activate the interruption monitor only when an alert is present;
-        // tapping the Gallery center can select a real thumbnail on reused simulators.
         MainActor.assumeIsolated {
             if launchedApp.alerts.firstMatch.waitForExistence(timeout: 1) {
                 launchedApp.tap()
@@ -109,7 +133,7 @@ final class FilmyCameraUITests: XCTestCase {
                       "The portrait-locked app must retain portrait geometry after rotation")
         XCTAssertTrue(waitForStableHittableFrame(done, timeout: 8),
                       "Pro controls must remain dismissible at 44pt after rotation")
-        assertMinimumHitTarget(done, named: "Rotated Done with Pro controls")
+        assertMinimumHitTarget(done, named: "Landscape Done with Pro controls")
         attachScreenshot(named: "pro-controls-rotated")
         #if !targetEnvironment(simulator)
         let reset = app.buttons["manual-controls-reset"]
@@ -138,7 +162,7 @@ final class FilmyCameraUITests: XCTestCase {
         #endif
         assertMinimumHitTarget(app.buttons["recipe-menu"], named: "Current look")
         assertMinimumHitTarget(app.buttons["import-photo"], named: "Import photo")
-        XCTAssertTrue(app.buttons["Open roll"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["roll-tab"].waitForExistence(timeout: 8))
         XCTAssertFalse(app.buttons["camera-tab"].exists, "The camera should have one control area")
         XCTAssertFalse(app.descendants(matching: .any)["recipe-picker"].exists)
         openRecipeDrawer(in: app)
@@ -376,7 +400,7 @@ final class FilmyCameraUITests: XCTestCase {
         relaunchedAfterApply.launch()
         app = relaunchedAfterApply
         app.tap()
-        XCTAssertTrue(app.buttons["Open roll"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["roll-tab"].waitForExistence(timeout: 10))
 
         openRecipeDetail(for: "classic-chrome", in: app, tuneLabel: "Tune Muted Color")
         XCTAssertEqual(
@@ -405,7 +429,7 @@ final class FilmyCameraUITests: XCTestCase {
         relaunchedAfterReset.launch()
         app = relaunchedAfterReset
         app.tap()
-        XCTAssertTrue(app.buttons["Open roll"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["roll-tab"].waitForExistence(timeout: 10))
 
         openRecipeDetail(for: "classic-chrome", in: app, tuneLabel: "Tune Muted Color")
         XCTAssertEqual(
@@ -431,7 +455,7 @@ final class FilmyCameraUITests: XCTestCase {
         assertMinimumHitTarget(skip, named: "Onboarding skip")
         skip.tap()
 
-        XCTAssertTrue(onboardingApp.buttons["Open roll"].waitForExistence(timeout: 8))
+        XCTAssertTrue(onboardingApp.buttons["roll-tab"].waitForExistence(timeout: 8))
         assertMinimumHitTarget(onboardingApp.buttons["recipe-menu"], named: "Current look after onboarding")
         openRecipeDrawer(in: onboardingApp)
         XCTAssertTrue(onboardingApp.staticTexts["CAMERA PROFILE"].waitForExistence(timeout: 5))
@@ -443,7 +467,7 @@ final class FilmyCameraUITests: XCTestCase {
 
     func testPortraitCameraShellIgnoresDeviceRotation() throws {
         let livePreview = app.descendants(matching: .any)["camera-preview"]
-        let unavailablePreview = app.descendants(matching: .any)["camera-preview-unavailable"]
+        let unavailablePreview = app.descendants(matching: .any)["camera-placeholder"]
         // Simulator camera sessions expose the unavailable placeholder, while
         // a physical iPad exposes the live preview. Either visible surface is
         // the app content whose geometry proves the portrait policy; the
@@ -482,7 +506,7 @@ final class FilmyCameraUITests: XCTestCase {
             "The visible app window must remain portrait after device rotation on iPhone"
         )
         let currentLook = app.buttons["recipe-menu"]
-        let roll = app.buttons["Open roll"]
+        let roll = app.buttons["roll-tab"]
         let importPhoto = app.buttons["import-photo"]
         for (element, name) in [(currentLook, "Current look"), (roll, "Roll"), (importPhoto, "Import")] {
             let stable = waitForStableHittableFrame(element, timeout: 10, within: visibleWindow)
@@ -541,7 +565,7 @@ final class FilmyCameraUITests: XCTestCase {
         ).tap()
 
         XCTAssertTrue(
-            app.staticTexts["IMPORTED PHOTO"].waitForExistence(timeout: 30),
+            app.staticTexts["review-heading"].waitForExistence(timeout: 30),
             "The imported image should reach filtered review"
         )
         // Whichever library photo the picker lists first, the caption must
@@ -619,7 +643,7 @@ final class FilmyCameraUITests: XCTestCase {
         }
         cacheApp.tap()
 
-        let openRoll = cacheApp.buttons["Open roll"]
+        let openRoll = cacheApp.buttons["roll-tab"]
         XCTAssertTrue(openRoll.waitForExistence(timeout: 10))
         openRoll.tap()
         XCTAssertTrue(cacheApp.staticTexts["Roll"].waitForExistence(timeout: 10))
@@ -659,8 +683,8 @@ final class FilmyCameraUITests: XCTestCase {
 
         cacheApp.terminate()
         cacheApp.launch()
-        XCTAssertTrue(cacheApp.buttons["Open roll"].waitForExistence(timeout: 10))
-        cacheApp.buttons["Open roll"].tap()
+        XCTAssertTrue(cacheApp.buttons["roll-tab"].waitForExistence(timeout: 10))
+        cacheApp.buttons["roll-tab"].tap()
         XCTAssertTrue(cacheApp.staticTexts["Roll"].waitForExistence(timeout: 10))
         XCTAssertTrue(newestFirst.waitForExistence(timeout: 5))
         XCTAssertTrue(cacheApp.frame.contains(newestFirst.frame))
@@ -722,7 +746,7 @@ final class FilmyCameraUITests: XCTestCase {
                 XCTAssertTrue(waitForSavedToastToDisappear(in: recipeApp), "\(recipeID): prior save toast must clear")
                 shutter.tap()
                 assertAutomaticSave(in: recipeApp)
-                recipeApp.buttons["Open roll"].tap()
+                recipeApp.buttons["roll-tab"].tap()
                 let frame = recipeApp.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Photo in your gallery'")).firstMatch
                 XCTAssertTrue(frame.waitForExistence(timeout: 20))
                 frame.tap()
@@ -849,7 +873,7 @@ final class FilmyCameraUITests: XCTestCase {
         XCUIDevice.shared.orientation = .landscapeLeft
         XCTAssertTrue(waitUntil(timeout: 5) { rollApp.frame.height > rollApp.frame.width })
 
-        let openRoll = rollApp.buttons["Open roll"]
+        let openRoll = rollApp.buttons["roll-tab"]
         XCTAssertTrue(openRoll.waitForExistence(timeout: 10))
         openRoll.tap()
         XCTAssertTrue(rollApp.staticTexts["Roll"].waitForExistence(timeout: 10))
@@ -943,15 +967,18 @@ final class FilmyCameraUITests: XCTestCase {
 
     #if targetEnvironment(simulator)
     func testSimulatorFallbackExposesReadableStateWithoutPreviewAction() throws {
-        XCTAssertTrue(app.staticTexts["Preview mode"].waitForExistence(timeout: 8))
-        XCTAssertTrue(
-            app.staticTexts["Shoot this look on an iPhone or iPad."].waitForExistence(timeout: 5)
+        let demoLabel = app.staticTexts["camera-demo-label"]
+        XCTAssertTrue(demoLabel.waitForExistence(timeout: 8))
+        XCTAssertEqual(demoLabel.label, "Sample · not a live camera")
+        XCTAssertFalse(
+            app.descendants(matching: .any)["camera-preview-unavailable"].exists,
+            "Simulator sample mode must not expose an actionable unavailable live preview"
         )
 
         let cameraPreview = app.descendants(matching: .any)["camera-preview"]
         XCTAssertFalse(
-            cameraPreview.isHittable,
-            "The unavailable camera preview must not remain an actionable target"
+            cameraPreview.exists,
+            "The unavailable camera preview must not expose live controls"
         )
     }
     #endif
@@ -971,7 +998,7 @@ final class FilmyCameraUITests: XCTestCase {
         }
         defer { accessibilityApp.terminate() }
 
-        let roll = accessibilityApp.buttons["Open roll"]
+        let roll = accessibilityApp.buttons["roll-tab"]
         let currentLook = accessibilityApp.buttons["recipe-menu"]
         let importPhoto = accessibilityApp.buttons["import-photo"]
         for (element, name) in [(roll, "Roll"), (currentLook, "Current look"), (importPhoto, "Import")] {
@@ -1037,7 +1064,7 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertFalse(previewApp.descendants(matching: .any)["recipe-picker"].exists)
         XCTAssertFalse(previewApp.descendants(matching: .any)["camera-tool-strip"].exists)
 
-        let roll = previewApp.buttons["Open roll"]
+        let roll = previewApp.buttons["roll-tab"]
         assertMinimumHitTarget(roll, named: "Viewfinder preview Roll")
 
         let controlsToggle = previewApp.buttons["Show camera controls"]
@@ -1196,21 +1223,21 @@ final class FilmyCameraUITests: XCTestCase {
             return onboardingApp
         }
 
-        XCTAssertTrue(onboardingApp.staticTexts["Start with a feeling."].waitForExistence(timeout: 8))
-        let firstContinue = onboardingApp.buttons["Continue"]
-        assertMinimumHitTarget(firstContinue, named: "Onboarding continue")
-
-        firstContinue.tap()
-        XCTAssertTrue(onboardingApp.staticTexts["See the mood as you compose."].waitForExistence(timeout: 5))
-        let secondContinue = onboardingApp.buttons["Continue"]
-        assertMinimumHitTarget(secondContinue, named: "Onboarding continue on page two")
-        secondContinue.tap()
-        XCTAssertTrue(onboardingApp.staticTexts["Save the finished photo."].waitForExistence(timeout: 5))
-        let openCamera = onboardingApp.buttons["Open camera"]
+        defer { onboardingApp.terminate() }
+        XCTAssertTrue(onboardingApp.staticTexts["A look. Your eye."].waitForExistence(timeout: 8))
+        let chooser = onboardingApp.descendants(matching: .any)["onboarding-recipe-chooser"]
+        XCTAssertTrue(chooser.waitForExistence(timeout: 5))
+        let selectedRecipe = onboardingApp.buttons["onboarding-recipe-g7x-compact"]
+        XCTAssertTrue(selectedRecipe.waitForExistence(timeout: 5))
+        XCTAssertEqual(selectedRecipe.value as? String, "Selected")
+        let compare = onboardingApp.buttons["onboarding-compare"]
+        XCTAssertTrue(compare.waitForExistence(timeout: 5))
+        XCTAssertEqual(compare.value as? String, "Look")
+        let openCamera = onboardingApp.buttons["onboarding-continue"]
         assertMinimumHitTarget(openCamera, named: "Onboarding open camera")
         openCamera.tap()
 
-        XCTAssertTrue(onboardingApp.buttons["Open roll"].waitForExistence(timeout: 8))
+        XCTAssertTrue(onboardingApp.buttons["roll-tab"].waitForExistence(timeout: 8))
     }
 
     private func openRecipeDetail(
@@ -1244,16 +1271,7 @@ final class FilmyCameraUITests: XCTestCase {
                 // AssistiveTouch can overlap the center of this edge-column
                 // control on a physical iPad. Tap the leading quarter while
                 // staying inside the button's actual accessibility frame.
-                let targetFrame = target.frame
-                let buttonFrame = currentLook.frame
-                let point = CGPoint(
-                    x: buttonFrame.minX + buttonFrame.width * 0.25,
-                    y: buttonFrame.midY
-                )
-                target.coordinate(withNormalizedOffset: CGVector(
-                    dx: (point.x - targetFrame.minX) / targetFrame.width,
-                    dy: (point.y - targetFrame.minY) / targetFrame.height
-                )).tap()
+                currentLook.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).tap()
             } else {
                 currentLook.tap()
             }
@@ -1524,7 +1542,7 @@ final class FilmyCameraUITests: XCTestCase {
     private func waitForCameraShell(in target: XCUIApplication, timeout: TimeInterval = 15) -> Bool {
         // The Roll thumbnail sits in the capture row of every camera layout,
         // on hardware and in Simulator preview mode alike.
-        target.buttons["Open roll"].waitForExistence(timeout: timeout)
+        target.buttons["roll-tab"].waitForExistence(timeout: timeout)
     }
 
     func testBackgroundingAndForegroundingRestoresTheViewfinder() throws {
@@ -1561,7 +1579,7 @@ final class FilmyCameraUITests: XCTestCase {
             let backID = tab == "roll-tab" ? "roll-back-to-camera" : "settings-back-to-camera"
             let back = app.buttons[backID]
             XCTAssertTrue(back.waitForExistence(timeout: 5))
-            RunLoop.current.run(until: Date(timeIntervalSinceNow: 1))
+            XCTAssertTrue(waitForStableHittableFrame(back, timeout: 5, within: app))
             back.tap()
             XCTAssertTrue(waitForCameraShell(in: app), "Returning from \(tab) must show the camera shell")
             if isPhysical {
@@ -1766,7 +1784,7 @@ final class FilmyCameraUITests: XCTestCase {
             let launched = makeApplication()
             launched.launchArguments = ["-ui-testing", "-selectedRecipeID", "classic-chrome"]
             launched.launch()
-            XCTAssertTrue(launched.buttons["Open roll"].waitForExistence(timeout: 15))
+            XCTAssertTrue(launched.buttons["roll-tab"].waitForExistence(timeout: 15))
             launched.terminate()
         }
         #endif

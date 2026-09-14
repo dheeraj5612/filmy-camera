@@ -61,9 +61,13 @@ PHOTOS_PERMISSION_BOOTSTRAP_SELECTOR = (
     "testGrantFullPhotosAccessForFixtureLane"
 )
 OPTIONAL_FIXTURE_SELECTORS = {
+    # These tests consume private, locally supplied captures. They remain in
+    # the opt-in fixture evidence lane, but a missing local
+    # input is an intentional skip rather than a Photos-fixture failure.
     "FilmyCameraTests/RecipeRenderGalleryTests/testG7XRenderGallery",
     "FilmyCameraTests/RecipeRenderGalleryTests/testFujiRenderGallery",
     "FilmyCameraTests/RecipeRenderGalleryTests/testCreatorRenderGallery",
+    "FilmyCameraTests/RendererSkinCaptureDiagnosticsTests/testExportStagesForLocalSkinCapture",
 }
 
 

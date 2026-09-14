@@ -228,8 +228,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         origin == .standalone
     }
 
-    /// The still-photo flash request. `off` is intentionally the default so
-    /// opening the camera never fires the flash without an explicit choice.
+    /// The still-photo flash request. A new preference defaults to On;
+    /// supported cameras restore the saved selection when configured.
     public enum FlashMode: Int, CaseIterable, Equatable, Sendable {
         case off = 0
         case auto = 2
@@ -240,6 +240,14 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             case .off: "Off"
             case .auto: "Auto"
             case .on: "On"
+            }
+        }
+
+        public var statusTitle: String {
+            switch self {
+            case .off: "Flash Off"
+            case .auto: "Auto Flash"
+            case .on: "Flash On"
             }
         }
 
@@ -887,24 +895,21 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     public func cycleFlashMode() {
         sessionQueue.async { [weak self] in
             guard let self else { return }
-            guard !self.isManualExposureActiveOrRequested else {
-                self.publishStatus("Flash requires Auto exposure.")
-                return
-            }
-            guard self.flashAvailabilityState == .available else {
-                if self.flashAvailabilityState == .temporarilyUnavailable {
-                    self.publishStatus("Flash is temporarily unavailable.")
-                }
+            let manualExposureActive = self.isManualExposureActiveOrRequested
+            guard manualExposureActive || self.flashAvailabilityState != .unsupported else {
                 return
             }
 
             let supported = self.supportedFlashModeRawValuesOnQueue()
-            let modes = FlashMode.allCases.filter { supported.contains($0.rawValue) }
-            guard let currentIndex = modes.firstIndex(of: self.selectedFlashMode), !modes.isEmpty else {
-                self.setFlashModeOnQueue(.off)
-                return
+            let nextMode = Self.nextFlashMode(
+                current: self.selectedFlashMode,
+                availability: self.flashAvailabilityState,
+                supportedModeRawValues: supported,
+                manualExposureActive: manualExposureActive
+            )
+            if manualExposureActive && self.selectedFlashMode == .off {
+                self.publishStatus("Flash requires Auto exposure.")
             }
-            let nextMode = modes[(currentIndex + 1) % modes.count]
             self.setFlashModeOnQueue(nextMode)
         }
     }
@@ -2404,7 +2409,6 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         publishStatus(pendingCaptureStatus)
         scheduleAutomaticRecoveryOnQueue()
     }
-
     /// Human-readable reason for an `AVCaptureSession` interruption. Reasons
     /// are compared by raw value so newer SDK cases fall through safely.
     static func interruptionStatus(forReasonRawValue rawValue: Int?) -> String {
@@ -2551,10 +2555,14 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                           AVCaptureDevice.authorizationStatus(for: .video) == .authorized else {
                         return
                     }
-                    if !self.session.isRunning {
-                        self.session.startRunning()
+                    if self.needsGraphRebuild {
+                        self.configureAndStartOnQueue()
+                    } else {
+                        if !self.session.isRunning {
+                            self.session.startRunning()
+                        }
+                        self.publishStartOutcomeOnQueue(running: self.session.isRunning && !self.session.isInterrupted)
                     }
-                    self.publishStartOutcomeOnQueue(running: self.session.isRunning && !self.session.isInterrupted)
                 }
             }
         ]
@@ -3198,12 +3206,19 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
     private func configureOrientation() {
         let previewConnection = videoOutput.connection(with: .video)
+        let photoConnection = photoOutput.connection(with: .video)
+        let mirrored = activeDevice()?.position == .front
+        for connection in [previewConnection, photoConnection] {
+            guard let connection, connection.isVideoMirroringSupported else { continue }
+            connection.automaticallyAdjustsVideoMirroring = false
+            connection.isVideoMirrored = mirrored
+        }
         configureRotation(
             previewConnection,
             angle: previewRotationAngleState
         )
         configureRotation(
-            photoOutput.connection(with: .video),
+            photoConnection,
             angle: captureRotationAngleState
         )
         publishPreviewMirroring(previewConnection?.isVideoMirrored ?? false)
@@ -3361,6 +3376,40 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         return supportedModeRawValues.contains(selection.rawValue) ? selection : .off
     }
 
+    /// Returns the modes that the viewfinder control may cycle through.
+    /// Off remains a safe, valid request while the hardware is temporarily
+    /// unavailable; Auto and On must wait until the hardware recovers.
+    static func flashModesForCycle(
+        availability: FlashAvailability,
+        supportedModeRawValues: Set<Int>
+    ) -> [FlashMode] {
+        guard availability != .unsupported else { return [] }
+        guard availability == .available else { return [.off] }
+        return FlashMode.allCases.filter {
+            supportedModeRawValues.contains($0.rawValue)
+        }
+    }
+
+    /// Resolves one user-facing cycle transition. Manual exposure can leave
+    /// a stale non-Off selection after a capability refresh, so its only
+    /// valid transition is explicitly back to Off.
+    static func nextFlashMode(
+        current: FlashMode,
+        availability: FlashAvailability,
+        supportedModeRawValues: Set<Int>,
+        manualExposureActive: Bool
+    ) -> FlashMode {
+        guard !manualExposureActive else { return .off }
+        let modes = flashModesForCycle(
+            availability: availability,
+            supportedModeRawValues: supportedModeRawValues
+        )
+        guard let currentIndex = modes.firstIndex(of: current), !modes.isEmpty else {
+            return .off
+        }
+        return modes[(currentIndex + 1) % modes.count]
+    }
+
     private func refreshFlashCapabilitiesOnQueue(
         for device: AVCaptureDevice,
         restoringRememberedSelection: Bool
@@ -3429,7 +3478,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         guard persistsFlashMode,
               let raw = defaults.object(forKey: flashModeDefaultsKey) as? Int,
               let mode = FlashMode(rawValue: raw) else {
-            return .off
+            return .on
         }
         return mode
     }

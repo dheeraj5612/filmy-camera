@@ -127,7 +127,7 @@ final class StoreScreenshotTests: XCTestCase {
             )
         ).tap()
 
-        XCTAssertTrue(app.staticTexts["IMPORTED PHOTO"].waitForExistence(timeout: 40))
+        XCTAssertTrue(app.staticTexts["review-heading"].waitForExistence(timeout: 40))
         XCTAssertTrue(app.staticTexts[recipeName].waitForExistence(timeout: 5))
         XCTAssertTrue(
             app.staticTexts.matching(
@@ -147,7 +147,7 @@ final class StoreScreenshotTests: XCTestCase {
                 photo.label.contains("Instant Print") && save.isEnabled
             }, "Store media must show the rendered Instant Print output")
         }
-        let heading = app.staticTexts["IMPORTED PHOTO"]
+        let heading = app.staticTexts["review-heading"]
         XCTAssertTrue(save.waitForExistence(timeout: 5))
         // These seeded media devices have a visible status bar and bottom
         // gesture area. PhotosPicker dismissal must settle before review is
@@ -259,7 +259,7 @@ final class LaunchOnboardingTests: XCTestCase {
         XCTAssertTrue(screen.waitForExistence(timeout: 15))
         XCTAssertEqual(app.buttons.matching(identifier: "onboarding-screen").count, 0,
                        "The screen identifier must never replace a button identifier")
-        for identifier in ["onboarding-skip", "onboarding-skip-for-now", "onboarding-continue"] {
+        for identifier in ["onboarding-skip", "onboarding-continue"] {
             let button = app.buttons[identifier]
             XCTAssertTrue(button.waitForExistence(timeout: 5), identifier)
             XCTAssertTrue(button.isHittable, identifier)
@@ -271,11 +271,9 @@ final class LaunchOnboardingTests: XCTestCase {
         firstUse.lifetime = .keepAlways
         add(firstUse)
         app.buttons["onboarding-continue"].tap()
-        let back = app.buttons["onboarding-back"]
-        XCTAssertTrue(back.waitForExistence(timeout: 5))
-        XCTAssertTrue(back.isHittable)
-        XCTAssertGreaterThanOrEqual(back.frame.width, 44)
-        XCTAssertGreaterThanOrEqual(back.frame.height, 44)
+        XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["onboarding-back"].exists, "First use is one screen, not a slideshow")
+        XCTAssertFalse(app.buttons["onboarding-skip-for-now"].exists, "Do not repeat the Skip action")
     }
 
     func testChosenLookReachesCameraAndSurvivesRelaunch() {
@@ -289,6 +287,7 @@ final class LaunchOnboardingTests: XCTestCase {
 
         let muted = app.buttons["onboarding-recipe-classic-chrome"]
         XCTAssertTrue(muted.waitForExistence(timeout: 15))
+        revealOnboarding(muted, in: app)
         muted.tap()
         XCTAssertEqual(muted.value as? String, "Selected")
         app.buttons["onboarding-skip"].tap()
@@ -304,7 +303,7 @@ final class LaunchOnboardingTests: XCTestCase {
         XCTAssertTrue(currentLook.label.contains("Muted Color"))
     }
 
-    func testBackNavigationKeepsChosenLookThroughCompletion() {
+    func testComparisonKeepsChosenLookThroughCompletion() {
         continueAfterFailure = false
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
@@ -315,23 +314,37 @@ final class LaunchOnboardingTests: XCTestCase {
 
         let muted = app.buttons["onboarding-recipe-classic-chrome"]
         XCTAssertTrue(muted.waitForExistence(timeout: 15))
+        revealOnboarding(muted, in: app)
         muted.tap()
-        let next = app.buttons["onboarding-continue"]
-        next.tap()
-        XCTAssertTrue(app.staticTexts["See the mood as you compose."].waitForExistence(timeout: 5))
-        app.buttons["onboarding-back"].tap()
-        XCTAssertTrue(muted.waitForExistence(timeout: 5))
         XCTAssertEqual(muted.value as? String, "Selected")
-        XCTAssertEqual(app.buttons["onboarding-recipe-g7x-compact"].value as? String, "Not selected")
-
-        next.tap()
-        next.tap()
-        XCTAssertTrue(app.staticTexts["Save the finished photo."].waitForExistence(timeout: 5))
-        next.tap()
+        let comparison = app.buttons["onboarding-compare"]
+        revealOnboarding(comparison, in: app)
+        comparison.tap()
+        XCTAssertEqual(comparison.value as? String, "Original")
+        XCTAssertEqual(muted.value as? String, "Selected", "Previewing the source must not change the look")
+        comparison.tap()
+        XCTAssertEqual(comparison.value as? String, "Look")
+        let explanation = app.staticTexts["onboarding-save-explanation"]
+        XCTAssertTrue(explanation.exists)
+        XCTAssertTrue(explanation.label.contains("save automatically"), "Capture disclosure must match auto-save")
+        XCTAssertTrue(explanation.label.contains("only when you choose"), "Imported originals must remain distinct")
+        app.buttons["onboarding-continue"].tap()
         let currentLook = app.buttons["recipe-menu"]
         XCTAssertTrue(currentLook.waitForExistence(timeout: 15))
         XCTAssertTrue(currentLook.label.contains("Muted Color"))
     }
+
+    private func revealOnboarding(_ element: XCUIElement, in app: XCUIApplication) {
+        let scroll = app.scrollViews["onboarding-content"]
+        for _ in 0..<5 where !element.isHittable {
+            if element.frame.midY < scroll.frame.midY { scroll.swipeDown() }
+            else { scroll.swipeUp() }
+        }
+        XCTAssertTrue(element.isHittable)
+        XCTAssertGreaterThanOrEqual(element.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(element.frame.height, 44)
+    }
+
 }
 
 /// Non-destructive discovery coverage. Every test owns its preferences and

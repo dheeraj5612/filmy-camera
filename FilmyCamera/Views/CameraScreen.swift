@@ -105,17 +105,13 @@ struct CameraTopBarLayout<Controls: View, Indicators: View>: View {
     }
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) {
-                controls
-                indicators.lineLimit(1)
-            }
-            VStack(alignment: .trailing, spacing: 0) {
-                controls.frame(height: 48)
-                indicators
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, minHeight: 44, maxHeight: 44, alignment: .trailing)
-            }
+        // Hardware discovery and status changes must never choose a different
+        // row count. Reserve both rows before the first camera frame arrives.
+        VStack(alignment: .trailing, spacing: 0) {
+            controls.frame(height: UIDevice.current.userInterfaceIdiom == .pad ? 64 : 48)
+            indicators
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, minHeight: 44, maxHeight: 44, alignment: .trailing)
         }
     }
 }
@@ -136,6 +132,12 @@ private struct ViewfinderChromeHeightKey: PreferenceKey {
 /// primary controls in an edge column; compact layouts keep them below the
 /// frame within thumb reach.
 struct CameraScreen: View {
+    // The portrait-only iPad window scales to 75% in landscape. Preserve
+    // a physical target above 44 points for compact camera controls.
+    private var cameraHitTarget: CGFloat {
+        UIDevice.current.userInterfaceIdiom == .pad ? 64 : FilmyTheme.minimumHitTarget
+    }
+
     @ObservedObject var camera: CameraService
     @ObservedObject var viewModel: CameraViewModel
     @ObservedObject var photoLibrary: PhotoLibraryService
@@ -162,6 +164,7 @@ struct CameraScreen: View {
     @State private var recipeForDetail: FilmRecipe?
     @State private var isShowingTools: Bool
     @State private var isShowingManualControls = false
+    @State private var isShowingLiveAdjustments = false
     @State private var isShowingLookDrawer = false
     @State private var isShowingLookLibrary = false
     @State private var focusPoint: CGPoint?
@@ -172,6 +175,9 @@ struct CameraScreen: View {
     @State private var suppressLookSwipeUntil = Date.distantPast
     @State private var viewfinderChromeHeights: [ViewfinderChromeEdge: CGFloat] = [:]
     @State private var isShutterBlinking = false
+    @State private var isConfirmingCaptureDiscard = false
+    @State private var favoritesOnly = false
+    @AppStorage("favoriteRecipeIDs.v1") private var favoriteData = Data()
 
     init(
         camera: CameraService,
@@ -283,6 +289,13 @@ struct CameraScreen: View {
             }
         }
         .modifier(CameraHardwareShutterModifier(enabled: canTriggerShutter, action: capture))
+        .confirmationDialog("Discard this unsaved photo?", isPresented: $isConfirmingCaptureDiscard, titleVisibility: .visible) {
+            Button("Discard photo", role: .destructive) { viewModel.discardReview() }
+                .accessibilityIdentifier("capture-save-confirm-discard")
+            Button("Keep photo", role: .cancel) { }
+        } message: {
+            Text("This photo has not been saved to Photos. Discarding cannot be undone.")
+        }
         .onChange(of: assistOptions, initial: true) { _, _ in updateCompositionAssists() }
         .onChange(of: isCameraVisibleForAssists, initial: true) { _, visible in
             if !visible { countdown.cancel() }
@@ -408,23 +421,34 @@ struct CameraScreen: View {
     /// normal shutter press into an editor or let the next shot overwrite it.
     private func captureSaveRecovery(_ message: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Photo not saved yet").font(.headline)
+            Label("Photo not saved yet", systemImage: "exclamationmark.circle.fill")
+                .font(.headline)
+                .foregroundStyle(FilmyTheme.danger)
             Text(message).font(.subheadline).fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Button("Retry save") { viewModel.saveReview(photoLibrary: photoLibrary) }
-                    .accessibilityIdentifier("capture-save-retry")
-                if viewModel.saveErrorRequiresSettings {
-                    Button("Photos Settings", action: openSystemSettings)
-                        .accessibilityIdentifier("capture-save-settings")
-                }
-                Button("Discard", role: .destructive) { viewModel.discardReview() }
-                    .accessibilityIdentifier("capture-save-discard")
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { captureRecoveryActions }
+                VStack(alignment: .leading, spacing: 8) { captureRecoveryActions }
             }
             .buttonStyle(.bordered)
         }
         .padding(14)
         .viewfinderChrome(RoundedRectangle(cornerRadius: 16))
         .accessibilityIdentifier("capture-save-recovery")
+    }
+
+    @ViewBuilder
+    private var captureRecoveryActions: some View {
+        Button("Retry save") { viewModel.saveReview(photoLibrary: photoLibrary) }
+            .frame(minHeight: 44)
+            .accessibilityIdentifier("capture-save-retry")
+        if viewModel.saveErrorRequiresSettings {
+            Button("Photos Settings", action: openSystemSettings)
+                .frame(minHeight: 44)
+                .accessibilityIdentifier("capture-save-settings")
+        }
+        Button("Discard", role: .destructive) { isConfirmingCaptureDiscard = true }
+            .frame(minHeight: 44)
+            .accessibilityIdentifier("capture-save-discard")
     }
 
     // MARK: - Shells
@@ -476,8 +500,8 @@ struct CameraScreen: View {
             if isShowingLookDrawer {
                 lookDrawer(
                     maxHeight: isLandscape
-                        ? max(160, min(240, availableHeight - 130))
-                        : max(180, min(360, availableHeight - 190))
+                        ? max(160, min(UIDevice.current.userInterfaceIdiom == .pad ? 460 : 240, availableHeight - 130))
+                        : max(180, min(UIDevice.current.userInterfaceIdiom == .pad ? 460 : 360, availableHeight - 190))
                 )
                     .padding(.leading, 12)
                     .padding(.trailing, 160)
@@ -489,7 +513,7 @@ struct CameraScreen: View {
     }
 
     private var isChromeDisabled: Bool {
-        viewModel.isCapturing || viewModel.isSaving || isImporting || viewModel.hasPendingCapture
+        viewModel.isCapturing || viewModel.isSaving || viewModel.hasPendingCapture || isImporting
     }
 
     private var portraitControlClearance: CGFloat {
@@ -517,6 +541,8 @@ struct CameraScreen: View {
             // review instead of announcing "Camera unavailable".
             if shouldShowCameraEmptyState, !isReviewing {
                 cameraPlaceholder
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("camera-placeholder")
             } else if isReviewing {
                 Color.black.opacity(0.55)
                     .allowsHitTesting(false)
@@ -598,64 +624,70 @@ struct CameraScreen: View {
 
     private var previewSurface: some View {
         GeometryReader { proxy in
-            FilteredCameraPreview(camera: camera, recipe: viewModel.selectedRecipe)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .contentShape(Rectangle())
-                .accessibilityElement(
-                    children: FilteredCameraPreview.exposesRenderStatusForUITesting
-                        ? .contain
-                        : .ignore
-                )
-                .accessibilityLabel("Live camera preview")
-                .accessibilityValue(camera.isRunning ? "Showing the \(viewModel.selectedRecipe.name) look" : camera.statusMessage)
-                .accessibilityHint("Tap to focus, swipe left or right to change looks, double tap to switch cameras, or pinch to zoom. These controls are also available as accessibility actions.")
-                .accessibilityAction(named: "Focus and expose at center") {
-                    focusPreview(at: CGPoint(x: proxy.size.width / 2, y: proxy.size.height / 2), in: proxy.size)
+            ZStack {
+                // Keep the renderer mounted across camera start/stop so its
+                // frame handler and render-status probe retain their lifetime.
+                FilteredCameraPreview(camera: camera, recipe: viewModel.selectedRecipe)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .allowsHitTesting(false)
+
+                if !shouldShowCameraEmptyState {
+                    livePreviewControls(in: proxy.size)
                 }
-                .accessibilityAction(named: "Next look") { selectAdjacentLook(.next) }
-                .accessibilityAction(named: "Previous look") { selectAdjacentLook(.previous) }
-                .accessibilityAction(named: "Switch camera", switchCameraFromPreview)
-                .accessibilityIdentifier(
-                    shouldShowCameraEmptyState ? "camera-preview-unavailable" : "camera-preview"
-                )
-                .accessibilityHidden(shouldShowCameraEmptyState)
-                .gesture(
-                    SpatialTapGesture(count: 2)
-                        .exclusively(before: SpatialTapGesture())
-                        .onEnded { value in
-                            switch value {
-                            case .first:
-                                switchCameraFromPreview()
-                            case .second(let tap):
-                                focusPreview(at: tap.location, in: proxy.size)
-                            }
-                        }
-                )
-                .simultaneousGesture(previewLookSwipe(in: proxy.size))
-                .onAppear { camera.updateOrientation(for: proxy.size) }
-                .onChange(of: proxy.size) { _, size in
-                    isPinching = false
-                    previewDragMaySelectLook = nil
-                    camera.updateOrientation(for: size)
-                }
-                .simultaneousGesture(
-                    MagnificationGesture()
-                        .onChanged { scale in
-                            guard canTriggerShutter else { return }
-                            if previewDragMaySelectLook != nil { previewDragMaySelectLook = false }
-                            if !isPinching {
-                                isPinching = true
-                                pinchStartZoom = camera.zoomFactor
-                            }
-                            camera.setZoom(pinchStartZoom * scale)
-                        }
-                        .onEnded { _ in
-                            isPinching = false
-                            pinchStartZoom = camera.zoomFactor
-                            suppressLookSwipeUntil = Date(timeIntervalSinceNow: 0.3)
-                        }
-                )
+            }
+            .onAppear { camera.updateOrientation(for: proxy.size) }
+            .onChange(of: proxy.size) { _, size in
+                isPinching = false
+                previewDragMaySelectLook = nil
+                camera.updateOrientation(for: size)
+            }
         }
+    }
+
+    private func livePreviewControls(in size: CGSize) -> some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Live camera preview")
+            .accessibilityValue("Showing the \(viewModel.selectedRecipe.name) look")
+            .accessibilityHint("Tap to focus, swipe left or right to change looks, double tap to switch cameras, or pinch to zoom. These controls are also available as accessibility actions.")
+            .accessibilityAction(named: "Focus and expose at center") {
+                focusPreview(at: CGPoint(x: size.width / 2, y: size.height / 2), in: size)
+            }
+            .accessibilityAction(named: "Next look") { selectAdjacentLook(.next) }
+            .accessibilityAction(named: "Previous look") { selectAdjacentLook(.previous) }
+            .accessibilityAction(named: "Switch camera", switchCameraFromPreview)
+            .accessibilityIdentifier("camera-preview")
+            .gesture(
+                SpatialTapGesture(count: 2)
+                    .exclusively(before: SpatialTapGesture())
+                    .onEnded { value in
+                        switch value {
+                        case .first:
+                            switchCameraFromPreview()
+                        case .second(let tap):
+                            focusPreview(at: tap.location, in: size)
+                        }
+                    }
+            )
+            .simultaneousGesture(previewLookSwipe(in: size))
+            .simultaneousGesture(
+                MagnificationGesture()
+                    .onChanged { scale in
+                        guard canTriggerShutter else { return }
+                        if previewDragMaySelectLook != nil { previewDragMaySelectLook = false }
+                        if !isPinching {
+                            isPinching = true
+                            pinchStartZoom = camera.zoomFactor
+                        }
+                        camera.setZoom(pinchStartZoom * scale)
+                    }
+                    .onEnded { _ in
+                        isPinching = false
+                        pinchStartZoom = camera.zoomFactor
+                        suppressLookSwipeUntil = Date(timeIntervalSinceNow: 0.3)
+                    }
+            )
     }
 
     private func focusPreview(at location: CGPoint, in size: CGSize) {
@@ -711,7 +743,15 @@ struct CameraScreen: View {
     @ViewBuilder
     private func viewfinderFooter(width: CGFloat) -> some View {
         VStack(spacing: 8) {
-            if isShowingTools {
+            if isShowingLiveAdjustments {
+                LiveRecipeControlsView(
+                    recipe: viewModel.selectedRecipe,
+                    onUpdate: viewModel.update,
+                    onReset: { viewModel.reset(recipeID: viewModel.selectedRecipeID) },
+                    onClose: { isShowingLiveAdjustments = false }
+                )
+            }
+            if isShowingTools && !isShowingLiveAdjustments {
                 toolStrip(minWidth: width - 24)
             }
 
@@ -753,33 +793,27 @@ struct CameraScreen: View {
 
     private var topBar: some View {
         CameraTopBarLayout {
-            HStack(spacing: 8) {
-                ZStack { Color.clear; flashControl }
-                    .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+            HStack(spacing: 4) {
+                flashControl
+                    .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
+                    .fixedSize(horizontal: true, vertical: false)
 
-                cameraSwitchButton
-                    .opacity(camera.availableCameraPositions.count > 1 ? 1 : 0)
-                    .disabled(camera.availableCameraPositions.count < 2)
-                    .accessibilityHidden(camera.availableCameraPositions.count < 2)
+                importButton
 
-                Spacer(minLength: 4)
+                Spacer(minLength: 0)
 
                 ViewThatFits(in: .horizontal) {
-                    Text("filmy")
-                        .font(.system(.title3, design: .serif).italic())
-                        .foregroundStyle(FilmyTheme.primary)
+                    FilmyWordmark(compact: true)
                         .accessibilityHidden(true)
                     Color.clear.frame(width: 0, height: 0)
                 }
                 .layoutPriority(-1)
 
-                Spacer(minLength: 4)
+                Spacer(minLength: 0)
 
                 captureSetupButton
                 settingsButton
 
-                toolsToggle
-                    .disabled(!camera.isRunning && !isViewfinderChromePreview)
             }
         } indicators: {
             HStack(spacing: 8) {
@@ -858,16 +892,14 @@ struct CameraScreen: View {
         return values.joined(separator: ", ")
     }
 
-    /// Flash sits in the top corner, icon-only, where every iPhone camera
-    /// keeps it. It is a capture decision the G7 X flash treatment depends
-    /// on, so it is never hidden behind the tools toggle.
+    /// Keep the current flash selection visible in the top corner,
+    /// including its full label, even when the tools are hidden.
     @ViewBuilder
     private var flashControl: some View {
         if camera.flashAvailability != .unsupported {
             FlashControl(
                 mode: camera.flashMode,
                 availability: camera.flashAvailability,
-                iconOnly: true,
                 action: camera.cycleFlashMode
             )
         }
@@ -881,7 +913,7 @@ struct CameraScreen: View {
             Image(systemName: "arrow.triangle.2.circlepath.camera")
                 .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(.white)
-                .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+                .frame(width: cameraHitTarget, height: cameraHitTarget)
                 .background { ChromeShapeBackground(shape: Circle()) }
                 .contentShape(Circle())
         }
@@ -901,7 +933,7 @@ struct CameraScreen: View {
             Image(systemName: "gearshape.fill")
                 .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(.white)
-                .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+                .frame(width: cameraHitTarget, height: cameraHitTarget)
                 .background { ChromeShapeBackground(shape: Circle()) }
                 .contentShape(Circle())
         }
@@ -920,15 +952,16 @@ struct CameraScreen: View {
                 isShowingTools.toggle()
             }
         } label: {
-            Image(systemName: isShowingTools ? "chevron.up" : "chevron.down")
-                .font(.system(size: 14, weight: .bold))
+            Image(systemName: isShowingTools ? "xmark" : "slider.horizontal.3")
+                .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(isShowingTools ? FilmyTheme.accent : .white)
-                .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+                .frame(width: cameraHitTarget, height: cameraHitTarget)
                 .background { ChromeShapeBackground(shape: Circle()) }
                 .contentShape(Circle())
         }
         .buttonStyle(.pressable)
         .accessibilityIdentifier("camera-chrome-toggle")
+        .accessibilityValue(isShowingTools ? "Expanded" : "Collapsed")
         .accessibilityLabel(isShowingTools ? "Hide camera controls" : "Show camera controls")
         .accessibilityHint(
             isShowingTools
@@ -940,23 +973,58 @@ struct CameraScreen: View {
     // MARK: - Primary controls and look drawer
 
     private var primaryBottomBar: some View {
-        VStack(spacing: 4) {
-            currentRecipeButton()
+        VStack(spacing: 6) {
+            HStack(spacing: 6) {
+                currentRecipeButton()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                favoriteCurrentLookButton
+                toolsToggle
+                    .disabled(!camera.isRunning && !isViewfinderChromePreview)
+            }
 
-            ZStack {
-                HStack {
-                    rollButton
-                    Spacer(minLength: 0)
-                    importButton
-                }
-
+            HStack(alignment: .center, spacing: 0) {
+                rollButton.frame(width: 76)
+                Spacer(minLength: 0)
                 captureControl
+                Spacer(minLength: 0)
+                VStack(spacing: 2) {
+                    cameraSwitchButton
+                        .disabled(camera.availableCameraPositions.count < 2)
+                    Text("Flip")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(FilmyTheme.secondary)
+                        .accessibilityHidden(true)
+                }
+                .frame(width: 76)
             }
             .frame(minHeight: 80)
         }
-        .padding(.horizontal, 6)
         .frame(maxWidth: FilmyLayout.dockMaxWidth)
         .frame(maxWidth: .infinity)
+    }
+
+    private var favoriteIDs: Set<String> { LookLibraryIndex.favorites(from: favoriteData) }
+
+    private var favoriteCurrentLookButton: some View {
+        let recipe = viewModel.selectedRecipe
+        let favorite = favoriteIDs.contains(recipe.id)
+        return Button {
+            var updated = favoriteIDs
+            if favorite { updated.remove(recipe.id) } else { updated.insert(recipe.id) }
+            favoriteData = LookLibraryIndex.encodeFavorites(updated)
+            HapticFeedback.play(.selection)
+        } label: {
+            Image(systemName: favorite ? "heart.fill" : "heart")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(favorite ? FilmyTheme.accent : FilmyTheme.primary)
+                .frame(width: cameraHitTarget, height: max(48, cameraHitTarget))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.pressable)
+        .accessibilityIdentifier("camera-favorite-look")
+        .accessibilityLabel(favorite ? "Remove \(recipe.name) from favorites" : "Favorite \(recipe.name)")
+        .accessibilityValue(favorite ? "Favorite" : "Not favorite")
+        .accessibilityHint("Favorites are shared with the look library. This does not change your look.")
     }
 
     /// Wide iPad layouts use the edge column even in portrait so the picture
@@ -971,7 +1039,13 @@ struct CameraScreen: View {
 
             HStack(spacing: 8) {
                 rollButton
-                importButton
+                cameraSwitchButton
+                    .disabled(camera.availableCameraPositions.count < 2)
+            }
+            HStack(spacing: 8) {
+                favoriteCurrentLookButton
+                toolsToggle
+                    .disabled(!camera.isRunning && !isViewfinderChromePreview)
             }
 
             Spacer(minLength: 0)
@@ -980,24 +1054,45 @@ struct CameraScreen: View {
     }
 
     private func currentRecipeButton(compact: Bool = false) -> some View {
-        CurrentRecipeButton(
-            recipe: viewModel.selectedRecipe,
-            isCustomized: viewModel.isCustomized(viewModel.selectedRecipe),
-            compactLayout: compact,
-            action: toggleLookDrawer
-        )
+        let layout = compact || dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: 4))
+            : AnyLayout(HStackLayout(spacing: 8))
+        return layout {
+            CurrentRecipeButton(
+                recipe: viewModel.selectedRecipe,
+                isCustomized: viewModel.isCustomized(viewModel.selectedRecipe),
+                compactLayout: compact,
+                action: toggleLookDrawer
+            )
+            Button {
+                let shouldOpen = !isShowingLiveAdjustments
+                closeControlDrawers()
+                isShowingLiveAdjustments = shouldOpen
+            } label: {
+                Label("Adjust", systemImage: "slider.horizontal.3")
+                    .font(.system(.caption, design: .rounded).weight(.bold))
+                    .frame(minHeight: 44)
+            }
+            .tint(FilmyTheme.accent)
+            .accessibilityIdentifier("live-recipe-adjustments")
+            .accessibilityHint("Adjust the look while watching the live camera preview")
+        }
     }
 
     private func lookDrawer(maxHeight: CGFloat) -> some View {
-        VStack(spacing: 6) {
+        // Header, filters, footer, three gaps, and outer padding must all
+        // fit before assigning the remaining height to scrolling recipes.
+        let chromeHeight = 64 + cameraHitTarget + max(48, cameraHitTarget) + 38
+
+        return VStack(spacing: 6) {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 1) {
                     Eyebrow(
                         text: recipeEyebrow,
                         color: isCompactDigitalMode ? FilmyTheme.accent : FilmyTheme.filmAccent
                     )
-                    Text("Choose a look")
-                        .font(.system(.title3, design: .serif).weight(.medium))
+                    Text("Looks")
+                        .font(.system(.title3).weight(.bold))
                         .foregroundStyle(FilmyTheme.primary)
                 }
 
@@ -1024,7 +1119,7 @@ struct CameraScreen: View {
                     Image(systemName: "xmark")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(FilmyTheme.secondary)
-                        .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+                        .frame(width: cameraHitTarget, height: cameraHitTarget)
                         .background(FilmyTheme.panel, in: Circle())
                         .frame(width: 64, height: 64)
                         .contentShape(Rectangle())
@@ -1036,13 +1131,61 @@ struct CameraScreen: View {
             .padding(.horizontal, 8)
             .layoutPriority(1)
 
-            RecipePickerView(
-                recipes: viewModel.recipes,
-                selectedRecipeID: $viewModel.selectedRecipeID,
-                onOpenDetail: openRecipeDetail,
-                compact: true
-            )
-            .frame(maxHeight: max(maxHeight - 122, 70))
+            HStack(spacing: 8) {
+                Button {
+                    favoritesOnly = false
+                    HapticFeedback.play(.selection)
+                } label: {
+                    Text("All")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(!favoritesOnly ? FilmyTheme.primary : FilmyTheme.secondary)
+                        .padding(.horizontal, 12)
+                        .frame(minWidth: cameraHitTarget, minHeight: cameraHitTarget)
+                        .overlay(alignment: .bottom) {
+                            if !favoritesOnly { FilmRegistration() }
+                        }
+                        .contentShape(Rectangle())
+                }
+                .accessibilityIdentifier("camera-looks-all")
+                .accessibilityAddTraits(!favoritesOnly ? .isSelected : [])
+                Button {
+                    favoritesOnly = true
+                    HapticFeedback.play(.selection)
+                } label: {
+                    Label("Favorites", systemImage: "heart")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(favoritesOnly ? FilmyTheme.primary : FilmyTheme.secondary)
+                        .padding(.horizontal, 12)
+                        .frame(minWidth: cameraHitTarget, minHeight: cameraHitTarget)
+                        .overlay(alignment: .bottom) {
+                            if favoritesOnly { FilmRegistration() }
+                        }
+                        .contentShape(Rectangle())
+                }
+                .accessibilityIdentifier("camera-looks-favorites")
+                .accessibilityAddTraits(favoritesOnly ? .isSelected : [])
+                Spacer(minLength: 0)
+            }
+            .buttonStyle(.plain)
+
+            if favoritesOnly && favoriteIDs.intersection(viewModel.recipes.map(\.id)).isEmpty {
+                Text("Heart a look to keep it here.")
+                    .font(.subheadline)
+                    .foregroundStyle(FilmyTheme.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 70)
+                    .accessibilityIdentifier("camera-favorites-empty")
+            } else {
+                RecipePickerView(
+                    recipes: favoritesOnly
+                        ? viewModel.recipes.filter { favoriteIDs.contains($0.id) }
+                        : viewModel.recipes,
+                    selectedRecipeID: $viewModel.selectedRecipeID,
+                    onOpenDetail: openRecipeDetail,
+                    compact: !favoritesOnly
+                )
+                .frame(maxHeight: max(maxHeight - chromeHeight, 70))
+                .id(favoritesOnly)
+            }
 
             Button {
                 HapticFeedback.play(.selection)
@@ -1050,15 +1193,15 @@ struct CameraScreen: View {
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "square.grid.2x2")
-                    Text("Explore all \(viewModel.recipes.count) looks")
+                    Text("All \(viewModel.recipes.count) looks")
                     Spacer(minLength: 0)
                     Image(systemName: "arrow.up.right")
                 }
                 .font(.system(.subheadline).weight(.semibold))
                 .foregroundStyle(FilmyTheme.accent)
                 .padding(.horizontal, 12)
-                .frame(minHeight: 48)
-                .background(FilmyTheme.accent.opacity(0.09), in: RoundedRectangle(cornerRadius: 14))
+                .frame(minHeight: max(48, cameraHitTarget))
+                .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 12))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.pressable)
@@ -1173,10 +1316,15 @@ struct CameraScreen: View {
             closeControlDrawers()
             onOpenGallery()
         } label: {
-            RollThumbnail(asset: photoLibrary.galleryAssets.first, photoLibrary: photoLibrary)
-                .frame(width: 52, height: 52)
-                .frame(width: 64, height: 64)
-                .contentShape(Rectangle())
+            VStack(spacing: 3) {
+                RollThumbnail(asset: photoLibrary.galleryAssets.first, photoLibrary: photoLibrary)
+                    .frame(width: 44, height: 44)
+                Text("Roll")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(FilmyTheme.secondary)
+            }
+            .frame(width: 64, height: 64)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.pressable)
         .accessibilityIdentifier("roll-tab")
@@ -1207,8 +1355,7 @@ struct CameraScreen: View {
                         .foregroundStyle(FilmyTheme.primary)
                 }
             }
-            .frame(width: 52, height: 52)
-            .frame(width: 64, height: 64)
+            .frame(width: cameraHitTarget, height: cameraHitTarget)
             .contentShape(Rectangle())
         }
         .buttonStyle(.pressable)
@@ -1223,7 +1370,9 @@ struct CameraScreen: View {
     private func toolStrip(minWidth: CGFloat) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ExposureControl(value: camera.exposureBias) { direction in
+                ExposureControl(value: camera.exposureBias, onReset: {
+                    camera.setExposureBias(0)
+                }) { direction in
                     let delta: Float = direction == .increment ? (1.0 / 3.0) : -(1.0 / 3.0)
                     camera.setExposureBias(camera.exposureBias + delta)
                 }
@@ -1401,6 +1550,7 @@ struct CameraScreen: View {
     private func closeControlDrawers() {
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) {
             isShowingLookDrawer = false
+            isShowingLiveAdjustments = false
             isShowingTools = false
         }
     }
@@ -1413,6 +1563,7 @@ struct CameraScreen: View {
     private func toggleLookDrawer() {
         withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.84)) {
             if !isShowingLookDrawer {
+                isShowingLiveAdjustments = false
                 isShowingTools = false
             }
             isShowingLookDrawer.toggle()
@@ -1660,7 +1811,7 @@ extension CameraScreen {
             Image(systemName: captureDelay == .off ? "viewfinder" : "timer")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(captureDelay == .off ? FilmyTheme.primary : FilmyTheme.accent)
-                .frame(width: 44, height: 44)
+                .frame(width: cameraHitTarget, height: cameraHitTarget)
                 .background { ChromeShapeBackground(shape: Circle()) }
                 .contentShape(Circle())
         }

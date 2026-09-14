@@ -534,6 +534,18 @@ class EvidenceTests(unittest.TestCase):
         run.require_complete_run("fixtures", [run.REQUIRED_FIXTURE_SELECTOR, selector], summary)
         self.assertEqual(summary["status"], "passed")
 
+    def test_optional_local_skin_capture_skip_is_allowed(self):
+        selector = "FilmyCameraTests/RendererSkinCaptureDiagnosticsTests/testExportStagesForLocalSkinCapture"
+        summary = {
+            "status": "passed", "passed": 1, "failed": 0, "skipped": 1,
+            "caseResults": [
+                {"test": run.REQUIRED_FIXTURE_SELECTOR, "passed": 1, "failed": 0, "skipped": 0},
+                {"test": selector, "passed": 0, "failed": 0, "skipped": 1},
+            ],
+        }
+        run.require_complete_run("fixtures", [run.REQUIRED_FIXTURE_SELECTOR, selector], summary)
+        self.assertEqual(summary["status"], "passed")
+
     def test_required_photo_library_fixture_skip_is_a_failure(self):
         summary = {
             "status": "failed", "passed": 0, "failed": 0, "skipped": 1,

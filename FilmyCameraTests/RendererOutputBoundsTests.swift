@@ -262,11 +262,14 @@ final class RendererOutputBoundsTests: XCTestCase {
             proviaMagentaBias - 0.002,
             "Classic Chrome should selectively suppress magenta"
         )
-        XCTAssertGreaterThan(
-            Double(classicShadow[2] - classicShadow[0]),
-            Double(proviaShadow[2] - proviaShadow[0]) + 0.002,
-            "Classic Chrome should preserve cooler shadow separation"
-        )
+        // These looks now have deliberately different shadow brightness.
+        // Compare hue bias relative to each pixel's peak, so darkening a
+        // still-cool shadow is not mistaken for warming it.
+        func blueBias(_ pixel: [Float]) -> Double {
+            Double(pixel[2] - pixel[0]) / Double(max(0.0001, pixel[0], pixel[1], pixel[2]))
+        }
+        XCTAssertGreaterThan(blueBias(classicShadow), blueBias(proviaShadow) + 0.002,
+                             "Classic Chrome should preserve cooler shadow separation")
     }
 
     func testG7XCompactStrengthensBlueAndFoliageWithoutTintingNeutralGray() throws {
@@ -371,19 +374,28 @@ final class RendererOutputBoundsTests: XCTestCase {
         }
     }
 
-    func testG7XCompactToneCurveIsMonotonicAndOpensUsefulMidtones() throws {
+    func testG7XCompactToneCurveIsMonotonicAndDistinguishesFlashResponse() throws {
         let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
         let context = CIContext(options: FilmRenderer.testContextOptions)
         let compact = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == "g7x-compact" })
-        let neutral = replacingFilmBase(of: compact, with: .standard)
+        let flashContext = FilmRenderer.CaptureContext(flashFired: true)
 
-        func renderedLuma(_ value: CGFloat, recipe: FilmRecipe) -> Double {
+        func renderedLuma(
+            _ value: CGFloat,
+            recipe: FilmRecipe,
+            captureContext: FilmRenderer.CaptureContext = .standard
+        ) -> Double {
             let image = CIImage(
                 color: CIColor(red: value, green: value, blue: value, alpha: 1)
             ).cropped(to: extent)
             return luma(
                 renderFloatPixels(
-                    FilmRenderer.render(image, recipe: recipe, quality: .photo),
+                    FilmRenderer.render(
+                        image,
+                        recipe: recipe,
+                        quality: .photo,
+                        captureContext: captureContext
+                    ),
                     extent: extent,
                     context: context
                 )
@@ -397,46 +409,353 @@ final class RendererOutputBoundsTests: XCTestCase {
         }
 
         XCTAssertGreaterThan(
-            renderedLuma(0.18, recipe: compact),
-            renderedLuma(0.18, recipe: neutral) + 0.005,
-            "The dedicated compact curve should recover useful shadow detail"
-        )
-        XCTAssertGreaterThan(
-            renderedLuma(0.50, recipe: compact),
-            renderedLuma(0.50, recipe: neutral) + 0.005,
-            "The dedicated compact curve should give midtones JPEG-style presence"
+            renderedLuma(0.50, recipe: compact, captureContext: flashContext),
+            renderedLuma(0.50, recipe: compact) + 0.02,
+            "Flash should retain a brighter global compact-camera response"
         )
         XCTAssertLessThan(compactLevels.last ?? 1, 0.995, "Highlights should retain a shoulder before clipping")
     }
 
-    func testG7XFlashContextSeparatesCenteredSubjectFromAmbientBackground() throws {
+    func testG7XFlashContextDoesNotCreateACenteredHalo() throws {
         let extent = CGRect(x: 0, y: 0, width: 64, height: 64)
         let input = CIImage(
             color: CIColor(red: 0.42, green: 0.35, blue: 0.30, alpha: 1)
         ).cropped(to: extent)
         let recipe = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == "g7x-compact" })
         let context = CIContext(options: FilmRenderer.testContextOptions)
-        let captureContext = FilmRenderer.CaptureContext(
-            flashFired: true,
-            subjectRegions: [CGRect(x: 24, y: 24, width: 16, height: 16)]
-        )
-        let pixels = renderFloatPixels(
+
+        let contexts = [
+            ("ambient", FilmRenderer.CaptureContext()),
+            ("ambient face", FilmRenderer.CaptureContext(
+                subjectRegions: [CGRect(x: 24, y: 24, width: 16, height: 16)]
+            )),
+            ("no-face fallback", FilmRenderer.CaptureContext(flashFired: true)),
+            (
+                "detected-face region",
+                FilmRenderer.CaptureContext(
+                    flashFired: true,
+                    subjectRegions: [CGRect(x: 24, y: 24, width: 16, height: 16)]
+                )
+            )
+        ]
+
+        for quality in [FilmRenderer.Quality.preview, .photo, .export] {
+            for (label, captureContext) in contexts {
+                let pixels = renderFloatPixels(
+                    FilmRenderer.render(
+                        input,
+                        recipe: recipe,
+                        quality: quality,
+                        captureContext: captureContext
+                    ),
+                    extent: extent,
+                    context: context
+                )
+                let center = pixel(pixels, width: 64, x: 32, y: 32)
+                let edge = pixel(pixels, width: 64, x: 2, y: 2)
+
+                XCTAssertLessThan(
+                    abs(luma(center) - luma(edge)),
+                    0.0005,
+                    "G7 X " + label + " created a localized center halo at " + String(describing: quality)
+                )
+            }
+        }
+
+        let ambientPixels = renderFloatPixels(
             FilmRenderer.render(
                 input,
                 recipe: recipe,
                 quality: .photo,
-                captureContext: captureContext
+                captureContext: .standard
             ),
             extent: extent,
             context: context
         )
-
-        let subject = pixel(pixels, width: 64, x: 32, y: 32)
-        let ambient = pixel(pixels, width: 64, x: 2, y: 2)
+        let flashPixels = renderFloatPixels(
+            FilmRenderer.render(
+                input,
+                recipe: recipe,
+                quality: .photo,
+                captureContext: FilmRenderer.CaptureContext(flashFired: true)
+            ),
+            extent: extent,
+            context: context
+        )
         XCTAssertGreaterThan(
-            luma(subject),
-            luma(ambient) + 0.04,
-            "Resolved flash captures should lift the subject while holding back ambient background"
+            meanLuminance(flashPixels),
+            meanLuminance(ambientPixels) + 0.02,
+            "Flash should retain its global compact-camera tone response"
+        )
+    }
+
+    func testG7XSkinTextureDoesNotReceiveFaceDependentAirbrushing() throws {
+        let extent = CGRect(x: 0, y: 0, width: 64, height: 64)
+        let input = try XCTUnwrap(CIFilter(name: "CICheckerboardGenerator", parameters: [
+            "inputColor0": CIColor(red: 0.62, green: 0.42, blue: 0.32),
+            "inputColor1": CIColor(red: 0.66, green: 0.46, blue: 0.36),
+            "inputWidth": 2,
+            "inputSharpness": 1
+        ])?.outputImage).cropped(to: extent)
+        let recipe = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == "g7x-compact" })
+        let context = CIContext(options: FilmRenderer.testContextOptions)
+        for quality in [FilmRenderer.Quality.preview, .photo, .export] {
+            for flash in [false, true] {
+                let withoutFace = renderFloatPixels(FilmRenderer.render(
+                    input, recipe: recipe, quality: quality,
+                    captureContext: .init(flashFired: flash)
+                ), extent: extent, context: context)
+                let withFace = renderFloatPixels(FilmRenderer.render(
+                    input, recipe: recipe, quality: quality,
+                    captureContext: .init(flashFired: flash, subjectRegions: [extent])
+                ), extent: extent, context: context)
+                XCTAssertLessThan(meanAbsoluteRGBDifference(withoutFace, withFace), 0.00001,
+                                  "Detecting a face must not add a beauty blur")
+                let light = pixel(withFace, width: 64, x: 30, y: 30)
+                let dark = pixel(withFace, width: 64, x: 32, y: 30)
+                XCTAssertGreaterThan(abs(luma(light) - luma(dark)), 0.02,
+                                     "Fine skin-toned texture must survive the default look")
+            }
+        }
+    }
+
+    func testColorRecipesRestrainAddedOrangeAcrossSkinTonesAndQualityTiers() throws {
+        let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
+        let context = CIContext(options: FilmRenderer.testContextOptions)
+        let tones: [[Float]] = [
+            [0.28, 0.18, 0.13, 1],
+            [0.58, 0.38, 0.28, 1],
+            [0.82, 0.65, 0.55, 1]
+        ]
+        for recipe in FilmRecipe.builtIns where !recipe.filmBase.supportsMonochromaticColorAxes {
+            for tone in tones {
+                let input = CIImage(color: CIColor(
+                    red: CGFloat(tone[0]), green: CGFloat(tone[1]), blue: CGFloat(tone[2])
+                )).cropped(to: extent)
+                for quality in [FilmRenderer.Quality.preview, .photo, .export] {
+                    let output = renderFloatPixels(FilmRenderer.render(
+                        input, recipe: recipe, quality: quality
+                    ), extent: extent, context: context)
+                    let sourceLuma = luma(tone)
+                    let outputLuma = max(luma(output), 0.02)
+                    for channel in 0...1 {
+                        let originalWarmth = Double(tone[channel] - tone[2]) / sourceLuma
+                        let outputWarmth = Double(output[channel] - output[2]) / outputLuma
+                        XCTAssertLessThanOrEqual(outputWarmth, originalWarmth + 0.25,
+                            "\(recipe.id) adds excessive orange to \(tone) at \(quality)")
+                    }
+                }
+            }
+        }
+    }
+
+    func testColorRecipesKeepFineSkinTextureFreeOfColorSpeckles() throws {
+        let fixture = skinCreaseFixture(width: 512)
+        try assertSkinTextureContinuity(
+            input: fixture.image,
+            extent: fixture.extent,
+            width: 512,
+            recipes: colorSkinRecipes(),
+            qualities: [.preview, .photo, .export],
+            context: FilmRenderer.sharedContext,
+            attachmentSuffix: "skin-continuity",
+            maximumAddedWarmth: 0.35
+        )
+    }
+
+    func testColorRecipesKeepHighResolutionSkinTextureFreeOfColorSpeckles() throws {
+        let fixture = skinCreaseFixture(width: 2048)
+        try assertSkinTextureContinuity(
+            input: fixture.image,
+            extent: fixture.extent,
+            width: 2048,
+            recipes: colorSkinRecipes(),
+            qualities: [.photo],
+            context: FilmRenderer.sharedContext,
+            attachmentSuffix: nil,
+            maximumAddedWarmth: nil
+        )
+    }
+
+    func testSaturatedDisplayPSkinTextureKeepsWarmthContinuousAcrossCreases() throws {
+        let fixture = saturatedDisplayPSkinCreaseFixture(width: 384)
+        let context = FilmRenderer.sharedContext
+        let sourcePixels = renderFloatPixels(
+            fixture.image,
+            extent: fixture.extent,
+            context: context
+        )
+        let inspectedPixelCount = (fixture.width - 8) * (fixture.width - 8)
+        var highSaturationCount = 0
+
+        for recipe in try colorSkinRecipes() {
+            for quality in [FilmRenderer.Quality.preview, .photo, .export] {
+                let output = FilmRenderer.render(
+                    fixture.image,
+                    recipe: recipe,
+                    quality: quality
+                )
+                let pixels = renderFloatPixels(
+                    output,
+                    extent: fixture.extent,
+                    context: context
+                )
+                // Verify this same fixture still catches the former mask
+                // cutoff. It must fail for added contrast, not for the gamut
+                // mapping reducing an existing source-color difference.
+                let legacyPixels: [Float]?
+                if quality == .photo {
+                    let legacy = try XCTUnwrap(FilmRenderer.diagnosticRenderStages(
+                        fixture.image, recipe: recipe, quality: quality
+                    )[.legacyUpperSaturationGateFinal])
+                    legacyPixels = renderFloatPixels(legacy, extent: fixture.extent, context: context)
+                } else {
+                    legacyPixels = nil
+                }
+                var largestLegacyWarmthAmplification = 0.0
+                var finitePixelCount = 0
+                var validWarmthSampleCount = 0
+                var largestAddedWarmth = 0.0
+                var largestWarmthStep = 0.0
+                var largestChromaStep = 0.0
+                var worstWarmthPair = ""
+
+                for y in 4..<(fixture.width - 4) {
+                    for x in 4..<(fixture.width - 4) {
+                        let index = (y * fixture.width + x) * 4
+                        let sourceFinite = sourcePixels[index].isFinite
+                            && sourcePixels[index + 1].isFinite
+                            && sourcePixels[index + 2].isFinite
+                        let renderedFinite = pixels[index].isFinite
+                            && pixels[index + 1].isFinite
+                            && pixels[index + 2].isFinite
+                        guard sourceFinite && renderedFinite else { continue }
+                        finitePixelCount += 1
+
+                        let sourceLuma = luma(sourcePixels, at: index)
+                        let renderedLuma = luma(pixels, at: index)
+                        let sourceMaximum = max(
+                            sourcePixels[index],
+                            max(sourcePixels[index + 1], sourcePixels[index + 2])
+                        )
+                        let sourceMinimum = min(
+                            sourcePixels[index],
+                            min(sourcePixels[index + 1], sourcePixels[index + 2])
+                        )
+                        let sourceSaturation = Double(sourceMaximum - sourceMinimum)
+                            / max(Double(sourceMaximum), 0.001)
+                        if recipe.id == "velvia-vivid",
+                           quality == .preview,
+                           sourceSaturation > 0.90 {
+                            highSaturationCount += 1
+                        }
+
+                        guard sourceLuma > 0.06, renderedLuma > 0.06 else { continue }
+                        validWarmthSampleCount += 1
+                        var sourceWarmth = [Double](repeating: 0, count: 2)
+                        var renderedWarmth = [Double](repeating: 0, count: 2)
+                        for channel in 0...1 {
+                            sourceWarmth[channel] = Double(
+                                sourcePixels[index + channel] - sourcePixels[index + 2]
+                            ) / sourceLuma
+                            renderedWarmth[channel] = Double(
+                                pixels[index + channel] - pixels[index + 2]
+                            ) / renderedLuma
+                            largestAddedWarmth = max(
+                                largestAddedWarmth,
+                                renderedWarmth[channel] - sourceWarmth[channel]
+                            )
+                        }
+
+                        for neighborOffset in 0..<2 {
+                            let neighbor = index + (neighborOffset == 0 ? 4 : fixture.width * 4)
+                            let sourceSimilar =
+                                abs(sourcePixels[index] - sourcePixels[neighbor]) < 0.024
+                                && abs(sourcePixels[index + 1] - sourcePixels[neighbor + 1]) < 0.024
+                                && abs(sourcePixels[index + 2] - sourcePixels[neighbor + 2]) < 0.024
+                            guard sourceSimilar else { continue }
+                            let neighborSourceLuma = luma(sourcePixels, at: neighbor)
+                            let neighborRenderedLuma = luma(pixels, at: neighbor)
+                            guard neighborSourceLuma > 0.06, neighborRenderedLuma > 0.06 else {
+                                continue
+                            }
+                            for channel in 0...1 {
+                                let neighborSourceWarmth = Double(
+                                    sourcePixels[neighbor + channel] - sourcePixels[neighbor + 2]
+                                ) / neighborSourceLuma
+                                let neighborRenderedWarmth = Double(
+                                    pixels[neighbor + channel] - pixels[neighbor + 2]
+                                ) / neighborRenderedLuma
+                                // Extended sRGB may have negative source channels.
+                                // Gamut fitting can legitimately reduce their hue
+                                // contrast; flag amplification, not that reduction.
+                                let sourceStep = abs(sourceWarmth[channel] - neighborSourceWarmth)
+                                let warmthStep = abs(renderedWarmth[channel] - neighborRenderedWarmth)
+                                    - sourceStep
+                                if let legacyPixels {
+                                    let legacyLuma = luma(legacyPixels, at: index)
+                                    let legacyNeighborLuma = luma(legacyPixels, at: neighbor)
+                                    if legacyLuma > 0.06, legacyNeighborLuma > 0.06 {
+                                        let legacyWarmth = Double(legacyPixels[index + channel] - legacyPixels[index + 2]) / legacyLuma
+                                        let legacyNeighborWarmth = Double(legacyPixels[neighbor + channel] - legacyPixels[neighbor + 2]) / legacyNeighborLuma
+                                        largestLegacyWarmthAmplification = max(
+                                            largestLegacyWarmthAmplification,
+                                            abs(legacyWarmth - legacyNeighborWarmth) - sourceStep
+                                        )
+                                    }
+                                }
+                                if warmthStep > largestWarmthStep {
+                                    largestWarmthStep = warmthStep
+                                    worstWarmthPair = "at (\(x), \(y)), channel \(channel), source \(Array(sourcePixels[index..<(index + 3)])) / \(Array(sourcePixels[neighbor..<(neighbor + 3)])), output \(Array(pixels[index..<(index + 3)])) / \(Array(pixels[neighbor..<(neighbor + 3)]))"
+                                }
+                                largestChromaStep = max(
+                                    largestChromaStep,
+                                    Double(abs(
+                                        (pixels[index + channel] - pixels[index + 2])
+                                            - (pixels[neighbor + channel] - pixels[neighbor + 2])
+                                    ))
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if legacyPixels != nil {
+                    XCTAssertGreaterThan(largestLegacyWarmthAmplification, 0.20,
+                        "The fixture must reproduce the old saturation cutoff's added color discontinuity")
+                }
+                XCTAssertEqual(
+                    finitePixelCount,
+                    inspectedPixelCount,
+                    "\(recipe.id) \(quality) produced non-finite saturated skin pixels"
+                )
+                XCTAssertGreaterThan(
+                    validWarmthSampleCount,
+                    inspectedPixelCount / 2,
+                    "\(recipe.id) \(quality) had too few valid saturated skin samples"
+                )
+                XCTAssertLessThan(
+                    largestAddedWarmth,
+                    0.45,
+                    "\(recipe.id) \(quality) added excessive orange to high-saturation skin"
+                )
+                XCTAssertLessThan(
+                    largestWarmthStep,
+                    0.20,
+                    "\(recipe.id) \(quality) amplified a warm discontinuity across a dark crease \(worstWarmthPair)"
+                )
+                XCTAssertLessThan(
+                    largestChromaStep,
+                    0.08,
+                    "\(recipe.id) \(quality) acquired an abrupt chroma step across a dark crease"
+                )
+            }
+        }
+
+        XCTAssertGreaterThan(
+            highSaturationCount,
+            inspectedPixelCount / 2,
+            "The regression fixture must exercise the upper saturation boundary"
         )
     }
 
@@ -459,14 +778,12 @@ final class RendererOutputBoundsTests: XCTestCase {
         }
 
         let skin = rendered(CIColor(red: 0.70, green: 0.43, blue: 0.30, alpha: 1), recipe: compact)
-        let neutralSkin = rendered(CIColor(red: 0.70, green: 0.43, blue: 0.30, alpha: 1), recipe: neutral)
-        // The compact profile pushes skin toward peach/pink rather than tan:
-        // a little blue returns while the tone stays clearly rosy.
-        XCTAssertGreaterThan(
-            Double(skin[2]),
-            Double(neutralSkin[2]),
-            "Peach/pink skin keeps a little more blue than a plain warm render"
-        )
+        // Warm highlights can reduce blue relative to the neutral pipeline.
+        // Preserve channel detail and the warm hue instead of requiring the
+        // former, brighter look's absolute blue-channel value.
+        XCTAssertGreaterThan(Double(skin[2]), 0.04, "Warm skin must retain blue-channel detail")
+        XCTAssertGreaterThan(skin[1], skin[2], "Warm skin must retain its red/yellow hue")
+        XCTAssertLessThan(skin[0], 0.99, "Warm skin must not clip the red channel")
         XCTAssertGreaterThan(
             Double(skin[0] - skin[1]),
             0.25,
@@ -1698,6 +2015,234 @@ final class RendererOutputBoundsTests: XCTestCase {
         XCTAssertEqual(landscapeCrop.midY, source.midY, accuracy: 0.001)
     }
 
+    private func colorSkinRecipes() throws -> [FilmRecipe] {
+        try ["velvia-vivid", "g7x-compact"].map { identifier in
+            try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == identifier })
+        }
+    }
+
+    private func skinCreaseFixture(width: Int) -> (image: CIImage, extent: CGRect) {
+        let extent = CGRect(x: 0, y: 0, width: width, height: width)
+        var bytes = [UInt8](repeating: 255, count: width * width * 4)
+        for y in 0..<width {
+            for x in 0..<width {
+                let crease = pow(max(0, sin(Double(x) * 0.12 + sin(Double(y) * 0.037) * 2)), 12)
+                let red = (0.20 + Double(x) / Double(width - 1) * 0.65) * (1 - 0.8 * crease)
+                let greenRatio = 0.55 + Double(y) / Double(width - 1) * 0.35
+                let texture = Double((x * 17 + y * 31) % 7 - 3) / 500
+                let redChannel = red + texture
+                let greenChannel = red * greenRatio + texture
+                let blueChannel = red * (greenRatio - 0.15) + texture
+                let index = (y * width + x) * 4
+                bytes[index] = UInt8((redChannel * 255).rounded())
+                bytes[index + 1] = UInt8((greenChannel * 255).rounded())
+                bytes[index + 2] = UInt8((blueChannel * 255).rounded())
+            }
+        }
+        let image = CIImage(
+            bitmapData: Data(bytes),
+            bytesPerRow: width * 4,
+            size: extent.size,
+            format: .RGBA8,
+            colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!
+        )
+        return (image, extent)
+    }
+
+    /// An anonymous Display P3 skin-colored ramp modeled on the real capture's
+    /// high-saturation hand samples. Luma varies smoothly while narrow dark
+    /// creases and achromatic noise preserve local texture. The fixed warm hue
+    /// keeps the test focused on the upper saturation gate rather than hue
+    /// classification or a global orange preset change.
+    private func saturatedDisplayPSkinCreaseFixture(
+        width: Int
+    ) -> (image: CIImage, extent: CGRect, width: Int) {
+        let extent = CGRect(x: 0, y: 0, width: width, height: width)
+        var bytes = [UInt8](repeating: 255, count: width * width * 4)
+        for y in 0..<width {
+            for x in 0..<width {
+                let xProgress = Double(x) / Double(width - 1)
+                let yProgress = Double(y) / Double(width - 1)
+                let saturation = min(1.02, 0.66 + xProgress * 0.36)
+                let huePosition = 0.40 + 0.018 * sin(Double(y) * 0.031)
+                let crease = pow(
+                    max(0, sin(Double(x) * 0.105 + sin(Double(y) * 0.041) * 1.8)),
+                    10
+                )
+                let lumaValue = max(
+                    0.026,
+                    (0.16 + yProgress * 0.30) * (1 - 0.80 * crease)
+                )
+
+                // Choose R, G, and B from luma, saturation, and a fixed warm
+                // hue so the fixture spans the .68... .90 gate continuously.
+                let blueRatio = 1 - saturation
+                let greenRatio = blueRatio + saturation * huePosition
+                let lumaScale = 0.2126
+                    + 0.7152 * greenRatio
+                    + 0.0722 * blueRatio
+                let red = lumaValue / lumaScale
+                let green = red * greenRatio
+                let blue = red * blueRatio
+                let noise = Double((x * 17 + y * 31) % 9 - 4) / 700
+                let index = (y * width + x) * 4
+                bytes[index] = UInt8((clampFixture(red + noise) * 255).rounded())
+                bytes[index + 1] = UInt8((clampFixture(green + noise) * 255).rounded())
+                bytes[index + 2] = UInt8((clampFixture(blue + noise) * 255).rounded())
+            }
+        }
+        let image = CIImage(
+            bitmapData: Data(bytes),
+            bytesPerRow: width * 4,
+            size: extent.size,
+            format: .RGBA8,
+            colorSpace: CGColorSpace(name: CGColorSpace.displayP3)!
+        )
+        return (image, extent, width)
+    }
+
+    private func clampFixture(_ value: Double) -> Double {
+        min(max(value, 0), 1)
+    }
+
+    private func assertSkinTextureContinuity(
+        input: CIImage,
+        extent: CGRect,
+        width: Int,
+        recipes: [FilmRecipe],
+        qualities: [FilmRenderer.Quality],
+        context: CIContext,
+        attachmentSuffix: String?,
+        maximumAddedWarmth: Double?
+    ) throws {
+        let sourcePixels = renderFloatPixels(input, extent: extent, context: context)
+
+        func warmthResidual(
+            source: [Float],
+            rendered: [Float],
+            index: Int,
+            channel: Int
+        ) -> Double? {
+            let sourceLuma = luma(source, at: index)
+            let renderedLuma = luma(rendered, at: index)
+            guard sourceLuma > 0.06, renderedLuma > 0.06 else { return nil }
+            let sourceWarmth = Double(source[index + channel] - source[index + 2]) / sourceLuma
+            let renderedWarmth = Double(rendered[index + channel] - rendered[index + 2]) / renderedLuma
+            return renderedWarmth - sourceWarmth
+        }
+
+        for recipe in recipes {
+            for quality in qualities {
+                let output = FilmRenderer.render(input, recipe: recipe, quality: quality)
+                let pixels = renderFloatPixels(output, extent: extent, context: context)
+                var largestChromaStep = 0.0
+                var largestAddedWarmth = 0.0
+                var largestWarmthStep = 0.0
+                var finitePixelCount = 0
+                var validWarmthSampleCount = 0
+                let inspectedPixelCount = (width - 8) * (width - 8)
+
+                for y in 4..<(width - 4) {
+                    for x in 4..<(width - 4) {
+                        let index = (y * width + x) * 4
+                        let sourceFinite = sourcePixels[index].isFinite
+                            && sourcePixels[index + 1].isFinite
+                            && sourcePixels[index + 2].isFinite
+                        let renderedFinite = pixels[index].isFinite
+                            && pixels[index + 1].isFinite
+                            && pixels[index + 2].isFinite
+                        guard sourceFinite && renderedFinite else { continue }
+                        finitePixelCount += 1
+                        let sourceLuma = luma(sourcePixels, at: index)
+                        let renderedLuma = luma(pixels, at: index)
+                        if sourceLuma > 0.06, renderedLuma > 0.06 {
+                            validWarmthSampleCount += 1
+                        }
+                        for channel in 0...1 {
+                            if let addedWarmth = warmthResidual(
+                                source: sourcePixels,
+                                rendered: pixels,
+                                index: index,
+                                channel: channel
+                            ) {
+                                largestAddedWarmth = max(largestAddedWarmth, addedWarmth)
+                            }
+                        }
+
+                        for neighborOffset in 0..<2 {
+                            let neighbor = index + (neighborOffset == 0 ? 4 : width * 4)
+                            let sourceSimilar =
+                                abs(sourcePixels[index] - sourcePixels[neighbor]) < 0.024
+                                && abs(sourcePixels[index + 1] - sourcePixels[neighbor + 1]) < 0.024
+                                && abs(sourcePixels[index + 2] - sourcePixels[neighbor + 2]) < 0.024
+                            guard sourceSimilar else { continue }
+
+                            for channel in 0...1 {
+                                let chroma = pixels[index + channel] - pixels[index + 2]
+                                let nearbyChroma = pixels[neighbor + channel] - pixels[neighbor + 2]
+                                largestChromaStep = max(
+                                    largestChromaStep,
+                                    Double(abs(chroma - nearbyChroma))
+                                )
+                                if let warmth = warmthResidual(
+                                    source: sourcePixels,
+                                    rendered: pixels,
+                                    index: index,
+                                    channel: channel
+                                ), let nearbyWarmth = warmthResidual(
+                                    source: sourcePixels,
+                                    rendered: pixels,
+                                    index: neighbor,
+                                    channel: channel
+                                ) {
+                                    largestWarmthStep = max(
+                                        largestWarmthStep,
+                                        abs(warmth - nearbyWarmth)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                XCTAssertLessThan(
+                    largestChromaStep,
+                    0.06,
+                    "\(recipe.id) \(quality) acquired abrupt red/yellow speckles"
+                )
+                XCTAssertLessThan(
+                    largestWarmthStep,
+                    0.18,
+                    "\(recipe.id) \(quality) acquired isolated warm chroma steps"
+                )
+                XCTAssertEqual(
+                    finitePixelCount,
+                    inspectedPixelCount,
+                    "\(recipe.id) \(quality) produced non-finite skin pixels"
+                )
+                XCTAssertGreaterThan(
+                    validWarmthSampleCount,
+                    inspectedPixelCount / 2,
+                    "\(recipe.id) \(quality) had too few valid warmth samples"
+                )
+                if let maximumAddedWarmth {
+                    XCTAssertLessThan(
+                        largestAddedWarmth,
+                        maximumAddedWarmth,
+                        "\(recipe.id) \(quality) acquired an excessive warm cast"
+                    )
+                }
+                if let attachmentSuffix, quality == .photo {
+                    let bitmap = try XCTUnwrap(context.createCGImage(output, from: extent))
+                    let attachment = XCTAttachment(image: UIImage(cgImage: bitmap))
+                    attachment.name = "\(recipe.id)-\(attachmentSuffix)"
+                    attachment.lifetime = .keepAlways
+                    add(attachment)
+                }
+            }
+        }
+    }
+
     private func renderFloatPixels(
         _ image: CIImage,
         extent: CGRect,
@@ -1795,6 +2340,12 @@ final class RendererOutputBoundsTests: XCTestCase {
         0.2126 * Double(pixel[0])
             + 0.7152 * Double(pixel[1])
             + 0.0722 * Double(pixel[2])
+    }
+
+    private func luma(_ pixels: [Float], at index: Int) -> Double {
+        0.2126 * Double(pixels[index])
+            + 0.7152 * Double(pixels[index + 1])
+            + 0.0722 * Double(pixels[index + 2])
     }
 
     private func chroma(_ pixel: [Float]) -> Double {

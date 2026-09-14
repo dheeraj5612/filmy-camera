@@ -64,6 +64,7 @@ public struct FilteredCameraPreview: UIViewRepresentable {
             grainSeed: cameraService.previewGrainSeed
         )
         coordinator.installFrameHandlerIfNeeded()
+        view.isAccessibilityElement = Self.exposesRenderStatusForUITesting && cameraService.isRunning
         view.accessibilityLabel = "Live camera preview"
         view.onDrawableSizeChange = { [weak cameraService] size in
             cameraService?.updatePreviewDrawableSize(size)
@@ -77,6 +78,7 @@ public struct FilteredCameraPreview: UIViewRepresentable {
     ) {
         let coordinator = context.coordinator
         coordinator.previewView = uiView
+        uiView.isAccessibilityElement = Self.exposesRenderStatusForUITesting && cameraService.isRunning
         coordinator.recipe = recipe
         coordinator.quality = quality
         uiView.update(
@@ -255,6 +257,8 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
         preferredFramesPerSecond = 30
         colorPixelFormat = .bgra8Unorm
         clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        // Gestures belong to CameraScreen’s live-only overlay.
+        isUserInteractionEnabled = false
         isOpaque = true
         backgroundColor = .black
         contentMode = .scaleAspectFill

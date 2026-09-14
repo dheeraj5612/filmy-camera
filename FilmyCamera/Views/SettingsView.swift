@@ -61,7 +61,7 @@ struct SettingsView: View {
         case .temporarilyUnavailable:
             return "The flash is temporarily unavailable, usually while the device cools down."
         case .available:
-            return "Remembered between launches. The G7 X profile renders flash frames differently."
+            return "On by default. Your choice is remembered between launches."
         }
     }
 
@@ -96,7 +96,10 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
                 .frame(maxWidth: .infinity, minHeight: 44)
-                .disabled(camera.flashAvailability != .available)
+                // Off is always selectable, including while the hardware is
+                // temporarily unavailable. The service rejects On/Auto until
+                // the camera reports that it can honor them.
+                .disabled(camera.flashAvailability == .unsupported)
                 .accessibilityIdentifier("flash-setting")
             }
 

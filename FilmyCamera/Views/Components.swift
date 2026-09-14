@@ -83,40 +83,42 @@ enum HapticFeedback {
 
 // MARK: - Design tokens
 
-/// Warm ink surfaces and cool, restrained signals keep photographs central.
+/// Signal Frame. Neutral surfaces keep photographic judgment independent of
+/// the identity. Vivid accents identify actions, never color the photographs.
 /// Color is never the only indication of selection or an actionable state.
 enum FilmyTheme {
     // Surfaces
-    static let background = Color(red: 0.055, green: 0.058, blue: 0.052)
-    static let backgroundRaised = Color(red: 0.082, green: 0.086, blue: 0.076)
-    static let panel = Color(red: 0.115, green: 0.122, blue: 0.108)
-    static let panelRaised = Color(red: 0.165, green: 0.175, blue: 0.157)
-    static let line = Color.white.opacity(0.09)
-    static let lineStrong = Color.white.opacity(0.18)
+    static let background = Color(white: 0.035)
+    static let backgroundRaised = Color(white: 0.065)
+    static let panel = Color(white: 0.105)
+    static let panelRaised = Color(white: 0.155)
+    static let line = Color.white.opacity(0.12)
+    static let lineStrong = Color.white.opacity(0.24)
 
     // Ink
     static let primary = Color(white: 0.96)
-    static let secondary = Color(white: 0.96).opacity(0.64)
-    // 0.56 keeps 10-11pt supporting text above 4.5:1 on both background and panel.
-    static let tertiary = Color(white: 0.96).opacity(0.56)
+    static let secondary = Color(white: 0.76)
+    // Opaque neutral ink stays legible on all semantic surfaces.
+    static let tertiary = Color(white: 0.65)
 
     // Signal colors
-    static let accent = Color(red: 0.69, green: 0.85, blue: 0.88)
-    static let accentWarm = Color(red: 0.95, green: 0.49, blue: 0.36)
-    static let filmAccent = Color(red: 0.74, green: 0.83, blue: 0.73)
-    static let mint = Color(red: 0.47, green: 0.86, blue: 0.66)
-    static let danger = Color(red: 1.0, green: 0.44, blue: 0.40)
+    static let accent = Color(red: 1, green: 0.471, blue: 0.329)
+    static let comparison = Color(red: 0.416, green: 0.863, blue: 1)
+    static let accentWarm = Color(red: 1, green: 0.471, blue: 0.329)
+    static let filmAccent = Color(red: 0.855, green: 0.953, blue: 0.396)
+    static let mint = Color(red: 0.54, green: 0.92, blue: 0.69)
+    static let danger = Color(red: 1, green: 0.43, blue: 0.47)
 
     // Chrome that floats over the live viewfinder
-    static let chromeFill = Color.black.opacity(0.42)
-    static let chromeStroke = Color.white.opacity(0.13)
+    static let chromeFill = Color.black.opacity(0.76)
+    static let chromeStroke = Color.white.opacity(0.24)
     /// The letterbox bands around the viewfinder. Pure black, like a camera
     /// body, so the frame reads as the only picture on screen.
     static let viewfinderBand = Color.black
-    static let viewfinderCornerRadius: CGFloat = 10
+    static let viewfinderCornerRadius: CGFloat = 2
 
-    static let cornerRadius: CGFloat = 20
-    static let controlRadius: CGFloat = 14
+    static let cornerRadius: CGFloat = 18
+    static let controlRadius: CGFloat = 12
     static let actionPlateRadius: CGFloat = 20
     static let minimumHitTarget: CGFloat = 44
     /// Tool-strip controls sit behind a presented sheet at times, where iOS
@@ -125,30 +127,30 @@ enum FilmyTheme {
     static let toolControlHeight: CGFloat = 48
     static let pageMargin: CGFloat = 20
 
-    static let titleFont = Font.system(.title2, design: .serif).weight(.medium)
+    static let titleFont = Font.system(.title2, design: .default).weight(.bold)
     static let bodyFont = Font.system(.body, design: .default)
     static let metadataFont = Font.system(.caption, design: .default).weight(.medium)
 
     static let pageGradient = LinearGradient(
-        colors: [backgroundRaised, background, background],
+        colors: [background, background],
         startPoint: .top,
         endPoint: .bottom
     )
 
     static let plateGradient = LinearGradient(
-        colors: [panelRaised, panel],
+        colors: [panel, panel],
         startPoint: .top,
         endPoint: .bottom
     )
 
     static let chromeGradient = LinearGradient(
-        colors: [Color.white.opacity(0.06), Color.white.opacity(0.02)],
+        colors: [Color.clear, Color.clear],
         startPoint: .top,
         endPoint: .bottom
     )
 
     static let navBarGradient = LinearGradient(
-        colors: [panelRaised.opacity(0.98), panel.opacity(0.98)],
+        colors: [panel, panel],
         startPoint: .top,
         endPoint: .bottom
     )
@@ -202,9 +204,7 @@ struct CameraReturnBar: View {
         HStack {
             BackToCameraButton(accessibilityIdentifier: accessibilityIdentifier, action: action)
             Spacer(minLength: 12)
-            Text("filmy")
-                .font(.system(.title3, design: .serif).italic())
-                .foregroundStyle(FilmyTheme.secondary)
+            FilmyWordmark(compact: true)
                 .accessibilityHidden(true)
         }
         .padding(.horizontal, FilmyTheme.pageMargin)
@@ -228,8 +228,15 @@ struct ViewfinderChromeModifier<S: InsettableShape>: ViewModifier {
     let shape: S
     let fill: Color
     var interactive = false
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
 
     func body(content: Content) -> some View {
+        if reduceTransparency || contrast == .increased {
+            content
+                .background(Color(white: 0.08), in: shape)
+                .overlay { shape.strokeBorder(Color.white.opacity(0.7), lineWidth: 1) }
+        } else {
         #if compiler(>=6.2)
         if #available(iOS 26.0, *) {
             content
@@ -240,6 +247,7 @@ struct ViewfinderChromeModifier<S: InsettableShape>: ViewModifier {
         #else
         legacy(content)
         #endif
+        }
     }
 
     #if compiler(>=6.2)
@@ -423,7 +431,7 @@ struct SectionHeading: View {
                 Eyebrow(text: eyebrow, color: FilmyTheme.accent)
 
                 Text(title)
-                    .font(.system(.largeTitle, design: .serif).weight(.medium))
+                    .font(.system(.largeTitle, design: .default).weight(.medium))
                     .foregroundStyle(FilmyTheme.primary)
             }
 
@@ -539,9 +547,6 @@ struct CameraActionButton: View {
 struct FlashControl: View {
     let mode: CameraService.FlashMode
     let availability: CameraService.FlashAvailability
-    /// Icon-only in the top bar (the way every iPhone camera shows flash);
-    /// labelled inside a control strip.
-    var iconOnly = false
     let action: () -> Void
 
     private var isTemporarilyUnavailable: Bool {
@@ -557,31 +562,33 @@ struct FlashControl: View {
             HapticFeedback.play(.controlStep)
             action()
         } label: {
-            if iconOnly {
+            HStack(spacing: 4) {
                 Image(systemName: mode.systemImageName)
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(tint)
-                    .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
-                    .background { ChromeShapeBackground(shape: Circle()) }
-                    .contentShape(Circle())
-            } else {
-                Label(mode.title, systemImage: mode.systemImageName)
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
-                    .foregroundStyle(tint)
-                    .padding(.horizontal, 12)
-                    .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.toolControlHeight)
-                    .viewfinderCapsule(interactive: true)
+                Text(mode.statusTitle)
             }
+            .font(.system(size: 11, weight: .bold, design: .rounded))
+            .foregroundStyle(tint)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, 6)
+            .frame(
+                minWidth: UIDevice.current.userInterfaceIdiom == .pad ? 64 : FilmyTheme.minimumHitTarget,
+                minHeight: UIDevice.current.userInterfaceIdiom == .pad ? 64 : FilmyTheme.minimumHitTarget
+            )
+            .viewfinderCapsule(interactive: true)
         }
         .buttonStyle(.pressable)
-        .disabled(isTemporarilyUnavailable)
+        // Off remains a valid request while the hardware is temporarily
+        // unavailable, so the user can always turn flash off. The camera
+        // screen omits this control entirely for unsupported hardware.
+        .disabled(availability == .unsupported)
         .opacity(isTemporarilyUnavailable ? 0.58 : 1)
         .accessibilityIdentifier("flash-control")
         .accessibilityLabel(isTemporarilyUnavailable ? "Flash temporarily unavailable" : "Flash")
         .accessibilityValue(mode.title)
         .accessibilityHint(
             isTemporarilyUnavailable
-                ? "The flash is temporarily unavailable. Try again after the camera cools down."
+                ? "The flash is temporarily unavailable. Tap to turn it off, or try again after the camera cools down."
                 : "Cycles between flash off, automatic low-light flash, and flash on."
         )
     }
@@ -735,7 +742,14 @@ struct ZoomPresetBar: View {
 
 struct ExposureControl: View {
     let value: Float
+    let onReset: (() -> Void)?
     let onAdjust: (AccessibilityAdjustmentDirection) -> Void
+
+    init(value: Float, onReset: (() -> Void)? = nil, onAdjust: @escaping (AccessibilityAdjustmentDirection) -> Void) {
+        self.value = value
+        self.onReset = onReset
+        self.onAdjust = onAdjust
+    }
 
     private var valueText: String {
         String(format: "%@%.1f", value >= 0 ? "+" : "−", abs(value))
@@ -749,17 +763,26 @@ struct ExposureControl: View {
         HStack(spacing: 0) {
             adjustmentButton(systemName: "minus", direction: .decrement)
 
-            VStack(spacing: 1) {
-                Text("EV")
-                    .font(.system(size: 8, weight: .black, design: .rounded))
-                    .tracking(0.8)
-                    .foregroundStyle(.white.opacity(0.72))
-                Text(valueText)
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(value == 0 ? .white : FilmyTheme.accent)
+            Button {
+                HapticFeedback.play(.controlStep)
+                onReset?()
+            } label: {
+                VStack(spacing: 1) {
+                    Text("EV")
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(FilmyTheme.secondary)
+                    Text(valueText)
+                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                        .monospacedDigit()
+                        .foregroundStyle(value == 0 ? FilmyTheme.primary : FilmyTheme.accent)
+                }
+                .frame(minWidth: 48, minHeight: 48)
+                .contentShape(Rectangle())
             }
-            .frame(minWidth: 40)
+            .buttonStyle(.plain)
+            .disabled(onReset == nil)
+            .accessibilityLabel("Reset exposure compensation")
+            .accessibilityIdentifier("exposure-reset")
 
             adjustmentButton(systemName: "plus", direction: .increment)
         }
@@ -768,7 +791,11 @@ struct ExposureControl: View {
         .accessibilityIdentifier("exposure-control")
         .accessibilityLabel("Exposure compensation")
         .accessibilityValue(accessibilityValueText)
-        .accessibilityHint("Swipe up or down to adjust exposure compensation.")
+        .accessibilityHint("Swipe up or down to adjust exposure compensation. Tap the value to reset to zero.")
+        .accessibilityAction(named: "Reset exposure compensation") {
+            HapticFeedback.play(.controlStep)
+            onReset?()
+        }
         .accessibilityAdjustableAction { direction in
             HapticFeedback.play(.controlStep)
             onAdjust(direction)
@@ -839,7 +866,7 @@ struct RecipeSwatch: View {
     @State private var thumbnailImage: UIImage?
 
     private var cornerRadius: CGFloat {
-        compact ? 12 : 12
+        2
     }
 
     var body: some View {
@@ -851,11 +878,8 @@ struct RecipeSwatch: View {
                     .resizable()
                     .scaledToFill()
             } else {
-                LinearGradient(
-                    colors: recipe.previewColors,
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
+                FilmyTheme.panel
+                    .overlay { ProgressView().tint(FilmyTheme.secondary) }
             }
         }
         .overlay {
@@ -1262,61 +1286,47 @@ struct PreviewPlaceholder: View {
 
     var body: some View {
         GeometryReader { proxy in
-            ZStack {
-                LinearGradient(
-                    colors: recipe.previewColors,
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-
-                // Keep the simulator and unavailable-camera states visually useful
-                // without presenting a synthetic image as live camera output. This
-                // is the same clearly non-live demo used by the recipe rail, so a
-                // user can still see how the selected look is meant to feel before
-                // moving to a physical iPhone.
-                if isSimulator {
-                    RecipeSwatch(recipe: recipe, compact: false, showsLabel: false)
-                        .frame(width: proxy.size.width, height: proxy.size.height)
-                        .accessibilityHidden(true)
-                }
-
-                Color.black.opacity(isSimulator ? 0.42 : 0.56)
-
-                VStack(spacing: 14) {
-                    Image(systemName: isSimulator ? "iphone.gen3" : "camera.fill")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 54, height: 54)
-                        .background(.white.opacity(0.12), in: Circle())
-
-                    VStack(spacing: 6) {
-                        Text(isSimulator ? "Preview mode" : "Camera unavailable")
-                            .font(.system(.title3, design: .default).weight(.bold))
-                            .foregroundStyle(.white)
-                            .multilineTextAlignment(.center)
-                        Text(message ?? (isSimulator ? "Shoot this look on an iPhone or iPad." : "Check camera access in Settings, then try again."))
-                            .font(.system(.subheadline, design: .default).weight(.medium))
-                            .foregroundStyle(.white.opacity(0.74))
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
+            if isSimulator {
+                RecipeSwatch(recipe: recipe, compact: false, showsLabel: false)
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .accessibilityHidden(true)
+                    .overlay(alignment: .topLeading) {
+                        Label("Sample · not a live camera", systemImage: "photo")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(FilmyTheme.primary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.black, in: Capsule())
+                            .padding(12)
+                            .accessibilityHidden(false)
+                            .accessibilityIdentifier("camera-demo-label")
                     }
-
+            } else {
+                FilmyTheme.background
+                VStack(spacing: 14) {
+                    Image(systemName: "camera.fill")
+                        .font(.title2)
+                        .foregroundStyle(FilmyTheme.secondary)
+                        .accessibilityHidden(true)
+                    Text(actionTitle == nil ? "Connecting camera" : "Camera unavailable")
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(FilmyTheme.primary)
+                    Text(message ?? "Allow camera access in Settings. You can still import a photo from the top bar.")
+                        .font(.subheadline)
+                        .foregroundStyle(FilmyTheme.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                     if let actionTitle, let action {
                         Button(actionTitle, action: action)
                             .buttonStyle(.filmyPrimary)
                             .accessibilityIdentifier(actionTitle == "Open Settings" ? "camera-permission-action" : "camera-recovery-action")
                             .accessibilityHint(actionTitle == "Open Settings" ? "Opens Filmy Camera permissions" : "Attempts to resume the camera")
+                    } else {
+                        ProgressView().tint(FilmyTheme.accent)
                     }
                 }
-                .padding(.horizontal, 22)
-                .padding(.vertical, 22)
+                .padding(20)
                 .frame(maxWidth: 340)
-                .viewfinderChrome(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                .padding(.horizontal, 20)
-                .padding(.vertical, 24)
-                // Centered inside the viewfinder; on short displays and at
-                // accessibility text sizes the card scrolls instead of
-                // pushing its recovery action out of reach.
                 .frame(maxWidth: .infinity, minHeight: proxy.size.height)
                 .scrollableWhenTaller()
             }
