@@ -679,6 +679,9 @@ struct CameraScreen: View {
                             suppressLookSwipeUntil = Date(timeIntervalSinceNow: 0.3)
                         }
                 )
+                // Include every gesture in the disabled hit-testing region
+                // while a simulator or unavailable placeholder is displayed.
+                .allowsHitTesting(!shouldShowCameraEmptyState)
         }
     }
 

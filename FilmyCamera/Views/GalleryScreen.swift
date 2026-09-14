@@ -416,6 +416,8 @@ private struct RollEmptyState: View {
     var actionTitle: String?
     var action: (() -> Void)?
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     private var sampleRecipes: [FilmRecipe] {
         Array(FilmRecipe.builtIns.prefix(3))
     }
@@ -474,20 +476,30 @@ private struct RollEmptyState: View {
                             .font(.system(.title3, design: .default).weight(.bold))
                             .foregroundStyle(FilmyTheme.primary)
                             .fixedSize(horizontal: false, vertical: true)
+                        if dynamicTypeSize.isAccessibilitySize {
+                            actionControl
+                        }
                         Text(message)
                             .font(.system(.subheadline, design: .default).weight(.medium))
                             .foregroundStyle(FilmyTheme.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
-                    if let actionTitle, let action {
-                        Button(actionTitle, action: action)
-                            .buttonStyle(.filmyPrimary)
-                            .accessibilityHint("Opens the relevant permission settings")
+                    if !dynamicTypeSize.isAccessibilitySize {
+                        actionControl
                     }
                 }
                 .padding(18)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var actionControl: some View {
+        if let actionTitle, let action {
+            Button(actionTitle, action: action)
+                .buttonStyle(.filmyPrimary)
+                .accessibilityHint("Opens the relevant permission settings")
         }
     }
 }

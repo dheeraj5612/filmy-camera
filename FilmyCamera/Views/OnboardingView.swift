@@ -129,6 +129,8 @@ struct OnboardingView: View {
             }
             .frame(height: height)
             .clipped()
+            .contentShape(Rectangle())
+            .allowsHitTesting(false)
             .accessibilityElement(children: .ignore)
             .accessibilityIdentifier("onboarding-photo")
             .accessibilityLabel("Sample photograph, \(isShowingOriginal ? "original" : recipe.name)")
@@ -180,6 +182,7 @@ struct OnboardingView: View {
                         VStack(alignment: .leading, spacing: 6) {
                             RecipeSwatch(recipe: recipe, showsLabel: false)
                                 .frame(width: 96, height: 64)
+                                .allowsHitTesting(false)
                                 .accessibilityHidden(true)
                             HStack(alignment: .top, spacing: 4) {
                                 if selected {

@@ -1620,6 +1620,9 @@ struct LookLibraryView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Color.clear
                         .aspectRatio(dynamicTypeSize.isAccessibilitySize ? 1.5 : 0.75, contentMode: .fit)
+                        // Keep the first card's action row in the initial viewport at
+                        // accessibility sizes, especially on the single-column iPad layout.
+                        .frame(maxHeight: dynamicTypeSize.isAccessibilitySize ? 260 : nil)
                         .overlay {
                             RecipeSwatch(recipe: recipe, showsLabel: false)
                         }

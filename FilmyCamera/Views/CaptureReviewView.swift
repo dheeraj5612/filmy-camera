@@ -413,12 +413,14 @@ struct CaptureReviewView: View {
                 }
             } else if finishInTopRow {
                 HStack(alignment: .top, spacing: 10) {
-                    lookPicker
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 10) {
+                        lookPicker
+                        comparisonControlGroup(stacked: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     finishPicker(stacked: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                comparisonControls
             } else if stacked {
                 VStack(alignment: .leading, spacing: 10) {
                     lookPicker
@@ -589,7 +591,14 @@ struct CaptureReviewView: View {
     }
 
     private var comparisonControls: some View {
-        HStack(spacing: 8) {
+        comparisonControlGroup(stacked: false)
+    }
+
+    private func comparisonControlGroup(stacked: Bool) -> some View {
+        let layout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 8))
+        return layout {
             compareButton
             if supportsSplit {
                 Button {
