@@ -104,6 +104,9 @@ extension FilmRecipe {
 
 @MainActor
 final class CameraViewModel: ObservableObject {
+#if DEBUG
+    @Published private(set) var captureTimingStatus = "idle"
+#endif
     nonisolated static let defaultRecipeID = "g7x-compact"
 
     private static let builtInRecipesByID = Dictionary(
@@ -541,10 +544,17 @@ final class CameraViewModel: ObservableObject {
             )
         }
         let grainSeed = camera.previewGrainSeed
+#if DEBUG
+        let captureStartedAt = ContinuousClock.now
+        if ProcessInfo.processInfo.arguments.contains("-ui-testing") { captureTimingStatus = "requested" }
+#endif
 
         camera.capturePhoto { [weak self] capturedPhoto in
             Task { @MainActor [weak self] in
                 guard let self else { return }
+#if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("-ui-testing") { self.captureTimingStatus = "capture-complete:\(captureStartedAt.duration(to: .now).components.seconds)s" }
+#endif
 
                 guard let capturedPhoto else {
                     self.isCapturing = false
@@ -584,6 +594,9 @@ final class CameraViewModel: ObservableObject {
                     self.showToast("The selected look could not be rendered. Try the capture again.", style: .error)
                     return
                 }
+#if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("-ui-testing") { self.captureTimingStatus = "render-complete:\(captureStartedAt.duration(to: .now).components.seconds)s" }
+#endif
 #if DEBUG
                 if FilmyCaptureDiagnostics.isEnabled() {
                     let metadata = FilmyCaptureDiagnostics.Metadata(
@@ -957,6 +970,13 @@ final class CameraViewModel: ObservableObject {
             capturedAt: capturedAt
         ) { [weak self] result in
             guard let self, self.reviewWorkGeneration == generation, self.isSaving else { return }
+#if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-ui-testing") {
+                let succeeded: Bool
+                if case .success = result { succeeded = true } else { succeeded = false }
+                self.captureTimingStatus = "save-callback:\(succeeded)"
+            }
+#endif
             self.isSaving = false
             switch result {
             case .success:
