@@ -88,6 +88,12 @@ struct CaptureReviewView: View {
                                     .padding(.top, 16)
                             }
 
+                            if dynamicTypeSize.isAccessibilitySize {
+                                actionBar
+                                    .padding(.horizontal, 20)
+                                    .padding(.top, 14)
+                            }
+
                             metadataBlock
                                 .padding(.horizontal, 20)
                                 .padding(.top, 12)
@@ -103,14 +109,16 @@ struct CaptureReviewView: View {
                     }
                     .accessibilityIdentifier("review-content-scroll")
                     .safeAreaInset(edge: .bottom, spacing: 0) {
-                        actionBar
-                            .frame(maxWidth: FilmyLayout.readableMaxWidth)
-                            .frame(maxWidth: .infinity)
-                            .padding(.horizontal, 20)
-                            .padding(.top, 14)
-                            .padding(.bottom, 8)
-                            .background(FilmyTheme.background)
-                            .overlay(alignment: .top) { FilmyTheme.line.frame(height: 1) }
+                        if !dynamicTypeSize.isAccessibilitySize {
+                            actionBar
+                                .frame(maxWidth: FilmyLayout.readableMaxWidth)
+                                .frame(maxWidth: .infinity)
+                                .padding(.horizontal, 20)
+                                .padding(.top, 14)
+                                .padding(.bottom, 8)
+                                .background(FilmyTheme.background)
+                                .overlay(alignment: .top) { FilmyTheme.line.frame(height: 1) }
+                        }
                     }
                 }
             }
@@ -400,7 +408,7 @@ struct CaptureReviewView: View {
         compact: Bool = false,
         wide: Bool = false
     ) -> some View {
-        let finishInTopRow = dynamicTypeSize.isAccessibilitySize && !compact
+        let usesAccessibleControlStack = dynamicTypeSize.isAccessibilitySize && !compact
 
         return VStack(alignment: .leading, spacing: 10) {
             if wide && !dynamicTypeSize.isAccessibilitySize {
@@ -411,16 +419,12 @@ struct CaptureReviewView: View {
                     finishPicker(stacked: false)
                         .frame(width: 280, alignment: .leading)
                 }
-            } else if finishInTopRow {
-                HStack(alignment: .top, spacing: 10) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        lookPicker
-                        comparisonControlGroup(stacked: true)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    finishPicker(stacked: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+            } else if usesAccessibleControlStack {
+                // Full-width rows keep accessibility text readable. The review
+                // and its actions share a scroll view so every control fits.
+                lookPicker
+                comparisonControlGroup(stacked: true)
+                finishPicker(stacked: true)
             } else if stacked {
                 VStack(alignment: .leading, spacing: 10) {
                     lookPicker
@@ -435,7 +439,7 @@ struct CaptureReviewView: View {
                 }
             }
 
-            if (!wide || dynamicTypeSize.isAccessibilitySize) && !finishInTopRow {
+            if (!wide || dynamicTypeSize.isAccessibilitySize) && !usesAccessibleControlStack {
                 finishPicker(stacked: stacked || dynamicTypeSize.isAccessibilitySize)
             }
 

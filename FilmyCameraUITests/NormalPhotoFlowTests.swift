@@ -105,9 +105,16 @@ final class NormalPhotoFlowTests: XCTestCase {
         XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 10))
 
         try importSeededFixture(newerSavedFrameCount: countBefore)
-        assertReviewControl(app.buttons["review-look-picker"], name: "Large-text review look picker")
-        assertReviewControl(app.buttons["review-compare-original"], name: "Large-text Original comparison")
-        assertReviewControl(app.buttons["review-finish-instantPrint"], name: "Large-text Instant Print")
+        let reviewScroll = app.scrollViews["review-content-scroll"]
+        for (identifier, name) in [
+            ("review-look-picker", "Large-text review look picker"),
+            ("review-compare-original", "Large-text Original comparison"),
+            ("review-finish-instantPrint", "Large-text Instant Print")
+        ] {
+            let control = app.buttons[identifier]
+            XCTAssertTrue(revealFully(control, in: reviewScroll), "\(name) must scroll fully into view")
+            assertReviewControl(control, name: name, containedInApp: true)
+        }
         attachScreenshot(named: "review-large-text")
 
         XCUIDevice.shared.orientation = .landscapeLeft
@@ -117,7 +124,7 @@ final class NormalPhotoFlowTests: XCTestCase {
             "Large-text review must stay portrait after device rotation before compact-layout checks"
         )
         let landscapeFinish = app.buttons["review-finish-instantPrint"]
-        let landscapeScroll = app.scrollViews["review-controls-scroll"]
+        let landscapeScroll = reviewScroll
         XCTAssertTrue(
             revealFully(landscapeFinish, in: landscapeScroll),
             "Large-text portrait-locked Instant Print must scroll fully into view"
@@ -346,7 +353,7 @@ final class NormalPhotoFlowTests: XCTestCase {
         containedInApp: Bool = false
     ) {
         XCTAssertTrue(element.waitForExistence(timeout: 10), "\(name) must be discoverable")
-        XCTAssertTrue(waitUntil(timeout: 5) { element.isHittable }, "\(name) must be reachable without scrolling at normal text size")
+        XCTAssertTrue(waitUntil(timeout: 5) { element.isHittable }, "\(name) must be reachable in the visible viewport")
         XCTAssertGreaterThanOrEqual(element.frame.width, 44, "\(name) needs a usable touch width")
         XCTAssertGreaterThanOrEqual(element.frame.height, 44, "\(name) needs a usable touch height")
         if containedInApp {

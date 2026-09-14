@@ -1622,7 +1622,11 @@ struct LookLibraryView: View {
                         .aspectRatio(dynamicTypeSize.isAccessibilitySize ? 1.5 : 0.75, contentMode: .fit)
                         // Keep the first card's action row in the initial viewport at
                         // accessibility sizes, especially on the single-column iPad layout.
-                        .frame(maxHeight: dynamicTypeSize.isAccessibilitySize ? 260 : nil)
+                        // A max-height proposal can be ignored by the aspect-ratio child
+                        // when the grid supplies a wider width. Use an explicit height so
+                        // the title, descriptor, and favorite action remain in the first
+                        // viewport at accessibility sizes.
+                        .frame(height: dynamicTypeSize.isAccessibilitySize ? 220 : nil)
                         .overlay {
                             RecipeSwatch(recipe: recipe, showsLabel: false)
                         }
