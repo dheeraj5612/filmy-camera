@@ -182,6 +182,15 @@ final class GalleryPagingUITests: XCTestCase {
         while !tile.isHittable && Date() < deadline { picker.swipeUp() }
         XCTAssertTrue(tile.isHittable, "Recipe \(name) must be selectable")
         tile.tap()
+        let close = app.buttons["recipe-drawer-close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5), "Recipe picker must expose its close control")
+        close.tap()
+        XCTAssertTrue(waitUntil(timeout: 5) {
+            !app.descendants(matching: .any)["recipe-drawer"].exists
+                && menu.label.contains(name)
+                && app.buttons["Capture photo"].isEnabled
+                && app.buttons["Capture photo"].isHittable
+        }, "Selecting \(name) must dismiss the picker and restore the shutter")
     }
 
 }

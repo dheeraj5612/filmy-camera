@@ -250,7 +250,7 @@ final class ComprehensiveSettingsTests: XCTestCase {
     }
 
     private func choose(_ id: String, _ title: String, _ app: XCUIApplication) {
-        let picker = reveal(app.descendants(matching: .any)[id], app)
+        let picker = reveal(app.descendants(matching: .any)[id], app, diagnosticName: id)
         picker.tap()
         let option = app.buttons[title]
         XCTAssertTrue(option.waitForExistence(timeout: 5))
@@ -282,11 +282,13 @@ final class ComprehensiveSettingsTests: XCTestCase {
                       file: file, line: line)
     }
 
-    private func reveal(_ control: XCUIElement, _ app: XCUIApplication, requireHittable: Bool = true) -> XCUIElement {
+    private func reveal(_ control: XCUIElement, _ app: XCUIApplication,
+                        requireHittable: Bool = true,
+                        diagnosticName: String = "unresolved control") -> XCUIElement {
         let form = app.descendants(matching: .any)["capture-setup-form"]
         let editor = app.descendants(matching: .any)["recipe-detail-scroll"]
         let scroll = form.exists ? form : (editor.exists ? editor : app.scrollViews.firstMatch)
-        for _ in 0..<22 {
+        for attempt in 0..<22 {
             var viewport = scroll.frame.intersection(app.frame)
             let action = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Apply changes to ' OR label BEGINSWITH 'Done editing '")).firstMatch
             if editor.exists && action.exists {
@@ -307,19 +309,26 @@ final class ComprehensiveSettingsTests: XCTestCase {
                 let origin = app.coordinate(withNormalizedOffset: .zero)
                 origin.withOffset(CGVector(dx: start.x - app.frame.minX, dy: start.y - app.frame.minY))
                     .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: end.x - app.frame.minX, dy: end.y - app.frame.minY)))
+            } else if form.exists && !control.exists {
+                // A SwiftUI Form can virtualize an off-screen row on iPad, so
+                // an unresolved target gives us no frame from which to infer
+                // the direction. Search from both ends instead of repeatedly
+                // swiping toward the bottom when the target is absent.
+                if attempt < 11 { scroll.swipeDown() } else { scroll.swipeUp() }
             } else if downward { scroll.swipeDown() } else { scroll.swipeUp() }
         }
-        let diagnostics = XCTAttachment(string: "Target: \(control.debugDescription)\nScroll: \(scroll.debugDescription)")
+        let container = form.exists ? "capture-setup-form" : (editor.exists ? "recipe-detail-scroll" : "first scroll view")
+        let diagnostics = XCTAttachment(string: "Target: \(diagnosticName)\nScroll container: \(container)")
         diagnostics.name = "unrevealed-control-geometry"
         diagnostics.lifetime = .keepAlways
         add(diagnostics)
         attach("unrevealed-control")
-        XCTFail("Could not fully reveal \(control.identifier.isEmpty ? control.label : control.identifier)")
+        XCTFail("Could not fully reveal \(diagnosticName)")
         return control
     }
 
     private func exerciseSlider(_ title: String, _ app: XCUIApplication) {
-        let slider = reveal(app.sliders[title], app)
+        let slider = reveal(app.sliders[title], app, diagnosticName: title)
         slider.adjust(toNormalizedSliderPosition: 0.1)
         let low = slider.value as? String
         slider.adjust(toNormalizedSliderPosition: 0.9)
@@ -330,7 +339,7 @@ final class ComprehensiveSettingsTests: XCTestCase {
         let section = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", title + ",")).firstMatch
         // Disclosure groups expose the title and description together.
         let fallback = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", title)).firstMatch
-        reveal(section.exists ? section : fallback, app).tap()
+        reveal(section.exists ? section : fallback, app, diagnosticName: title).tap()
     }
 
     private func setToggle(_ row: XCUIElement, _ value: String) {
@@ -371,9 +380,32 @@ final class ComprehensiveSettingsTests: XCTestCase {
             "label BEGINSWITH 'Photo in your gallery'")).firstMatch
         XCTAssertTrue(frame.waitForExistence(timeout: 20) && frame.isHittable)
         let dimensions = frame.value as? String
-        let parts = dimensions?.split(separator: "x").compactMap { Double($0) }
+        // XCTest exposes the localized AX value (for example,
+        // "3,024x4,032"), so remove grouping characters before parsing.
+        let parts: [Double]? = dimensions.flatMap { value in
+            let components = value.split(separator: "x", omittingEmptySubsequences: false)
+            guard components.count == 2 else { return nil }
+            let groupingSeparators = Set([
+                Locale.current.groupingSeparator ?? ",",
+                ","
+            ])
+            let parsed = components.compactMap { component -> Double? in
+                let normalized = component.filter {
+                    !$0.isWhitespace && !groupingSeparators.contains(String($0))
+                }
+                guard !normalized.isEmpty, normalized.allSatisfy({ $0.isNumber }) else {
+                    return nil
+                }
+                return Double(String(normalized))
+            }
+            guard parsed.count == 2 else { return nil }
+            return parsed
+        }
         XCTAssertEqual(parts?.count, 2, "The saved gallery tile must expose persisted pixel dimensions")
         if let parts, parts.count == 2 {
+            XCTAssertTrue(parts.allSatisfy { $0 > 0 }, "The saved gallery tile must expose positive pixel dimensions")
+        }
+        if let parts, parts.count == 2, parts.allSatisfy({ $0 > 0 }) {
             XCTAssertEqual(parts[0] / parts[1], Double(expectedRatio), accuracy: 0.03,
                            "The saved gallery asset must preserve the selected crop")
         }

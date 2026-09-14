@@ -352,6 +352,7 @@ final class FilmyCameraUITests: XCTestCase {
         // row. Verify reachability and actual adjustment; the 44pt button
         // geometry helper does not describe a native slider's touch behavior.
         XCTAssertTrue(exposure.waitForExistence(timeout: 5))
+        scrollIntoView(exposure, in: app, downward: false)
         XCTAssertTrue(exposure.isEnabled && exposure.isHittable)
         let originalValue = try XCTUnwrap(exposure.value as? String)
         exposure.adjust(toNormalizedSliderPosition: originalValue.contains("-") ? 0.9 : 0.1)
@@ -380,6 +381,7 @@ final class FilmyCameraUITests: XCTestCase {
 
         let exposure = app.sliders["Exposure"]
         XCTAssertTrue(exposure.waitForExistence(timeout: 5))
+        scrollIntoView(exposure, in: app, downward: false)
         XCTAssertTrue(exposure.isEnabled && exposure.isHittable)
         let originalValue = try XCTUnwrap(exposure.value as? String)
         exposure.adjust(toNormalizedSliderPosition: 0.9)

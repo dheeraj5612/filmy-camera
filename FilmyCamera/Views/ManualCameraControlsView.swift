@@ -22,6 +22,12 @@ struct ManualCameraControlsView: View {
     @State private var editingFocus = false
 
     private var controls: CameraManualControls { camera.manualControls }
+    // The hosted iPad portrait window scales its content to 75% in landscape;
+    // keep the Done target at least 44 physical points after that transform.
+    private var doneButtonTarget: CGFloat {
+        UIDevice.current.userInterfaceIdiom == .pad ? 64 : 48
+    }
+
     private var hasManualCapability: Bool {
         controls.manualExposureSupported
             || controls.manualWhiteBalanceSupported
@@ -81,9 +87,7 @@ struct ManualCameraControlsView: View {
                     .font(.system(.body, design: .rounded).weight(.semibold))
                     .foregroundStyle(FilmyTheme.accent)
                     .padding(.horizontal, 16)
-                    // Inset medium sheets scale their content slightly;
-                    // preserve a displayed target of at least 44 points.
-                    .frame(minWidth: 64, minHeight: 48)
+                    .frame(minWidth: 64, minHeight: doneButtonTarget)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
