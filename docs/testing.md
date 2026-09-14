@@ -55,6 +55,10 @@ Counts describe declared test methods, not line coverage or proof of hardware be
 
 Each deterministic UI case receives a unique preferences suite that persists across its own relaunches. Normal app launches ignore that testing environment variable. The Photos E2E uses its disposable simulator's real preferences and library.
 
+### Primary portrait iPhone acceptance
+
+Portrait iPhone is the primary product layout (user preference, 2026-09-14). For every camera or controls UI change, test the current revision on an iPhone simulator or physical iPhone before merge/release. iPhone compatibility mode on iPad is an acceptable fallback; a native iPad run alone does not satisfy this gate. Check the viewfinder, shutter, look picker, Pro controls, dismissal, and large text, and retain portrait screenshots with the test result and source revision. Continue native iPad coverage for its adaptive layouts.
+
 ## Hardware and optional lanes
 
 Compile device-only branches before a release, even when hardware is unavailable:

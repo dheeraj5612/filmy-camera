@@ -1,25 +1,12 @@
 import XCTest
 
-/// Real UI interactions with isolated preferences; physical captures are
-/// retained as review screenshots and are not written to the user's library.
+/// Real UI interactions with isolated preferences; editor screenshots are
+/// retained for review.
 @MainActor
 final class ComprehensiveSettingsTests: XCTestCase {
     func testEveryRecipeEditorSettingChangesAndResetRestoresTheLook() {
-        continueAfterFailure = false
-        let app = makeApp()
-        #if targetEnvironment(simulator)
-        app.launchArguments = ["-ui-testing", "-selectedRecipeID", "classic-chrome"]
-        #else
-        app.launchArguments = ["-ui-testing-real-roll", "-selectedRecipeID", "classic-chrome"]
-        #endif
-        app.launch()
+        let app = openRecipeEditor(recipeID: "classic-chrome", tuneTitle: "Tune Muted Color")
         defer { app.terminate() }
-        XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 20))
-        app.buttons["recipe-menu"].tap()
-        let tune = app.buttons["Tune Muted Color"]
-        XCTAssertTrue(tune.waitForExistence(timeout: 5))
-        tune.tap()
-        XCTAssertTrue(app.staticTexts["Recipe controls"].waitForExistence(timeout: 5))
 
         for label in ["Exposure", "Highlights", "Shadows", "Contrast"] { exerciseSlider(label, app) }
         for title in ["AUTO", "DR100", "DR200", "DR400"] {
@@ -28,6 +15,13 @@ final class ComprehensiveSettingsTests: XCTestCase {
         for title in ["AUTO", "Off", "Weak", "Strong"] {
             choose("recipe-choice-D Range Priority", title, app)
         }
+        finishRecipeEditor(app, attachmentName: "tone-recipe-editor-settings-modified")
+    }
+
+    func testEveryRecipeEditorColorAndWhiteBalanceChangesAndResetRestoresTheLook() {
+        let app = openRecipeEditor(recipeID: "classic-chrome", tuneTitle: "Tune Muted Color")
+        defer { app.terminate() }
+
         exerciseSlider("Color", app)
         for (id, options) in [
             ("recipe-choice-Color Chrome", ["Off", "Weak", "Strong"]),
@@ -39,14 +33,56 @@ final class ComprehensiveSettingsTests: XCTestCase {
             for title in options { choose(id, title, app) }
         }
         for label in ["Color temperature", "Warmth", "Tint"] { exerciseSlider(label, app) }
+        finishRecipeEditor(app, attachmentName: "color-recipe-editor-settings-modified")
+    }
+
+    func testEveryRecipeEditorTextureAndFinishChangesAndResetRestoresTheLook() {
+        let app = openRecipeEditor(recipeID: "classic-chrome", tuneTitle: "Tune Muted Color")
+        defer { app.terminate() }
+
         expandSection("Texture", app)
         for label in ["Sharpness", "Noise reduction", "Clarity"] { exerciseSlider(label, app) }
         expandSection("Finish", app)
         for title in ["Off", "Weak", "Strong"] { choose("recipe-choice-Grain Effect", title, app) }
         for title in ["Small", "Large"] { choose("recipe-choice-Grain Size", title, app) }
         for label in ["Vignette", "Halation"] { exerciseSlider(label, app) }
+        finishRecipeEditor(app, attachmentName: "texture-finish-recipe-editor-settings-modified")
+    }
+
+    func testRecipeEditorResetClearsCombinedCrossSectionDraft() {
+        let app = openRecipeEditor(recipeID: "classic-chrome", tuneTitle: "Tune Muted Color")
+        defer { app.terminate() }
+
+        exerciseSlider("Exposure", app)
+        exerciseSlider("Color", app)
+        expandSection("Texture", app)
+        exerciseSlider("Sharpness", app)
+        expandSection("Finish", app)
+        exerciseSlider("Vignette", app)
+        finishRecipeEditor(app, attachmentName: "combined-recipe-editor-settings-modified")
+    }
+
+    private func openRecipeEditor(recipeID: String, tuneTitle: String) -> XCUIApplication {
+        continueAfterFailure = false
+        let app = makeApp()
+        #if targetEnvironment(simulator)
+        app.launchArguments = ["-ui-testing", "-selectedRecipeID", recipeID]
+        #else
+        app.launchArguments = ["-ui-testing-real-roll", "-selectedRecipeID", recipeID]
+        #endif
+        app.launch()
+        XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 20))
+        app.buttons["recipe-menu"].tap()
+        let tune = app.buttons[tuneTitle]
+        XCTAssertTrue(tune.waitForExistence(timeout: 5))
+        tune.tap()
+        XCTAssertTrue(app.staticTexts["Recipe controls"].waitForExistence(timeout: 5))
+        return app
+    }
+
+    private func finishRecipeEditor(_ app: XCUIApplication, attachmentName: String) {
         XCTAssertTrue(app.buttons["Apply changes to Muted Color"].isEnabled)
-        attach("all-recipe-editor-settings-modified")
+        attach(attachmentName)
         reveal(app.buttons["Reset recipe controls"], app).tap()
         XCTAssertTrue(app.buttons["Done editing Muted Color"].waitForExistence(timeout: 5),
                       "Reset must remove the entire draft, including all edited sections")

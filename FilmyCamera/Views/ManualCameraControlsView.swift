@@ -20,10 +20,34 @@ struct ManualCameraControlsView: View {
     @State private var editingKelvin = false
     @State private var editingTint = false
     @State private var editingFocus = false
+    @State private var selectedSection: ControlSection = .exposure
+
+    private enum ControlSection: String, CaseIterable, Identifiable {
+        case exposure
+        case focus
+        case whiteBalance
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .exposure: return "Exposure"
+            case .focus: return "Focus"
+            case .whiteBalance: return "White balance"
+            }
+        }
+
+        var symbolName: String {
+            switch self {
+            case .exposure: return "sun.max"
+            case .focus: return "scope"
+            case .whiteBalance: return "thermometer.sun"
+            }
+        }
+    }
 
     private var controls: CameraManualControls { camera.manualControls }
-    // The hosted iPad portrait window scales its content to 75% in landscape;
-    // keep the Done target at least 44 physical points after that transform.
+    // Keep a generous touch target on iPad in every orientation.
     private var doneButtonTarget: CGFloat {
         UIDevice.current.userInterfaceIdiom == .pad ? 64 : 48
     }
@@ -48,9 +72,8 @@ struct ManualCameraControlsView: View {
                     }
 
                     if hasManualCapability {
-                        exposureSection
-                        whiteBalanceSection
-                        focusSection
+                        sectionPicker
+                        selectedSectionView
                     } else {
                         unavailableCard
                     }
@@ -100,17 +123,129 @@ struct ManualCameraControlsView: View {
     }
 
     private var statusHeader: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Eyebrow(text: "CAMERA", color: FilmyTheme.filmAccent)
-            Text(controls.activeDeviceName)
-                .font(.system(.title3, design: .rounded).weight(.bold))
-                .foregroundStyle(FilmyTheme.primary)
-                .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Eyebrow(text: "CAMERA", color: FilmyTheme.filmAccent)
+                    Text(controls.activeDeviceName)
+                        .font(.system(.title3, design: .rounded).weight(.bold))
+                        .foregroundStyle(FilmyTheme.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                modeBadge
+            }
             Text(statusDescription)
                 .font(.system(.subheadline, design: .rounded).weight(.medium))
                 .foregroundStyle(FilmyTheme.secondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("manual-controls-status")
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(FilmyTheme.backgroundRaised, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(FilmyTheme.line, lineWidth: 1)
+        }
+    }
+
+    private var modeBadge: some View {
+        let manual = controls.isAnyManualModeEnabled
+        return Text(manual ? "MANUAL" : "AUTO")
+            .font(.system(.caption2, design: .rounded).weight(.heavy))
+            .tracking(0.8)
+            .foregroundStyle(manual ? FilmyTheme.background : FilmyTheme.primary)
+            .padding(.horizontal, 10)
+            .frame(minHeight: 28)
+            .background(manual ? FilmyTheme.filmAccent : FilmyTheme.panel, in: Capsule())
+            .overlay { Capsule().strokeBorder(manual ? FilmyTheme.filmAccent : FilmyTheme.lineStrong, lineWidth: 1) }
+            .accessibilityLabel("Control mode")
+            .accessibilityValue(manual ? "Manual" : "Auto")
+    }
+
+    private var sectionPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Adjust")
+                .font(.system(.caption, design: .rounded).weight(.heavy))
+                .foregroundStyle(FilmyTheme.secondary)
+                .textCase(.uppercase)
+                .tracking(0.8)
+                .accessibilityAddTraits(.isHeader)
+
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: dynamicTypeSize.isAccessibilitySize ? 1 : 3),
+                spacing: 8
+            ) {
+                ForEach(ControlSection.allCases) { section in
+                    Button {
+                        HapticFeedback.play(.selection)
+                        withAnimation(.easeInOut(duration: 0.2)) { selectedSection = section }
+                    } label: {
+                        ZStack(alignment: .topTrailing) {
+                            VStack(alignment: .leading, spacing: 5) {
+                                HStack(alignment: .top, spacing: 7) {
+                                    Image(systemName: section.symbolName)
+                                        .font(.system(.subheadline, weight: .bold))
+                                    Text(section.title)
+                                        .font(.system(.subheadline, design: .rounded).weight(.bold))
+                                        .lineLimit(2)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .layoutPriority(1)
+                                }
+                                .padding(.trailing, 24)
+                                Text(sectionSummary(section))
+                                    .font(.system(.caption2, design: .rounded).weight(.medium))
+                                    .foregroundStyle(selectedSection == section ? FilmyTheme.primary : FilmyTheme.secondary)
+                                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                                    .minimumScaleFactor(0.85)
+                            }
+                            if selectedSection == section {
+                                Image(systemName: "checkmark")
+                                    .font(.caption.weight(.heavy))
+                                    .padding(.top, 1)
+                            }
+                        }
+                        .foregroundStyle(selectedSection == section ? FilmyTheme.filmAccent : FilmyTheme.primary)
+                        .padding(.horizontal, 12)
+                        .frame(maxWidth: .infinity, minHeight: dynamicTypeSize.isAccessibilitySize ? 72 : 60, alignment: .leading)
+                        .background(selectedSection == section ? FilmyTheme.filmAccent.opacity(0.18) : FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .strokeBorder(selectedSection == section ? FilmyTheme.filmAccent : FilmyTheme.line, lineWidth: 1)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("manual-section-\(section.id)")
+                    .accessibilityLabel(section.title)
+                    .accessibilityValue(selectedSection == section ? "Selected. \(sectionSummary(section))" : sectionSummary(section))
+                    .accessibilityHint("Shows \(section.title.lowercased()) controls")
+                }
+            }
+        }
+        .accessibilityIdentifier("manual-controls-sections")
+    }
+
+    @ViewBuilder
+    private var selectedSectionView: some View {
+        switch selectedSection {
+        case .exposure: exposureSection
+        case .focus: focusSection
+        case .whiteBalance: whiteBalanceSection
+        }
+    }
+
+    private func sectionSummary(_ section: ControlSection) -> String {
+        switch section {
+        case .exposure:
+            guard controls.exposureMode == .manual else { return "Auto metering" }
+            return "ISO \(Int(isoDraft.rounded())) · \(shutterLabel(duration(for: shutterPosition)))"
+        case .focus:
+            guard controls.focusMode == .manual else { return "Auto focus" }
+            return String(format: "Manual · %.2f", focusDraft)
+        case .whiteBalance:
+            guard controls.whiteBalanceMode == .manual else { return "Auto color" }
+            return "\(Int(kelvinDraft.rounded()))K · \(String(format: "%+.0f", tintDraft))"
         }
     }
 
@@ -347,6 +482,13 @@ struct ManualCameraControlsView: View {
             }
             content()
         }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(FilmyTheme.backgroundRaised, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(FilmyTheme.line, lineWidth: 1)
+        }
         .accessibilityElement(children: .contain)
     }
 
@@ -363,6 +505,8 @@ struct ManualCameraControlsView: View {
             modeButton(title: "Auto", selected: mode == .auto, enabled: true, id: autoID, action: autoAction)
             modeButton(title: "Manual", selected: mode == .manual, enabled: supported, id: manualID, action: manualAction)
         }
+        .padding(4)
+        .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
     }
@@ -380,7 +524,7 @@ struct ManualCameraControlsView: View {
         } label: {
             Text(title)
                 .font(.system(.subheadline, design: .rounded).weight(.bold))
-                .frame(maxWidth: .infinity, minHeight: FilmyTheme.minimumHitTarget)
+                .frame(maxWidth: .infinity, minHeight: max(FilmyTheme.minimumHitTarget, 44))
                 .foregroundStyle(selected ? FilmyTheme.background : FilmyTheme.primary)
                 .background(selected ? FilmyTheme.filmAccent : FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay {
@@ -434,6 +578,7 @@ struct ManualCameraControlsView: View {
                 onEnded()
             }
         }
+        .padding(.horizontal, 2)
         .frame(minHeight: 58)
     }
 
