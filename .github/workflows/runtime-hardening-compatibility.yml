@@ -1,0 +1,145 @@
+name: Runtime hardening compatibility validation
+on:
+  push:
+    branches: [perf/runtime-hardening-20260914]
+    paths: [.github/workflows/runtime-hardening-compatibility.yml]
+permissions:
+  contents: write
+jobs:
+  compatibility:
+    if: github.repository == 'dheeraj5612/filmy-camera' && github.ref == 'refs/heads/perf/runtime-hardening-20260914'
+    runs-on: macos-15
+    timeout-minutes: 35
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ github.sha }}
+      - name: Apply narrow SDK fixes
+        shell: python
+        run: |
+          from pathlib import Path
+          import os
+          def replace_once(text, before, after):
+              assert text.count(before) == 1, before
+              return text.replace(before, after, 1)
+          path = Path('FilmyCamera/Services/PhotoLibraryService.swift')
+          text = path.read_text()
+          text = replace_once(text, 'final class PhotoLibraryService: ObservableObject {\n', '''final class PhotoLibraryService: ObservableObject {
+              /// Immutable registration ownership; NotificationCenter removal is thread-safe.
+              /// Keep non-Sendable Objective-C token access out of the service's actor-isolated lifetime.
+              private final class MemoryWarningObservation: @unchecked Sendable {
+                  private let token: NSObjectProtocol
+
+                  init(token: NSObjectProtocol) { self.token = token }
+
+                  deinit { NotificationCenter.default.removeObserver(token) }
+              }
+
+          ''')
+          text = replace_once(text, 'private var memoryWarningObserver: NSObjectProtocol?', 'private var memoryWarningObserver: MemoryWarningObservation?')
+          text = replace_once(text, 'memoryWarningObserver = NotificationCenter.default.addObserver(', 'let observer = NotificationCenter.default.addObserver(')
+          before = '''                  MainActor.assumeIsolated { self?.invalidateThumbnailCache() }
+                  }
+              }
+
+              deinit {
+                  if let memoryWarningObserver {
+                      NotificationCenter.default.removeObserver(memoryWarningObserver)
+                  }
+              }
+          '''
+          after = '''                  MainActor.assumeIsolated { self?.invalidateThumbnailCache() }
+                  }
+                  memoryWarningObserver = MemoryWarningObservation(token: observer)
+              }
+          '''
+          text = replace_once(text, before, after)
+          path.write_text(text)
+          path = Path('FilmyCamera/Views/FilteredCameraPreview.swift')
+          text = path.read_text()
+          before = '''            if Thread.isMainThread {
+                          MainActor.assumeIsolated { [weak self] in
+                              self?.previewView?.display(image: image)
+                          }
+                      } else {
+                          let imageBox = CIImageBox(image)
+          '''
+          after = '''            // Xcode 16.4 does not yet mark immutable CIImage as Sendable.
+                      let imageBox = CIImageBox(image)
+                      if Thread.isMainThread {
+                          MainActor.assumeIsolated { [weak self] in
+                              self?.previewView?.display(image: imageBox.image)
+                          }
+                      } else {
+          '''
+          path.write_text(replace_once(text, before, after))
+          path = Path('docs/hardening/runtime-performance-2026-09-14.md')
+          path.write_text(replace_once(path.read_text(), 'Per-frame autorelease scope and no extra box on the normal main-thread delivery path.', 'Per-frame autorelease scope; retain the immutable CIImage sendability bridge required by the Xcode 16.4 compatibility lane.'))
+          (Path(os.environ['RUNNER_TEMP']) / 'hardening-v2').mkdir()
+      - name: Commit compatibility fixes and remove temporary workflow
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/runtime-hardening-compatibility.yml
+          git add FilmyCamera/Services/PhotoLibraryService.swift FilmyCamera/Views/FilteredCameraPreview.swift docs/hardening/runtime-performance-2026-09-14.md
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Own notification registration safely and retain legacy CIImage bridge'
+          git push origin HEAD:refs/heads/perf/runtime-hardening-20260914
+          git rev-parse HEAD | tee "${RUNNER_TEMP}/hardening-v2/source-sha.txt"
+          git show --format=fuller > "${RUNNER_TEMP}/hardening-v2/compatibility.patch"
+      - name: Build and run simulator regressions
+        id: simulator
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          evidence="${RUNNER_TEMP}/hardening-v2"
+          xcodebuild -version > "${evidence}/xcode-compatibility.txt"
+          xcrun simctl list devices available -j > "${evidence}/simulators.json"
+          simulator_id="$(python3 -c 'import json,sys; data=json.load(open(sys.argv[1])); devices=[d for runtime,rows in data["devices"].items() if "iOS-18-5" in runtime for d in rows if "iPhone" in d["name"]]; assert devices; print(devices[0]["udid"])' "${evidence}/simulators.json")"
+          destination="platform=iOS Simulator,id=${simulator_id}"
+          xcrun simctl boot "${simulator_id}" || true
+          python3 scripts/testing/run.py build --destination "${destination}" --derived-data "${RUNNER_TEMP}/FilmyHardening" --output-dir "${evidence}"
+          xcrun simctl bootstatus "${simulator_id}" -b
+          xcodebuild test-without-building -project FilmyCamera.xcodeproj -scheme FilmyCamera \
+            -destination "${destination}" -derivedDataPath "${RUNNER_TEMP}/FilmyHardening" \
+            -resultBundlePath "${evidence}/focused.xcresult" -parallel-testing-enabled NO \
+            -only-testing:FilmyCameraTests/ImageSizePolicyTests \
+            -only-testing:FilmyCameraTests/ImageDecodeQueueTests \
+            -only-testing:FilmyCameraTests/RuntimeHardeningTests \
+            -only-testing:FilmyCameraTests/PhotoLibraryMetadataTests \
+            -only-testing:FilmyCameraTests/CameraViewModelRenderingTests \
+            -only-testing:FilmyCameraTests/CameraServiceAvailabilityTests \
+            -only-testing:FilmyCameraTests/RendererOutputBoundsTests \
+            -only-testing:FilmyCameraTests/PhotoOutputEncoderTests \
+            -only-testing:FilmyCameraTests/PhotoPrintCompositorTests \
+            CODE_SIGNING_ALLOWED=NO > "${evidence}/focused-tests.log" 2>&1
+          tail -50 "${evidence}/focused-tests.log"
+      - name: Compile unsigned Release on distribution SDK
+        id: release
+        continue-on-error: true
+        env:
+          DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+        run: |
+          set -euo pipefail
+          evidence="${RUNNER_TEMP}/hardening-v2"
+          xcodebuild -version > "${evidence}/xcode-release.txt"
+          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera -configuration Release \
+            -destination 'generic/platform=iOS' -derivedDataPath "${RUNNER_TEMP}/FilmyHardeningRelease" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build > "${evidence}/release-build.log" 2>&1
+          tail -25 "${evidence}/release-build.log"
+      - name: Retain native evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: runtime-hardening-compatibility-${{ github.run_id }}
+          path: ${{ runner.temp }}/hardening-v2/
+          retention-days: 7
+      - name: Require both outcomes
+        if: always()
+        env:
+          SIMULATOR_RESULT: ${{ steps.simulator.outcome }}
+          RELEASE_RESULT: ${{ steps.release.outcome }}
+        run: test "$SIMULATOR_RESULT" = success && test "$RELEASE_RESULT" = success
