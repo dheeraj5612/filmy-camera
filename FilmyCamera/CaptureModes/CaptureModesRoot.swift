@@ -11,7 +11,7 @@ struct CaptureModesRoot: View {
     @State private var initialMode = CaptureModesLaunch.peek() ?? .photo
 
     private var busy: Bool {
-        cameraViewModel.isCapturing || cameraViewModel.isSaving
+        cameraViewModel.isCapturing || cameraViewModel.isSaving || cameraViewModel.isImporting
             || cameraViewModel.reviewImage != nil
     }
 
