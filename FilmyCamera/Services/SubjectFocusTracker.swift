@@ -53,7 +53,7 @@ final class SubjectFocusTracker {
             }
             guard let request else { return nil }
             try sequence.perform([request], on: image)
-            guard let observation = request.results?.first,
+            guard let observation = request.results?.first as? VNDetectedObjectObservation,
                   Self.isUsable(rectangle: observation.boundingBox, confidence: observation.confidence) else {
                 lost = true
                 self.request = nil

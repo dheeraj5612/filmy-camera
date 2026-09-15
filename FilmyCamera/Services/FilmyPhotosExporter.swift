@@ -158,7 +158,7 @@ enum FilmyPhotosExporter {
                           let rendered = ProPhotoOutput.context.createCGImage(
                             filtered, from: filtered.extent, format: .RGBA8, colorSpace: colorSpace
                           ) else {
-                        error.pointee = ExportError.writeFailed as NSError
+                        error?.pointee = ExportError.writeFailed as NSError
                         return nil
                     }
                     return CIImage(cgImage: rendered)
