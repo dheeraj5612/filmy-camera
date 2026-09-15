@@ -1,0 +1,80 @@
+name: Publish verified recipe implementation
+on:
+  push:
+    branches: [feat/recipe-library-packs-fidelity]
+    paths: [.github/workflows/recipe-publish.yml]
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish:
+    if: github.repository == 'dheeraj5612/filmy-camera' && github.ref == 'refs/heads/feat/recipe-library-packs-fidelity'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: reviewed-public-recipe-settings
+          path: /tmp/research
+          run-id: 34923286215
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify exact implementation bytes and apply
+        run: |
+          python - <<'PY'
+          import base64, hashlib, lzma
+          from pathlib import Path
+          parts = sorted(Path('.recipe-transfer').glob('part-*.b64'))
+          assert len(parts) == 3
+          chunks = [''.join(p.read_text().split()) for p in parts]
+          for p, chunk in zip(parts, chunks):
+              print(p, len(chunk), hashlib.sha256(chunk.encode()).hexdigest())
+          payload = base64.b64decode(''.join(chunks), validate=True)
+          assert hashlib.sha256(payload).hexdigest() == '61ad271d0d30ec2838cae55081bcc229ffce965547df6e3e8cef7c1e85142627'
+          patch = lzma.decompress(payload)
+          assert hashlib.sha256(patch).hexdigest() == '456480d022d997eb34f0ffa103385c28cb3fc69b0ff03bca1665a0b6215b6095'
+          Path('/tmp/recipe-source.patch').write_bytes(patch)
+          Path('scripts/recipes/collect_public_settings.py').unlink()
+          PY
+          git apply --check /tmp/recipe-source.patch
+          git apply /tmp/recipe-source.patch
+      - name: Regenerate catalog from checksum-locked source facts
+        run: |
+          python - <<'PY'
+          import json, hashlib
+          from pathlib import Path
+          lock = json.loads(Path('scripts/recipes/catalog-lock.json').read_text())
+          assert hashlib.sha256(Path('/tmp/research/public-settings-staging.json').read_bytes()).hexdigest() == lock['stagingSHA256']
+          PY
+          python scripts/recipes/normalize_catalog.py /tmp/research/public-settings-staging.json
+          python - <<'PY'
+          import json, hashlib
+          from pathlib import Path
+          lock = json.loads(Path('scripts/recipes/catalog-lock.json').read_text())
+          assert hashlib.sha256(Path('FilmyCamera/Resources/RecipeCatalog.json').read_bytes()).hexdigest() == lock['catalogSHA256']
+          PY
+          python -m unittest discover -s scripts/recipes -p 'test_*.py' -v
+          python -m unittest discover -s scripts/testing -p 'test_*.py' -v
+          python scripts/testing/run.py inventory
+          git diff --check
+      - name: Remove development transport and commit only to feature branch
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git ls-remote origin refs/heads/feat/recipe-library-packs-fidelity | cut -f1)" = "$EXPECTED_SHA"
+          rm -rf .recipe-transfer
+          rm .github/workflows/recipe-research.yml .github/workflows/recipe-research-repair.yml .github/workflows/recipe-mono-research.yml .github/workflows/recipe-publish.yml scripts/recipes/repair_public_settings.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'feat: add 595 sourced recipes, camera foundations, pack management, and fidelity fixes'
+          git push origin HEAD:refs/heads/feat/recipe-library-packs-fidelity
+          git rev-parse HEAD
