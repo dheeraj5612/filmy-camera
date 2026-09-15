@@ -502,6 +502,93 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
     }
 
+    // The drive bridge borrows this service's queue, device and output. It
+    // never creates another AVCaptureSession or changes inputs during a lease.
+    private lazy var fujiCapture = FujiCaptureBridge(queue: sessionQueue)
+
+    func fujiSnapshot() async throws -> FujiDeviceSnapshot {
+        try await withCheckedThrowingContinuation { continuation in
+            sessionQueue.async { [self] in
+                guard session.isRunning, let device = activeDevice() else {
+                    continuation.resume(throwing: FujiCaptureError.unavailable("Start the camera to check lens capabilities."))
+                    return
+                }
+                do { continuation.resume(returning: try FujiCaptureBridge.snapshot(device: device, output: photoOutput)) }
+                catch { continuation.resume(throwing: error) }
+            }
+        }
+    }
+
+    func beginFujiCapture(settings: FujiShootingSettings) async throws -> FujiCaptureLease {
+        try await withCheckedThrowingContinuation { continuation in
+            sessionQueue.async { [self] in
+                guard session.isRunning, let device = activeDevice() else {
+                    continuation.resume(throwing: FujiCaptureError.unavailable("Start the camera before shooting."))
+                    return
+                }
+                guard pendingPhotoCompletion == nil, pendingManualControlsPhotoCompletion == nil, !isApplyingManualControls else {
+                    continuation.resume(throwing: FujiCaptureError.busy)
+                    return
+                }
+                do {
+                    let flash = AVCaptureDevice.FlashMode(rawValue: selectedFlashMode.rawValue) ?? .off
+                    continuation.resume(returning: try fujiCapture.begin(device: device, output: photoOutput,
+                                                                          settings: settings, requestedFlash: flash))
+                } catch { continuation.resume(throwing: error) }
+            }
+        }
+    }
+
+    func captureFujiFrame(lease: UUID, step: FujiCaptureStep) async throws -> FujiSourceFrame {
+        try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            return try await withCheckedThrowingContinuation { continuation in
+                sessionQueue.async { [self] in fujiCapture.capture(leaseID: lease, step: step, continuation: continuation) }
+            }
+        } onCancel: { self.cancelFujiCapture(lease: lease) }
+    }
+
+    func cancelFujiCapture(lease: UUID) {
+        sessionQueue.async { [self] in fujiCapture.abort(leaseID: lease) }
+    }
+
+    func endFujiCapture(lease: UUID) async {
+        await withCheckedContinuation { continuation in
+            sessionQueue.async { [self] in fujiCapture.end(leaseID: lease, continuation: continuation) }
+        }
+        sessionQueue.async { [self] in
+            if let device = activeDevice() { publishManualControlsOnQueue(for: device) }
+        }
+    }
+
+    func updateFujiAutoISO(_ profile: FujiAutoISOProfile) async -> String? {
+        await withCheckedContinuation { continuation in
+            sessionQueue.async { [self] in
+                guard session.isRunning, !fujiCapture.isBusy, !isApplyingManualControls,
+                      pendingPhotoCompletion == nil, let device = activeDevice() else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                guard device.isExposureModeSupported(.custom),
+                      let snapshot = try? FujiCaptureBridge.snapshot(device: device, output: photoOutput) else {
+                    continuation.resume(returning: "Auto ISO requires a physical lens with manual exposure support.")
+                    return
+                }
+                let offset = Double(device.exposureTargetOffset)
+                guard offset.isFinite else { continuation.resume(returning: nil); return }
+                // Positive offset means the current image is over target.
+                // Bounded feedback steps avoid a sudden full-range exposure jump.
+                let product = snapshot.iso * snapshot.durationSeconds * pow(2, -min(max(offset, -1), 1))
+                let exposure = FujiAutoISOPlanner.resolve(meteredProduct: product, profile: profile,
+                    isoBounds: snapshot.isoBounds, durationBounds: snapshot.durationBounds)
+                if device.exposureMode != .custom || abs(log2(exposure.iso / snapshot.iso)) > 0.08 || abs(log2(exposure.seconds / snapshot.durationSeconds)) > 0.08 {
+                    setManualExposureOnQueue(iso: Float(exposure.iso), durationSeconds: exposure.seconds)
+                }
+                continuation.resume(returning: exposure.isLimited ? "Auto ISO reached this lens's exposure limits." : nil)
+            }
+        }
+    }
+
     public override init() {
         self.session = AVCaptureSession()
         self.previewGrainSeed = UInt32.random(in: UInt32.min...UInt32.max)
@@ -615,6 +702,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func stopOnQueue() {
+        fujiCapture.sessionStopped()
         wantsToRun = false
         recoveryAttempt = 0
         manualExposureGeneration &+= 1
@@ -921,6 +1009,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         let point = clampedNormalizedPoint(normalizedPoint)
 
         sessionQueue.async { [weak self] in
+            guard self?.fujiCapture.isBusy == false else { return }
             guard let self, let device = self.activeDevice() else { return }
             do {
                 try device.lockForConfiguration()
@@ -951,6 +1040,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     public func toggleFocusExposureLock(at normalizedPoint: CGPoint) {
         let point = clampedNormalizedPoint(normalizedPoint)
         sessionQueue.async { [weak self] in
+            guard self?.fujiCapture.isBusy == false else { return }
             guard let self, let device = self.activeDevice() else { return }
 
             do {
@@ -1025,6 +1115,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// the public UI uses a conservative +/-2 EV contract for consistency.
     public func setExposureBias(_ bias: Float) {
         sessionQueue.async { [weak self] in
+            guard self?.fujiCapture.isBusy == false else { return }
             guard let self else { return }
             guard let device = self.activeDevice() else {
                 self.publishStatus("Exposure control is available on a physical device.")
@@ -1165,6 +1256,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func setManualExposureOnQueue(iso: Float, durationSeconds: Double) {
+        guard !fujiCapture.isBusy else { return }
         guard let device = activeDevice() else {
             publishStatus("Manual exposure is available on a physical camera.")
             return
@@ -1251,6 +1343,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func setAutoExposureOnQueue() {
+        guard !fujiCapture.isBusy else { return }
         guard let device = activeDevice() else {
             desiredManualExposure = .auto
             publishManualControlsUnavailable()
@@ -1302,6 +1395,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         tint: Float,
         preferredGains: AVCaptureDevice.WhiteBalanceGains? = nil
     ) {
+        guard !fujiCapture.isBusy else { return }
         guard let device = activeDevice() else {
             publishStatus("Manual white balance is available on a physical camera.")
             return
@@ -1387,6 +1481,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func setAutoWhiteBalanceOnQueue() {
+        guard !fujiCapture.isBusy else { return }
         guard let device = activeDevice() else {
             desiredManualWhiteBalance = .auto
             publishManualControlsUnavailable()
@@ -1420,6 +1515,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func setManualFocusOnQueue(lensPosition: Float) {
+        guard !fujiCapture.isBusy else { return }
         guard let device = activeDevice() else {
             publishStatus("Manual focus is available on a physical camera.")
             return
@@ -1469,6 +1565,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func setAutoFocusOnQueue() {
+        guard !fujiCapture.isBusy else { return }
         guard let device = activeDevice() else {
             desiredManualFocus = .auto
             publishManualControlsUnavailable()
@@ -1513,6 +1610,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func resetManualControlsToAutoOnQueue() {
+        guard !fujiCapture.isBusy else { return }
         guard let device = activeDevice() else {
             desiredManualExposure = .auto
             desiredManualWhiteBalance = .auto
@@ -2022,6 +2120,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func setManualControlLensOnQueue(id: String) {
+        guard !fujiCapture.isBusy else { return }
         guard let active = activeDevice() else {
             publishStatus("Manual lens selection is available on a physical device.")
             return
@@ -2364,6 +2463,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func resetSessionGraphOnQueue(pendingCaptureStatus: String) {
+        fujiCapture.sessionStopped()
         cancelPendingPhotoOnQueue(status: pendingCaptureStatus)
         activeConstituentObservation?.invalidate()
         activeConstituentObservation = nil
@@ -2578,6 +2678,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func handleSubjectAreaChangeOnQueue(deviceID: String, observedAt: UInt64) {
+        guard !fujiCapture.isBusy else { return }
         guard wantsToRun, isConfigured, session.isRunning, !session.isInterrupted,
               !focusExposureLocked,
               observedAt > latestFocusPointUpdateUptime,
@@ -2701,6 +2802,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func setCameraPositionOnQueue(_ position: CameraPosition) {
+        guard !fujiCapture.isBusy else { return }
         guard let desiredDevice = cameraDeviceForPositionOnQueue(position) else {
             publishStatus("Camera switching is available on a physical device.")
             publishAvailableCameraPositions([])
@@ -2741,6 +2843,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func setLensOnQueue(id: String) {
+        guard !fujiCapture.isBusy else { return }
         guard let option = currentLensOptions.first(where: { $0.id == id }) else {
             publishStatus("That lens is unavailable on this camera.")
             return
@@ -2793,6 +2896,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
     @discardableResult
     private func setZoomOnQueue(_ factor: CGFloat) -> Bool {
+        guard !fujiCapture.isBusy else { return false }
         guard let device = activeDevice() else { return false }
         let hardwareFactor = hardwareZoomFactorOnQueue(
             for: device,
@@ -2803,6 +2907,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
     @discardableResult
     private func setHardwareZoomOnQueue(_ factor: CGFloat) -> Bool {
+        guard !fujiCapture.isBusy else { return false }
         guard let device = activeDevice() else { return false }
         let lowerBound = device.minAvailableVideoZoomFactor
         let userFacingPerHardwareFactor = userFacingZoomFactorOnQueue(
@@ -3543,6 +3648,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func setFlashModeOnQueue(_ mode: FlashMode) {
+        guard !fujiCapture.isBusy else { return }
         if isManualExposureActiveOrRequested {
             guard mode == .off else {
                 publishStatus("Flash requires Auto exposure.")
@@ -3610,6 +3716,10 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func capturePhotoOnQueue(completion: @escaping PhotoCompletion) {
+        guard !fujiCapture.isBusy else {
+            publishPhoto(nil, completion: completion)
+            return
+        }
         guard isConfigured, session.isRunning else {
             publishStatus("Start the camera before capturing.")
             publishPhoto(nil, completion: completion)
@@ -3704,6 +3814,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func cancelPendingPhotoOnQueue(status: String) {
+        fujiCapture.sessionStopped()
         let completion = pendingPhotoCompletion ?? pendingManualControlsPhotoCompletion
         guard let completion else { return }
         pendingPhotoCompletion = nil

@@ -151,6 +151,8 @@ struct CameraScreen: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @AppStorage("showGrid") private var showGrid = true
+    @StateObject private var fuji = FujiShootingController()
+    @State private var isShowingFuji = false
     @StateObject private var countdown = CaptureCountdown()
     @StateObject private var assists = CompositionAssistStore()
     @State private var isShowingCaptureSetup = false
@@ -314,6 +316,25 @@ struct CameraScreen: View {
             assists.stop()
             updateCompositionAssists()
         }
+        .sheet(isPresented: $isShowingFuji) {
+            FujiShootingPanel(shooting: fuji, camera: camera, viewModel: viewModel, photoLibrary: photoLibrary)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
+            fuji.clearPreview()
+        }
+        .onChange(of: camera.manualControls.activeDeviceID) { _, _ in Task { await fuji.refreshCapabilities() } }
+        .onChange(of: camera.isRunning) { _, running in
+            if running { Task { await fuji.refreshCapabilities() } } else { fuji.clearPreview() }
+        }
+        .onChange(of: camera.previewRotationAngle) { _, _ in fuji.clearPreview() }
+        .onChange(of: isShowingManualControls) { _, showing in
+            if showing { fuji.settings.autoISOIndex = nil }
+        }
+        .alert("Shooting system", isPresented: Binding(get: { fuji.errorMessage != nil && !isShowingFuji },
+                                                     set: { if !$0 { fuji.errorMessage = nil } })) {
+            Button("OK") { fuji.errorMessage = nil }
+        } message: { Text(fuji.errorMessage ?? "") }
+        .overlay(alignment: .bottom) { fujiCaptureFeedback }
         .sheet(isPresented: $isShowingCaptureSetup) {
             CaptureSetupView()
                 .presentationDetents([.large])
@@ -366,6 +387,7 @@ struct CameraScreen: View {
                 .presentationBackground(FilmyTheme.background)
         }
         .onAppear {
+            fuji.attach(camera: camera, viewModel: viewModel)
             updateCameraActivity()
             updateIdleTimer()
             // Keeps the Roll thumbnail in the capture row current without
@@ -376,12 +398,14 @@ struct CameraScreen: View {
         // instant; the scene phase handler still stops it when the app leaves
         // the foreground.
         .onDisappear {
+            fuji.detach()
             countdown.cancel()
             assists.stop()
             camera.stop(after: CameraActivityPolicy.inactiveGracePeriod)
             UIApplication.shared.isIdleTimerDisabled = false
         }
         .onChange(of: scenePhase) { _, _ in
+            if scenePhase == .active { fuji.attach(camera: camera, viewModel: viewModel) } else { fuji.detach() }
             updateCameraActivity()
             updateIdleTimer()
         }
@@ -513,7 +537,7 @@ struct CameraScreen: View {
     }
 
     private var isChromeDisabled: Bool {
-        viewModel.isCapturing || viewModel.isSaving || viewModel.hasPendingCapture || isImporting
+        viewModel.isCapturing || viewModel.isSaving || viewModel.hasPendingCapture || isImporting || fuji.locksSettings
     }
 
     private var portraitControlClearance: CGFloat {
@@ -535,6 +559,7 @@ struct CameraScreen: View {
     private func viewfinder(size: CGSize, overlaysTopBar: Bool) -> some View {
         ZStack(alignment: .top) {
             previewSurface
+            if fuji.settings.enabled { FujiViewfinderOverlay(shooting: fuji) }
 
             // The session is intentionally stopped while a frame is under
             // review. Keep the paused frame quiet behind the full-screen
@@ -627,7 +652,8 @@ struct CameraScreen: View {
             ZStack {
                 // Keep the renderer mounted across camera start/stop so its
                 // frame handler and render-status probe retain their lifetime.
-                FilteredCameraPreview(camera: camera, recipe: viewModel.selectedRecipe)
+                FilteredCameraPreview(camera: camera, recipe: viewModel.selectedRecipe,
+                                  naturalLiveView: fuji.settings.previewIsNatural, cropFactor: fuji.settings.cropFactor)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .allowsHitTesting(false)
 
@@ -674,7 +700,7 @@ struct CameraScreen: View {
             .simultaneousGesture(
                 MagnificationGesture()
                     .onChanged { scale in
-                        guard canTriggerShutter else { return }
+                        guard canTriggerShutter, fuji.settings.cropFactor == 1 else { return }
                         if previewDragMaySelectLook != nil { previewDragMaySelectLook = false }
                         if !isPinching {
                             isPinching = true
@@ -811,6 +837,16 @@ struct CameraScreen: View {
 
                 Spacer(minLength: 0)
 
+                Button {
+                    closeControlDrawers()
+                    isShowingFuji = true
+                } label: {
+                    Text("Q").font(.system(size: 16, weight: .bold, design: .monospaced))
+                        .frame(width: cameraHitTarget, height: cameraHitTarget)
+                        .background { ChromeShapeBackground(shape: Circle()) }
+                }
+                .accessibilityLabel("Shooting Q menu")
+                .accessibilityIdentifier("fuji-q-menu")
                 captureSetupButton
                 settingsButton
 
@@ -1538,12 +1574,39 @@ struct CameraScreen: View {
         guard canTriggerShutter else { return }
         closeControlDrawers()
         if captureDelay == .off {
-            viewModel.capture(camera: camera, photoLibrary: photoLibrary)
+            performCapture()
         } else {
             countdown.start(seconds: captureDelay.rawValue) {
                 guard canTriggerShutter else { return }
-                viewModel.capture(camera: camera, photoLibrary: photoLibrary)
+                performCapture()
             }
+        }
+    }
+
+    private func performCapture() {
+        if fuji.settings.enabled {
+            let viewport = camera.previewViewportSize
+            let aspect = viewport.width > 0 && viewport.height > 0 ? Double(viewport.width / viewport.height) : nil
+            fuji.capture(camera: camera, viewModel: viewModel, photoLibrary: photoLibrary, aspectRatio: aspect)
+            blinkShutter()
+        } else { viewModel.capture(camera: camera, photoLibrary: photoLibrary) }
+    }
+
+    @ViewBuilder private var fujiCaptureFeedback: some View {
+        if fuji.settings.enabled && (fuji.isBusy || fuji.multipleCount > 0) {
+            VStack(spacing: 10) {
+                Text(fuji.status).font(.subheadline.weight(.semibold)).multilineTextAlignment(.center)
+                if fuji.isBusy { ProgressView() }
+                HStack {
+                    if !fuji.isBusy && fuji.multipleCount > 0 {
+                        Button("Next exposure", action: capture).frame(minHeight: 44)
+                        Button("Retake last") { fuji.retakeMultiple() }.frame(minHeight: 44)
+                    }
+                    Button("Cancel", role: .cancel) { fuji.cancel() }.frame(minHeight: 44)
+                }
+            }
+            .padding(16).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+            .padding(16).accessibilityIdentifier("fuji-capture-progress")
         }
     }
 
@@ -1672,7 +1735,10 @@ struct CameraScreen: View {
         }
 
         return CameraService.captureDevicePoint(
-            fromRotatedPreviewPoint: rotatedPreviewPoint,
+            fromRotatedPreviewPoint: CGPoint(
+                x: 0.5 + (rotatedPreviewPoint.x - 0.5) / fuji.settings.cropFactor,
+                y: 0.5 + (rotatedPreviewPoint.y - 0.5) / fuji.settings.cropFactor
+            ),
             rotationAngle: camera.previewRotationAngle,
             mirrored: camera.previewMirrored
         )
@@ -1785,10 +1851,10 @@ extension CameraScreen {
     private var isCameraVisibleForAssists: Bool {
         scenePhase == .active && isCameraTabActive && camera.isRunning && camera.availability == .running && !isReviewing && !isImporting
             && !viewModel.isCapturing && recipeForDetail == nil && !isShowingLookLibrary
-            && !isShowingManualControls && !isShowingCaptureSetup
+            && !isShowingManualControls && !isShowingCaptureSetup && !isShowingFuji
     }
     private var canTriggerShutter: Bool {
-        isCameraVisibleForAssists && viewModel.reviewImage == nil && !viewModel.isSaving && !camera.manualControls.isApplying && !countdown.state.isActive && framingIsReady
+        isCameraVisibleForAssists && !fuji.isBusy && viewModel.reviewImage == nil && !viewModel.isSaving && !camera.manualControls.isApplying && !countdown.state.isActive && framingIsReady
     }
     private var framingIsReady: Bool {
         guard captureAspect != .viewfinder else { return true }
