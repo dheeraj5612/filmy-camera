@@ -19,6 +19,7 @@ final class SubjectFocusTracker {
     private var lost = false
 
     func select(topLeftPoint: CGPoint) {
+        guard topLeftPoint.x.isFinite, topLeftPoint.y.isFinite else { reset(); return }
         seedPoint = CGPoint(x: min(max(topLeftPoint.x, 0), 1), y: 1 - min(max(topLeftPoint.y, 0), 1))
         request = nil
         sequence = VNSequenceRequestHandler()

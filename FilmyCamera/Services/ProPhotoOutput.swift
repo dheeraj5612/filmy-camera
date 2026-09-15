@@ -83,9 +83,12 @@ enum ProPhotoOutput {
             sourcePixels: Double(input.extent.width * input.extent.height), resolution: resolution
         )
         let sized = scale < 1 ? input.applyingFilter("CILanczosScaleTransform", parameters: [kCIInputScaleKey: scale, kCIInputAspectRatioKey: 1]) : input
-        let crop = viewportSize.width > 0 && viewportSize.height > 0
-            ? CameraFrameLayout.aspectFillCrop(sourceExtent: sized.extent, targetSize: viewportSize).integral.intersection(sized.extent)
-            : sized.extent.integral
+        let proposed = viewportSize.width > 0 && viewportSize.height > 0
+            ? CameraFrameLayout.aspectFillCrop(sourceExtent: sized.extent, targetSize: viewportSize).intersection(sized.extent)
+            : sized.extent
+        let crop = CGRect(x: ceil(proposed.minX), y: ceil(proposed.minY),
+                          width: max(1, floor(proposed.maxX) - ceil(proposed.minX)),
+                          height: max(1, floor(proposed.maxY) - ceil(proposed.minY)))
         return sized.cropped(to: crop).transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
     }
 }

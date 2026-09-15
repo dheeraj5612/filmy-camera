@@ -98,7 +98,7 @@ struct FilmyPhotoEditorView: View {
                 imagePreview
                 if let document, let current = document.currentRevision {
                     Text(document.capturedAt, format: .dateTime.month().day().year().hour().minute()).foregroundStyle(.secondary)
-                    Text("\(current.output.format.title) · \(current.output.resolution.title) · \(current.output.dynamicRange == .hdr ? "HDR PQ" : "SDR")")
+                    Text("\(current.output.format.title) · \(current.output.resolution.title) requested · \(current.output.dynamicRange == .hdr ? "HDR PQ" : "SDR")")
                         .font(.caption).monospacedDigit()
                     Toggle("Compare original", isOn: $showingOriginal).accessibilityIdentifier("filmy-compare-original")
                     if let recipe {
@@ -119,7 +119,7 @@ struct FilmyPhotoEditorView: View {
                         Button("Save version") { Task { await develop(save: true) } }.buttonStyle(.borderedProminent)
                             .accessibilityIdentifier("filmy-save-version")
                     }
-                    Text("Preview is limited to 1800 pixels. Save version renders from the retained original at the selected output resolution. Every save creates a new version.")
+                    Text("Editing previews are SDR and limited to 1800 pixels. HDR is preserved in the saved HEIF when selected. Save version renders from the retained original at the selected output resolution. Every save creates a new version.")
                         .font(.caption).foregroundStyle(.secondary)
                     revisionPicker(document)
                     exportControls(document)
@@ -272,8 +272,11 @@ struct FilmyPhotoEditorView: View {
         busy = true
         defer { busy = false }
         do {
-            _ = try await FilmyPhotosExporter.save(documentID, asNewCopy: asNewCopy)
-            photoLibrary.refresh()
+            let identifier = try await FilmyPhotosExporter.save(documentID, asNewCopy: asNewCopy)
+            if let document, let revision = document.currentRevision {
+                await photoLibrary.registerDocumentExport(identifier, recipe: revision.recipe,
+                                                          capturedAt: document.capturedAt, thumbnail: preview)
+            }
             await load()
             message = "Saved to Photos with original resources and reversible Filmy edits."
         } catch { message = error.localizedDescription }

@@ -987,6 +987,19 @@ final class PhotoLibraryService: ObservableObject {
         }
     }
 
+    func registerDocumentExport(_ identifier: String, recipe: FilmRecipe, capturedAt: Date, thumbnail: UIImage?) async {
+        if let thumbnail {
+            await rememberSavedAsset(identifier, metadata: SavedFrameMetadata(recipe: recipe, capturedAt: capturedAt),
+                                     imageData: nil, image: thumbnail)
+        } else {
+            savedAssetIdentifiers = PhotoLibraryAssetOwnership.adding(identifier, to: savedAssetIdentifiers)
+            metadataByAssetIdentifier[identifier] = SavedFrameMetadata(recipe: recipe, capturedAt: capturedAt)
+            persistMetadata()
+        }
+        refreshAuthorizationStatuses()
+        refresh()
+    }
+
     private func rememberSavedAsset(
         _ identifier: String,
         metadata: SavedFrameMetadata,

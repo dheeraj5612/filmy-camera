@@ -21,7 +21,7 @@ struct ProCaptureControlsView: View {
             }
             .pickerStyle(.segmented)
             .accessibilityIdentifier("pro-resolution")
-            Text("12 and 48 MP use supported sensor dimensions. 24 MP is developed from a 48 MP original, not Apple's deferred 24 MP fusion. Cropping reduces the final pixel count.")
+            Text("12 and 48 MP use supported sensor dimensions. 24 MP is developed from a 48 MP original, not Apple's deferred 24 MP fusion. These are requested resolutions; the camera can deliver fewer pixels. Cropping reduces the final pixel count. Manual and priority exposure use 12 MP.")
                 .font(.caption).foregroundStyle(.secondary)
             Picker("File format", selection: binding(\.format)) {
                 ForEach(ProCaptureSettings.Format.allCases) { value in
@@ -55,6 +55,7 @@ struct ProCaptureControlsView: View {
                 Text(reason).font(.caption).foregroundStyle(.orange).accessibilityIdentifier("pro-capture-unavailable")
             }
 
+            Text(camera.statusMessage).font(.caption).foregroundStyle(.secondary)
             Divider()
             Text("Exposure program").font(.headline)
             Picker("Program", selection: Binding(get: { camera.exposureProgram }, set: { apply($0) })) {

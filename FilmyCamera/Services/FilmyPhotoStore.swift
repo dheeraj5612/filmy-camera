@@ -43,7 +43,8 @@ actor FilmyPhotoStore {
     ) throws -> FilmyPhotoDocument {
         guard !processed.isEmpty, let originalExtension = Self.imageExtension(processed),
               !settings.format.retainsRAW || raw?.isEmpty == false,
-              !settings.livePhoto || liveMovieURL != nil else { throw StoreError.emptyOriginal }
+              !settings.livePhoto || liveMovieURL != nil,
+              raw == nil || raw?.isEmpty == false, settings.incompatibility == nil else { throw StoreError.emptyOriginal }
         try makeDirectory(root)
         let id = UUID()
         let stage = root.appendingPathComponent(".\(id.uuidString).pending", isDirectory: true)
@@ -114,17 +115,24 @@ actor FilmyPhotoStore {
     func originalURL(_ id: UUID, raw: Bool = false) throws -> URL {
         let document = try load(id)
         guard let name = document.originalFilename, !raw || document.hasRAW else { throw StoreError.missingOriginal }
-        return directory(id).appendingPathComponent(raw ? "original.dng" : name)
+        let url = directory(id).appendingPathComponent(raw ? "original.dng" : name)
+        guard files.fileExists(atPath: url.path) else { throw StoreError.missingOriginal }
+        return url
     }
 
     func liveMovieURL(_ id: UUID) throws -> URL? {
         let document = try load(id)
-        return document.hasLivePhoto ? directory(id).appendingPathComponent("original.mov") : nil
+        guard document.hasLivePhoto else { return nil }
+        let url = directory(id).appendingPathComponent("original.mov")
+        guard files.fileExists(atPath: url.path) else { throw StoreError.missingOriginal }
+        return url
     }
 
     func renditionURL(_ id: UUID, revisionID: UUID? = nil) throws -> URL {
         let document = try load(id)
-        let revision = revisionID.flatMap { wanted in document.revisions.first { $0.id == wanted } } ?? document.currentRevision
+        let revision: FilmyPhotoRevision?
+        if let revisionID { revision = document.revisions.first { $0.id == revisionID } }
+        else { revision = document.currentRevision }
         guard let name = revision?.renditionFilename else { throw StoreError.missingRendition }
         let url = directory(id).appendingPathComponent(name)
         guard files.fileExists(atPath: url.path) else { throw StoreError.missingRendition }

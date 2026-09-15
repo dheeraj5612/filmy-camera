@@ -434,6 +434,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private var captureCapabilities = ProCaptureCapabilities()
     private var photoAssembly: PhotoCaptureAssembly?
     private var pendingMovieDestination: URL?
+    private var captureSettingsGeneration: UInt64 = 0
     private var priorityExposureRequest: NativeCameraControls.ExposureRequest?
     private var audioInput: AVCaptureDeviceInput?
     private var trackingRequested = false
@@ -1206,8 +1207,6 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func setManualExposureOnQueue(iso: Float, durationSeconds: Double) {
-        priorityExposureRequest = nil
-        publishOnMain { [weak self] in self?.exposureProgram = .manual }
         guard let device = activeDevice() else {
             publishStatus("Manual exposure is available on a physical camera.")
             return
@@ -1249,6 +1248,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             let requestGeneration = manualExposureGeneration
             let deviceGeneration = manualDeviceGeneration
             let deviceID = device.uniqueID
+            priorityExposureRequest = nil
+            publishOnMain { [weak self] in self?.exposureProgram = .manual }
             desiredManualExposure = .manual(
                 iso: request.iso,
                 durationSeconds: request.durationSeconds
@@ -1294,10 +1295,10 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func setAutoExposureOnQueue() {
-        priorityExposureRequest = nil
-        publishOnMain { [weak self] in self?.exposureProgram = .automatic }
         guard let device = activeDevice() else {
             desiredManualExposure = .auto
+            priorityExposureRequest = nil
+            publishOnMain { [weak self] in self?.exposureProgram = .automatic }
             publishManualControlsUnavailable()
             return
         }
@@ -1313,6 +1314,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             }
             manualExposureGeneration &+= 1
             isApplyingManualExposure = false
+            priorityExposureRequest = nil
+            publishOnMain { [weak self] in self?.exposureProgram = .automatic }
             desiredManualExposure = .auto
             let center = CGPoint(x: 0.5, y: 0.5)
             if device.isExposurePointOfInterestSupported {
@@ -2097,7 +2100,13 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
     private func reapplyDesiredManualControlsOnQueue(for device: AVCaptureDevice) {
         if let request = priorityExposureRequest {
-            applyPriorityExposureOnQueue(request)
+            refreshProCapabilitiesOnQueue(for: device)
+            if captureCapabilities.exposurePrograms.contains(request.program) {
+                applyPriorityExposureOnQueue(request)
+            } else {
+                setAutoExposureOnQueue()
+                publishStatus("The previous priority program is unavailable on this lens. Auto exposure restored.")
+            }
         } else {
             switch desiredManualExposure {
             case .auto:
@@ -3743,6 +3752,11 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         case .on:
             settings.flashMode = .on
         }
+        guard device.exposureMode != .custom || capturePreferences.resolution == .mp12 else {
+            publishStatus("Manual and priority exposure use 12 MP to preserve the selected controls. Choose 12 MP or Auto exposure.")
+            publishPhoto(nil, completion: completion)
+            return
+        }
         settings.photoQualityPrioritization = Self.photoQualityPrioritization(
             manualExposureEnabled: device.exposureMode == .custom
         )
@@ -4143,6 +4157,8 @@ extension CameraService {
     public func setProCaptureSettings(_ settings: ProCaptureSettings) {
         sessionQueue.async { [weak self] in
             guard let self, self.pendingPhotoCompletion == nil, self.pendingManualControlsPhotoCompletion == nil else { return }
+            self.captureSettingsGeneration &+= 1
+            let generation = self.captureSettingsGeneration
             if let reason = settings.incompatibility { self.publishStatus(reason); return }
             if settings.livePhoto && settings.livePhotoAudio,
                AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
@@ -4150,7 +4166,8 @@ extension CameraService {
                 // opening Pro controls or merely starting the camera.
                 AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
                     self?.sessionQueue.async { [weak self] in
-                        guard let self, self.pendingPhotoCompletion == nil else { return }
+                        guard let self, self.pendingPhotoCompletion == nil, self.pendingManualControlsPhotoCompletion == nil,
+                              self.captureSettingsGeneration == generation else { return }
                         var resolved = settings
                         resolved.livePhotoAudio = granted
                         self.applyCapturePreferencesOnQueue(resolved)
@@ -4177,8 +4194,9 @@ extension CameraService {
             session.commitConfiguration()
             refreshProCapabilitiesOnQueue(for: device)
         }
-        if let data = try? JSONEncoder().encode(settings) { UserDefaults.standard.set(data, forKey: "proCaptureSettings.v1") }
-        publishOnMain { [weak self] in self?.proCaptureSettings = settings }
+        let applied = capturePreferences
+        if let data = try? JSONEncoder().encode(applied) { UserDefaults.standard.set(data, forKey: "proCaptureSettings.v1") }
+        publishOnMain { [weak self] in self?.proCaptureSettings = applied }
     }
 
     private func configureProColorOnQueue(for device: AVCaptureDevice) {
@@ -4224,8 +4242,14 @@ extension CameraService {
             if let audioInput { session.removeInput(audioInput); self.audioInput = nil }
             return
         }
-        guard audioInput == nil, let microphone = AVCaptureDevice.default(for: .audio),
-              let input = try? AVCaptureDeviceInput(device: microphone), session.canAddInput(input) else { return }
+        guard audioInput == nil else { return }
+        guard let microphone = AVCaptureDevice.default(for: .audio),
+              let input = try? AVCaptureDeviceInput(device: microphone), session.canAddInput(input) else {
+            capturePreferences.livePhotoAudio = false
+            publishOnMain { [weak self] in self?.proCaptureSettings.livePhotoAudio = false }
+            publishStatus("The microphone could not be added. Live Photos will be silent.")
+            return
+        }
         session.addInput(input)
         audioInput = input
     }
@@ -4253,7 +4277,7 @@ extension CameraService {
         guard let device = activeDevice(), request.iso.isFinite, request.durationSeconds.isFinite, request.aperture.isFinite else { return }
         refreshProCapabilitiesOnQueue(for: device)
         guard captureCapabilities.exposurePrograms.contains(request.program) else {
-            publishStatus("This priority mode needs a compatible lens and an iOS 27 build. Auto exposure is unchanged.")
+            publishStatus("This priority mode needs a compatible lens and an iOS 27 build. Exposure is unchanged.")
             return
         }
         do {
@@ -4398,6 +4422,7 @@ extension CameraService {
         }
         if videoLoupeEnabled {
             let crop = Self.loupeCrop(extent: image.extent, topLeftPoint: videoFocusPoint)
+            guard !crop.isEmpty else { return }
             let cropped = image.cropped(to: crop).transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
             let scale = min(1, 320 / max(crop.width, crop.height))
             let loupe = cropped.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
@@ -4411,7 +4436,8 @@ extension CameraService {
 
     static func loupeCrop(extent: CGRect, topLeftPoint: CGPoint) -> CGRect {
         let size = min(extent.width, extent.height) / 4
-        guard size.isFinite, size > 0 else { return .zero }
+        guard size.isFinite, size > 0, !extent.isInfinite, !extent.isNull,
+              topLeftPoint.x.isFinite, topLeftPoint.y.isFinite else { return .zero }
         let x = extent.minX + min(max(topLeftPoint.x, 0), 1) * extent.width
         let y = extent.minY + (1 - min(max(topLeftPoint.y, 0), 1)) * extent.height
         return CGRect(x: min(max(x - size / 2, extent.minX), extent.maxX - size),

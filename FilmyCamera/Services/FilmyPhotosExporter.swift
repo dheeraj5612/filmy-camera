@@ -1,6 +1,7 @@
 @preconcurrency import Photos
 import CoreImage
 import Foundation
+import ImageIO
 import UniformTypeIdentifiers
 
 /// PhotoKit owns the rendered Live Photo pairing metadata. Never combine a
@@ -106,12 +107,15 @@ enum FilmyPhotosExporter {
     private static func update(
         _ asset: PHAsset, document: FilmyPhotoDocument, rendition: URL, adjustment: PHAdjustmentData
     ) async throws {
+        let externalAdjustment = Box(false)
         let options = PHContentEditingInputRequestOptions()
         options.isNetworkAccessAllowed = true
         // Returning true for Filmy adjustments asks Photos for the original,
         // not the previous baked-in look. A version is never graded twice.
         options.canHandleAdjustmentData = { data in
-            data.formatIdentifier == adjustmentIdentifier && data.formatVersion == "1"
+            let recognized = data.formatIdentifier == adjustmentIdentifier && data.formatVersion == "1"
+            if !recognized { externalAdjustment.set(true) }
+            return recognized
         }
         let input: PHContentEditingInput = try await withCheckedThrowingContinuation { continuation in
             asset.requestContentEditingInput(with: options) { input, _ in
@@ -119,6 +123,7 @@ enum FilmyPhotosExporter {
                 else { continuation.resume(throwing: ExportError.writeFailed) }
             }
         }
+        if externalAdjustment.get() { throw ExportError.externalEdit }
         if let data = input.adjustmentData, data.formatIdentifier != adjustmentIdentifier {
             throw ExportError.externalEdit
         }
