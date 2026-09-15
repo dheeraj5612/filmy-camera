@@ -732,7 +732,7 @@ final class CameraServiceAvailabilityTests: XCTestCase {
                 availability: .available,
                 supportedModeRawValues: supported
             ),
-            [.off, .auto, .on]
+            [.off, .on, .auto]
         )
         XCTAssertEqual(
             CameraService.flashModesForCycle(
@@ -756,6 +756,34 @@ final class CameraServiceAvailabilityTests: XCTestCase {
                 availability: .available,
                 supportedModeRawValues: supported,
                 manualExposureActive: true
+            ),
+            .off
+        )
+
+        XCTAssertEqual(
+            CameraService.nextFlashMode(
+                current: .off,
+                availability: .available,
+                supportedModeRawValues: supported,
+                manualExposureActive: false
+            ),
+            .on
+        )
+        XCTAssertEqual(
+            CameraService.nextFlashMode(
+                current: .on,
+                availability: .available,
+                supportedModeRawValues: supported,
+                manualExposureActive: false
+            ),
+            .auto
+        )
+        XCTAssertEqual(
+            CameraService.nextFlashMode(
+                current: .auto,
+                availability: .available,
+                supportedModeRawValues: supported,
+                manualExposureActive: false
             ),
             .off
         )

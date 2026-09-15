@@ -264,6 +264,25 @@ enum PhotoOutputEncoder {
         ) else {
             return nil
         }
-        return String(data: data, encoding: .utf8)
+        guard let json = String(data: data, encoding: .utf8) else { return nil }
+        return asciiSafeJSON(json)
+    }
+
+    /// ImageIO can serialize EXIF UserComment as ASCII and replace non-ASCII
+    /// source settings with "?". JSON Unicode escapes preserve the original
+    /// text without changing the metadata schema or its existing readers.
+    static func asciiSafeJSON(_ json: String) -> String {
+        var escaped = ""
+        escaped.reserveCapacity(json.utf8.count)
+        for unit in json.utf16 {
+            if unit < 128 {
+                escaped.unicodeScalars.append(UnicodeScalar(Int(unit))!)
+            } else {
+                // Escaping UTF-16 units also preserves non-BMP characters as
+                // standard JSON surrogate pairs instead of dropping them.
+                escaped += String(format: "\\u%04X", Int(unit))
+            }
+        }
+        return escaped
     }
 }

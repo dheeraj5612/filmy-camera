@@ -3667,7 +3667,11 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     ) -> [FlashMode] {
         guard availability != .unsupported else { return [] }
         guard availability == .available else { return [.off] }
-        return FlashMode.allCases.filter {
+        // The viewfinder control uses the camera-style sequence Off, On,
+        // Auto. Keep this independent from `allCases`, which also drives the
+        // Settings picker and preserves its existing presentation order.
+        let cycleOrder: [FlashMode] = [.off, .on, .auto]
+        return cycleOrder.filter {
             supportedModeRawValues.contains($0.rawValue)
         }
     }

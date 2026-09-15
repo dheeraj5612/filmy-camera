@@ -57,7 +57,9 @@
     "FilmyCameraTests/RecipeLibraryPersistenceTests": "unit",
     "FilmyCameraUITests/RecipeLibraryUITests": "e2e",
     "FilmyCameraTests/SceneAutoPolicyTests": "unit",
-    "FilmyCameraTests/SceneAutoIntegrationTests": "unit"
+    "FilmyCameraTests/SceneAutoIntegrationTests": "unit",
+    "FilmyCameraTests/CaptureModesPolicyTests": "unit",
+    "FilmyCameraTests/CaptureModesProcessingTests": "unit"
   },
   "overrides": {
     "FilmyCameraUITests/FilmyCameraUITests/testSimulatorFallbackExposesReadableStateWithoutPreviewAction": "simulator-e2e",

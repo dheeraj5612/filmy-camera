@@ -149,9 +149,9 @@ final class ModesShutterControl: UIControl {
         if canHold {
             holdTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: false) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    guard let self, isTracking, isEnabled else { return }
-                    held = true
-                    beginHold()
+                    guard let self, self.isTracking, self.isEnabled else { return }
+                    self.held = true
+                    self.beginHold()
                 }
             }
         }
