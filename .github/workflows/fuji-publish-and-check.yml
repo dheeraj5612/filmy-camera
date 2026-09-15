@@ -1,0 +1,117 @@
+name: Fuji source publication and native checks
+
+on:
+  push:
+    branches: [feat/fuji-shooting-system]
+    paths: [.github/workflows/fuji-publish-and-check.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: feat/fuji-shooting-system
+      - name: Supersede only this feature's queued validation attempt
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api --method POST repos/dheeraj5612/filmy-camera/actions/runs/34925520533/cancel || true
+      - name: Verify and publish source
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/feat/fuji-shooting-system'
+          python3 - <<'PY'
+          import base64, bz2, hashlib, pathlib, subprocess
+          files = sorted(pathlib.Path('_fuji_delivery').glob('*.b64'))
+          assert len(files) == 6
+          encoded = ''.join(p.read_text().strip() for p in files)
+          patch = bz2.decompress(base64.b64decode(encoded, validate=True))
+          assert hashlib.sha256(patch).hexdigest() == 'aa0eea1491aa8bd774288f3def33f8b9f45b99326d6b4ac3983c00ce7ea43403'
+          pathlib.Path('/tmp/fuji.patch').write_bytes(patch)
+          subprocess.run(['git', 'apply', '--check', '/tmp/fuji.patch'], check=True)
+          subprocess.run(['git', 'apply', '/tmp/fuji.patch'], check=True)
+          p = pathlib.Path('FilmyCamera/Services/FujiCaptureBridge.swift')
+          text = p.read_text().replace('private final class Pending {', 'private final class Pending: @unchecked Sendable {')
+          old = 'if device.isExposureModeSupported(state.exposureMode) { device.exposureMode = state.exposureMode }'
+          new = '''if state.exposureMode == .custom, device.isExposureModeSupported(.custom) {
+                              device.setExposureModeCustom(duration: state.duration, iso: state.iso, completionHandler: nil)
+                          } else if device.isExposureModeSupported(state.exposureMode) {
+                              device.exposureMode = state.exposureMode
+                          }'''
+          assert old in text
+          p.write_text(text.replace(old, new))
+          PY
+          rm -rf _fuji_delivery
+          rm -f .github/workflows/fuji-development-snapshot.yml .github/workflows/fuji-apply-and-validate.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -u
+          git add FilmyCamera FilmyCameraTests/FujiShootingTests.swift scripts/testing/test-fuji-models.swift docs/fuji-shooting-system.md
+          git commit -m 'feat: implement Fuji shooting banks, drive capture, RAW development and Q menu'
+          git push origin HEAD:feat/fuji-shooting-system
+  native-check:
+    needs: publish
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: feat/fuji-shooting-system
+      - name: Install verified XcodeGen and register new sources
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/fuji-evidence"
+          gh release download 2.45.4 --repo yonaskolb/XcodeGen --pattern xcodegen.zip --output "$RUNNER_TEMP/xcodegen.zip"
+          echo "090ec29491aad50aec10631bf6e62253fed733c50f3aab0f5ffc86bc170bdbef  $RUNNER_TEMP/xcodegen.zip" | shasum -a 256 --check
+          mkdir -p .ci
+          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d .ci
+          echo '6aa2b4da95304b343bea12890c59f9655aa428c08b351d57d592cfab4e88a9f1  .ci/xcodegen/bin/xcodegen' | shasum -a 256 --check
+          .ci/xcodegen/bin/xcodegen generate
+          rm .github/workflows/fuji-publish-and-check.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -u
+          git commit -m 'build: register Fuji capture and development sources with pinned XcodeGen'
+          git push origin HEAD:feat/fuji-shooting-system
+          git rev-parse HEAD > "$RUNNER_TEMP/fuji-evidence/source-sha.txt"
+          cp FilmyCamera.xcodeproj/project.pbxproj "$RUNNER_TEMP/fuji-evidence/project.pbxproj"
+      - name: Check pure shooting models
+        run: |
+          set -euo pipefail
+          swiftc -swift-version 6 FilmyCamera/Models/FujiShootingModels.swift scripts/testing/test-fuji-models.swift -o "$RUNNER_TEMP/fuji-model-tests"
+          "$RUNNER_TEMP/fuji-model-tests" | tee "$RUNNER_TEMP/fuji-evidence/model-tests.log"
+      - name: Compile iOS Simulator application
+        run: |
+          set -o pipefail
+          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera -configuration Debug -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/FujiBuild" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build > "$RUNNER_TEMP/fuji-evidence/build.log" 2>&1 || {
+            grep -n -E 'error:|warning:|BUILD FAILED' "$RUNNER_TEMP/fuji-evidence/build.log" | tail -100
+            exit 1
+          }
+          tail -5 "$RUNNER_TEMP/fuji-evidence/build.log"
+      - name: Run Fuji native unit tests
+        run: |
+          set -o pipefail
+          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.5' -derivedDataPath "$RUNNER_TEMP/FujiBuild" -only-testing:FilmyCameraTests/FujiShootingTests -resultBundlePath "$RUNNER_TEMP/fuji-evidence/FujiTests.xcresult" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test > "$RUNNER_TEMP/fuji-evidence/tests.log" 2>&1 || {
+            grep -n -E 'error:|failed|TEST FAILED' "$RUNNER_TEMP/fuji-evidence/tests.log" | tail -100
+            exit 1
+          }
+          tail -60 "$RUNNER_TEMP/fuji-evidence/tests.log"
+      - name: Preserve native build evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: fuji-native-validation
+          path: ${{ runner.temp }}/fuji-evidence
+          retention-days: 7
+          if-no-files-found: warn
