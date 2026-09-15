@@ -1,0 +1,86 @@
+name: Prepare smart recipe source review
+on:
+  push:
+    branches: [work/scene-smart-recipes-validation]
+    paths: [.staging/smart-source-ready]
+permissions:
+  contents: write
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      BASE: 3d1428ec8497ad6b3836db256cb75145828f5add
+      REVIEW: work/scene-smart-recipes-source
+      STAGING: work/scene-smart-recipes-validation
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          fetch-depth: 0
+      - name: Preserve explicit feature source manifest
+        run: |
+          python3 - <<'PY'
+          import os, shutil
+          from pathlib import Path
+          names = ['FilmyCamera/Models/SmartRecipeEngine.swift', 'FilmyCamera/Services/SmartRecipeStore.swift',
+                   'FilmyCamera/Views/SmartRecipeViews.swift', 'FilmyCameraTests/SmartRecipeEngineTests.swift',
+                   'FilmyCameraTests/SmartRecipeIntegrationTests.swift', 'FilmyCameraUITests/SmartRecipeUITests.swift',
+                   'docs/smart-recipes.md']
+          root = Path(os.environ['RUNNER_TEMP']) / 'smart-source'
+          for name in names:
+              source = Path(name)
+              assert source.is_file() and not source.is_symlink() and source.stat().st_size < 50000
+              target = root / name
+              target.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copyfile(source, target)
+          shutil.copyfile('.staging/integrate-smart-recipes.py', root / 'integrate.py')
+          shutil.copyfile('.staging/adjust-smart-test-inventory.py', root / 'adjust.py')
+          PY
+      - name: Apply exact-context integration and run repository checks
+        run: |
+          set -euo pipefail
+          exec > >(tee "$RUNNER_TEMP/smart-source.log") 2>&1
+          git checkout -B smart-source-prepared "$BASE"
+          python3 "$RUNNER_TEMP/smart-source/integrate.py"
+          python3 "$RUNNER_TEMP/smart-source/adjust.py"
+          git diff --check
+          python3 -m unittest discover -s scripts/testing -p 'test_*.py' -v
+      - name: Publish source-only review branch without changing native target
+        run: |
+          set -euo pipefail
+          test -z "$(git ls-remote --heads origin "$REVIEW")"
+          git add FilmyCamera/Models/SmartRecipeEngine.swift FilmyCamera/Services/SmartRecipeStore.swift \
+            FilmyCamera/Views/SmartRecipeViews.swift FilmyCamera/Views/CameraScreen.swift \
+            FilmyCameraTests/SmartRecipeEngineTests.swift FilmyCameraTests/SmartRecipeIntegrationTests.swift \
+            FilmyCameraUITests/SmartRecipeUITests.swift docs/smart-recipes.md README.md \
+            scripts/testing/suites.json scripts/testing/test_runner.py
+          git diff --cached --check
+          ! git diff --cached --name-only | grep -E '^(.github/|.staging/)'
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -m 'Implement private on-device smart look suggestions and camera integration'
+          git push origin HEAD:"refs/heads/$REVIEW"
+          git rev-parse HEAD > "$RUNNER_TEMP/smart-source-commit.txt"
+      - name: Record preparation result in staging only
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_RESULT: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, json, base64
+          from pathlib import Path
+          temp = Path(os.environ['RUNNER_TEMP'])
+          lines = ['Run ' + os.environ['GITHUB_RUN_ID'], 'Result: ' + os.environ['JOB_RESULT'],
+                   'Source-only review. Native XcodeGen project regeneration and iOS tests remain separate.']
+          for name in ['smart-source-commit.txt', 'smart-source.log']:
+              path = temp / name
+              lines += ['\n## ' + name, path.read_text()[-16000:] if path.exists() else 'Not produced']
+          text = '\n'.join(lines)
+          (temp / 'smart-source-report.json').write_text(json.dumps({
+              'message': 'Record smart look source preparation result [skip ci]', 'branch': os.environ['STAGING'],
+              'content': base64.b64encode(text.encode()).decode()}))
+          print(text)
+          PY
+          gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/.staging/smart-source-prepared.txt" \
+            --input "$RUNNER_TEMP/smart-source-report.json" --silent
