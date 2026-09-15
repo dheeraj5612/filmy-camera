@@ -1,0 +1,141 @@
+name: Native smart recipe validation
+on:
+  push:
+    branches: [work/scene-smart-recipes-validation]
+    paths: [.staging/smart-recipes.json.gz]
+permissions:
+  contents: write
+concurrency:
+  group: smart-recipes-native-validation
+  cancel-in-progress: true
+jobs:
+  validate:
+    runs-on: macos-15
+    timeout-minutes: 25
+    env:
+      BASE: 3d1428ec8497ad6b3836db256cb75145828f5add
+      TARGET: feat/scene-smart-recipes
+      STAGING: work/scene-smart-recipes-validation
+      XCODEGEN_VERSION: 2.45.4
+      XCODEGEN_SHA256: 090ec29491aad50aec10631bf6e62253fed733c50f3aab0f5ffc86bc170bdbef
+      XCODEGEN_BINARY_SHA256: 6aa2b4da95304b343bea12890c59f9655aa428c08b351d57d592cfab4e88a9f1
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          fetch-depth: 0
+      - name: Unpack bounded source payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import gzip, json, os
+          from pathlib import Path
+          source = Path('.staging/smart-recipes.json.gz')
+          assert source.stat().st_size < 100000
+          payload = gzip.decompress(source.read_bytes())
+          assert len(payload) < 200000
+          files = json.loads(payload)
+          allowed = {
+              'integrate.py', 'FilmyCamera/Models/SmartRecipeEngine.swift',
+              'FilmyCamera/Services/SmartRecipeStore.swift', 'FilmyCamera/Views/SmartRecipeViews.swift',
+              'FilmyCameraTests/SmartRecipeEngineTests.swift', 'FilmyCameraTests/SmartRecipeIntegrationTests.swift',
+              'FilmyCameraUITests/SmartRecipeUITests.swift', 'docs/smart-recipes.md'
+          }
+          assert set(files) == allowed
+          directory = Path(os.environ['RUNNER_TEMP']) / 'smart-source'
+          for name, content in files.items():
+              destination = directory / name
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              destination.write_text(content)
+          PY
+      - name: Select Xcode and install pinned XcodeGen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d /Applications/Xcode_16.4.app/Contents/Developer
+          echo 'DEVELOPER_DIR=/Applications/Xcode_16.4.app/Contents/Developer' >> "$GITHUB_ENV"
+          gh release download "$XCODEGEN_VERSION" --repo yonaskolb/XcodeGen --pattern xcodegen.zip --output "$RUNNER_TEMP/xcodegen.zip"
+          echo "$XCODEGEN_SHA256  $RUNNER_TEMP/xcodegen.zip" | shasum -a 256 --check
+          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP/xcodegen-install"
+          binary="$RUNNER_TEMP/xcodegen-install/xcodegen/bin/xcodegen"
+          echo "$XCODEGEN_BINARY_SHA256  $binary" | shasum -a 256 --check
+          echo "$(dirname "$binary")" >> "$GITHUB_PATH"
+      - name: Integrate into clean pinned feature branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "$TARGET"
+          test "$(git rev-parse FETCH_HEAD)" = "$BASE"
+          git checkout -B smart-recipes-prepared "$BASE"
+          python3 "$RUNNER_TEMP/smart-source/integrate.py"
+          xcodegen generate --spec project.yml
+          git diff --check
+          python3 -m unittest discover -s scripts/testing -p 'test_*.py' -v > "$RUNNER_TEMP/smart-python.log" 2>&1
+      - name: Build and run smart recipe unit integration and UI tests
+        shell: bash
+        run: |
+          set -uo pipefail
+          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera \
+            -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.5' \
+            -derivedDataPath "$RUNNER_TEMP/smart-derived" \
+            -resultBundlePath "$RUNNER_TEMP/SmartRecipes.xcresult" \
+            -parallel-testing-enabled NO -maximum-parallel-testing-workers 1 \
+            CODE_SIGNING_ALLOWED=NO \
+            -only-testing:FilmyCameraTests/SmartRecipeEngineTests \
+            -only-testing:FilmyCameraTests/SmartRecipeIntegrationTests \
+            -only-testing:FilmyCameraUITests/SmartRecipeUITests \
+            test > "$RUNNER_TEMP/smart-native.log" 2>&1
+          status=$?
+          tail -80 "$RUNNER_TEMP/smart-native.log"
+          exit "$status"
+      - name: Commit only validated application changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add FilmyCamera/Models/SmartRecipeEngine.swift FilmyCamera/Services/SmartRecipeStore.swift \
+            FilmyCamera/Views/SmartRecipeViews.swift FilmyCamera/Views/CameraScreen.swift \
+            FilmyCameraTests/SmartRecipeEngineTests.swift FilmyCameraTests/SmartRecipeIntegrationTests.swift \
+            FilmyCameraUITests/SmartRecipeUITests.swift docs/smart-recipes.md README.md \
+            scripts/testing/suites.json FilmyCamera.xcodeproj
+          git diff --cached --check
+          ! git diff --cached --name-only | grep -E '^(.github/|.staging/)'
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -m 'Add private on-device scene-aware recipe suggestions with one-tap apply and undo'
+          git push origin HEAD:"refs/heads/$TARGET"
+          git rev-parse HEAD > "$RUNNER_TEMP/smart-commit.txt"
+      - name: Publish bounded validation evidence to staging only
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_RESULT: ${{ job.status }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          report_path='.staging/smart-validation.txt'
+          export REPORT_SHA="$(gh api "repos/$GITHUB_REPOSITORY/contents/$report_path?ref=$STAGING" --jq '.sha' 2>/dev/null || true)"
+          python3 - <<'PY'
+          import base64, json, os
+          from pathlib import Path
+          temp = Path(os.environ['RUNNER_TEMP'])
+          report = ['Run ' + os.environ['GITHUB_RUN_ID'], 'Result: ' + os.environ['JOB_RESULT']]
+          for filename in ['smart-commit.txt', 'smart-python.log', 'smart-native.log']:
+              path = temp / filename
+              report.append('\n## ' + filename)
+              if path.exists():
+                  lines = path.read_text(errors='replace').splitlines()
+                  important = [line for line in lines if 'error:' in line or 'Executed ' in line or 'failed' in line.lower()]
+                  report.extend(important[-70:])
+                  report.extend(lines[-100:])
+              else:
+                  report.append('Not produced')
+          text = '\n'.join(report)[-50000:]
+          request = {'message': 'Record isolated smart-recipe validation evidence [skip ci]', 'branch': os.environ['STAGING'],
+                     'content': base64.b64encode(text.encode()).decode()}
+          if os.environ.get('REPORT_SHA'):
+              request['sha'] = os.environ['REPORT_SHA']
+          (temp / 'smart-report.json').write_text(json.dumps(request))
+          print(text[-18000:])
+          PY
+          gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/$report_path" --input "$RUNNER_TEMP/smart-report.json" --silent
