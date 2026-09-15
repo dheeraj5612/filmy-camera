@@ -93,7 +93,7 @@ final class PhotoOutputEncoderTests: XCTestCase {
         add(measurement)
     }
 
-    func testFilteredJPEGKeepsNativeCameraMetadataAndNormalizesLayout() throws {
+    func testFilteredJPEGKeepsSafeCameraMetadataAndNormalizesLayout() throws {
         let recipe = FilmRecipe.builtIns[3]
         let colorSpace = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
         let context = try XCTUnwrap(CGContext(
@@ -207,10 +207,11 @@ final class PhotoOutputEncoderTests: XCTestCase {
         XCTAssertEqual((properties[kCGImagePropertyOrientation as String] as? NSNumber)?.intValue, 1)
         XCTAssertEqual(properties[kCGImagePropertyColorModel as String] as? String, kCGImagePropertyColorModelRGB as String)
         XCTAssertEqual(properties[kCGImagePropertyProfileName as String] as? String, PhotoOutputEncoder.outputProfileName)
-        XCTAssertNotNil(properties[kCGImagePropertyGPSDictionary as String])
-        XCTAssertEqual(tiff[kCGImagePropertyTIFFMake as String] as? String, "Apple")
-        XCTAssertEqual(tiff[kCGImagePropertyTIFFModel as String] as? String, "iPhone camera fixture")
-        XCTAssertEqual(exif[kCGImagePropertyExifCameraOwnerName as String] as? String, "private-owner-should-not-leak")
+        XCTAssertNil(properties[kCGImagePropertyGPSDictionary as String])
+        XCTAssertNil(tiff[kCGImagePropertyTIFFMake as String])
+        XCTAssertNil(tiff[kCGImagePropertyTIFFModel as String])
+        XCTAssertNil(exif[kCGImagePropertyExifCameraOwnerName as String])
+        XCTAssertNil(properties[kCGImagePropertyMakerAppleDictionary as String])
         XCTAssertEqual(CGImageSourceGetType(outputSource) as String?, UTType.jpeg.identifier)
 
         let userComment = try XCTUnwrap(exif[kCGImagePropertyExifUserComment as String] as? String)

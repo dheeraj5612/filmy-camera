@@ -133,27 +133,14 @@ enum PhotoOutputEncoder {
             kCGImagePropertyOrientation as String: 1,
             kCGImageDestinationLossyCompressionQuality as String: Self.jpegCompressionQuality
         ]
-        if let sourceProperties = sourceProperties(from: sourceData),
-           let makerApple = sourceProperties[kCGImagePropertyMakerAppleDictionary as String] {
-            properties[kCGImagePropertyMakerAppleDictionary as String] = makerApple
-        }
-
         let tiff: [String: Any] = [
             kCGImagePropertyTIFFSoftware as String: "Filmy Camera",
             kCGImagePropertyTIFFImageDescription as String: "Filmy Camera • \(recipe.name)"
         ]
-        if let sourceProperties = sourceProperties(from: sourceData),
-           let sourceTIFF = sourceProperties[kCGImagePropertyTIFFDictionary as String] as? [String: Any] {
-            var merged = sourceTIFF
-            merged.removeValue(forKey: "Orientation")
-            merged.removeValue(forKey: "ImageWidth")
-            merged.removeValue(forKey: "ImageLength")
-            merged[kCGImagePropertyTIFFSoftware as String] = tiff[kCGImagePropertyTIFFSoftware as String]
-            merged[kCGImagePropertyTIFFImageDescription as String] = tiff[kCGImagePropertyTIFFImageDescription as String]
-            properties[kCGImagePropertyTIFFDictionary as String] = merged
-        } else {
-            properties[kCGImagePropertyTIFFDictionary as String] = tiff
-        }
+        // Do not merge source TIFF or MakerApple dictionaries. They can carry
+        // owner, device, serial, and other private fields that do not belong
+        // on an app-created export.
+        properties[kCGImagePropertyTIFFDictionary as String] = tiff
 
         // The filtered frame may be aspect-fill cropped before encoding. Keep
         // the exported metadata truthful instead of carrying source-camera
@@ -197,10 +184,6 @@ enum PhotoOutputEncoder {
         properties[kCGImagePropertyExifDictionary as String] = exif
         if let location, CLLocationCoordinate2DIsValid(location.coordinate) {
             properties[kCGImagePropertyGPSDictionary as String] = gpsDictionary(for: location)
-        } else if let sourceGPS = sourceProperties(from: sourceData)?[kCGImagePropertyGPSDictionary as String] {
-            // Imported photos retain the coordinates they arrived with. Never
-            // substitute the device's current location for an imported asset.
-            properties[kCGImagePropertyGPSDictionary as String] = sourceGPS
         }
 
         return properties
@@ -212,10 +195,31 @@ enum PhotoOutputEncoder {
             return [:]
         }
 
-        // ImageIO has already decoded this dictionary from the source JPEG;
-        // carrying every genuine EXIF field preserves camera-specific details
-        // such as MakerNote, lens data, and capture timing.
-        return sourceExif
+        // Keep only useful capture facts. In particular, do not carry MakerNote,
+        // owner, comment, serial, or other camera-private fields into an export.
+        let safeKeys: Set<String> = [
+            kCGImagePropertyExifExposureTime as String,
+            kCGImagePropertyExifExposureBiasValue as String,
+            kCGImagePropertyExifISOSpeedRatings as String,
+            kCGImagePropertyExifFNumber as String,
+            kCGImagePropertyExifFocalLength as String,
+            kCGImagePropertyExifFocalLenIn35mmFilm as String,
+            kCGImagePropertyExifLensModel as String,
+            kCGImagePropertyExifDateTimeOriginal as String,
+            kCGImagePropertyExifOffsetTimeOriginal as String,
+            kCGImagePropertyExifDateTimeDigitized as String,
+            kCGImagePropertyExifOffsetTimeDigitized as String,
+            kCGImagePropertyExifExposureProgram as String,
+            kCGImagePropertyExifMeteringMode as String,
+            kCGImagePropertyExifFlash as String,
+            kCGImagePropertyExifWhiteBalance as String,
+            kCGImagePropertyExifSceneType as String,
+            kCGImagePropertyExifCustomRendered as String,
+            kCGImagePropertyExifContrast as String,
+            kCGImagePropertyExifSaturation as String,
+            kCGImagePropertyExifSharpness as String
+        ]
+        return sourceExif.filter { safeKeys.contains($0.key) }
     }
 
     private static func sourceProperties(from sourceData: Data) -> [String: Any]? {

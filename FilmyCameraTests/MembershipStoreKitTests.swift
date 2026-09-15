@@ -8,8 +8,12 @@ import XCTest
 @MainActor
 final class MembershipStoreKitTests: XCTestCase {
     private func session() throws -> SKTestSession {
-        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "Filmy", withExtension: "storekit"))
-        let session = try SKTestSession(contentsOf: url)
+        let bundledURL = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "Filmy", withExtension: "storekit"))
+        let writableURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Filmy-\(UUID().uuidString)", isDirectory: false)
+            .appendingPathExtension("storekit")
+        try FileManager.default.copyItem(at: bundledURL, to: writableURL)
+        let session = try SKTestSession(contentsOf: writableURL)
         session.resetToDefaultState()
         session.clearTransactions()
         session.disableDialogs = true
@@ -56,6 +60,11 @@ final class MembershipStoreKitTests: XCTestCase {
         _ = try await session.buyProduct(identifier: MonetizationConfiguration.monthlyProductID)
         let store = store()
         await store.restore()
+        for _ in 0..<20 {
+            if store.isPremium { break }
+            await store.refresh()
+            try await Task.sleep(for: .milliseconds(100))
+        }
         XCTAssertTrue(store.isPremium, store.purchaseMessage ?? "Restore did not find purchase")
     }
 
@@ -66,7 +75,7 @@ final class MembershipStoreKitTests: XCTestCase {
         let store = store()
         await store.refresh()
         XCTAssertTrue(store.isPremium)
-        try session.refundTransaction(identifier: XCTUnwrap(Int(exactly: transaction.id)))
+        try session.refundTransaction(identifier: XCTUnwrap(UInt(exactly: transaction.id)))
         await store.refresh()
         XCTAssertFalse(store.isPremium)
         XCTAssertFalse(store.allowsRecipe("classic-chrome"))
@@ -79,7 +88,7 @@ final class MembershipStoreKitTests: XCTestCase {
         let store = store()
         await store.refresh()
         XCTAssertTrue(store.isPremium)
-        try session.disableAutoRenewForTransaction(identifier: XCTUnwrap(Int(exactly: transaction.id)))
+        try session.disableAutoRenewForTransaction(identifier: XCTUnwrap(UInt(exactly: transaction.id)))
         try session.expireSubscription(productIdentifier: MonetizationConfiguration.monthlyProductID)
         await store.refresh()
         XCTAssertFalse(store.isPremium)
@@ -95,7 +104,14 @@ final class MembershipStoreKitTests: XCTestCase {
         await store.refresh()
         XCTAssertTrue(store.isTrial)
         try session.forceRenewalOfSubscription(productIdentifier: MonetizationConfiguration.monthlyProductID)
-        await store.refresh()
+        // StoreKit Test publishes the renewal asynchronously. Poll the signed
+        // entitlement briefly so the assertion checks the renewal, not the
+        // pre-renewal transaction still being surfaced by the test service.
+        for _ in 0..<20 {
+            await store.refresh()
+            if !store.isTrial { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
         XCTAssertTrue(store.isPremium)
         XCTAssertFalse(store.isTrial)
         XCTAssertFalse(store.mayShowAds)

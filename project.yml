@@ -54,6 +54,7 @@ schemes:
       storeKitConfiguration: StoreKit/Filmy.storekit
     test:
       config: Debug
+      storeKitConfiguration: StoreKit/Filmy.storekit
       targets:
         - FilmyCameraTests
   FilmyCameraReview:
