@@ -1,1 +1,1 @@
-Native validation attempt 1: plain Swift source manifest, exact-context integration, Xcode 16.4.
+Native validation attempt 2: explicit method overrides for simulator-only UI tests.
