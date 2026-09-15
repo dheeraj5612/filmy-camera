@@ -33,8 +33,6 @@ jobs:
           parts = sorted(Path('.recipe-transfer').glob('part-*.b64'))
           assert len(parts) == 3
           chunks = [''.join(p.read_text().split()) for p in parts]
-          for p, chunk in zip(parts, chunks):
-              print(p, len(chunk), hashlib.sha256(chunk.encode()).hexdigest())
           payload = base64.b64decode(''.join(chunks), validate=True)
           assert hashlib.sha256(payload).hexdigest() == '61ad271d0d30ec2838cae55081bcc229ffce965547df6e3e8cef7c1e85142627'
           patch = lzma.decompress(payload)
@@ -44,6 +42,11 @@ jobs:
           PY
           git apply --check /tmp/recipe-source.patch
           git apply /tmp/recipe-source.patch
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('docs/original-recipe-audit.csv')
+          path.write_bytes(path.read_bytes().replace(b'\r\n', b'\n'))
+          PY
       - name: Regenerate catalog from checksum-locked source facts
         run: |
           python - <<'PY'
@@ -61,7 +64,7 @@ jobs:
           PY
           python -m unittest discover -s scripts/recipes -p 'test_*.py' -v
           python -m unittest discover -s scripts/testing -p 'test_*.py' -v
-          python scripts/testing/run.py inventory
+          python scripts/testing/run.py inventory > /tmp/recipe-inventory.json
           git diff --check
       - name: Remove development transport and commit only to feature branch
         env:
