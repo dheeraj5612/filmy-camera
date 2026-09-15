@@ -11,9 +11,10 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     /// pre-provenance format; version 2 records provenance explicitly; version
     /// 3 records user edits and renderer compatibility metadata; version 4
     /// adds the canonical camera mode controls introduced by the fidelity pass;
-    /// version 5 adds persisted Kelvin white-balance control.
-    public static let currentSchemaVersion = 5
-    public static let rendererVersion = "core-image-parametric-v19"
+    /// version 5 adds persisted Kelvin white-balance control; version 6 adds
+    /// source-setting traces and the three MONOCHROME color-filter modes.
+    public static let currentSchemaVersion = 6
+    public static let rendererVersion = "core-image-parametric-v20"
 
     /// The Kelvin value that renders as "as shot". Phone frames are already
     /// balanced for their scene, so a Color Temperature setting equal to this
@@ -57,6 +58,9 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         case realaAce
         case compactDigital
         case monochrome
+        case monochromeYellow
+        case monochromeRed
+        case monochromeGreen
         case sepia
 
         public var displayName: String {
@@ -78,6 +82,9 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             case .realaAce: return "Natural Negative"
             case .compactDigital: return "Premium Compact"
             case .monochrome: return "Fine Monochrome"
+            case .monochromeYellow: return "Fine Monochrome + Yellow"
+            case .monochromeRed: return "Fine Monochrome + Red"
+            case .monochromeGreen: return "Fine Monochrome + Green"
             case .sepia: return "Sepia Archive"
             }
         }
@@ -99,7 +106,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             case .nostalgicNegative: return "NOSTALGIC Neg."
             case .realaAce: return "REALA ACE"
             case .compactDigital: return "STANDARD"
-            case .monochrome: return "MONOCHROME"
+            case .monochrome, .monochromeYellow, .monochromeRed, .monochromeGreen: return "MONOCHROME"
             case .sepia: return "SEPIA"
             }
         }
@@ -111,11 +118,11 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             switch self {
             case .acros:
                 return .neutral
-            case .acrosYellow:
+            case .acrosYellow, .monochromeYellow:
                 return .yellow
-            case .acrosRed:
+            case .acrosRed, .monochromeRed:
                 return .red
-            case .acrosGreen:
+            case .acrosGreen, .monochromeGreen:
                 return .green
             case .monochrome:
                 return .neutral
@@ -130,7 +137,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         /// same warm/cool and green/magenta controls.
         public var supportsMonochromaticColorAxes: Bool {
             switch self {
-            case .acros, .acrosYellow, .acrosRed, .acrosGreen, .monochrome, .sepia:
+            case .acros, .acrosYellow, .acrosRed, .acrosGreen, .monochrome, .monochromeYellow, .monochromeRed, .monochromeGreen, .sepia:
                 return true
             default:
                 return false
@@ -422,6 +429,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         case fujifilmRecipeGuide
         case fujifilmCreatorRecipes
         case fujiXWeeklyRecipeLibrary
+        case filmRecipesLibrary
         case g7XMarkIIITechnicalSpecifications
         case g7XMarkIIICameraMuseum
 
@@ -437,6 +445,8 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
                 return "FUJIFILM creator FS RECIPE stories"
             case .fujiXWeeklyRecipeLibrary:
                 return "Fuji X Weekly public recipe library"
+            case .filmRecipesLibrary:
+                return "Film Recipes public recipe index"
             case .g7XMarkIIITechnicalSpecifications:
                 return "Canon PowerShot G7 X Mark III technical specifications"
             case .g7XMarkIIICameraMuseum:
@@ -456,6 +466,8 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
                 return "https://www.fujifilm-x.com/en-us/stories/"
             case .fujiXWeeklyRecipeLibrary:
                 return "https://fujixweekly.com/recipes/"
+            case .filmRecipesLibrary:
+                return "https://film.recipes/blog/film-recipes-index-a-z/"
             case .g7XMarkIIITechnicalSpecifications:
                 return "https://www.usa.canon.com/support/p/powershot-g7-x-mark-iii"
             case .g7XMarkIIICameraMuseum:
@@ -473,7 +485,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
                 return "Public recipe control semantics and an official example recipe"
             case .fujifilmCreatorRecipes:
                 return "Public creator recipe settings published by Fujifilm"
-            case .fujiXWeeklyRecipeLibrary:
+            case .fujiXWeeklyRecipeLibrary, .filmRecipesLibrary:
                 return "Public community recipe settings used as adaptation references"
             case .g7XMarkIIITechnicalSpecifications:
                 return "Public sensor, lens, white-balance, and Picture Style option specifications"
@@ -531,6 +543,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         public let references: [PublicReference]
         public let parentRecipeID: String?
         public let rendererVersion: String
+        public let cameraSource: CameraRecipeSource?
 
         public init(
             source: Source,
@@ -538,7 +551,8 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             calibration: Calibration,
             references: [PublicReference],
             parentRecipeID: String? = nil,
-            rendererVersion: String = FilmRecipe.rendererVersion
+            rendererVersion: String = FilmRecipe.rendererVersion,
+            cameraSource: CameraRecipeSource? = nil
         ) {
             self.source = source
             self.implementation = implementation
@@ -546,6 +560,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             self.references = references
             self.parentRecipeID = parentRecipeID
             self.rendererVersion = rendererVersion
+            self.cameraSource = cameraSource
         }
 
         private enum CodingKeys: String, CodingKey {
@@ -555,6 +570,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             case references
             case parentRecipeID
             case rendererVersion
+            case cameraSource
         }
 
         public init(from decoder: Decoder) throws {
@@ -564,6 +580,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             calibration = try container.decode(Calibration.self, forKey: .calibration)
             references = try container.decode([PublicReference].self, forKey: .references)
             parentRecipeID = try container.decodeIfPresent(String.self, forKey: .parentRecipeID)
+            cameraSource = try container.decodeIfPresent(CameraRecipeSource.self, forKey: .cameraSource)
             // A missing renderer version is legacy metadata, not evidence that
             // the record is compatible with the current renderer.
             rendererVersion = try container.decodeIfPresent(String.self, forKey: .rendererVersion)
@@ -597,11 +614,15 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             case (.publicOfficialRecipe, .notCalibratedToFujifilmHardware):
                 hasMatchingSourceAndReferences = references == FilmRecipe.fujifilmCreatorRecipeReferences
             case (.publicCommunityRecipe, .notCalibratedToFujifilmHardware):
-                hasMatchingSourceAndReferences = references == FilmRecipe.communityRecipeReferences
+                hasMatchingSourceAndReferences = [
+                    FilmRecipe.communityRecipeReferences,
+                    FilmRecipe.fujifilmPublicReferences + [.filmRecipesLibrary]
+                ].contains(references)
             case (.userModified, .notCalibratedToFujifilmHardware):
                 hasMatchingSourceAndReferences = [
                     FilmRecipe.fujifilmCreatorRecipeReferences,
-                    FilmRecipe.communityRecipeReferences
+                    FilmRecipe.communityRecipeReferences,
+                    FilmRecipe.fujifilmPublicReferences + [.filmRecipesLibrary]
                 ].contains(references)
             case (.publicCanonDocumentation, .notCalibratedToCanonHardware),
                  (.userModified, .notCalibratedToCanonHardware):
@@ -611,6 +632,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             }
 
             return hasMatchingSourceAndReferences
+                && (cameraSource?.isValid ?? true)
                 && implementation == .originalParametricApproximation
                 && rendererVersion == FilmRecipe.rendererVersion
         }
@@ -1105,7 +1127,8 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             calibration: parentProvenance.calibration,
             references: parentProvenance.references,
             parentRecipeID: parentRecipeID,
-            rendererVersion: Self.rendererVersion
+            rendererVersion: Self.rendererVersion,
+            cameraSource: provenance.cameraSource
         )
     }
 
@@ -1435,6 +1458,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     /// The initial recipe library. Names refer to public film-camera
     /// conventions; the app is not affiliated with or calibrated by Fujifilm.
     public static let builtIns: [FilmRecipe] = legacyBuiltIns + originalCreativeLooks
+        + RecipeCatalog.cameraBaselines + RecipeCatalog.sourcedRecipes
 
     /// The original 36 entries retain their identity, order, and exact controls.
     static let legacyBuiltIns: [FilmRecipe] = [

@@ -166,6 +166,8 @@ struct CameraScreen: View {
     @State private var isShowingLiveAdjustments = false
     @State private var isShowingLookDrawer = false
     @State private var isShowingLookLibrary = false
+    @State private var isShowingRecipeManager = false
+    @State private var quickRecipeQuery = ""
     @State private var focusPoint: CGPoint?
     @State private var focusNormalizedPoint: CGPoint?
     @State private var pinchStartZoom: CGFloat = 1
@@ -377,12 +379,27 @@ struct CameraScreen: View {
                     isShowingLookLibrary = false
                     isShowingLookDrawer = false
                 },
-                onClose: { isShowingLookLibrary = false }
+                onClose: { isShowingLookLibrary = false },
+                libraryPreferences: $viewModel.libraryPreferences
             )
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
             .presentationBackground(FilmyTheme.background)
             .presentationCornerRadius(28)
+        }
+        .sheet(isPresented: $isShowingRecipeManager) {
+            RecipeLibraryManagerView(
+                preferences: $viewModel.libraryPreferences,
+                recipes: viewModel.recipes,
+                selectedRecipeID: viewModel.selectedRecipeID,
+                onSelect: { recipe in
+                    viewModel.select(recipe: recipe)
+                    isShowingRecipeManager = false
+                    isShowingLookDrawer = false
+                }
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
         .sheet(item: $recipeForDetail) { recipe in
             RecipeDetailView(
@@ -804,7 +821,7 @@ struct CameraScreen: View {
         #else
         guard canTriggerShutter, !isPinching,
               let recipe = CameraPreviewGesturePolicy.targetRecipe(
-                in: viewModel.recipes, selectedIdentifier: viewModel.selectedRecipeID,
+                in: viewModel.quickNavigationRecipes, selectedIdentifier: viewModel.selectedRecipeID,
                 direction: direction
               ) else { return }
         viewModel.select(recipe: recipe)
@@ -1242,7 +1259,14 @@ struct CameraScreen: View {
     private func lookDrawer(maxHeight: CGFloat) -> some View {
         // Header, filters, footer, three gaps, and outer padding must all
         // fit before assigning the remaining height to scrolling recipes.
-        let chromeHeight = 64 + cameraHitTarget + max(48, cameraHitTarget) + 38
+        let showsSearch = maxHeight >= 340
+        let chromeHeight = 64 + cameraHitTarget + max(48, cameraHitTarget) + 38 + (showsSearch ? 50 : 0)
+        let active = viewModel.quickRecipes
+        let visible = active.filter { recipe in
+            (!favoritesOnly || favoriteIDs.contains(recipe.id))
+                && (!showsSearch || quickRecipeQuery.isEmpty
+                    || RecipeCatalog.searchText(for: recipe).localizedStandardContains(quickRecipeQuery))
+        }
 
         return VStack(spacing: 6) {
             HStack(spacing: 10) {
@@ -1293,7 +1317,7 @@ struct CameraScreen: View {
                     favoritesOnly = false
                     HapticFeedback.play(.selection)
                 } label: {
-                    Text("All")
+                    Text("Active \(active.count)")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(!favoritesOnly ? FilmyTheme.primary : FilmyTheme.secondary)
                         .padding(.horizontal, 12)
@@ -1325,17 +1349,37 @@ struct CameraScreen: View {
             }
             .buttonStyle(.plain)
 
-            if favoritesOnly && favoriteIDs.intersection(viewModel.recipes.map(\.id)).isEmpty {
-                Text("Heart a look to keep it here.")
+            if showsSearch {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(FilmyTheme.secondary)
+                    TextField("Search active looks", text: $quickRecipeQuery)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.done)
+                        .accessibilityIdentifier("camera-looks-search")
+                    if !quickRecipeQuery.isEmpty {
+                        Button("Clear", systemImage: "xmark.circle.fill") { quickRecipeQuery = "" }
+                            .labelStyle(.iconOnly)
+                            .frame(minWidth: 44, minHeight: 44)
+                    }
+                }
+                .font(.subheadline)
+                .padding(.horizontal, 12)
+                .frame(height: 44)
+                .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 10))
+            }
+
+            if visible.isEmpty {
+                Text(active.isEmpty ? "Your quick menu is empty. Open Packs to add looks."
+                     : favoritesOnly ? "No active favorites match. Manage them in Packs."
+                     : "No active looks match your search.")
                     .font(.subheadline)
                     .foregroundStyle(FilmyTheme.secondary)
                     .frame(maxWidth: .infinity, minHeight: 70)
-                    .accessibilityIdentifier("camera-favorites-empty")
+                    .accessibilityIdentifier(favoritesOnly ? "camera-favorites-empty" : "camera-looks-empty")
             } else {
                 RecipePickerView(
-                    recipes: favoritesOnly
-                        ? viewModel.recipes.filter { favoriteIDs.contains($0.id) }
-                        : viewModel.recipes,
+                    recipes: visible,
                     selectedRecipeID: $viewModel.selectedRecipeID,
                     onOpenDetail: openRecipeDetail,
                     compact: !favoritesOnly
@@ -1344,26 +1388,31 @@ struct CameraScreen: View {
                 .id(favoritesOnly)
             }
 
-            Button {
-                HapticFeedback.play(.selection)
-                isShowingLookLibrary = true
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "square.grid.2x2")
-                    Text("All \(viewModel.recipes.count) looks")
-                    Spacer(minLength: 0)
-                    Image(systemName: "arrow.up.right")
+            HStack(spacing: 8) {
+                Button {
+                    HapticFeedback.play(.selection)
+                    isShowingLookLibrary = true
+                } label: {
+                    Label("Browse all", systemImage: "square.grid.2x2")
+                        .frame(maxWidth: .infinity, minHeight: max(48, cameraHitTarget))
+                        .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 12))
                 }
-                .font(.system(.subheadline).weight(.semibold))
-                .foregroundStyle(FilmyTheme.accent)
-                .padding(.horizontal, 12)
-                .frame(minHeight: max(48, cameraHitTarget))
-                .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 12))
-                .contentShape(Rectangle())
+                .accessibilityIdentifier("look-library-open")
+                .accessibilityHint("Browse and search all \(viewModel.recipes.count) looks, including hidden recipes")
+                Button {
+                    HapticFeedback.play(.selection)
+                    isShowingRecipeManager = true
+                } label: {
+                    Label("Packs", systemImage: "square.stack.3d.up")
+                        .frame(maxWidth: .infinity, minHeight: max(48, cameraHitTarget))
+                        .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 12))
+                }
+                .accessibilityIdentifier("camera-recipe-packs")
+                .accessibilityHint("Choose the packs and individual looks in your quick menu")
             }
+            .font(.system(.subheadline).weight(.semibold))
+            .foregroundStyle(FilmyTheme.accent)
             .buttonStyle(.pressable)
-            .accessibilityIdentifier("look-library-open")
-            .accessibilityHint("Browse larger previews, search looks, and save favorites")
         }
         .padding(10)
         .frame(maxWidth: 640)
@@ -1949,7 +1998,7 @@ private struct CameraLensMenu: View {
 extension CameraScreen {
     private var isCameraVisibleForAssists: Bool {
         scenePhase == .active && isCameraTabActive && camera.isRunning && camera.availability == .running && !isReviewing && !isImporting
-            && !viewModel.isCapturing && recipeForDetail == nil && !isShowingLookLibrary
+            && !viewModel.isCapturing && recipeForDetail == nil && !isShowingLookLibrary && !isShowingRecipeManager
             && !isShowingManualControls && !isShowingCaptureSetup
     }
     private var canTriggerShutter: Bool {

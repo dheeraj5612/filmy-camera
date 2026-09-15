@@ -34,7 +34,7 @@ final class RecipeInvariantsTests: XCTestCase {
     private var previousRecipeOverrides: Data?
 
     func testRendererVersionTracksCurrentParametricPipeline() {
-        XCTAssertEqual(FilmRecipe.rendererVersion, "core-image-parametric-v19")
+        XCTAssertEqual(FilmRecipe.rendererVersion, "core-image-parametric-v20")
     }
 
     override func setUp() {
@@ -85,7 +85,8 @@ final class RecipeInvariantsTests: XCTestCase {
         XCTAssertEqual(FilmRecipe.expandedInternetRecipeIDs.count, 18)
         XCTAssertEqual(Set(FilmRecipe.expandedInternetRecipeIDs).count, 18)
         XCTAssertEqual(FilmRecipe.legacyBuiltIns.count, 36)
-        XCTAssertEqual(FilmRecipe.builtIns.count, 142)
+        XCTAssertEqual(FilmRecipe.builtIns.count, 148 + RecipeCatalog.records.count)
+        XCTAssertGreaterThanOrEqual(RecipeCatalog.records.count, 500)
 
         let builtInIDs = Set(FilmRecipe.builtIns.map(\.id))
         XCTAssertTrue(Set(FilmRecipe.expandedInternetRecipeIDs).isSubset(of: builtInIDs))
@@ -759,7 +760,7 @@ final class ExpandedCreativeCatalogTests: XCTestCase {
     }
     func testFamilySearchAndFiltersResolveTheExpandedCatalog() {
         XCTAssertEqual(LookLibraryIndex.results(in: FilmRecipe.builtIns, query: "", filter: .compact, favorites: []).count, 17)
-        XCTAssertEqual(LookLibraryIndex.results(in: FilmRecipe.builtIns, query: "cinema", filter: .cinema, favorites: []).count, 12)
+        XCTAssertEqual(LookLibraryIndex.results(in: FilmRecipe.originalCreativeLooks, query: "cinema", filter: .cinema, favorites: []).count, 12)
         XCTAssertEqual(LookLibraryIndex.results(in: FilmRecipe.builtIns, query: "CCD Daylight", filter: .all, favorites: []).map(\.id), ["digital-ccd-daylight"])
         XCTAssertEqual(LookLibraryIndex.results(in: FilmRecipe.builtIns, query: "", filter: .instant, favorites: []).count, 8)
     }

@@ -1043,9 +1043,15 @@ public final class FilmRenderer {
             signatureSaturation = 0.95
         } else {
             switch recipe.filmBase {
-            case .standard, .provia, .realaAce, .proNegative:
+            case .standard, .provia, .proNegative:
                 signatureLevels = [0.0, 0.13, 0.49, 0.85, 0.99]
                 signatureSaturation = 1.08
+            case .realaAce:
+                // Public REALA ACE intent: gentler shadow separation but a
+                // steeper upper-mid/highlight response, not Provia's curve.
+                // Original estimate, not a measured Fujifilm transfer curve.
+                signatureLevels = [0.0, 0.18, 0.50, 0.87, 1.0]
+                signatureSaturation = 1
             case .classicChrome:
                 signatureLevels = [0.014, 0.14, 0.49, 0.80, 0.95]
                 signatureSaturation = 0.94
@@ -1067,7 +1073,7 @@ public final class FilmRenderer {
             case .nostalgicNegative:
                 signatureLevels = [0.025, 0.16, 0.53, 0.84, 0.97]
                 signatureSaturation = 1.06
-            case .acros, .acrosYellow, .acrosRed, .acrosGreen, .monochrome:
+            case .acros, .acrosYellow, .acrosRed, .acrosGreen, .monochrome, .monochromeYellow, .monochromeRed, .monochromeGreen:
                 signatureLevels = [0.0, 0.10, 0.46, 0.86, 1.0]
                 signatureSaturation = 1
             case .sepia:
@@ -1143,10 +1149,10 @@ public final class FilmRenderer {
         let temperatureShift = recipe.temperatureShift + recipe.whiteBalance.mode.temperatureBias
         let tintShift = recipe.tintShift + recipe.whiteBalance.mode.tintBias
         // Camera semantics: the Kelvin value is the illuminant the camera is
-        // told to neutralize. Phone frames arrive already balanced for the
-        // scene (about daylight), so a setting above the as-shot reference
-        // renders warmer and one below renders cooler, exactly as it would on
-        // the camera body and in desktop RAW editors.
+        // told to neutralize. Processed phone pixels do not identify the
+        // original illuminant; 5600K is an explicit display-referred reference,
+        // not a recovered sensor white balance. Higher settings render warmer
+        // and lower settings cooler, but are not a camera RAW reconstruction.
         let baseKelvin = recipe.whiteBalance.mode == .colorTemperature
             ? 6500 - (clamp(recipe.whiteBalance.kelvin, lower: 2500, upper: 10000) - FilmRecipe.asShotKelvin)
             : 6500
@@ -1788,21 +1794,22 @@ public final class FilmRenderer {
             mappedRed = luma * 1.06
             mappedGreen = luma * 0.91
             mappedBlue = luma * 0.72
-        case .acros, .acrosYellow, .acrosRed, .acrosGreen, .monochrome:
+        case .acros, .acrosYellow, .acrosRed, .acrosGreen, .monochrome, .monochromeYellow, .monochromeRed, .monochromeGreen:
             mappedRed = luma
             mappedGreen = luma
             mappedBlue = luma
         case .classicNegative:
-            // Hard tonality with its own palette: greens go "green-green"
-            // (less yellow), reds deeper and less bright, browns less
-            // yellow, cool cyan shadows against warm highlights.
+            // Fujifilm describes cyan-green shadows and magenta highlights:
+            // https://www.fujifilm-x.com/global/products/film-simulation/classic-neg/
+            // The old amber highlight shift belonged to Nostalgic Neg., not
+            // this mode. Gate color casts by chroma so neutral whites survive.
             saturate(0.94)
             nudge(-0.050, 0.004, 0.022, by: greenSector)
             nudge(-0.030, -0.004, 0.016, by: redSector)
             nudge(-0.004, -0.022, 0.010, by: skinSector)
             nudge(0.000, -0.020, -0.004, by: yellowSector)
-            nudge(-0.022, 0.030, 0.052, by: shadowWeight)
-            nudge(0.030, 0.012, -0.022, by: highlightWeight)
+            nudge(-0.022, 0.030, 0.052, by: shadowWeight * colorful)
+            nudge(0.018, -0.012, 0.014, by: highlightWeight * colorful)
         case .nostalgicNegative:
             // American New Color, per Fujifilm: rich colors in the shadows
             // with a soft tonality through midtones and highlights. Amber
@@ -1815,10 +1822,12 @@ public final class FilmRenderer {
             nudge(0.012, 0.006, -0.028, by: blueSector)
             nudge(0.014, 0.004, 0.000, by: shadowWeight)
         case .realaAce:
-            // Faithful color with hard tonality: between PRO Neg. Std and Hi
-            // in saturation, blues rendered slightly deeper, brighter
-            // midtones, a whisper of warmth in skin.
-            saturate(0.98)
+            // Public REALA ACE intent is saturation-dependent, not a fixed
+            // saturation reduction: protect already-rich colors while lifting
+            // restrained colors. Near-neutral pixels stay neutral.
+            // https://www.fujifilm-x.com/global/products/film-simulation/reala-ace/
+            let saturationResponse = 1.025 - 0.105 * smoothstep(0.18, 0.72, baseChroma)
+            saturate(saturationResponse)
             nudge(0.010, 0.002, -0.004, by: skinSector)
             nudge(-0.010, -0.010, 0.012, by: blueSector)
             nudge(0.004, 0.004, 0.004, by: midtoneWeight)

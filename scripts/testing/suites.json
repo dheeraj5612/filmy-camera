@@ -51,7 +51,10 @@
     "FilmyCameraUITests/SignalFrameUITests": "e2e",
     "FilmyCameraTests/ImageSizePolicyTests": "unit",
     "FilmyCameraTests/ImageDecodeQueueTests": "unit",
-    "FilmyCameraTests/RuntimeHardeningTests": "integration"
+    "FilmyCameraTests/RuntimeHardeningTests": "integration",
+    "FilmyCameraTests/RecipeLibraryTests": "unit",
+    "FilmyCameraTests/RecipeLibraryPersistenceTests": "unit",
+    "FilmyCameraUITests/RecipeLibraryUITests": "e2e"
   },
   "overrides": {
     "FilmyCameraUITests/FilmyCameraUITests/testSimulatorFallbackExposesReadableStateWithoutPreviewAction": "simulator-e2e",

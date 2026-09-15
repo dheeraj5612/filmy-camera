@@ -233,6 +233,17 @@ import ImageIO
 /// Always-on catalog acceptance. Uses bundled/synthetic fixtures, never skips
 /// for absent private photographs and never writes to the user's Photos.
 final class CatalogRenderAcceptanceTests: XCTestCase {
+    func testRenderEveryBundledSourceRecipeWithPreviewPhotoAndExportEvidence() throws {
+        XCTAssertTrue(RecipeCatalog.loadIssues.isEmpty)
+        XCTAssertGreaterThanOrEqual(RecipeCatalog.records.count, 500)
+        for recipe in RecipeCatalog.sourcedRecipes { try verifyRecipe(recipe.id) }
+    }
+
+    func testRenderAllTwentyCameraFoundationsWithPreviewPhotoAndExportEvidence() throws {
+        XCTAssertEqual(RecipeCatalog.cameraBaselines.count, 20)
+        for recipe in RecipeCatalog.cameraBaselines { try verifyRecipe(recipe.id) }
+    }
+
     func testRender_provia_standard() throws { try verifyRecipe("provia-standard") }
     func testRender_classic_chrome() throws { try verifyRecipe("classic-chrome") }
     func testRender_velvia_vivid() throws { try verifyRecipe("velvia-vivid") }
