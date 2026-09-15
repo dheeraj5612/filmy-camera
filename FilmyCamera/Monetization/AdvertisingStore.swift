@@ -103,13 +103,14 @@ final class AdvertisingStore: ObservableObject {
     }
 }
 
+@MainActor
 struct MonetizationBanner: View {
     @ObservedObject private var membership = MembershipStore.shared
     @ObservedObject private var advertising = AdvertisingStore.shared
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        Group {
+        VStack(spacing: 0) {
             if membership.mayShowAds && advertising.isReady && scenePhase == .active {
                 VStack(spacing: 4) {
                     Text("Advertisement").font(.caption2).foregroundStyle(.secondary)
@@ -129,6 +130,7 @@ struct MonetizationBanner: View {
     }
 }
 
+@MainActor
 private struct AdMobBannerView: UIViewRepresentable {
     func makeUIView(context: Context) -> BannerView {
         let banner = BannerView(adSize: AdSizeBanner)

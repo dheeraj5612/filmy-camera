@@ -66,7 +66,7 @@ final class MembershipStoreKitTests: XCTestCase {
         let store = store()
         await store.refresh()
         XCTAssertTrue(store.isPremium)
-        try session.refundTransaction(identifier: transaction.identifier)
+        try session.refundTransaction(identifier: XCTUnwrap(Int(exactly: transaction.id)))
         await store.refresh()
         XCTAssertFalse(store.isPremium)
         XCTAssertFalse(store.allowsRecipe("classic-chrome"))
@@ -79,7 +79,7 @@ final class MembershipStoreKitTests: XCTestCase {
         let store = store()
         await store.refresh()
         XCTAssertTrue(store.isPremium)
-        try session.disableAutoRenewForTransaction(identifier: transaction.identifier)
+        try session.disableAutoRenewForTransaction(identifier: XCTUnwrap(Int(exactly: transaction.id)))
         try session.expireSubscription(productIdentifier: MonetizationConfiguration.monthlyProductID)
         await store.refresh()
         XCTAssertFalse(store.isPremium)
@@ -104,7 +104,7 @@ final class MembershipStoreKitTests: XCTestCase {
     func testFailedPaymentNeverUnlocksPremium() async throws {
         let session = try session()
         defer { session.clearTransactions() }
-        session.failTransactionsEnabled = true
+        try await session.setSimulatedError(.generic(.notAvailableInStorefront), forAPI: .purchase)
         let store = store()
         await store.refresh()
         await store.loadProduct()
