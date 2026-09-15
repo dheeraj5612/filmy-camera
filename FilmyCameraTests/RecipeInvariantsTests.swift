@@ -85,7 +85,7 @@ final class RecipeInvariantsTests: XCTestCase {
         XCTAssertEqual(FilmRecipe.expandedInternetRecipeIDs.count, 18)
         XCTAssertEqual(Set(FilmRecipe.expandedInternetRecipeIDs).count, 18)
         XCTAssertEqual(FilmRecipe.legacyBuiltIns.count, 36)
-        XCTAssertEqual(FilmRecipe.builtIns.count, 148 + RecipeCatalog.records.count)
+        XCTAssertEqual(FilmRecipe.builtIns.count, 162 + RecipeCatalog.records.count)
         XCTAssertGreaterThanOrEqual(RecipeCatalog.records.count, 500)
 
         let builtInIDs = Set(FilmRecipe.builtIns.map(\.id))
@@ -286,7 +286,12 @@ final class RecipeInvariantsTests: XCTestCase {
                 XCTAssertEqual(recipe.provenance.references, FilmRecipe.fujifilmCreatorRecipeReferences, recipe.id)
             case .publicCommunityRecipe:
                 XCTAssertEqual(recipe.provenance.calibration, .notCalibratedToFujifilmHardware, recipe.id)
-                XCTAssertEqual(recipe.provenance.references, FilmRecipe.communityRecipeReferences, recipe.id)
+                if recipe.provenance.cameraSource?.publisher == .filmRecipes {
+                    XCTAssertEqual(recipe.provenance.references,
+                                   FilmRecipe.fujifilmPublicReferences + [.filmRecipesLibrary], recipe.id)
+                } else {
+                    XCTAssertEqual(recipe.provenance.references, FilmRecipe.communityRecipeReferences, recipe.id)
+                }
             case .originalCreativeDesign:
                 XCTAssertEqual(recipe.provenance, FilmRecipe.creativeProvenance, recipe.id)
                 XCTAssertTrue(FilmRecipe.originalCreativeRecipeIDs.contains(recipe.id))

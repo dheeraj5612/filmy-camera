@@ -52,6 +52,7 @@
     "FilmyCameraTests/ImageSizePolicyTests": "unit",
     "FilmyCameraTests/ImageDecodeQueueTests": "unit",
     "FilmyCameraTests/RuntimeHardeningTests": "integration",
+    "FilmyCameraTests/FujiShootingTests": "unit",
     "FilmyCameraTests/RecipeLibraryTests": "unit",
     "FilmyCameraTests/RecipeLibraryPersistenceTests": "unit",
     "FilmyCameraUITests/RecipeLibraryUITests": "e2e"

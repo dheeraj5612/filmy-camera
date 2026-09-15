@@ -9,7 +9,7 @@ final class RecipeLibraryTests: XCTestCase {
         XCTAssertEqual(Set(RecipeCatalog.records.map(\.id)).count, RecipeCatalog.records.count)
         XCTAssertEqual(Set(RecipeCatalog.records.map { $0.source.url }).count, RecipeCatalog.records.count)
         XCTAssertEqual(RecipeCatalog.cameraBaselines.count, 20)
-        XCTAssertEqual(FilmRecipe.builtIns.count, 148 + RecipeCatalog.records.count)
+        XCTAssertEqual(FilmRecipe.builtIns.count, 162 + RecipeCatalog.records.count)
         for record in RecipeCatalog.records {
             XCTAssertTrue(record.isValid, record.id)
             XCTAssertNotNil(record.source.sourceURL, record.id)
@@ -188,7 +188,7 @@ final class RecipeLibraryPersistenceTests: XCTestCase {
         XCTAssertEqual(reopened.selectedRecipe, model.selectedRecipe)
         XCTAssertEqual(reopened.selectedRecipe.provenance.cameraSource, selected.provenance.cameraSource)
         reopened.libraryPreferences.restoreDefaults()
-        XCTAssertEqual(reopened.quickRecipes.count, 128)
+        XCTAssertEqual(reopened.quickRecipes.count, 142)
         XCTAssertEqual(reopened.selectedRecipe.exposure, 0.75, "Membership reset must not reset tuning")
     }
 
