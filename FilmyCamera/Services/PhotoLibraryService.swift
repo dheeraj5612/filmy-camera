@@ -335,6 +335,16 @@ enum PhotoLibraryCachePath {
 
 @MainActor
 final class PhotoLibraryService: ObservableObject {
+    /// Immutable registration ownership; NotificationCenter removal is thread-safe.
+    /// Keep non-Sendable Objective-C token access out of the service's actor-isolated lifetime.
+    private final class MemoryWarningObservation: @unchecked Sendable {
+        private let token: NSObjectProtocol
+
+        init(token: NSObjectProtocol) { self.token = token }
+
+        deinit { NotificationCenter.default.removeObserver(token) }
+    }
+
     private final class IdentifierBox: @unchecked Sendable {
         private let lock = NSLock()
         private var value: String?
@@ -506,7 +516,7 @@ final class PhotoLibraryService: ObservableObject {
     private let isUITesting: Bool
     private let thumbnailCache = NSCache<NSString, UIImage>()
     private var thumbnailCacheGeneration: UInt64 = 0
-    private var memoryWarningObserver: NSObjectProtocol?
+    private var memoryWarningObserver: MemoryWarningObservation?
     private var savedFrameResourcesCache: [String: SavedFrameResource]?
     private var savedAssetIdentifiersCache: [String]?
     private var ownedAssetIdentifierSet = Set<String>()
@@ -537,18 +547,13 @@ final class PhotoLibraryService: ObservableObject {
             // applied here, after which the Roll thumbnail refreshes.
             scheduleCacheMaintenance(includingLaunchPasses: true)
         }
-        memoryWarningObserver = NotificationCenter.default.addObserver(
+        let observer = NotificationCenter.default.addObserver(
             forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main
         ) { [weak self] _ in
             // UIKit posts this notification on the main thread.
             MainActor.assumeIsolated { self?.invalidateThumbnailCache() }
         }
-    }
-
-    deinit {
-        if let memoryWarningObserver {
-            NotificationCenter.default.removeObserver(memoryWarningObserver)
-        }
+        memoryWarningObserver = MemoryWarningObservation(token: observer)
     }
 
     private struct CacheMaintenanceInput: Sendable {
