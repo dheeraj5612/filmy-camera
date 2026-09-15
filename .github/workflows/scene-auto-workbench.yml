@@ -41,6 +41,7 @@ jobs:
           PY
           git apply --check "$RUNNER_TEMP/scene-auto.patch"
           git apply --whitespace=error-all "$RUNNER_TEMP/scene-auto.patch"
+          python3 scripts/testing/scene-auto-finalize.py
           echo 'ready=true' >> "$GITHUB_OUTPUT"
       - name: Install verified XcodeGen and generate project
         if: steps.patch.outputs.ready == 'true'
@@ -84,7 +85,7 @@ jobs:
           set -euo pipefail
           git config user.name 'Dheeraj Namburu'
           git config user.email '57207534+dheeraj5612@users.noreply.github.com'
-          git rm -r -- .github/workflows/scene-auto-workbench.yml scripts/testing/scene-auto-implementation scripts/testing/scene-auto-implementation.ready
+          git rm -r -- .github/workflows/scene-auto-workbench.yml scripts/testing/scene-auto-implementation scripts/testing/scene-auto-implementation.ready scripts/testing/scene-auto-finalize.py
           git add -- FilmyCamera FilmyCameraTests FilmyCamera.xcodeproj scripts/testing/suites.json scripts/testing/test-scene-auto-core.sh docs/scene-auto.md
           git diff --cached --check
           git commit -m 'feat: add opt-in stabilized scene-aware Auto camera mode'
