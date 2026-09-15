@@ -1,0 +1,85 @@
+name: Pro Camera iOS 27 Implementation
+on:
+  push:
+    branches: [feat/pro-camera-capture-parity]
+    paths: [.github/workflows/pro-camera-ios27-implementation.yml]
+permissions:
+  contents: write
+jobs:
+  validate:
+    runs-on: xcode-27
+    timeout-minutes: 25
+    env:
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: feat/pro-camera-capture-parity
+      - name: Apply checked optical aperture source patch
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/evidence"
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64,hashlib,lzma,subprocess
+          p=Path('.pro-camera-patches/aperture.b64')
+          if p.exists():
+              packed=base64.b64decode(p.read_text().strip(),validate=True)
+              assert hashlib.sha256(packed).hexdigest()=='e3a6d0ebfb251c7f6247bff993505d16d5dda7acadb2296912ab84601b295552'
+              patch=lzma.decompress(packed)
+              subprocess.run(['git','apply','--check','-'],input=patch,check=True)
+              subprocess.run(['git','apply','-'],input=patch,check=True)
+              p.unlink()
+          PY
+      - name: Regenerate Xcode project with pinned generator
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download 2.45.4 --repo yonaskolb/XcodeGen --pattern xcodegen.zip --output "$RUNNER_TEMP/xcodegen.zip"
+          echo "090ec29491aad50aec10631bf6e62253fed733c50f3aab0f5ffc86bc170bdbef  $RUNNER_TEMP/xcodegen.zip" | shasum -a 256 --check
+          mkdir -p .ci
+          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d .ci
+          echo '6aa2b4da95304b343bea12890c59f9655aa428c08b351d57d592cfab4e88a9f1  .ci/xcodegen/bin/xcodegen' | shasum -a 256 --check
+          .ci/xcodegen/bin/xcodegen generate --spec project.yml
+          test "$GITHUB_REF_NAME" = feat/pro-camera-capture-parity
+          git config user.name 'Dheeraj Namburu'
+          git config user.email '57207534+dheeraj5612@users.noreply.github.com'
+          git add FilmyCamera FilmyCameraTests FilmyCamera.xcodeproj project.yml docs/PRO_CAMERA_FEATURES.md
+          if git ls-files .pro-camera-patches | grep -q .; then git add -u .pro-camera-patches; fi
+          git diff --cached --check
+          if ! git diff --cached --quiet; then
+            git commit -m 'feat: add real iOS 27 optical aperture control with SDK and hardware gates'
+            git push origin HEAD:feat/pro-camera-capture-parity
+          fi
+          git rev-parse HEAD | tee "$RUNNER_TEMP/evidence/source-sha.txt"
+          cp FilmyCamera.xcodeproj/project.pbxproj "$RUNNER_TEMP/evidence/project.pbxproj"
+          xcodebuild -version | tee "$RUNNER_TEMP/evidence/xcode.txt"
+          xcrun --sdk iphoneos --show-sdk-version | tee "$RUNNER_TEMP/evidence/sdk.txt"
+          grep -q '^27\.' "$RUNNER_TEMP/evidence/sdk.txt"
+          sdk=$(xcrun --sdk iphoneos --show-sdk-path)
+          grep -R -n -A 6 -B 4 'setExposureModeCustomWithLensAperture\|minLensAperture\|maxLensAperture\|supportsExposureModeCustomWithLensAperture' "$sdk/System/Library/Frameworks/AVFoundation.framework/Headers" "$sdk/System/Library/Frameworks/AVFCapture.framework/Headers" > "$RUNNER_TEMP/evidence/aperture-api.txt" 2>&1 || true
+      - name: Build real device code with optical aperture enabled
+        run: |
+          set -euo pipefail
+          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera -configuration Release -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/Device" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build > "$RUNNER_TEMP/evidence/device-build.log" 2>&1 || {
+            grep -n -A 5 -B 2 'error:' "$RUNNER_TEMP/evidence/device-build.log" | tail -160
+            exit 1
+          }
+          grep -q '\-D FILMY_IOS27_CAMERA_APIS\|\-DFILMY_IOS27_CAMERA_APIS' "$RUNNER_TEMP/evidence/device-build.log"
+      - name: Run capture, persistence, encoder and save regressions
+        run: |
+          set -euo pipefail
+          xcrun simctl list devices available -j > "$RUNNER_TEMP/evidence/simulators.json"
+          simulator=$(python3 -c 'import json,os; j=json.load(open(os.environ["RUNNER_TEMP"]+"/evidence/simulators.json")); print(next(d["udid"] for key,devices in j["devices"].items() if "iOS-27" in key for d in devices if "iPhone" in d["name"] and d.get("isAvailable",False)))')
+          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera -configuration Debug -destination "platform=iOS Simulator,id=$simulator" -derivedDataPath "$RUNNER_TEMP/Simulator" -resultBundlePath "$RUNNER_TEMP/evidence/Tests.xcresult" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO -parallel-testing-enabled NO -only-testing:FilmyCameraTests/ProCapturePolicyTests -only-testing:FilmyCameraTests/FilmyPhotoStoreTests -only-testing:FilmyCameraTests/ProPhotoEncoderTests -only-testing:FilmyCameraTests/CameraReviewSaveTests -only-testing:FilmyCameraTests/CameraViewModelRenderingTests -only-testing:FilmyCameraTests/CameraManualControlsTests -only-testing:FilmyCameraTests/PhotoOutputEncoderTests test > "$RUNNER_TEMP/evidence/tests.log" 2>&1 || {
+            grep -n -A 5 -B 2 'error:\|failed\|Failure\|fatal' "$RUNNER_TEMP/evidence/tests.log" | tail -160
+            exit 1
+          }
+          tail -25 "$RUNNER_TEMP/evidence/tests.log"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        if: always()
+        with:
+          name: pro-camera-ios27-${{ github.run_id }}
+          path: ${{ runner.temp }}/evidence
+          retention-days: 7
