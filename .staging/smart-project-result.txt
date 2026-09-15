@@ -1,0 +1,219 @@
+Run 34928775717
+Result: success
+Swift version 6.3.3 (swift-6.3.3-RELEASE)
+Target: x86_64-unknown-linux-gnu
+Cloning into '/home/runner/work/_temp/XcodeGen'...
+Note: switching to '8d3d3476a69ae3e5d68e1adccc701c410c05eb36'.
+
+You are in 'detached HEAD' state. You can look around, make experimental
+changes and commit them, and you can discard any commits you make in this
+state without impacting any branches by switching back to a branch.
+
+If you want to create a new branch to retain commits you create, you may
+do so (now or later) by using -c with the switch command. Example:
+
+  git switch -c <new-branch-name>
+
+Or undo this operation with:
+
+  git switch -
+
+Turn off this advice by setting config variable advice.detachedHead to false
+
+Fetching https://github.com/tadija/AEXML.git
+Fetching https://github.com/kylef/Spectre.git
+Fetching https://github.com/tuist/XcodeProj.git
+[1/2159] Fetching aexml
+[865/27032] Fetching aexml, xcodeproj
+Fetched https://github.com/tadija/AEXML.git from cache (0.79s)
+Fetching https://github.com/yonaskolb/JSONUtilities.git
+[498/24873] Fetching xcodeproj
+[499/25894] Fetching xcodeproj, spectre
+[11967/27247] Fetching xcodeproj, spectre, jsonutilities
+Fetched https://github.com/kylef/Spectre.git from cache (1.44s)
+[18370/26226] Fetching xcodeproj, jsonutilities
+Fetching https://github.com/mxcl/Version
+Fetched https://github.com/yonaskolb/JSONUtilities.git from cache (0.86s)
+Fetching https://github.com/freddi-kit/ArtifactBundleGen
+[1/311] Fetching version
+Fetched https://github.com/tuist/XcodeProj.git from cache (2.29s)
+Fetching https://github.com/onevcat/Rainbow.git
+[145/500] Fetching version, artifactbundlegen
+Fetched https://github.com/freddi-kit/ArtifactBundleGen from cache (0.82s)
+Fetched https://github.com/mxcl/Version from cache (1.05s)
+Fetching https://github.com/kylef/PathKit.git
+Fetching https://github.com/jakeheis/SwiftCLI.git
+[1/5080] Fetching swiftcli
+[2/6558] Fetching swiftcli, rainbow
+[53/8018] Fetching swiftcli, rainbow, pathkit
+Fetched https://github.com/onevcat/Rainbow.git from cache (1.30s)
+Fetching https://github.com/jpsim/Yams.git
+Fetched https://github.com/kylef/PathKit.git from cache (1.12s)
+Fetched https://github.com/jakeheis/SwiftCLI.git from cache (1.12s)
+[1/11861] Fetching yams
+Fetched https://github.com/jpsim/Yams.git from cache (3.04s)
+Computing version for https://github.com/freddi-kit/ArtifactBundleGen
+Computed https://github.com/freddi-kit/ArtifactBundleGen at 0.0.8 (10.71s)
+Computing version for https://github.com/mxcl/Version
+Computed https://github.com/mxcl/Version at 2.0.0 (1.42s)
+Computing version for https://github.com/jakeheis/SwiftCLI.git
+Computed https://github.com/jakeheis/SwiftCLI.git at 6.0.3 (0.19s)
+Computing version for https://github.com/tuist/XcodeProj.git
+Computed https://github.com/tuist/XcodeProj.git at 9.10.1 (0.18s)
+Computing version for https://github.com/onevcat/Rainbow.git
+Computed https://github.com/onevcat/Rainbow.git at 4.0.1 (1.11s)
+Computing version for https://github.com/kylef/Spectre.git
+Computed https://github.com/kylef/Spectre.git at 0.10.1 (0.20s)
+Computing version for https://github.com/yonaskolb/JSONUtilities.git
+Computed https://github.com/yonaskolb/JSONUtilities.git at 4.2.0 (0.19s)
+Computing version for https://github.com/jpsim/Yams.git
+Computed https://github.com/jpsim/Yams.git at 5.0.1 (0.21s)
+Computing version for https://github.com/kylef/PathKit.git
+Computed https://github.com/kylef/PathKit.git at 1.0.1 (0.19s)
+Computed https://github.com/freddi-kit/ArtifactBundleGen at 0.0.8 (0.00s)
+Computed https://github.com/mxcl/Version at 2.0.0 (0.00s)
+Computed https://github.com/jakeheis/SwiftCLI.git at 6.0.3 (0.00s)
+Computed https://github.com/tuist/XcodeProj.git at 9.10.1 (0.00s)
+Computed https://github.com/onevcat/Rainbow.git at 4.0.1 (0.00s)
+Computed https://github.com/kylef/Spectre.git at 0.10.1 (0.00s)
+Computed https://github.com/yonaskolb/JSONUtilities.git at 4.2.0 (0.00s)
+Computed https://github.com/jpsim/Yams.git at 5.0.1 (0.00s)
+Computed https://github.com/kylef/PathKit.git at 1.0.1 (0.00s)
+Computing version for https://github.com/tadija/AEXML.git
+Computed https://github.com/tadija/AEXML.git at 4.7.0 (0.15s)
+Creating working copy for https://github.com/tadija/AEXML.git
+Working copy of https://github.com/tadija/AEXML.git resolved at 4.7.0
+Creating working copy for https://github.com/mxcl/Version
+Working copy of https://github.com/mxcl/Version resolved at 2.0.0
+Creating working copy for https://github.com/jpsim/Yams.git
+Working copy of https://github.com/jpsim/Yams.git resolved at 5.0.1
+Creating working copy for https://github.com/kylef/PathKit.git
+Working copy of https://github.com/kylef/PathKit.git resolved at 1.0.1
+Creating working copy for https://github.com/tuist/XcodeProj.git
+Working copy of https://github.com/tuist/XcodeProj.git resolved at 9.10.1
+Creating working copy for https://github.com/freddi-kit/ArtifactBundleGen
+Working copy of https://github.com/freddi-kit/ArtifactBundleGen resolved at 0.0.8
+Creating working copy for https://github.com/onevcat/Rainbow.git
+Working copy of https://github.com/onevcat/Rainbow.git resolved at 4.0.1
+Creating working copy for https://github.com/kylef/Spectre.git
+Working copy of https://github.com/kylef/Spectre.git resolved at 0.10.1
+Creating working copy for https://github.com/jakeheis/SwiftCLI.git
+Working copy of https://github.com/jakeheis/SwiftCLI.git resolved at 6.0.3
+Creating working copy for https://github.com/yonaskolb/JSONUtilities.git
+Working copy of https://github.com/yonaskolb/JSONUtilities.git resolved at 4.2.0
+Building for production...
+[0/23] Write sources
+[2/23] Copying SettingPresets
+[3/23] Write sources
+[13/23] Write swift-version--1BFCD5C06E9F820A.txt
+[14/23] Compiling writer.c
+[15/24] Compiling scanner.c
+[17/25] Compiling Version Version+Codable.swift
+[18/26] Compiling SwiftCLI ArgumentList.swift
+[19/27] Compiling Rainbow BackgroundColor.swift
+[20/28] Compiling PathKit PathKit.swift
+[20/28] Compiling reader.c
+[22/28] Compiling JSONUtilities DecodingError.swift
+[22/28] Compiling parser.c
+[23/28] Compiling api.c
+[24/28] Write sources
+[25/29] Compiling emitter.c
+[27/30] Compiling AEXML Builders.swift
+[28/31] Compiling Yams Constructor.swift
+[29/32] Compiling XcodeGenCore ArrayExtensions.swift
+[30/32] Compiling XcodeProj Errors.swift
+[31/33] Compiling ProjectSpec AggregateTarget.swift
+[32/34] Compiling XcodeGenKit BreakpointGenerator.swift
+[33/35] Compiling XcodeGenCLI Arguments.swift
+[34/36] Compiling XcodeGen main.swift
+[34/36] Write Objects.LinkFileList
+[35/36] Linking xcodegen
+Build of product 'xcodegen' complete! (113.63s)
+⚙️  Generating plists...
+⚙️  Generating project...
+⚙️  Writing project...
+Created project at /home/runner/work/filmy-camera/filmy-camera/FilmyCamera.xcodeproj
+⚙️  Generating plists...
+⚙️  Generating project...
+⚙️  Writing project...
+Created project at /home/runner/work/filmy-camera/filmy-camera/FilmyCamera.xcodeproj
+test_every_legacy_and_original_look_has_a_concrete_renderer_case (test_catalog_contract.CatalogContractTests.test_every_legacy_and_original_look_has_a_concrete_renderer_case) ... ok
+test_every_manifest_id_has_exactly_one_authored_definition (test_catalog_contract.CatalogContractTests.test_every_manifest_id_has_exactly_one_authored_definition) ... ok
+test_hardware_shutter_keeps_the_ios18_guard_and_older_os_fallback (test_catalog_contract.CatalogContractTests.test_hardware_shutter_keeps_the_ios18_guard_and_older_os_fallback) ... ok
+test_manifest_has_92_unique_stable_original_ids (test_catalog_contract.CatalogContractTests.test_manifest_has_92_unique_stable_original_ids) ... ok
+test_render_workflow_requires_all_149_cases_without_skips (test_catalog_contract.CatalogContractTests.test_render_workflow_requires_all_149_cases_without_skips) ... ok
+test_renders_cannot_skip_for_missing_private_fixture (test_catalog_contract.CatalogContractTests.test_renders_cannot_skip_for_missing_private_fixture) ... ok
+test_all_pr_revisions_share_the_same_group (test_launch_concurrency.LaunchConcurrencyTests.test_all_pr_revisions_share_the_same_group) ... ok
+test_non_pr_runs_have_unique_groups_including_pending_runs (test_launch_concurrency.LaunchConcurrencyTests.test_non_pr_runs_have_unique_groups_including_pending_runs) ... ok
+test_only_superseded_pr_runs_are_cancelled (test_launch_concurrency.LaunchConcurrencyTests.test_only_superseded_pr_runs_are_cancelled) ... ok
+test_export_preserves_validated_archive_version_and_build (test_release_export_options.ReleaseExportOptionsTests.test_export_preserves_validated_archive_version_and_build) ... ok
+test_accepts_later_numeric_versions (test_release_sdk.ReleaseSDKTests.test_accepts_later_numeric_versions) ... ok
+test_accepts_minimum_toolchain (test_release_sdk.ReleaseSDKTests.test_accepts_minimum_toolchain) ... ok
+test_app_accepts_binary_stamp_for_newer_xcode (test_release_sdk.ReleaseSDKTests.test_app_accepts_binary_stamp_for_newer_xcode) ... ok
+test_app_accepts_equivalent_zero_patch_versions (test_release_sdk.ReleaseSDKTests.test_app_accepts_equivalent_zero_patch_versions) ... ok
+test_app_can_keep_ios_17_deployment_target (test_release_sdk.ReleaseSDKTests.test_app_can_keep_ios_17_deployment_target) ... ok
+test_app_rejects_disagreeing_sdk_stamps (test_release_sdk.ReleaseSDKTests.test_app_rejects_disagreeing_sdk_stamps) ... ok
+test_app_rejects_invalid_xcode_stamps (test_release_sdk.ReleaseSDKTests.test_app_rejects_invalid_xcode_stamps) ... ok
+test_app_rejects_missing_sdk_stamps (test_release_sdk.ReleaseSDKTests.test_app_rejects_missing_sdk_stamps) ... ok
+test_app_rejects_non_dictionary_plist (test_release_sdk.ReleaseSDKTests.test_app_rejects_non_dictionary_plist) ... ok
+test_app_rejects_old_sdk_stamp (test_release_sdk.ReleaseSDKTests.test_app_rejects_old_sdk_stamp) ... ok
+test_app_rejects_old_xcode_stamp (test_release_sdk.ReleaseSDKTests.test_app_rejects_old_xcode_stamp) ... ok
+test_app_rejects_simulator_and_other_platforms (test_release_sdk.ReleaseSDKTests.test_app_rejects_simulator_and_other_platforms) ... ok
+test_archive_help_is_available_without_xcode (test_release_sdk.ReleaseSDKTests.test_archive_help_is_available_without_xcode) ... ok
+test_archive_rejects_old_sdk_before_outputs_or_signing (test_release_sdk.ReleaseSDKTests.test_archive_rejects_old_sdk_before_outputs_or_signing) ... ok
+test_archive_validation_checks_built_metadata_before_provisioning (test_release_sdk.ReleaseSDKTests.test_archive_validation_checks_built_metadata_before_provisioning) ... ok
+test_cli_reads_xml_and_binary_without_launching_tools (test_release_sdk.ReleaseSDKTests.test_cli_reads_xml_and_binary_without_launching_tools) ... ok
+test_cli_requires_exactly_one_mode (test_release_sdk.ReleaseSDKTests.test_cli_requires_exactly_one_mode) ... ok
+test_cli_returns_nonzero_for_corrupt_or_missing_plist (test_release_sdk.ReleaseSDKTests.test_cli_returns_nonzero_for_corrupt_or_missing_plist) ... ok
+test_command_failure_does_not_echo_arbitrary_output (test_release_sdk.ReleaseSDKTests.test_command_failure_does_not_echo_arbitrary_output) ... ok
+test_current_toolchain_rejects_missing_or_ambiguous_version (test_release_sdk.ReleaseSDKTests.test_current_toolchain_rejects_missing_or_ambiguous_version) ... ok
+test_current_toolchain_uses_physical_sdk_and_bounded_commands (test_release_sdk.ReleaseSDKTests.test_current_toolchain_uses_physical_sdk_and_bounded_commands) ... ok
+test_missing_tools_and_timeout_fail_closed (test_release_sdk.ReleaseSDKTests.test_missing_tools_and_timeout_fail_closed) ... ok
+test_rejects_malformed_numeric_versions (test_release_sdk.ReleaseSDKTests.test_rejects_malformed_numeric_versions) ... ok
+test_rejects_old_sdk_even_with_new_xcode (test_release_sdk.ReleaseSDKTests.test_rejects_old_sdk_even_with_new_xcode) ... ok
+test_rejects_old_xcode_even_with_new_sdk (test_release_sdk.ReleaseSDKTests.test_rejects_old_xcode_even_with_new_sdk) ... ok
+test_distribution_lane_checks_selected_and_built_sdk (test_release_sdk_workflow.ReleaseSDKWorkflowTests.test_distribution_lane_checks_selected_and_built_sdk) ... ok
+test_distribution_lane_compiles_release_and_device_tests_without_signing (test_release_sdk_workflow.ReleaseSDKWorkflowTests.test_distribution_lane_compiles_release_and_device_tests_without_signing) ... ok
+test_distribution_lane_has_explicit_supported_xcode (test_release_sdk_workflow.ReleaseSDKWorkflowTests.test_distribution_lane_has_explicit_supported_xcode) ... ok
+test_distribution_lane_is_checked_for_app_and_release_changes (test_release_sdk_workflow.ReleaseSDKWorkflowTests.test_distribution_lane_is_checked_for_app_and_release_changes) ... ok
+test_distribution_lane_retains_evidence_even_when_compilation_fails (test_release_sdk_workflow.ReleaseSDKWorkflowTests.test_distribution_lane_retains_evidence_even_when_compilation_fails) ... ok
+test_build_digest_tracks_source_resources_and_target_membership (test_runner.EvidenceTests.test_build_digest_tracks_source_resources_and_target_membership) ... ok
+test_known_hardware_limitations_remain_explicit_skips (test_runner.EvidenceTests.test_known_hardware_limitations_remain_explicit_skips) ... ok
+test_missing_opt_in_tests_cannot_pass_as_supported_subset (test_runner.EvidenceTests.test_missing_opt_in_tests_cannot_pass_as_supported_subset) ... ok
+test_missing_result_bundle_cannot_pass (test_runner.EvidenceTests.test_missing_result_bundle_cannot_pass) ... ok
+test_optional_local_skin_capture_skip_is_allowed (test_runner.EvidenceTests.test_optional_local_skin_capture_skip_is_allowed) ... ok
+test_optional_recipe_fixture_skip_is_allowed (test_runner.EvidenceTests.test_optional_recipe_fixture_skip_is_allowed) ... ok
+test_required_photo_library_fixture_skip_is_a_failure (test_runner.EvidenceTests.test_required_photo_library_fixture_skip_is_a_failure) ... ok
+test_skipped_prerequisite_is_failure_in_routine_ci (test_runner.EvidenceTests.test_skipped_prerequisite_is_failure_in_routine_ci) ... ok
+test_stale_build_missing_new_tests_is_failure (test_runner.EvidenceTests.test_stale_build_missing_new_tests_is_failure) ... ok
+test_stale_source_or_toolchain_cannot_reuse_test_products (test_runner.EvidenceTests.test_stale_source_or_toolchain_cannot_reuse_test_products) ... ok
+test_unverified_build_cannot_be_reused (test_runner.EvidenceTests.test_unverified_build_cannot_be_reused) ... ok
+test_zero_tests_cannot_pass_despite_successful_xcode_exit (test_runner.EvidenceTests.test_zero_tests_cannot_pass_despite_successful_xcode_exit) ... ok
+test_cleanup_timeout_still_attempts_bounded_owned_delete (test_runner.SuiteRoutingTests.test_cleanup_timeout_still_attempts_bounded_owned_delete) ... ok
+test_device_writes_fail_before_any_process_without_opt_in (test_runner.SuiteRoutingTests.test_device_writes_fail_before_any_process_without_opt_in) ... ok
+test_dry_run_has_no_build_or_simulator_side_effects (test_runner.SuiteRoutingTests.test_dry_run_has_no_build_or_simulator_side_effects) ... ok
+test_every_declared_test_has_an_explicit_lane (test_runner.SuiteRoutingTests.test_every_declared_test_has_an_explicit_lane) ... ok
+test_failed_phase_exit_code_and_summary_survive_cleanup_timeout (test_runner.SuiteRoutingTests.test_failed_phase_exit_code_and_summary_survive_cleanup_timeout) ... ok
+test_fixture_permission_bootstrap_rejects_a_skipped_ui_case (test_runner.SuiteRoutingTests.test_fixture_permission_bootstrap_rejects_a_skipped_ui_case) ... ok
+test_fixture_permission_bootstrap_runs_real_roll_before_fixture_cases (test_runner.SuiteRoutingTests.test_fixture_permission_bootstrap_runs_real_roll_before_fixture_cases) ... ok
+test_fixture_photos_setup_installs_without_simctl_grant (test_runner.SuiteRoutingTests.test_fixture_photos_setup_installs_without_simctl_grant) ... ok
+test_fixture_setup_does_not_depend_on_privacy_grant (test_runner.SuiteRoutingTests.test_fixture_setup_does_not_depend_on_privacy_grant) ... ok
+test_inherited_opt_ins_cannot_enable_photos_or_benchmarks_in_ci (test_runner.SuiteRoutingTests.test_inherited_opt_ins_cannot_enable_photos_or_benchmarks_in_ci) ... ok
+test_nested_helper_class_does_not_steal_test_ownership (test_runner.SuiteRoutingTests.test_nested_helper_class_does_not_steal_test_ownership) ... ok
+test_permission_bootstrap_is_excluded_from_routine_photos_lane (test_runner.SuiteRoutingTests.test_permission_bootstrap_is_excluded_from_routine_photos_lane) ... ok
+test_photos_and_store_media_destroy_their_owned_simulator_on_exit (test_runner.SuiteRoutingTests.test_photos_and_store_media_destroy_their_owned_simulator_on_exit) ... ok
+test_photos_media_timeout_is_bounded_and_deletes_only_owned_simulator (test_runner.SuiteRoutingTests.test_photos_media_timeout_is_bounded_and_deletes_only_owned_simulator) ... ok
+test_photos_merge_failure_keeps_raw_case_evidence_authoritative (test_runner.SuiteRoutingTests.test_photos_merge_failure_keeps_raw_case_evidence_authoritative) ... ok
+test_photos_methods_run_once_in_isolated_invocations_and_aggregate (test_runner.SuiteRoutingTests.test_photos_methods_run_once_in_isolated_invocations_and_aggregate) ... ok
+test_photos_setup_failure_deletes_only_its_own_simulator (test_runner.SuiteRoutingTests.test_photos_setup_failure_deletes_only_its_own_simulator) ... ok
+test_routine_ci_includes_all_deterministic_tests_and_no_opt_ins (test_runner.SuiteRoutingTests.test_routine_ci_includes_all_deterministic_tests_and_no_opt_ins) ... ok
+test_simulator_and_device_lanes_reject_wrong_platform (test_runner.SuiteRoutingTests.test_simulator_and_device_lanes_reject_wrong_platform) ... ok
+test_simulator_only_ui_cases_run_in_e2e_and_ci_but_not_on_device (test_runner.SuiteRoutingTests.test_simulator_only_ui_cases_run_in_e2e_and_ci_but_not_on_device) ... ok
+test_test_failure_is_not_masked_by_owned_cleanup_timeout (test_runner.SuiteRoutingTests.test_test_failure_is_not_masked_by_owned_cleanup_timeout) ... ok
+test_unknown_and_stale_tests_fail_inventory (test_runner.SuiteRoutingTests.test_unknown_and_stale_tests_fail_inventory) ... ok
+
+----------------------------------------------------------------------
+Ran 74 tests in 0.232s
+
+OK
+b8cef78e848c271338bc8508865517a61029c54a
