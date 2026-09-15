@@ -7,6 +7,24 @@ options:
   createIntermediateGroups: true
   groupSortPosition: top
 
+packages:
+  Firebase:
+    url: https://github.com/firebase/firebase-ios-sdk.git
+    exactVersion: 12.0.0
+  GoogleSignIn:
+    url: https://github.com/google/GoogleSignIn-iOS.git
+    exactVersion: 9.0.0
+  GoogleMobileAds:
+    url: https://github.com/googleads/swift-package-manager-google-mobile-ads.git
+    exactVersion: 12.14.0
+  GoogleUserMessagingPlatform:
+    url: https://github.com/googleads/swift-package-manager-google-user-messaging-platform.git
+    exactVersion: 3.0.0
+
+fileGroups:
+  - Config
+  - StoreKit
+
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -20,6 +38,17 @@ settings:
     SUPPORTS_MACCATALYST: NO
 
 schemes:
+  FilmyCameraStoreKit:
+    build:
+      targets:
+        FilmyCamera: all
+    run:
+      config: Debug
+      storeKitConfiguration: StoreKit/Filmy.storekit
+    test:
+      config: Debug
+      targets:
+        - FilmyCameraTests
   FilmyCameraReview:
     build:
       targets:
@@ -43,15 +72,53 @@ targets:
     platform: iOS
     sources:
       - path: FilmyCamera
+    configFiles:
+      Debug: Config/Monetization.Debug.xcconfig
+      Release: Config/Monetization.Release.xcconfig
+    entitlements:
+      path: FilmyCamera/FilmyCamera.entitlements
+      properties:
+        com.apple.developer.applesignin:
+          - Default
+    dependencies:
+      - package: Firebase
+        product: FirebaseCore
+      - package: Firebase
+        product: FirebaseAuth
+      - package: GoogleSignIn
+        product: GoogleSignIn
+      - package: GoogleSignIn
+        product: GoogleSignInSwift
+      - package: GoogleMobileAds
+        product: GoogleMobileAds
+      - package: GoogleUserMessagingPlatform
+        product: GoogleUserMessagingPlatform
     settings:
       base:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1,2"
         SWIFT_EMIT_LOC_STRINGS: YES
+        OTHER_LDFLAGS: ["$(inherited)", "-ObjC"]
     info:
       path: FilmyCamera/Info.plist
       properties:
         CFBundleDisplayName: Filmy Camera
+        FilmyMonthlyProductID: "$(FILMY_MONTHLY_PRODUCT_ID)"
+        FilmyPrivacyPolicyURL: "$(FILMY_PRIVACY_POLICY_URL)"
+        FilmyTermsURL: "$(FILMY_TERMS_URL)"
+        FilmyLegalReady: "$(FILMY_LEGAL_READY)"
+        FilmyAdsEnabled: "$(FILMY_ADS_ENABLED)"
+        FilmyAdMobBannerID: "$(FILMY_ADMOB_BANNER_ID)"
+        GADApplicationIdentifier: "$(FILMY_ADMOB_APP_ID)"
+        GADDelayAppMeasurementInit: true
+        FirebaseAnalyticsCollectionEnabled: false
+        GOOGLE_ANALYTICS_DEFAULT_ALLOW_AD_PERSONALIZATION_SIGNALS: false
+        CFBundleURLTypes:
+          - CFBundleTypeRole: Editor
+            CFBundleURLSchemes:
+              - "$(FILMY_GOOGLE_REVERSED_CLIENT_ID)"
+        SKAdNetworkItems:
+          - SKAdNetworkIdentifier: cstr6suwn9.skadnetwork
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         NSMotionUsageDescription: Filmy Camera uses device orientation only to display the optional horizon level. Motion data is not saved or uploaded.
@@ -77,6 +144,8 @@ targets:
     platform: iOS
     sources:
       - path: FilmyCameraTests
+      - path: StoreKit/Filmy.storekit
+        buildPhase: resources
     dependencies:
       - target: FilmyCamera
     settings:

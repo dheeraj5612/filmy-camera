@@ -45,11 +45,11 @@ Run the complete test suite with `python3 scripts/testing/run.py ci --destinatio
 
 The app requires iOS 17 or later. Camera and Photos permissions are requested only when the relevant feature is used.
 
-## Future monetization
+## Filmy Pro, accounts, and advertising
 
-The current launch is fully free: all shipped looks, camera tools, import, review, Save to Photos, and the optional Instant Print finish are available without a paywall, subscription trial, or export watermark. Existing images remain usable regardless of any future access model.
+This candidate adds a 10-photo daily free tier, three starter looks, native monthly App Store subscriptions with an eligible one-month trial, optional Apple/Google sign-in, and AdMob banners outside the camera. Trial and paid access unlock Pro and remove ads. Existing saved images remain accessible. No watermark is added.
 
-The product target is an exceptional film-simulation and G7X-inspired camera with additional capture and editing tools in a premium monthly subscription. Price, trial duration, and the exact feature split remain open. See the [premium camera vision](docs/premium-camera-vision.md) for the staged feature and quality targets and the [monetization roadmap](docs/monetization-roadmap.md) for future access and export proposals. Subscription restrictions and watermarking are not enabled in the current launch; RAW and HDR work described in those documents remains roadmap work.
+Production activation still requires App Store Connect products, Firebase provider configuration, AdMob publisher IDs/consent messages, and reviewed legal disclosures. Release purchases and ads fail closed until configured. See the [implementation and setup guide](docs/monetization.md) and [monetized release checklist](docs/app-store/monetized-release.md). The [older roadmap](docs/monetization-roadmap.md) is historical; RAW/HDR and other capabilities are not implied by the new paywall.
 
 ## Rendering note
 

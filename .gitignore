@@ -42,3 +42,7 @@ fastlane/test_output/
 # Generated Xcode project is reproducible from project.yml
 FilmyCamera.xcodeproj/project.xcworkspace/xcuserdata/
 FilmyCamera.xcodeproj/xcuserdata/
+
+# Local monetization configuration, never upload provider private credentials.
+Config/Monetization.Local.*.xcconfig
+FilmyCamera/GoogleService-Info.plist

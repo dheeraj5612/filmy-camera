@@ -138,6 +138,7 @@ struct CameraScreen: View {
         UIDevice.current.userInterfaceIdiom == .pad ? 64 : FilmyTheme.minimumHitTarget
     }
 
+    @ObservedObject private var membership = MembershipStore.shared
     @ObservedObject var camera: CameraService
     @ObservedObject var viewModel: CameraViewModel
     @ObservedObject var photoLibrary: PhotoLibraryService
@@ -154,13 +155,20 @@ struct CameraScreen: View {
     @StateObject private var countdown = CaptureCountdown()
     @StateObject private var assists = CompositionAssistStore()
     @State private var isShowingCaptureSetup = false
-    @AppStorage("captureDelay") private var captureDelay = CaptureDelay.off
-    @AppStorage("captureAspect") private var captureAspect = CaptureAspect.viewfinder
-    @AppStorage("compositionGuide") private var compositionGuide = CompositionGuide.thirds
-    @AppStorage("showHistogram") private var showHistogram = false
-    @AppStorage("showZebras") private var showZebras = false
-    @AppStorage("showFocusPeaking") private var showFocusPeaking = false
-    @AppStorage("showHorizonLevel") private var showHorizonLevel = false
+    @AppStorage("captureDelay") private var storedCaptureDelay = CaptureDelay.off
+    private var captureDelay: CaptureDelay { membership.isPremium ? storedCaptureDelay : .off }
+    @AppStorage("captureAspect") private var storedCaptureAspect = CaptureAspect.viewfinder
+    private var captureAspect: CaptureAspect { membership.isPremium ? storedCaptureAspect : .viewfinder }
+    @AppStorage("compositionGuide") private var storedCompositionGuide = CompositionGuide.thirds
+    private var compositionGuide: CompositionGuide { membership.isPremium ? storedCompositionGuide : .thirds }
+    @AppStorage("showHistogram") private var storedShowHistogram = false
+    private var showHistogram: Bool { membership.isPremium && storedShowHistogram }
+    @AppStorage("showZebras") private var storedShowZebras = false
+    private var showZebras: Bool { membership.isPremium && storedShowZebras }
+    @AppStorage("showFocusPeaking") private var storedShowFocusPeaking = false
+    private var showFocusPeaking: Bool { membership.isPremium && storedShowFocusPeaking }
+    @AppStorage("showHorizonLevel") private var storedShowHorizonLevel = false
+    private var showHorizonLevel: Bool { membership.isPremium && storedShowHorizonLevel }
     @State private var recipeForDetail: FilmRecipe?
     @State private var isShowingTools: Bool
     @State private var isShowingManualControls = false
@@ -296,6 +304,14 @@ struct CameraScreen: View {
         } message: {
             Text("This photo has not been saved to Photos. Discarding cannot be undone.")
         }
+        .onChange(of: membership.isPremium) { _, premium in
+            if !premium {
+                isShowingLiveAdjustments = false
+                recipeForDetail = nil
+                countdown.cancel()
+            }
+            updateCompositionAssists()
+        }
         .onChange(of: assistOptions, initial: true) { _, _ in updateCompositionAssists() }
         .onChange(of: isCameraVisibleForAssists, initial: true) { _, visible in
             if !visible { countdown.cancel() }
@@ -315,7 +331,7 @@ struct CameraScreen: View {
             updateCompositionAssists()
         }
         .sheet(isPresented: $isShowingCaptureSetup) {
-            CaptureSetupView()
+            PremiumFeatureGate(feature: .captureSetup) { CaptureSetupView() }
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(FilmyTheme.background)
@@ -323,8 +339,9 @@ struct CameraScreen: View {
         .sheet(isPresented: $isShowingLookLibrary) {
             LookLibraryView(
                 recipes: viewModel.recipes,
-                selectedRecipeID: viewModel.selectedRecipeID,
+                selectedRecipeID: viewModel.effectiveSelectedRecipeID,
                 onSelect: { recipe in
+                    guard membership.requireRecipe(recipe.id) else { return }
                     viewModel.select(recipe: recipe)
                     isShowingLookLibrary = false
                     isShowingLookDrawer = false
@@ -340,8 +357,9 @@ struct CameraScreen: View {
             RecipeDetailView(
                 recipe: recipe,
                 originalRecipe: viewModel.originalRecipe(for: recipe.id),
-                isSelected: viewModel.selectedRecipeID == recipe.id,
+                isSelected: viewModel.effectiveSelectedRecipeID == recipe.id,
                 onSelect: {
+                    guard membership.requireRecipe(recipe.id) else { return }
                     viewModel.select(recipe: recipe)
                     recipeForDetail = nil
                 },
@@ -360,7 +378,7 @@ struct CameraScreen: View {
             .presentationCornerRadius(30)
         }
         .sheet(isPresented: $isShowingManualControls) {
-            ManualCameraControlsView(camera: camera)
+            PremiumFeatureGate(feature: .manualControls) { ManualCameraControlsView(camera: camera) }
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(FilmyTheme.background)
@@ -712,7 +730,7 @@ struct CameraScreen: View {
     private func selectAdjacentLook(_ direction: CameraLookDirection) {
         guard canTriggerShutter, !isPinching,
               let recipe = CameraPreviewGesturePolicy.targetRecipe(
-                in: viewModel.recipes, selectedIdentifier: viewModel.selectedRecipeID,
+                in: viewModel.recipes, selectedIdentifier: viewModel.effectiveSelectedRecipeID,
                 direction: direction
               ) else { return }
         viewModel.select(recipe: recipe)
@@ -1066,6 +1084,7 @@ struct CameraScreen: View {
             )
             Button {
                 let shouldOpen = !isShowingLiveAdjustments
+                guard !shouldOpen || membership.require(.recipeEditing) else { return }
                 closeControlDrawers()
                 isShowingLiveAdjustments = shouldOpen
             } label: {
@@ -1179,7 +1198,7 @@ struct CameraScreen: View {
                     recipes: favoritesOnly
                         ? viewModel.recipes.filter { favoriteIDs.contains($0.id) }
                         : viewModel.recipes,
-                    selectedRecipeID: $viewModel.selectedRecipeID,
+                    selectedRecipeID: Binding(get: { viewModel.effectiveSelectedRecipeID }, set: { viewModel.select(recipe: viewModel.recipe(for: $0)) }),
                     onOpenDetail: openRecipeDetail,
                     compact: !favoritesOnly
                 )
@@ -1556,6 +1575,7 @@ struct CameraScreen: View {
     }
 
     private func openRecipeDetail(_ recipe: FilmRecipe) {
+        guard membership.require(.recipeEditing) else { return }
         closeControlDrawers()
         recipeForDetail = viewModel.recipe(for: recipe.id)
     }

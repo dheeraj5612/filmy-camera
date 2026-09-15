@@ -1,0 +1,8 @@
+#include "Monetization.xcconfig"
+// Shipping remains fail-closed until the owner supplies real publisher IDs and
+// publishes/reviews the updated privacy disclosures. See docs/monetization.md.
+FILMY_ADS_ENABLED = NO
+FILMY_ADMOB_APP_ID = ca-app-pub-3940256099942544~1458002511
+FILMY_ADMOB_BANNER_ID =
+FILMY_LEGAL_READY = NO
+#include? "Monetization.Local.Release.xcconfig"
