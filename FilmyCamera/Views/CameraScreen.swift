@@ -301,6 +301,9 @@ struct CameraScreen: View {
             if !visible { countdown.cancel() }
             updateCompositionAssists()
         }
+        .onChange(of: isCameraVisibleForAssists && !countdown.state.isActive, initial: true) { _, active in
+            camera.setSceneAutoViewfinderActive(active)
+        }
         .onChange(of: captureAspect) { _, _ in countdown.cancel(); assists.stop(); updateCompositionAssists() }
         .onChange(of: canTriggerShutter) { _, enabled in
             if !enabled {
@@ -376,6 +379,7 @@ struct CameraScreen: View {
         // instant; the scene phase handler still stops it when the app leaves
         // the foreground.
         .onDisappear {
+            camera.setSceneAutoViewfinderActive(false)
             countdown.cancel()
             assists.stop()
             camera.stop(after: CameraActivityPolicy.inactiveGracePeriod)
@@ -627,7 +631,7 @@ struct CameraScreen: View {
             ZStack {
                 // Keep the renderer mounted across camera start/stop so its
                 // frame handler and render-status probe retain their lifetime.
-                FilteredCameraPreview(camera: camera, recipe: viewModel.selectedRecipe)
+                FilteredCameraPreview(camera: camera, recipe: camera.sceneAuto.development.applying(to: viewModel.selectedRecipe))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .allowsHitTesting(false)
 
@@ -817,24 +821,25 @@ struct CameraScreen: View {
             }
         } indicators: {
             HStack(spacing: 8) {
+                SceneAutoControl(camera: camera, isBusy: viewModel.isCapturing || viewModel.isSaving || countdown.state.isActive)
+                Spacer(minLength: 0)
                 activeCaptureIndicators
 
-                CameraStatusPill(
-                    isRunning: camera.isRunning,
-                    availability: camera.availability,
-                    message: camera.statusMessage
-                )
-                .opacity(isLive ? 0 : 1)
-                .accessibilityHidden(isLive)
+                if !isLive {
+                    CameraStatusPill(
+                        isRunning: camera.isRunning,
+                        availability: camera.availability,
+                        message: camera.statusMessage
+                    )
+                }
             }
         }
     }
 
     @ViewBuilder
     private var activeCaptureIndicators: some View {
-        if (abs(camera.exposureBias) >= 0.05 && camera.manualControls.exposureMode == .auto)
-            || camera.isFocusExposureLocked
-            || camera.manualControls.isAnyManualModeEnabled {
+        if !camera.sceneAuto.isEnabled && ((abs(camera.exposureBias) >= 0.05 && camera.manualControls.exposureMode == .auto)
+            || camera.isFocusExposureLocked || camera.manualControls.isAnyManualModeEnabled) {
             Button {
                 if camera.manualControls.isAnyManualModeEnabled {
                     isShowingManualControls = true

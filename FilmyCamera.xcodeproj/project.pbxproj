@@ -9,9 +9,11 @@
 /* Begin PBXBuildFile section */
 		00493D9DE920BF3A134CCF56 /* NormalPhotoFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E79227F5594654480E6C981 /* NormalPhotoFlowTests.swift */; };
 		020D3A1BCF35368AF1D93441 /* CompositionAssistStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DEAF80BF98F3BCC9BB1DBC1 /* CompositionAssistStore.swift */; };
+		0EE339ACFC466E68AF2AEB84 /* SceneAutoControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA765277D3D9474D090F622C /* SceneAutoControl.swift */; };
 		0F78AF03F58F3B9498AA5889 /* HistogramPlacementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5D96E086FC9CCF420279875 /* HistogramPlacementTests.swift */; };
 		10B76FC5874DC16B348CCDB8 /* FilmyCaptureDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 003018A2653FF10D42B98591 /* FilmyCaptureDiagnostics.swift */; };
 		19E345353E2942C8157EE673 /* ReviewComparisonState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99E28DFBB94E495FBDCE48DB /* ReviewComparisonState.swift */; };
+		1C28E1721EA410612B375853 /* SceneAutoPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A822FF06BEBF6695268720B4 /* SceneAutoPolicy.swift */; };
 		1DB34E65B1543DDA2A1AF9B9 /* RecipeControlEffectTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C1C3F4E707A5DADA6142F6E /* RecipeControlEffectTests.swift */; };
 		1FA4D1311CC59621E8A662B9 /* FilmyCameraApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D59729E8AC667A9120C460CB /* FilmyCameraApp.swift */; };
 		2445E3AD0B06312916D6EE89 /* RendererRedCreaseRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F1F58788021769171897C0 /* RendererRedCreaseRegressionTests.swift */; };
@@ -53,13 +55,16 @@
 		9CDBE678DD0FD47E87EDCB2D /* ComprehensiveSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67723B708854007A2748F2D2 /* ComprehensiveSettingsTests.swift */; };
 		9E575EACB950986DE7E5DEF9 /* SignalFrameUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BA00D8FA3F0F24067FEC604 /* SignalFrameUITests.swift */; };
 		9FB74EFBFC5A955FCF341E7C /* PhotoFinish.swift in Sources */ = {isa = PBXBuildFile; fileRef = F355DB84E4E768575297585A /* PhotoFinish.swift */; };
+		A7090745871A90253A277AD5 /* SceneAutoAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E2CD496ACCD027E1E429F21 /* SceneAutoAnalyzer.swift */; };
 		AAA72B6A7DD8688BFD065F7D /* PhotoPrintCompositor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51B0F84271C9B08AE6A3D78A /* PhotoPrintCompositor.swift */; };
+		AEA1D835B9E597FC8F7969DD /* SceneAutoIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F12807AD30031D4848B2030 /* SceneAutoIntegrationTests.swift */; };
 		AF1962852DF723AD8B04E986 /* CameraScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57D96867146ACDDA4F134F19 /* CameraScreen.swift */; };
 		B0CAE865F8D5D837818DF498 /* RecipePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E85F3412BBC965E4A33B9EB /* RecipePickerView.swift */; };
 		B22522279FEB9D04C091754C /* CameraViewModelRenderingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5373778E34C64A9AC521C02 /* CameraViewModelRenderingTests.swift */; };
 		B894017399FC1CB334E23846 /* RendererSkinCaptureDiagnosticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDBE726609926512D91F3176 /* RendererSkinCaptureDiagnosticsTests.swift */; };
 		BD0D8B563C87B105A44850C1 /* RendererPerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39AFAD26579DD804EBC3552B /* RendererPerformanceTests.swift */; };
 		BEC8BB7A676F9707C7D50A57 /* PhotoLibraryLargeRollTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2338DC25752A65D0169B8AC /* PhotoLibraryLargeRollTests.swift */; };
+		BFE01D085729330FD9DDA021 /* SceneAutoPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F442C18596057A9E9FE61D36 /* SceneAutoPolicyTests.swift */; };
 		C39D65C13BF730F85F01A8B9 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F84BD1235DF873E06F8C6282 /* ContentView.swift */; };
 		C4D440CDE09BDCC292A6DCB8 /* CameraServiceAvailabilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34105C69677310EA27B9F6C4 /* CameraServiceAvailabilityTests.swift */; };
 		C70373098CEE45627237523A /* FilmyCameraUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61617C6B4DB09D291F5DEA10 /* FilmyCameraUITests.swift */; };
@@ -102,6 +107,7 @@
 		034A4A43A70736DF08762220 /* CameraReviewEditingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraReviewEditingTests.swift; sourceTree = "<group>"; };
 		0569FE61E3015B082CAB8031 /* CameraLensAcceptanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraLensAcceptanceTests.swift; sourceTree = "<group>"; };
 		09CCB0FEDDDA669EB40BAF2B /* RecipeDetailCommitPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeDetailCommitPolicyTests.swift; sourceTree = "<group>"; };
+		0F12807AD30031D4848B2030 /* SceneAutoIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneAutoIntegrationTests.swift; sourceTree = "<group>"; };
 		10A0F8269AA5365633E9A3C0 /* GalleryScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalleryScreen.swift; sourceTree = "<group>"; };
 		1E3E5451BF5130228EAD7B57 /* FilteredCameraPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilteredCameraPreview.swift; sourceTree = "<group>"; };
 		1F50AF57ED0353408C3CC952 /* FlashHardwareDeviceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlashHardwareDeviceTests.swift; sourceTree = "<group>"; };
@@ -146,10 +152,13 @@
 		979D033B221CDD724A21C7EE /* CameraManualHardwareTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraManualHardwareTests.swift; sourceTree = "<group>"; };
 		99D74C27D238C00120CAABB3 /* RecipeRenderGalleryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeRenderGalleryTests.swift; sourceTree = "<group>"; };
 		99E28DFBB94E495FBDCE48DB /* ReviewComparisonState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewComparisonState.swift; sourceTree = "<group>"; };
+		9E2CD496ACCD027E1E429F21 /* SceneAutoAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneAutoAnalyzer.swift; sourceTree = "<group>"; };
 		A3940D2834957A9E44F66872 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A657E128117A2C10BAD8B761 /* FilmyCamera.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = FilmyCamera.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A822FF06BEBF6695268720B4 /* SceneAutoPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneAutoPolicy.swift; sourceTree = "<group>"; };
 		A89BFC50D79A0FAEB41F1D3C /* ManualCameraControlsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualCameraControlsView.swift; sourceTree = "<group>"; };
 		A9F1F58788021769171897C0 /* RendererRedCreaseRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RendererRedCreaseRegressionTests.swift; sourceTree = "<group>"; };
+		AA765277D3D9474D090F622C /* SceneAutoControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneAutoControl.swift; sourceTree = "<group>"; };
 		B2338DC25752A65D0169B8AC /* PhotoLibraryLargeRollTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibraryLargeRollTests.swift; sourceTree = "<group>"; };
 		B23B5C550DB001D0819FC64E /* CameraCatalogHardwareTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraCatalogHardwareTests.swift; sourceTree = "<group>"; };
 		C2E9A15C80F9345FFEE2F001 /* CameraManualControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraManualControls.swift; sourceTree = "<group>"; };
@@ -167,6 +176,7 @@
 		ED28FA298007EE9E0D94A12B /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
 		EDBE726609926512D91F3176 /* RendererSkinCaptureDiagnosticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RendererSkinCaptureDiagnosticsTests.swift; sourceTree = "<group>"; };
 		F355DB84E4E768575297585A /* PhotoFinish.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoFinish.swift; sourceTree = "<group>"; };
+		F442C18596057A9E9FE61D36 /* SceneAutoPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneAutoPolicyTests.swift; sourceTree = "<group>"; };
 		F48EF3C63EAF05BFADF4D9C3 /* FilmyCameraUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = FilmyCameraUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F56BE8EB7D6BDB867CFD8C3A /* FilmRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmRenderer.swift; sourceTree = "<group>"; };
 		F595081C082AD030B6FE6A2F /* CameraViewModelPersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraViewModelPersistenceTests.swift; sourceTree = "<group>"; };
@@ -217,6 +227,8 @@
 				A9F1F58788021769171897C0 /* RendererRedCreaseRegressionTests.swift */,
 				EDBE726609926512D91F3176 /* RendererSkinCaptureDiagnosticsTests.swift */,
 				44FCA4AA16B8B0B93F53C10A /* ReviewComparisonStateTests.swift */,
+				0F12807AD30031D4848B2030 /* SceneAutoIntegrationTests.swift */,
+				F442C18596057A9E9FE61D36 /* SceneAutoPolicyTests.swift */,
 				F6151D36AD2BD5096C1D2A5E /* SignatureCharacterTests.swift */,
 			);
 			path = FilmyCameraTests;
@@ -233,6 +245,7 @@
 				633814C090174B79B0FC2F78 /* HistogramPlacement.swift */,
 				F355DB84E4E768575297585A /* PhotoFinish.swift */,
 				99E28DFBB94E495FBDCE48DB /* ReviewComparisonState.swift */,
+				A822FF06BEBF6695268720B4 /* SceneAutoPolicy.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -248,6 +261,7 @@
 				8433ABA6CF2F34E7F51023B6 /* PhotoLibraryService.swift */,
 				3E54A0716052C16B09DBEF38 /* PhotoOutputEncoder.swift */,
 				51B0F84271C9B08AE6A3D78A /* PhotoPrintCompositor.swift */,
+				9E2CD496ACCD027E1E429F21 /* SceneAutoAnalyzer.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -296,6 +310,7 @@
 				A89BFC50D79A0FAEB41F1D3C /* ManualCameraControlsView.swift */,
 				31718B2CA6575E585EA91B06 /* OnboardingView.swift */,
 				3E85F3412BBC965E4A33B9EB /* RecipePickerView.swift */,
+				AA765277D3D9474D090F622C /* SceneAutoControl.swift */,
 				A3940D2834957A9E44F66872 /* SettingsView.swift */,
 			);
 			path = Views;
@@ -477,6 +492,8 @@
 				2445E3AD0B06312916D6EE89 /* RendererRedCreaseRegressionTests.swift in Sources */,
 				B894017399FC1CB334E23846 /* RendererSkinCaptureDiagnosticsTests.swift in Sources */,
 				53D183E20520AE531C832E7C /* ReviewComparisonStateTests.swift in Sources */,
+				AEA1D835B9E597FC8F7969DD /* SceneAutoIntegrationTests.swift in Sources */,
+				BFE01D085729330FD9DDA021 /* SceneAutoPolicyTests.swift in Sources */,
 				7B66943C345806D40DA470B4 /* SignatureCharacterTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -513,6 +530,9 @@
 				AAA72B6A7DD8688BFD065F7D /* PhotoPrintCompositor.swift in Sources */,
 				B0CAE865F8D5D837818DF498 /* RecipePickerView.swift in Sources */,
 				19E345353E2942C8157EE673 /* ReviewComparisonState.swift in Sources */,
+				A7090745871A90253A277AD5 /* SceneAutoAnalyzer.swift in Sources */,
+				0EE339ACFC466E68AF2AEB84 /* SceneAutoControl.swift in Sources */,
+				1C28E1721EA410612B375853 /* SceneAutoPolicy.swift in Sources */,
 				6601697F81C16F997D68E4EF /* SettingsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

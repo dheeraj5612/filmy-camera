@@ -519,7 +519,10 @@ final class CameraViewModel: ObservableObject {
         toastMessage = nil
         saveErrorMessage = nil
         saveErrorRequiresSettings = false
-        let recipe = selectedRecipe
+        // Freeze both the sensor controller and the exact development used
+        // in the viewfinder. Async rendering never reads mutable Auto state.
+        camera.setSceneAutoCapturePaused(true)
+        let recipe = camera.sceneAuto.development.applying(to: selectedRecipe)
         let finish = PhotoFinish(rawValue: defaults.string(forKey: "captureFinish") ?? "") ?? .photo
         let viewportSize = camera.previewViewportSize
         // Use the drawable the viewfinder really rendered into: its scale
@@ -544,6 +547,7 @@ final class CameraViewModel: ObservableObject {
 
         camera.capturePhoto { [weak self] capturedPhoto in
             Task { @MainActor [weak self] in
+                defer { camera.setSceneAutoCapturePaused(false) }
                 guard let self else { return }
 
                 guard let capturedPhoto else {
