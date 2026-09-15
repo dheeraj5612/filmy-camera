@@ -33,17 +33,23 @@ struct ProCaptureControlsView: View {
                 Text("sRGB").tag(ProCaptureSettings.ColorGamut.sRGB)
                 Text("Display P3").tag(ProCaptureSettings.ColorGamut.displayP3)
             }
+            .disabled(settings.dynamicRange == .hdr)
             .accessibilityIdentifier("pro-color-space")
+            if settings.dynamicRange == .hdr {
+                Text("HDR uses a Rec.2020 / PQ output profile. The sRGB / P3 selection applies to standard-range exports.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Toggle("HDR HEIF (10-bit PQ)", isOn: Binding(
                 get: { settings.dynamicRange == .hdr },
                 set: { value in var next = settings; next.dynamicRange = value ? .hdr : .sdr; camera.setProCaptureSettings(next) }
             ))
-            .disabled(settings.format == .jpeg || settings.livePhoto)
+            .disabled(settings.dynamicRange != .hdr && (settings.format == .jpeg || settings.livePhoto))
             .accessibilityIdentifier("pro-hdr")
             Text("HDR preserves available captured highlight headroom. SDR originals are not given artificial HDR brightness. Filmy keeps the original alongside every edit.")
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("Live Photo", isOn: binding(\.livePhoto))
-                .disabled(!capabilities.livePhotoSupported || settings.format.retainsRAW || settings.resolution != .mp12 || settings.dynamicRange == .hdr)
+                .disabled(!settings.livePhoto && (!capabilities.livePhotoSupported || settings.format.retainsRAW
+                    || settings.resolution != .mp12 || settings.dynamicRange == .hdr))
                 .accessibilityIdentifier("pro-live-photo")
             Text("Live uses 12 MP, standard dynamic range and Photo finish. RAW and Live cannot be combined. The film look is applied to the still and movie during Photos export.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -65,7 +71,7 @@ struct ProCaptureControlsView: View {
             }
             .accessibilityIdentifier("pro-exposure-program")
             if !capabilities.nativeExposureAPIAvailable {
-                Text("Priority and variable-aperture controls require an iOS 27 SDK build, iOS 27, and a lens that exposes them. Coupled manual exposure remains available below.")
+                Text("Priority and variable-aperture controls require an iOS 27 release-SDK build, iOS 27, and a lens that exposes them. Coupled manual exposure remains available below.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if priority {
