@@ -1,0 +1,22 @@
+name: Monetization validation
+on:
+  push:
+    branches: [codex/monetization-auth-subscriptions]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Archive reviewable source
+        run: git archive --format=zip HEAD -o /tmp/filmy-source.zip
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: filmy-source
+          path: /tmp/filmy-source.zip
+          retention-days: 3
