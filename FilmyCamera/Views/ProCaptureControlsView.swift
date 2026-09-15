@@ -7,10 +7,28 @@ struct ProCaptureControlsView: View {
     @AppStorage("proFocusLoupeMagnification") private var magnification = 2.0
     @State private var fixedISO = 100.0
     @State private var fixedShutter = 1.0 / 125.0
+    private static let shutterValues: [Double] = [8000, 4000, 2000, 1000, 500, 250, 125, 60, 30, 15, 8, 4, 2, 1].map { 1.0 / $0 }
+    private static let isoValues: [Double] = [25, 50, 100, 200, 400, 800, 1600, 3200]
     private var options: ProCaptureOptions { camera.captureOptions }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
+            captureFormatSection
+            Divider()
+            exposurePrioritySection
+            Divider()
+            focusAidsSection
+            Divider()
+            retentionSection
+        }
+        .foregroundStyle(FilmyTheme.primary)
+        .padding(16)
+        .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 18))
+        .accessibilityIdentifier("pro-capture-controls")
+    }
+
+    private var captureFormatSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
             Text("Capture format").font(.headline)
             Picker("Resolution request", selection: binding(\.resolution)) {
                 ForEach(ProCaptureOptions.Resolution.allCases, id: \.self) { resolution in
@@ -45,7 +63,12 @@ struct ProCaptureControlsView: View {
             ForEach(camera.captureNotices, id: \.self) { notice in
                 Text(notice).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            Divider()
+
+        }
+    }
+
+    private var exposurePrioritySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
             Text("Exposure priority").font(.headline)
             if camera.manualControls.manualExposureSupported {
                 HStack {
@@ -57,8 +80,7 @@ struct ProCaptureControlsView: View {
                 .buttonStyle(.bordered)
                 if camera.exposurePriority == .shutter {
                     Picker("Fixed shutter", selection: $fixedShutter) {
-                        ForEach([1.0 / 8000, 1.0 / 4000, 1.0 / 2000, 1.0 / 1000, 1.0 / 500, 1.0 / 250,
-                                 1.0 / 125, 1.0 / 60, 1.0 / 30, 1.0 / 15, 1.0 / 8, 1.0 / 4, 0.5, 1.0], id: \.self) { duration in
+                        ForEach(Self.shutterValues, id: \.self) { duration in
                             Text(duration < 1 ? "1/\(Int((1 / duration).rounded())) s" : "1 s").tag(duration)
                         }
                     }
@@ -66,7 +88,7 @@ struct ProCaptureControlsView: View {
                     Text("ISO follows the scene. Requested shutter is clamped to this lens's supported range.").font(.caption)
                 } else if camera.exposurePriority == .iso {
                     Picker("Fixed ISO", selection: $fixedISO) {
-                        ForEach([25.0, 50, 100, 200, 400, 800, 1600, 3200], id: \.self) { iso in Text("ISO \(Int(iso))").tag(iso) }
+                        ForEach(Self.isoValues, id: \.self) { iso in Text("ISO \(Int(iso))").tag(iso) }
                     }
                     .onChange(of: fixedISO) { _, value in camera.setExposurePriority(.iso, fixedValue: value) }
                     Text("Shutter follows the scene. Requested ISO is clamped to this lens's supported range.").font(.caption)
@@ -80,7 +102,12 @@ struct ProCaptureControlsView: View {
             } else {
                 Text("Choose a physical lens that supports custom exposure to use priority modes.").font(.caption).foregroundStyle(.secondary)
             }
-            Divider()
+
+        }
+    }
+
+    private var focusAidsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
             Text("Focus aids").font(.headline)
             Toggle("Focus loupe", isOn: $loupe).accessibilityIdentifier("pro-focus-loupe")
             if loupe {
@@ -92,7 +119,12 @@ struct ProCaptureControlsView: View {
             Toggle("Track subject focus", isOn: $tracking).accessibilityIdentifier("pro-subject-tracking")
             Text("Tap a subject to follow it. Without a tap, the largest detected face is selected. Lost subjects require another tap. Tracking never overrides manual focus or AE/AF lock. The loupe only magnifies the preview.")
                 .font(.caption).foregroundStyle(.secondary)
-            Divider()
+
+        }
+    }
+
+    private var retentionSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
             LabeledContent("Lens aperture", value: camera.captureCapabilities.aperture > 0
                 ? String(format: "ƒ/%.2f", camera.captureCapabilities.aperture) : "Unavailable")
                 .accessibilityIdentifier("pro-aperture-readout")
@@ -101,11 +133,8 @@ struct ProCaptureControlsView: View {
             Text("Originals and edits remain in Roll → Filmy originals, even when Photos access is denied. These are user files, not an evictable cache; deleting the app removes its local originals.")
                 .font(.caption).foregroundStyle(.secondary)
         }
-        .foregroundStyle(FilmyTheme.primary)
-        .padding(16)
-        .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 18))
-        .accessibilityIdentifier("pro-capture-controls")
     }
+
 
     private func binding<Value>(_ keyPath: WritableKeyPath<ProCaptureOptions, Value>) -> Binding<Value> {
         Binding(get: { camera.captureOptions[keyPath: keyPath] }, set: { value in

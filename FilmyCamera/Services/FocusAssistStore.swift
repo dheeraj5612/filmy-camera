@@ -61,7 +61,7 @@ private final class FocusTrackingWorker: @unchecked Sendable {
                         let request = VNTrackObjectRequest(detectedObjectObservation: observation)
                         request.trackingLevel = .accurate
                         try sequence.perform([request], on: cgImage)
-                        guard let result = request.results?.first, result.confidence >= 0.55,
+                        guard let result = request.results?.first as? VNDetectedObjectObservation, result.confidence >= 0.55,
                               !result.boundingBox.intersection(CGRect(x: 0, y: 0, width: 1, height: 1)).isEmpty else {
                             self.observation = nil
                             lost = true

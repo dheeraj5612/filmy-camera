@@ -9,7 +9,7 @@ enum ProPhotoEncoder {
     static let colorSpace = CGColorSpace(name: CGColorSpace.displayP3)!
     static let context = CIContext(options: [
         .workingColorSpace: CGColorSpace(name: CGColorSpace.extendedSRGB)!,
-        .workingFormat: CIFormat.RGBAh,
+        .workingFormat: CIFormat.RGBAh.rawValue,
         .outputColorSpace: colorSpace,
         .cacheIntermediates: false
     ])
