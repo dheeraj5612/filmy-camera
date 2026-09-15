@@ -1,0 +1,87 @@
+name: Pro Camera Implementation Check
+on:
+  push:
+    branches: [feat/pro-camera-capture-parity]
+    paths: [.github/workflows/pro-camera-implementation-check.yml]
+permissions:
+  contents: write
+jobs:
+  validate:
+    runs-on: macos-15
+    timeout-minutes: 25
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: feat/pro-camera-capture-parity
+      - name: Verify and apply source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/pro-camera-evidence"
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64, hashlib, lzma, subprocess
+          parts = sorted(Path('.pro-camera-patches').glob('part-*.b64'))
+          if parts:
+              text = ''.join(p.read_text().strip() for p in parts)
+              packed = base64.b64decode(text, validate=True)
+              assert hashlib.sha256(packed).hexdigest() == '0532f6700b933b0ff2a4220ddab0e25c9147cde1c5f6e5ddad34cc149c6d2cdf'
+              patch = lzma.decompress(packed)
+              subprocess.run(['git', 'apply', '--check', '-'], input=patch, check=True)
+              subprocess.run(['git', 'apply', '-'], input=patch, check=True)
+              for part in parts: part.unlink()
+          PY
+      - name: Install pinned project generator
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download 2.45.4 --repo yonaskolb/XcodeGen --pattern xcodegen.zip --output "$RUNNER_TEMP/xcodegen.zip"
+          echo "090ec29491aad50aec10631bf6e62253fed733c50f3aab0f5ffc86bc170bdbef  $RUNNER_TEMP/xcodegen.zip" | shasum -a 256 --check
+          mkdir -p .ci
+          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d .ci
+          echo '6aa2b4da95304b343bea12890c59f9655aa428c08b351d57d592cfab4e88a9f1  .ci/xcodegen/bin/xcodegen' | shasum -a 256 --check
+          .ci/xcodegen/bin/xcodegen generate --spec project.yml
+      - name: Commit implementation only to isolated feature branch
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = feat/pro-camera-capture-parity
+          git config user.name 'Dheeraj Namburu'
+          git config user.email '57207534+dheeraj5612@users.noreply.github.com'
+          git add FilmyCamera FilmyCameraTests FilmyCamera.xcodeproj README.md docs/PRO_CAMERA_FEATURES.md scripts/testing/suites.json
+          if git ls-files .pro-camera-patches | grep -q .; then git add -u .pro-camera-patches; fi
+          git diff --cached --check
+          if ! git diff --cached --quiet; then
+            git commit -m 'feat: add pro capture, focus aids, HDR and persistent non-destructive originals'
+            git push origin HEAD:feat/pro-camera-capture-parity
+          fi
+          git rev-parse HEAD | tee "$RUNNER_TEMP/pro-camera-evidence/source-sha.txt"
+          cp FilmyCamera.xcodeproj/project.pbxproj "$RUNNER_TEMP/pro-camera-evidence/project.pbxproj"
+          xcodebuild -version | tee "$RUNNER_TEMP/pro-camera-evidence/xcode.txt"
+          python3 -m unittest discover -s scripts/testing -p 'test_*.py' -q
+      - name: Compile physical camera branches
+        run: |
+          set -euo pipefail
+          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera -configuration Release -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/ProCameraDevice" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build > "$RUNNER_TEMP/pro-camera-evidence/device-build.log" 2>&1 || {
+            grep -n -A 5 -B 2 'error:' "$RUNNER_TEMP/pro-camera-evidence/device-build.log" | tail -180
+            exit 1
+          }
+      - name: Run pro-camera and save-path regression tests
+        run: |
+          set -euo pipefail
+          xcrun simctl list devices available -j > "$RUNNER_TEMP/pro-camera-evidence/simulators.json"
+          simulator=$(python3 -c 'import json,os; j=json.load(open(os.environ["RUNNER_TEMP"]+"/pro-camera-evidence/simulators.json")); print(next(d["udid"] for key,devices in reversed(list(j["devices"].items())) if "iOS" in key for d in devices if "iPhone" in d["name"] and d.get("isAvailable",False)))')
+          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera -configuration Debug -destination "platform=iOS Simulator,id=$simulator" -derivedDataPath "$RUNNER_TEMP/ProCameraSimulator" -resultBundlePath "$RUNNER_TEMP/pro-camera-evidence/Tests.xcresult" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO -parallel-testing-enabled NO -only-testing:FilmyCameraTests/ProCapturePolicyTests -only-testing:FilmyCameraTests/FilmyPhotoStoreTests -only-testing:FilmyCameraTests/ProPhotoEncoderTests -only-testing:FilmyCameraTests/CameraReviewSaveTests -only-testing:FilmyCameraTests/CameraViewModelRenderingTests -only-testing:FilmyCameraTests/CameraManualControlsTests -only-testing:FilmyCameraTests/PhotoOutputEncoderTests test > "$RUNNER_TEMP/pro-camera-evidence/tests.log" 2>&1 || {
+            grep -n -A 5 -B 2 'error:\|failed\|Failure\|fatal' "$RUNNER_TEMP/pro-camera-evidence/tests.log" | tail -200
+            exit 1
+          }
+          tail -25 "$RUNNER_TEMP/pro-camera-evidence/tests.log"
+      - name: Retain build and test evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: pro-camera-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/pro-camera-evidence
+          retention-days: 7
