@@ -132,7 +132,9 @@ suites_path = root / 'scripts/testing/suites.json'
 suites = json.loads(suites_path.read_text())
 suites['classes']['FilmyCameraTests/SmartRecipeEngineTests'] = 'unit'
 suites['classes']['FilmyCameraTests/SmartRecipeIntegrationTests'] = 'integration'
-suites['classes']['FilmyCameraUITests/SmartRecipeUITests'] = 'simulator-e2e'
+suites['classes']['FilmyCameraUITests/SmartRecipeUITests'] = 'e2e'
+for method in ['testSmartLooksIsDiscoverableAndUnavailableSceneHasNoApplyAction', 'testDisablingSuggestionsPersistsAcrossRelaunch']:
+    suites['overrides']['FilmyCameraUITests/SmartRecipeUITests/' + method] = 'simulator-e2e'
 suites_path.write_text(json.dumps(suites, indent=2) + '\n')
 readme = root / 'README.md'
 text = readme.read_text()
