@@ -1,0 +1,122 @@
+Run 34926172048
+Result: failure
+
+## smart-commit.txt
+Not produced
+
+## smart-integration.log
+From https://github.com/dheeraj5612/filmy-camera
+ * branch            feat/scene-smart-recipes -> FETCH_HEAD
+Switched to a new branch 'smart-recipes-prepared'
+Integrated smart recipes with exact source anchors and registered test suites.
+⚙️  Generating plists...
+⚙️  Generating project...
+⚙️  Writing project...
+Created project at /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera.xcodeproj
+
+## smart-python.log
+test_failed_phase_exit_code_and_summary_survive_cleanup_timeout (test_runner.SuiteRoutingTests.test_failed_phase_exit_code_and_summary_survive_cleanup_timeout) ... ok
+FAILED (failures=1, errors=5)
+test_every_declared_test_has_an_explicit_lane (test_runner.SuiteRoutingTests.test_every_declared_test_has_an_explicit_lane) ... ERROR
+test_failed_phase_exit_code_and_summary_survive_cleanup_timeout (test_runner.SuiteRoutingTests.test_failed_phase_exit_code_and_summary_survive_cleanup_timeout) ... ok
+test_fixture_permission_bootstrap_rejects_a_skipped_ui_case (test_runner.SuiteRoutingTests.test_fixture_permission_bootstrap_rejects_a_skipped_ui_case) ... ok
+test_fixture_permission_bootstrap_runs_real_roll_before_fixture_cases (test_runner.SuiteRoutingTests.test_fixture_permission_bootstrap_runs_real_roll_before_fixture_cases) ... ok
+test_fixture_photos_setup_installs_without_simctl_grant (test_runner.SuiteRoutingTests.test_fixture_photos_setup_installs_without_simctl_grant) ... ok
+test_fixture_setup_does_not_depend_on_privacy_grant (test_runner.SuiteRoutingTests.test_fixture_setup_does_not_depend_on_privacy_grant) ... ok
+test_inherited_opt_ins_cannot_enable_photos_or_benchmarks_in_ci (test_runner.SuiteRoutingTests.test_inherited_opt_ins_cannot_enable_photos_or_benchmarks_in_ci) ... ok
+test_nested_helper_class_does_not_steal_test_ownership (test_runner.SuiteRoutingTests.test_nested_helper_class_does_not_steal_test_ownership) ... ok
+test_permission_bootstrap_is_excluded_from_routine_photos_lane (test_runner.SuiteRoutingTests.test_permission_bootstrap_is_excluded_from_routine_photos_lane) ... ERROR
+test_photos_and_store_media_destroy_their_owned_simulator_on_exit (test_runner.SuiteRoutingTests.test_photos_and_store_media_destroy_their_owned_simulator_on_exit) ... ok
+test_photos_media_timeout_is_bounded_and_deletes_only_owned_simulator (test_runner.SuiteRoutingTests.test_photos_media_timeout_is_bounded_and_deletes_only_owned_simulator) ... ok
+test_photos_merge_failure_keeps_raw_case_evidence_authoritative (test_runner.SuiteRoutingTests.test_photos_merge_failure_keeps_raw_case_evidence_authoritative) ... ok
+test_photos_methods_run_once_in_isolated_invocations_and_aggregate (test_runner.SuiteRoutingTests.test_photos_methods_run_once_in_isolated_invocations_and_aggregate) ... ok
+test_photos_setup_failure_deletes_only_its_own_simulator (test_runner.SuiteRoutingTests.test_photos_setup_failure_deletes_only_its_own_simulator) ... ok
+test_routine_ci_includes_all_deterministic_tests_and_no_opt_ins (test_runner.SuiteRoutingTests.test_routine_ci_includes_all_deterministic_tests_and_no_opt_ins) ... ERROR
+test_simulator_and_device_lanes_reject_wrong_platform (test_runner.SuiteRoutingTests.test_simulator_and_device_lanes_reject_wrong_platform) ... ok
+test_simulator_only_ui_cases_run_in_e2e_and_ci_but_not_on_device (test_runner.SuiteRoutingTests.test_simulator_only_ui_cases_run_in_e2e_and_ci_but_not_on_device) ... ERROR
+test_test_failure_is_not_masked_by_owned_cleanup_timeout (test_runner.SuiteRoutingTests.test_test_failure_is_not_masked_by_owned_cleanup_timeout) ... ok
+test_unknown_and_stale_tests_fail_inventory (test_runner.SuiteRoutingTests.test_unknown_and_stale_tests_fail_inventory) ... ok
+
+======================================================================
+ERROR: test_dry_run_has_no_build_or_simulator_side_effects (test_runner.SuiteRoutingTests.test_dry_run_has_no_build_or_simulator_side_effects)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/runner/work/filmy-camera/filmy-camera/scripts/testing/test_runner.py", line 134, in test_dry_run_has_no_build_or_simulator_side_effects
+    self.assertEqual(run.main(["ci", "--destination", "platform=iOS Simulator,id=example", "--dry-run"]), 0)
+                     ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/runner/work/filmy-camera/filmy-camera/scripts/testing/run.py", line 473, in main
+    tests = inventory()
+  File "/Users/runner/work/filmy-camera/filmy-camera/scripts/testing/run.py", line 104, in inventory
+    raise ValueError(
+        f"Simulator-only test requires an explicit method override: {test_id}"
+    )
+ValueError: Simulator-only test requires an explicit method override: FilmyCameraUITests/SmartRecipeUITests/testSmartLooksIsDiscoverableAndUnavailableSceneHasNoApplyAction
+
+======================================================================
+ERROR: test_every_declared_test_has_an_explicit_lane (test_runner.SuiteRoutingTests.test_every_declared_test_has_an_explicit_lane)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/runner/work/filmy-camera/filmy-camera/scripts/testing/test_runner.py", line 16, in test_every_declared_test_has_an_explicit_lane
+    tests = run.inventory()
+  File "/Users/runner/work/filmy-camera/filmy-camera/scripts/testing/run.py", line 104, in inventory
+    raise ValueError(
+        f"Simulator-only test requires an explicit method override: {test_id}"
+    )
+ValueError: Simulator-only test requires an explicit method override: FilmyCameraUITests/SmartRecipeUITests/testSmartLooksIsDiscoverableAndUnavailableSceneHasNoApplyAction
+
+======================================================================
+ERROR: test_permission_bootstrap_is_excluded_from_routine_photos_lane (test_runner.SuiteRoutingTests.test_permission_bootstrap_is_excluded_from_routine_photos_lane)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/runner/work/filmy-camera/filmy-camera/scripts/testing/test_runner.py", line 33, in test_permission_bootstrap_is_excluded_from_routine_photos_lane
+    tests = run.inventory()
+  File "/Users/runner/work/filmy-camera/filmy-camera/scripts/testing/run.py", line 104, in inventory
+    raise ValueError(
+        f"Simulator-only test requires an explicit method override: {test_id}"
+    )
+ValueError: Simulator-only test requires an explicit method override: FilmyCameraUITests/SmartRecipeUITests/testSmartLooksIsDiscoverableAndUnavailableSceneHasNoApplyAction
+
+======================================================================
+ERROR: test_routine_ci_includes_all_deterministic_tests_and_no_opt_ins (test_runner.SuiteRoutingTests.test_routine_ci_includes_all_deterministic_tests_and_no_opt_ins)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/runner/work/filmy-camera/filmy-camera/scripts/testing/test_runner.py", line 21, in test_routine_ci_includes_all_deterministic_tests_and_no_opt_ins
+    tests = run.inventory()
+  File "/Users/runner/work/filmy-camera/filmy-camera/scripts/testing/run.py", line 104, in inventory
+    raise ValueError(
+        f"Simulator-only test requires an explicit method override: {test_id}"
+    )
+ValueError: Simulator-only test requires an explicit method override: FilmyCameraUITests/SmartRecipeUITests/testSmartLooksIsDiscoverableAndUnavailableSceneHasNoApplyAction
+
+======================================================================
+ERROR: test_simulator_only_ui_cases_run_in_e2e_and_ci_but_not_on_device (test_runner.SuiteRoutingTests.test_simulator_only_ui_cases_run_in_e2e_and_ci_but_not_on_device)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/runner/work/filmy-camera/filmy-camera/scripts/testing/test_runner.py", line 39, in test_simulator_only_ui_cases_run_in_e2e_and_ci_but_not_on_device
+    tests = run.inventory()
+  File "/Users/runner/work/filmy-camera/filmy-camera/scripts/testing/run.py", line 104, in inventory
+    raise ValueError(
+        f"Simulator-only test requires an explicit method override: {test_id}"
+    )
+ValueError: Simulator-only test requires an explicit method override: FilmyCameraUITests/SmartRecipeUITests/testSmartLooksIsDiscoverableAndUnavailableSceneHasNoApplyAction
+
+======================================================================
+FAIL: test_device_writes_fail_before_any_process_without_opt_in (test_runner.SuiteRoutingTests.test_device_writes_fail_before_any_process_without_opt_in)
+----------------------------------------------------------------------
+ValueError: Simulator-only test requires an explicit method override: FilmyCameraUITests/SmartRecipeUITests/testSmartLooksIsDiscoverableAndUnavailableSceneHasNoApplyAction
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/runner/work/filmy-camera/filmy-camera/scripts/testing/test_runner.py", line 118, in test_device_writes_fail_before_any_process_without_opt_in
+    with self.assertRaisesRegex(ValueError, "allow-photos-writes"):
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: "allow-photos-writes" does not match "Simulator-only test requires an explicit method override: FilmyCameraUITests/SmartRecipeUITests/testSmartLooksIsDiscoverableAndUnavailableSceneHasNoApplyAction"
+
+----------------------------------------------------------------------
+Ran 74 tests in 0.450s
+
+FAILED (failures=1, errors=5)
+
+## smart-native.log
+Not produced
