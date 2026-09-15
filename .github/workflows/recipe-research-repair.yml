@@ -1,0 +1,32 @@
+name: Complete public recipe table settings
+on:
+  push:
+    branches: [feat/recipe-library-packs-fidelity]
+    paths: [.github/workflows/recipe-research-repair.yml]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: public-recipe-settings
+          path: /tmp/research
+          run-id: 34921637228
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: python -m pip install beautifulsoup4==4.13.4
+      - run: python scripts/recipes/repair_public_settings.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: complete-public-recipe-settings
+          path: /tmp/research/
+          retention-days: 7
