@@ -2,7 +2,7 @@ name: Native smart recipe validation
 on:
   push:
     branches: [work/scene-smart-recipes-validation]
-    paths: [.staging/smart-recipes.json.gz]
+    paths: [.staging/smart-recipes-ready]
 permissions:
   contents: write
 concurrency:
@@ -23,30 +23,27 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           fetch-depth: 0
-      - name: Unpack bounded source payload
+      - name: Preserve explicit source manifest outside checkout
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import gzip, json, os
+          import os, shutil
           from pathlib import Path
-          source = Path('.staging/smart-recipes.json.gz')
-          assert source.stat().st_size < 100000
-          payload = gzip.decompress(source.read_bytes())
-          assert len(payload) < 200000
-          files = json.loads(payload)
-          allowed = {
-              'integrate.py', 'FilmyCamera/Models/SmartRecipeEngine.swift',
+          manifest = [
+              'FilmyCamera/Models/SmartRecipeEngine.swift',
               'FilmyCamera/Services/SmartRecipeStore.swift', 'FilmyCamera/Views/SmartRecipeViews.swift',
               'FilmyCameraTests/SmartRecipeEngineTests.swift', 'FilmyCameraTests/SmartRecipeIntegrationTests.swift',
               'FilmyCameraUITests/SmartRecipeUITests.swift', 'docs/smart-recipes.md'
-          }
-          assert set(files) == allowed
+          ]
           directory = Path(os.environ['RUNNER_TEMP']) / 'smart-source'
-          for name, content in files.items():
+          for name in manifest:
+              source = Path(name)
+              assert source.is_file() and not source.is_symlink() and source.stat().st_size < 50000
               destination = directory / name
               destination.parent.mkdir(parents=True, exist_ok=True)
-              destination.write_text(content)
+              shutil.copyfile(source, destination)
+          shutil.copyfile('.staging/integrate-smart-recipes.py', directory / 'integrate.py')
           PY
       - name: Select Xcode and install pinned XcodeGen
         env:
@@ -66,6 +63,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          exec > >(tee "$RUNNER_TEMP/smart-integration.log") 2>&1
           git fetch --no-tags origin "$TARGET"
           test "$(git rev-parse FETCH_HEAD)" = "$BASE"
           git checkout -B smart-recipes-prepared "$BASE"
@@ -120,7 +118,7 @@ jobs:
           from pathlib import Path
           temp = Path(os.environ['RUNNER_TEMP'])
           report = ['Run ' + os.environ['GITHUB_RUN_ID'], 'Result: ' + os.environ['JOB_RESULT']]
-          for filename in ['smart-commit.txt', 'smart-python.log', 'smart-native.log']:
+          for filename in ['smart-commit.txt', 'smart-integration.log', 'smart-python.log', 'smart-native.log']:
               path = temp / filename
               report.append('\n## ' + filename)
               if path.exists():
