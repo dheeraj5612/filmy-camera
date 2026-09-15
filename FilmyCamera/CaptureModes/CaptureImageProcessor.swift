@@ -33,6 +33,11 @@ enum CaptureImageProcessor {
         }
         guard media.originals.count <= media.mode.frameLimit else { throw CaptureModesError.invalidImage }
         let urls = try media.originals.map { try CaptureMediaStore.file($0, in: media.id) }
+        if media.mode.isVideo {
+            let size = try await validateMovie(urls[0], spatial: media.mode == .spatialVideo)
+            media.width = Int(size.width)
+            media.height = Int(size.height)
+        }
         if media.mode == .spatialVideo {
             // Do not flatten, re-encode, or strip the stereo calibration metadata.
             media.outputs = media.originals
@@ -238,6 +243,32 @@ enum CaptureImageProcessor {
         guard accepted >= 3 else { throw CaptureModesError.insufficientFrames(accepted) }
         let crop = CGRect(x: 0, y: ceil(bottom), width: floor(canvas.extent.maxX), height: floor(top) - ceil(bottom))
         return FusionResult(image: canvas.cropped(to: crop).transformed(by: CGAffineTransform(translationX: 0, y: -crop.minY)), accepted: accepted)
+    }
+
+    /// A nonempty file left by termination is only a recovery candidate. Verify
+    /// its container and stereo track before marking a spatial capture ready.
+    private static func validateMovie(_ url: URL, spatial: Bool) async throws -> CGSize {
+        try Task.checkCancellation()
+        let asset = AVURLAsset(url: url)
+        let duration = try await asset.load(.duration)
+        guard duration.seconds.isFinite, duration.seconds > 0,
+              let track = try await asset.loadTracks(withMediaType: .video).first else {
+            throw CaptureModesError.unavailable("This movie was not finalized. Its original is retained, but it cannot be developed.")
+        }
+        if spatial {
+            guard #available(iOS 18.0, *),
+                  !(try await asset.loadTracks(withMediaCharacteristic: .containsStereoMultiviewVideo)).isEmpty else {
+                throw CaptureModesError.unavailable("This file has no native stereo track. It has not been labeled or exported as spatial video.")
+            }
+        }
+        let size = try await track.load(.naturalSize)
+        let transform = try await track.load(.preferredTransform)
+        let bounds = CGRect(origin: .zero, size: size).applying(transform)
+        guard bounds.width.isFinite, bounds.height.isFinite, bounds.width > 0, bounds.height > 0 else {
+            throw CaptureModesError.invalidImage
+        }
+        try Task.checkCancellation()
+        return bounds.size
     }
 
     private final class ExportBox: @unchecked Sendable {
