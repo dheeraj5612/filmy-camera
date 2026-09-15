@@ -3,9 +3,7 @@ name: Fuji Shooting Checks
 on:
   push:
     branches: [feature/fuji-shooting-system]
-    paths:
-      - 'scripts/ci/fuji-followup.patch'
-      - '.github/workflows/fuji-shooting-checks.yml'
+    paths: ['.github/workflows/fuji-shooting-checks.yml']
 
 permissions:
   contents: write
@@ -15,63 +13,95 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  source-followup:
+  project-membership:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           ref: feature/fuji-shooting-system
-      - name: Apply pending source follow-up
+      - name: Add deterministic XcodeProj source references
         run: |
-          set -euo pipefail
-          if [ -f scripts/ci/fuji-followup.patch ]; then
-            git apply --check scripts/ci/fuji-followup.patch
-            git apply scripts/ci/fuji-followup.patch
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add FilmyCamera FilmyCameraTests
-            git rm scripts/ci/fuji-followup.patch
-            git commit -m 'fix: cancel RAW development on lifecycle interruptions'
+          python3 - <<'PY'
+          from pathlib import Path
+          from hashlib import md5
+          import re
+          p = Path('FilmyCamera.xcodeproj/project.pbxproj')
+          s = p.read_text()
+          if 'FujiShootingSettings.swift in Sources' in s:
+              raise SystemExit(0)
+          def reference(kind, ids):
+              acronym = ''.join(c for c in kind.removeprefix('PBX').removeprefix('XC') if c.isupper())
+              return md5(f'{acronym}_{kind}-{"-".join(ids)}_1'.encode()).hexdigest().upper()[:24]
+          assert reference('PBXFileReference', ['FilmyCamera','FilmyCamera','Services','CompositionAssistStore.swift']) == '5DEAF80BF98F3BCC9BB1DBC1'
+          assert reference('PBXBuildFile', ['FilmyCamera','FilmyCamera','Sources','2742A27161237B210E4D8A3C']) == 'F84D685F791EF68BD232EC02'
+          new = [(f.name, 'FilmyCamera', ['FilmyCamera','Shooting']) for f in sorted(Path('FilmyCamera/Shooting').glob('*.swift'))]
+          new.append(('FujiShootingTests.swift', 'FilmyCameraTests', ['FilmyCameraTests']))
+          entries = []
+          for name, target, groups in new:
+              fr = reference('PBXFileReference', ['FilmyCamera'] + groups + [name])
+              bf = reference('PBXBuildFile', ['FilmyCamera', target, 'Sources', fr])
+              assert fr not in s and bf not in s
+              entries.append((name, target, fr, bf))
+          def insert_section(section, lines):
+              global s
+              m = re.search(rf'(/\* Begin {section} section \*/\n)(.*?)(/\* End {section} section \*/)', s, re.S)
+              assert m
+              s = s[:m.start()] + m[1] + ''.join(sorted(m[2].splitlines(keepends=True) + lines)) + m[3] + s[m.end():]
+          insert_section('PBXBuildFile', [f'\t\t{bf} /* {name} in Sources */ = {{isa = PBXBuildFile; fileRef = {fr} /* {name} */; }};\n' for name,_,fr,bf in entries])
+          insert_section('PBXFileReference', [f'\t\t{fr} /* {name} */ = {{isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = {name}; sourceTree = "<group>"; }};\n' for name,_,fr,_ in entries])
+          def add_children(object_id, lines, field='children'):
+              global s
+              m = re.search(rf'(\t\t{object_id} /\*.*?\*/ = \{{.*?\b{field} = \(\n)(.*?)(\t\t\t\);)', s, re.S)
+              assert m
+              items = sorted(m[2].splitlines(keepends=True) + lines, key=lambda line: line.split('/* ',1)[1].casefold())
+              s = s[:m.start()] + m[1] + ''.join(items) + m[3] + s[m.end():]
+          for target, phase in [('FilmyCamera','32C8A77D3F2700871BE5B3CA'), ('FilmyCameraTests','1351B15A91B0887375B8F106')]:
+              add_children(phase, [f'\t\t\t\t{bf} /* {name} in Sources */,\n' for name,t,fr,bf in entries if t == target], 'files')
+          add_children(reference('PBXGroup',['FilmyCamera','FilmyCameraTests']), [f'\t\t\t\t{fr} /* {name} */,\n' for name,t,fr,bf in entries if t == 'FilmyCameraTests'])
+          sg = reference('PBXGroup',['FilmyCamera','FilmyCamera','Shooting'])
+          needle = '\t\t\t\t325853F97B7E117222F4E01E /* Services */,\n'
+          assert s.count(needle) == 1
+          s = s.replace(needle, needle + f'\t\t\t\t{sg} /* Shooting */,\n')
+          group = f'\t\t{sg} /* Shooting */ = {{\n\t\t\tisa = PBXGroup;\n\t\t\tchildren = (\n'
+          group += ''.join(f'\t\t\t\t{fr} /* {name} */,\n' for name,t,fr,bf in entries if t == 'FilmyCamera')
+          group += '\t\t\t);\n\t\t\tpath = Shooting;\n\t\t\tsourceTree = "<group>";\n\t\t};\n'
+          m = re.search(r'(/\* Begin PBXGroup section \*/\n)(.*?)(/\* End PBXGroup section \*/)', s, re.S)
+          assert m
+          blocks = re.findall(r'\t\t[0-9A-F]{24}.*?\n\t\t};\n', m[2], re.S)
+          assert ''.join(blocks) == m[2]
+          s = s[:m.start()] + m[1] + ''.join(sorted(blocks + [group])) + m[3] + s[m.end():]
+          definitions = re.findall(r'^\t\t([0-9A-F]{24}) /\*.*?\*/ = ', s, re.M)
+          assert len(definitions) == len(set(definitions))
+          for name,t,fr,bf in entries:
+              assert s.count(f'{fr} /* {name} */') == 3
+              assert s.count(f'{bf} /* {name} in Sources */') == 2
+          p.write_text(s)
+          print('Ten source memberships added with verified deterministic references.')
+          PY
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add FilmyCamera.xcodeproj
+          if ! git diff --cached --quiet; then
+            git commit -m 'build: register Fuji shooting sources and regression tests in Xcode'
             git push origin HEAD:refs/heads/feature/fuji-shooting-system
           fi
       - name: Validate test routing
         run: python3 -m unittest discover -s scripts/testing -p 'test_*.py' -v
 
   native-validation:
-    needs: source-followup
-    runs-on: macos-15-intel
+    needs: project-membership
+    runs-on: macos-latest
     timeout-minutes: 30
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           ref: feature/fuji-shooting-system
-      - name: Install verified XcodeGen
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh release download 2.45.4 --repo yonaskolb/XcodeGen --pattern xcodegen.zip --output "$RUNNER_TEMP/xcodegen.zip"
-          echo "090ec29491aad50aec10631bf6e62253fed733c50f3aab0f5ffc86bc170bdbef  $RUNNER_TEMP/xcodegen.zip" | shasum -a 256 --check
-          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP/fuji-tools"
-          echo "6aa2b4da95304b343bea12890c59f9655aa428c08b351d57d592cfab4e88a9f1  $RUNNER_TEMP/fuji-tools/xcodegen/bin/xcodegen" | shasum -a 256 --check
-          echo "$RUNNER_TEMP/fuji-tools/xcodegen/bin" >> "$GITHUB_PATH"
-      - name: Regenerate and commit Xcode project
-        run: |
-          set -euo pipefail
-          xcodegen generate --spec project.yml
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add FilmyCamera.xcodeproj
-          if ! git diff --cached --quiet; then
-            git commit -m 'build: regenerate Xcode project for Fuji shooting system'
-            git push origin HEAD:refs/heads/feature/fuji-shooting-system
-          fi
       - name: Build and run shooting regression tests
         run: |
           set -o pipefail
-          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.5' -parallel-testing-enabled NO -maximum-parallel-testing-workers 1 -only-testing:FilmyCameraTests/FujiShootingTests -resultBundlePath "$RUNNER_TEMP/FujiTests.xcresult" test CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/fuji-build.log"
+          xcodebuild -version
+          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera -destination 'platform=iOS Simulator,name=iPhone 16 Pro' -parallel-testing-enabled NO -maximum-parallel-testing-workers 1 -only-testing:FilmyCameraTests/FujiShootingTests -resultBundlePath "$RUNNER_TEMP/FujiTests.xcresult" test CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/fuji-build.log"
       - name: Summarize diagnostics
         if: always()
         run: |
