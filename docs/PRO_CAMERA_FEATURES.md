@@ -7,7 +7,7 @@ with Halide, the system Camera app, or every camera on iOS 27.
 
 | Request | Implemented behavior | Boundary |
 | --- | --- | --- |
-| Variable aperture | Runtime format min/max discovery, continuous optical f-number control, public iOS 27 `setExposureModeCustom(lensAperture:duration:iso:completionHandler:)`, validated exposure combinations | Requires an iOS 27 SDK build, iOS 27 and a supported variable-aperture lens. Older builds/lenses show a read-only f-number. Selecting aperture holds shutter/ISO; priority modes retain aperture. Returning to auto releases all exposure locks. Physical hardware acceptance remains required. |
+| Variable aperture | Runtime format min/max discovery, continuous optical f-number control, public iOS 27 `setExposureModeCustom(lensAperture:duration:iso:completionHandler:)`, validated exposure combinations | Requires iOS 27 exposing the documented public selectors and a supported variable-aperture lens. Older OS versions, early betas and fixed-aperture lenses show a read-only f-number. Selecting aperture holds shutter/ISO; priority modes retain aperture. Returning to auto releases all exposure locks. Physical hardware acceptance remains required. |
 | 12 / 24 / 48 MP | Capability-gated exact sensor-dimension requests, actual output dimensions in the project, no upscaling | 24 MP is an explicitly labeled downsample from a 48 MP request, **not** Apple's deferred 24 MP fusion. RAW Bayer, custom exposure and Live Photos request 12 MP. Cropping and device processing can lower final resolution. Native 12.2 / 48.8 MP sizes are not needlessly resampled. |
 | Shutter / ISO priority | Fix one parameter and adjust the other with the device exposure meter, damped 250 ms feedback, deadband, bounds and limit indication | App-managed custom exposure, not a native AVFoundation priority mode. Available only on a supporting lens. Stops on auto/manual override, AE/AF lock, session stop and reset. |
 | Focus loupe | 2x / 4x live preview crop around the selected point or tracked subject | Does not change optical zoom or capture pixels. Preview-resolution aid, not a sensor-resolution still magnifier. |
@@ -18,13 +18,18 @@ with Halide, the system Camera app, or every camera on iOS 27.
 | HDR | Preserve source HDR highlight headroom through an extended, half-float render context; generate a new gain map for the edited SDR/HDR pair | iOS 18+ HEIF only. SDR sources remain SDR, and instant-print composition is SDR. This is not a new multi-frame exposure-fusion capture algorithm or a guarantee that every capture contains HDR. |
 | Live Photos | Actual capture movie callback, byte-preserved still/movie pairing, Photos export and in-app `PHLivePhotoView` playback | **Silent original Live Photo**, deliberately without microphone permission. The Filmy still is separately edited/exported. No falsely paired filtered still or promise of film-filtered motion. RAW / manual exposure combinations are disabled. |
 
-## SDK selection
+## Public aperture API compatibility
 
-XcodeGen enables `FILMY_IOS27_CAMERA_APIS` for `iphoneos27*` and
-`iphonesimulator27*` SDKs only. Build with Xcode 27 to include optical control.
-The same sources still compile against Xcode 16.4 / 26.3 without pretending those
-older SDKs offer aperture control. Future SDK major versions must extend these
-explicit build conditions after their API contracts are reviewed.
+The small Objective-C bridge declares Apple's documented iOS 27 selectors with
+exact float / CMTime / completion-block signatures. It checks OS availability,
+all required selectors, finite variable bounds, custom exposure support and the
+full exposure combination before sending a message. It does not use private
+APIs, KVC, swizzling, guessed device model lists, or untyped IMP calls.
+
+This allows older supported SDKs and early iOS 27 SDK betas to build the app:
+the Xcode 27 preview in CI predates these hardware-specific declarations despite
+reporting SDK 27.0. A matching OS/framework and real variable-aperture hardware
+remain necessary for optical control. A simulator build is not a hardware test.
 
 ## Entry points
 

@@ -73,6 +73,9 @@ actor FilmyPhotoStore {
         try manager.createDirectory(at: staging, withIntermediateDirectories: false)
         do {
             let originalName = "original.\(ProPhotoEncoder.fileExtension(for: original))"
+            guard originalName != "project.json", raw == nil || originalName != "original.dng" else {
+                throw FilmyPhotoStoreError.invalidManifest
+            }
             try write(original, to: staging.appendingPathComponent(originalName))
             if let raw { try write(raw, to: staging.appendingPathComponent("original.dng")) }
             var movieHash: String?
@@ -121,7 +124,12 @@ actor FilmyPhotoStore {
         guard project.id == id, project.revision >= 0 else { throw FilmyPhotoStoreError.invalidManifest }
         let names = [project.originalFilename, project.rawFilename, project.movieFilename,
                      project.renditionFilename, project.thumbnailFilename].compactMap { $0 }
-        guard names.allSatisfy(Self.isSafeFilename) else { throw FilmyPhotoStoreError.invalidManifest }
+        guard names.allSatisfy(Self.isSafeFilename), Set(names + ["project.json"]).count == names.count + 1,
+              project.renditionFilename.map({ $0.hasPrefix("edit-") }) ?? true,
+              project.thumbnailFilename.map({ $0.hasPrefix("thumb-") }) ?? true,
+              (project.rawFilename == nil) == (project.rawSHA256 == nil),
+              (project.movieFilename == nil) == (project.movieSHA256 == nil),
+              project.revision < Int.max else { throw FilmyPhotoStoreError.invalidManifest }
         return project
     }
 
@@ -197,7 +205,8 @@ actor FilmyPhotoStore {
             throw error
         }
         // Only obsolete derivatives are disposable. Originals are never GC'd.
-        for filename in [previousRendition, previousThumbnail].compactMap({ $0 }) {
+        let originals = Set([project.originalFilename, project.rawFilename, project.movieFilename, "project.json"].compactMap { $0 })
+        for filename in [previousRendition, previousThumbnail].compactMap({ $0 }) where !originals.contains(filename) {
             try? manager.removeItem(at: location.appendingPathComponent(filename))
         }
         return project

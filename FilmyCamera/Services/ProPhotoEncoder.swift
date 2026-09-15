@@ -40,7 +40,7 @@ enum ProPhotoEncoder {
         guard scale < 0.9999 else { return image }
         let resized = image.applyingFilter("CILanczosScaleTransform", parameters: [kCIInputScaleKey: scale, kCIInputAspectRatioKey: 1])
         // Fractional extents can cause a one-pixel encoder disagreement.
-        return resized.cropped(to: CGRect(x: 0, y: 0, width: floor(resized.extent.width), height: floor(resized.extent.height)))
+        return resized.cropped(to: CGRect(x: 0, y: 0, width: max(1, floor(image.extent.width * scale)), height: max(1, floor(image.extent.height * scale))))
     }
 
     static func heifData(image: CIImage, sourceSDR: CIImage, sourceHDR: CIImage?, sourceData: Data,
@@ -82,7 +82,12 @@ enum ProPhotoEncoder {
 
     static func containsHDRGainMap(_ data: Data) -> Bool {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return false }
-        return CGImageSourceCopyAuxiliaryDataInfoAtIndex(source, 0, kCGImageAuxiliaryDataTypeHDRGainMap) != nil
+        if CGImageSourceCopyAuxiliaryDataInfoAtIndex(source, 0, kCGImageAuxiliaryDataTypeHDRGainMap) != nil { return true }
+        if #available(iOS 18.0, *) {
+            // Adaptive HDR uses the standardized ISO gain map, not the legacy Apple auxiliary type.
+            return CGImageSourceCopyAuxiliaryDataInfoAtIndex(source, 0, kCGImageAuxiliaryDataTypeISOGainMap) != nil
+        }
+        return false
     }
 
     static func fileExtension(for data: Data) -> String {

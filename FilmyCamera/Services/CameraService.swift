@@ -1229,14 +1229,12 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             return
         }
 
-        #if FILMY_IOS27_CAMERA_APIS
-        if #available(iOS 27.0, *), let aperture = requestedLensAperture,
-           !device.activeFormat.supportsExposureModeCustom(lensAperture: aperture, duration: duration, iso: request.iso) {
+        if let aperture = requestedLensAperture,
+           !FilmySupportsOpticalExposure(device, aperture, duration, request.iso) {
             publishStatus("That aperture, shutter and ISO combination is unsupported on this format.")
             stopExposurePriorityOnQueue()
             return
         }
-        #endif
 
         do {
             try device.lockForConfiguration()
@@ -1285,15 +1283,20 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                     self.captureDeferredPhotoWhenManualControlsSettleOnQueue()
                 }
             }
-            #if FILMY_IOS27_CAMERA_APIS
-            if #available(iOS 27.0, *), let aperture = requestedLensAperture {
-                device.setExposureModeCustom(lensAperture: aperture, duration: duration, iso: request.iso, completionHandler: completion)
+            if let aperture = requestedLensAperture {
+                guard FilmySetOpticalExposure(device, aperture, duration, request.iso, completion) else {
+                    device.unlockForConfiguration()
+                    isApplyingManualExposure = false
+                    requestedLensAperture = nil
+                    stopExposurePriorityOnQueue()
+                    publishManualControlsOnQueue(for: device)
+                    publishStatus("Optical aperture is unavailable for this exposure combination.")
+                    failDeferredPhotoForManualControlsOnQueue()
+                    return
+                }
             } else {
                 device.setExposureModeCustom(duration: duration, iso: request.iso, completionHandler: completion)
             }
-            #else
-            device.setExposureModeCustom(duration: duration, iso: request.iso, completionHandler: completion)
-            #endif
             device.unlockForConfiguration()
         } catch {
             publishStatus("Manual exposure is unavailable right now.")
@@ -3360,17 +3363,9 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         capabilities.supportsLivePhoto = photoOutput.isLivePhotoCaptureSupported
         if #available(iOS 18.0, *) { capabilities.supportsHDRExport = capabilities.supportsHEIF }
         capabilities.aperture = device.lensAperture
-        #if FILMY_IOS27_CAMERA_APIS
-        if #available(iOS 27.0, *) {
-            capabilities.minimumAperture = device.activeFormat.minLensAperture
-            capabilities.maximumAperture = device.activeFormat.maxLensAperture
-            capabilities.supportsVariableAperture = OpticalAperturePolicy.clamped(device.lensAperture,
-                minimum: capabilities.minimumAperture, maximum: capabilities.maximumAperture) != nil
-                && device.isExposureModeSupported(.custom)
-                && device.activeFormat.supportsExposureModeCustom(lensAperture: AVCaptureDevice.currentLensAperture,
-                    duration: AVCaptureDevice.currentExposureDuration, iso: AVCaptureDevice.currentISO)
-        }
-        #endif
+        capabilities.supportsVariableAperture = FilmyOpticalApertureBounds(device,
+            &capabilities.minimumAperture, &capabilities.maximumAperture)
+            && FilmySupportsOpticalExposure(device, device.lensAperture, device.exposureDuration, device.iso)
         proCapabilities = capabilities
         let selection = ProCapturePolicy.resolve(requestedProOptions, capabilities: capabilities,
                                                   manualExposure: device.exposureMode == .custom)
@@ -3384,8 +3379,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
     }
 
-    /// Optical aperture is enabled only when compiled with Apple's iOS 27 SDK
-    /// and when the active format advertises a genuine variable aperture.
+    /// Optical aperture requires the documented iOS 27 selectors at runtime
+    /// and an active format advertising a genuine variable aperture.
     /// Changing it keeps shutter and ISO fixed; priority modes may then meter
     /// one of those parameters while retaining the optical aperture selection.
     public func setLensAperture(_ value: Float) {
@@ -3393,19 +3388,17 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             guard let self, self.pendingPhotoCompletion == nil,
                   self.pendingManualControlsPhotoCompletion == nil, !self.isApplyingManualControls,
                   let device = self.activeDevice() else { return }
-            #if FILMY_IOS27_CAMERA_APIS
-            if #available(iOS 27.0, *),
-               let aperture = OpticalAperturePolicy.clamped(value, minimum: device.activeFormat.minLensAperture,
-                    maximum: device.activeFormat.maxLensAperture),
-               device.activeFormat.supportsExposureModeCustom(lensAperture: aperture,
-                    duration: device.exposureDuration, iso: device.iso) {
+            var minimum: Float = 0
+            var maximum: Float = 0
+            if FilmyOpticalApertureBounds(device, &minimum, &maximum),
+               let aperture = OpticalAperturePolicy.clamped(value, minimum: minimum, maximum: maximum),
+               FilmySupportsOpticalExposure(device, aperture, device.exposureDuration, device.iso) {
                 self.stopExposurePriorityOnQueue()
                 self.requestedLensAperture = aperture
                 self.setManualExposureOnQueue(iso: device.iso, durationSeconds: CMTimeGetSeconds(device.exposureDuration))
                 return
             }
-            #endif
-            self.publishStatus("Optical aperture control requires an iOS 27 SDK build, iOS 27 and a supported variable-aperture lens.")
+            self.publishStatus("Optical aperture requires the public iOS 27 camera APIs and a supported variable-aperture lens.")
         }
     }
 

@@ -97,6 +97,22 @@ final class FilmyPhotoStoreTests: XCTestCase {
         XCTAssertTrue(listing.photos.isEmpty)
         XCTAssertTrue(FileManager.default.fileExists(atPath: location.appendingPathComponent(".staging-interrupted").path))
     }
+    func testCorruptDerivativeAliasCannotDeleteOriginal() async throws {
+        let location = root()
+        defer { try? FileManager.default.removeItem(at: location) }
+        let store = FilmyPhotoStore(root: location)
+        let bytes = try fixture()
+        var project = try await store.insert(original: bytes, raw: nil, movieURL: nil, capturedAt: Date(),
+            dimensions: ProPhotoDimensions(width: 16, height: 16), edit: edit())
+        let directory = location.appendingPathComponent(project.id.uuidString)
+        project.renditionFilename = project.originalFilename
+        try JSONEncoder().encode(project).write(to: directory.appendingPathComponent("project.json"), options: .atomic)
+        do {
+            _ = try await store.commitRendition(project.id, data: bytes, edit: edit(), expectedRevision: 0)
+            XCTFail("A derivative alias must not be accepted")
+        } catch { XCTAssertEqual(error as? FilmyPhotoStoreError, .invalidManifest) }
+        XCTAssertEqual(try Data(contentsOf: directory.appendingPathComponent(project.originalFilename)), bytes)
+    }
     func testManifestPathValidationPreventsTraversal() {
         for name in ["", "../original.dng", "/tmp/data", "a/b.jpg", "a\\b.jpg", ".project", "photo..jpg"] {
             XCTAssertFalse(FilmyPhotoStore.isSafeFilename(name))

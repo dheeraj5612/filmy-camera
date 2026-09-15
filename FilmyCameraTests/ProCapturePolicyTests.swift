@@ -1,9 +1,20 @@
+import CoreMedia
 import CoreGraphics
 import Foundation
 import XCTest
 @testable import FilmyCamera
 
 final class ProCapturePolicyTests: XCTestCase {
+    func testOpticalBridgeRejectsMissingHardwareWithoutCallingCompletion() {
+        var minimum: Float = 10
+        var maximum: Float = 10
+        XCTAssertFalse(FilmyOpticalApertureBounds(nil, &minimum, &maximum))
+        XCTAssertEqual(minimum, 0)
+        XCTAssertEqual(maximum, 0)
+        XCTAssertFalse(FilmySupportsOpticalExposure(nil, 2, CMTime(value: 1, timescale: 60), 100))
+        XCTAssertFalse(FilmySetOpticalExposure(nil, 2, CMTime(value: 1, timescale: 60), 100, nil))
+    }
+
     func testOpticalApertureRejectsFixedOrInvalidRangesAndClampsWithoutInventingStops() {
         XCTAssertNil(OpticalAperturePolicy.clamped(2.8, minimum: 1.8, maximum: 1.8))
         XCTAssertNil(OpticalAperturePolicy.clamped(.nan, minimum: 1.48, maximum: 4))
