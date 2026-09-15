@@ -369,6 +369,32 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     @Published public private(set) var isFocusExposureLocked = false
     @Published public private(set) var isLensSmudged = false
     @Published public private(set) var manualControls: CameraManualControls = .unavailable
+    @Published public private(set) var sceneAuto = SceneAutoState()
+
+    // Mutable Scene Auto state belongs to sessionQueue. The analyzer is lazy
+    // and main-queue-owned, so Off has no thumbnail/Vision cost.
+    private lazy var sceneAutoAnalyzer = SceneAutoAnalyzer()
+    // Main-thread-only snapshot. Already queued UI publications must not
+    // change development after the shutter has copied its effective recipe.
+    private var sceneAutoFrozenDevelopmentOnMain: SceneAutoDevelopment?
+    private var sceneAutoState = SceneAutoState()
+    private var sceneAutoPolicy = SceneAutoPolicy()
+    private var sceneAutoViewfinderActive = true
+    private var sceneAutoCapturePaused = false
+    private var sceneAutoHeld = false
+    private var sceneAutoFallbackBias: Float = 0
+    private var sceneAutoRestore: SceneAutoRestore?
+    private struct SceneAutoRestore {
+        let exposure: DesiredManualExposure
+        let whiteBalance: DesiredManualWhiteBalance
+        let focus: DesiredManualFocus
+        let bias: Float
+        let flash: FlashMode
+        let flashBeforeManual: FlashMode?
+        let lowLightBoost: Bool
+        let smoothFocus: Bool
+        let deviceID: String
+    }
     @Published public private(set) var previewFrameSize: CGSize = .zero
     @Published public private(set) var previewViewportSize: CGSize = .zero
     /// The pixel size of the drawable the viewfinder actually renders into,
@@ -723,6 +749,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
     private func stopOnQueue() {
         fujiCapture.sessionStopped()
+        disableSceneAutoOnQueue()
         wantsToRun = false
         recoveryAttempt = 0
         manualExposureGeneration &+= 1
@@ -772,6 +799,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// no-op and the preview-only state remains unchanged.
     public func setCameraPosition(_ position: CameraPosition) {
         sessionQueue.async { [weak self] in
+            self?.disableSceneAutoOnQueue()
             self?.setCameraPositionOnQueue(position)
         }
     }
@@ -781,6 +809,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     public func toggleCameraPosition() {
         sessionQueue.async { [weak self] in
             guard let self else { return }
+            self.disableSceneAutoOnQueue()
             let nextPosition: CameraPosition = self.requestedCameraPosition == .back ? .front : .back
             self.setCameraPositionOnQueue(nextPosition)
         }
@@ -791,6 +820,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// standalone physical devices are swapped into the session input.
     public func setLens(id: String) {
         sessionQueue.async { [weak self] in
+            self?.disableSceneAutoOnQueue()
             self?.setLensOnQueue(id: id)
         }
     }
@@ -837,6 +867,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
         let handlers = Array(frameHandlers.values)
         frameHandlersLock.unlock()
+        submitSceneAutoFrameOnMain(image)
         onFrame?(image)
         for handler in handlers {
             handler(image)
@@ -994,6 +1025,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// AVCapturePhotoOutput, which would otherwise raise an exception.
     public func setFlashMode(_ mode: FlashMode) {
         sessionQueue.async { [weak self] in
+            self?.disableSceneAutoOnQueue()
             self?.setFlashModeOnQueue(mode)
         }
     }
@@ -1005,6 +1037,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     public func cycleFlashMode() {
         sessionQueue.async { [weak self] in
             guard let self else { return }
+            self.disableSceneAutoOnQueue()
             let manualExposureActive = self.isManualExposureActiveOrRequested
             guard manualExposureActive || self.flashAvailabilityState != .unsupported else {
                 return
@@ -1033,6 +1066,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         sessionQueue.async { [weak self] in
             guard self?.fujiCapture.isBusy == false else { return }
             guard let self, let device = self.activeDevice() else { return }
+            if self.sceneAutoHeld { self.setSceneAutoHeldOnQueue(false) }
             do {
                 try device.lockForConfiguration()
                 defer { device.unlockForConfiguration() }
@@ -1041,12 +1075,15 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                     self.applyAutoFocusOnQueue(to: device, at: point, isUserInitiated: true)
                 }
 
+                if self.sceneAutoState.isEnabled, device.isExposurePointOfInterestSupported {
+                    device.exposurePointOfInterest = point
+                }
                 if self.desiredManualExposure == .auto {
                     self.applyAutoExposureOnQueue(to: device, at: point)
                 }
 
-                device.isSubjectAreaChangeMonitoringEnabled =
-                    self.usesAutoFocusOnQueue(for: device) || self.desiredManualExposure == .auto
+                device.isSubjectAreaChangeMonitoringEnabled = !self.sceneAutoState.isEnabled
+                    && (self.usesAutoFocusOnQueue(for: device) || self.desiredManualExposure == .auto)
                 self.latestFocusPointUpdateUptime = DispatchTime.now().uptimeNanoseconds
                 self.focusExposureLocked = false
                 self.publishFocusExposureLocked(false)
@@ -1064,6 +1101,11 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         sessionQueue.async { [weak self] in
             guard self?.fujiCapture.isBusy == false else { return }
             guard let self, let device = self.activeDevice() else { return }
+
+            if self.sceneAutoState.isEnabled {
+                self.setSceneAutoHeldOnQueue(!self.sceneAutoHeld)
+                return
+            }
 
             do {
                 try device.lockForConfiguration()
@@ -1128,6 +1170,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// Sets a bounded optical/digital zoom factor for the active camera.
     public func setZoom(_ factor: CGFloat) {
         sessionQueue.async { [weak self] in
+            self?.invalidateSceneAutoAnalysisOnQueue()
             self?.setZoomOnQueue(factor)
         }
     }
@@ -1143,6 +1186,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 self.publishStatus("Exposure control is available on a physical device.")
                 return
             }
+            self.disableSceneAutoOnQueue()
             guard !self.isManualExposureActiveOrRequested else {
                 self.publishStatus("Exposure compensation requires Auto exposure.")
                 return
@@ -1177,12 +1221,14 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// readback is published from AVFoundation's completion callback.
     public func setManualExposure(iso: Float, durationSeconds: Double) {
         sessionQueue.async { [weak self] in
+            self?.disableSceneAutoOnQueue()
             self?.setManualExposureOnQueue(iso: iso, durationSeconds: durationSeconds)
         }
     }
 
     public func setAutoExposure() {
         sessionQueue.async { [weak self] in
+            self?.disableSceneAutoOnQueue()
             self?.setAutoExposureOnQueue()
         }
     }
@@ -1192,21 +1238,23 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     public func lockCurrentExposure() {
         sessionQueue.async { [weak self] in
             guard let self, let device = self.activeDevice() else { return }
-            self.setManualExposureOnQueue(
-                iso: device.iso,
-                durationSeconds: CMTimeGetSeconds(device.exposureDuration)
-            )
+            let iso = device.iso
+            let duration = CMTimeGetSeconds(device.exposureDuration)
+            self.disableSceneAutoOnQueue()
+            self.setManualExposureOnQueue(iso: iso, durationSeconds: duration)
         }
     }
 
     public func setManualWhiteBalance(kelvin: Float, tint: Float) {
         sessionQueue.async { [weak self] in
+            self?.disableSceneAutoOnQueue()
             self?.setManualWhiteBalanceOnQueue(kelvin: kelvin, tint: tint)
         }
     }
 
     public func setAutoWhiteBalance() {
         sessionQueue.async { [weak self] in
+            self?.disableSceneAutoOnQueue()
             self?.setAutoWhiteBalanceOnQueue()
         }
     }
@@ -1220,6 +1268,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 self.publishStatus("White balance is still settling. Try again in a moment.")
                 return
             }
+            self.disableSceneAutoOnQueue()
             self.setManualWhiteBalanceOnQueue(
                 kelvin: current.temperature,
                 tint: current.tint,
@@ -1230,12 +1279,14 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
     public func setManualFocus(lensPosition: Float) {
         sessionQueue.async { [weak self] in
+            self?.disableSceneAutoOnQueue()
             self?.setManualFocusOnQueue(lensPosition: lensPosition)
         }
     }
 
     public func setAutoFocus() {
         sessionQueue.async { [weak self] in
+            self?.disableSceneAutoOnQueue()
             self?.setAutoFocusOnQueue()
         }
     }
@@ -1244,13 +1295,16 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     public func lockCurrentFocus() {
         sessionQueue.async { [weak self] in
             guard let self, let device = self.activeDevice() else { return }
-            self.setManualFocusOnQueue(lensPosition: device.lensPosition)
+            let position = device.lensPosition
+            self.disableSceneAutoOnQueue()
+            self.setManualFocusOnQueue(lensPosition: position)
         }
     }
 
     /// Restores every sensor control to continuous automatic operation.
     public func resetManualControlsToAuto() {
         sessionQueue.async { [weak self] in
+            self?.disableSceneAutoOnQueue()
             self?.resetManualControlsToAutoOnQueue()
         }
     }
@@ -1260,6 +1314,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// choosing a constituent there intentionally keeps seamless zoom active.
     public func setManualControlLens(id: String) {
         sessionQueue.async { [weak self] in
+            self?.disableSceneAutoOnQueue()
             self?.setManualControlLensOnQueue(id: id)
         }
     }
@@ -1353,7 +1408,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                         durationSeconds: appliedDuration
                     )
                     self.publishManualControlsOnQueue(for: device)
-                    self.publishStatus("Manual exposure applied")
+                    self.publishStatus(self.sceneAutoState.isEnabled ? "Scene Auto exposure applied" : "Manual exposure applied")
                     self.captureDeferredPhotoWhenManualControlsSettleOnQueue()
                 }
             }
@@ -1491,7 +1546,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                         )
                     }
                     self.publishManualControlsOnQueue(for: device)
-                    self.publishStatus("Manual white balance applied")
+                    self.publishStatus(self.sceneAutoState.isEnabled ? "Scene Auto color held" : "Manual white balance applied")
                     self.captureDeferredPhotoWhenManualControlsSettleOnQueue()
                 }
             }
@@ -2501,6 +2556,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         isApplyingManualWhiteBalance = false
         isApplyingManualFocus = false
         fujiCapture.sessionStopped()
+        disableSceneAutoOnQueue()
         cancelPendingPhotoOnQueue(status: pendingCaptureStatus)
         resetLensSmudgeObservationOnQueue()
         activeConstituentObservation?.invalidate()
@@ -2718,7 +2774,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private func handleSubjectAreaChangeOnQueue(deviceID: String, observedAt: UInt64) {
         guard !fujiCapture.isBusy else { return }
         guard wantsToRun, isConfigured, session.isRunning, !session.isInterrupted,
-              !focusExposureLocked,
+              !focusExposureLocked, !sceneAutoState.isEnabled,
               observedAt > latestFocusPointUpdateUptime,
               let device = activeDevice(), device.uniqueID == deviceID,
               device.isSubjectAreaChangeMonitoringEnabled else { return }
@@ -4364,5 +4420,267 @@ final class CameraCaptureLocationProvider: NSObject, @preconcurrency CLLocationM
         latestLocation = locations.last(where: {
             Self.validLocation($0, authorization: manager.authorizationStatus, at: Date()) != nil
         })
+    }
+}
+
+// MARK: - Opt-in, stabilized scene auto
+
+extension CameraService {
+    public func setSceneAutoEnabled(_ enabled: Bool) {
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            guard self.pendingPhotoCompletion == nil, self.pendingManualControlsPhotoCompletion == nil,
+                  !self.sceneAutoCapturePaused else { return }
+            if !enabled { self.disableSceneAutoOnQueue(); return }
+            guard !self.sceneAutoState.isEnabled, self.session.isRunning, self.isConfigured,
+                  self.pendingPhotoCompletion == nil, self.pendingManualControlsPhotoCompletion == nil,
+                  !self.isApplyingManualControls, let device = self.activeDevice() else { return }
+            guard !self.focusExposureLocked else {
+                self.publishStatus("Unlock AE/AF before enabling Scene Auto.")
+                return
+            }
+            self.sceneAutoRestore = SceneAutoRestore(
+                exposure: self.desiredManualExposure, whiteBalance: self.desiredManualWhiteBalance, focus: self.desiredManualFocus,
+                bias: self.selectedExposureBias, flash: self.selectedFlashMode, flashBeforeManual: self.flashModeBeforeManualExposure,
+                lowLightBoost: device.automaticallyEnablesLowLightBoostWhenAvailable,
+                smoothFocus: device.isSmoothAutoFocusEnabled, deviceID: device.uniqueID
+            )
+            self.resetManualControlsToAutoOnQueue()
+            self.selectedExposureBias = 0
+            self.sceneAutoFallbackBias = 0
+            // Do not persist auto-owned flash changes. Disabling Auto restores
+            // the user's exact request, including a preexisting manual override.
+            self.selectedFlashMode = .off
+            self.flashModeBeforeManualExposure = nil
+            self.publishFlashMode(.off)
+            self.configureFlashSceneMonitoringOnQueue(supportedModes: self.supportedFlashModeRawValuesOnQueue())
+            self.publishExposureBias(0)
+            do {
+                try device.lockForConfiguration()
+                self.applyExposureBiasOnQueue(to: device)
+                if device.isLowLightBoostSupported { device.automaticallyEnablesLowLightBoostWhenAvailable = true }
+                if device.isSmoothAutoFocusSupported { device.isSmoothAutoFocusEnabled = true }
+                // One-shot AF settles rather than breathing indefinitely.
+                self.applyAutoFocusOnQueue(to: device, at: CGPoint(x: 0.5, y: 0.5), isUserInitiated: true)
+                device.isSubjectAreaChangeMonitoringEnabled = false
+                device.unlockForConfiguration()
+            } catch {
+                self.disableSceneAutoOnQueue()
+                self.publishStatus("Scene Auto could not configure this camera.")
+                return
+            }
+            self.sceneAutoPolicy = SceneAutoPolicy()
+            self.sceneAutoHeld = false
+            self.sceneAutoCapturePaused = false
+            self.sceneAutoState.generation &+= 1
+            self.sceneAutoState.phase = .metering
+            self.sceneAutoState.scene = .balanced
+            self.sceneAutoState.development = SceneAutoDevelopment()
+            self.publishSceneAutoOnQueue()
+        }
+    }
+
+    public func setSceneAutoHeld(_ held: Bool) {
+        sessionQueue.async { [weak self] in self?.setSceneAutoHeldOnQueue(held) }
+    }
+
+    /// UI visibility and capture are separate gates: completion of a photo
+    /// cannot resume analysis behind a sheet or in the background.
+    func setSceneAutoViewfinderActive(_ active: Bool) {
+        sessionQueue.async { [weak self] in
+            guard let self, self.sceneAutoViewfinderActive != active else { return }
+            self.sceneAutoViewfinderActive = active
+            self.invalidateSceneAutoAnalysisOnQueue()
+            self.publishSceneAutoOnQueue()
+        }
+    }
+
+    func setSceneAutoCapturePaused(_ paused: Bool) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        sceneAutoFrozenDevelopmentOnMain = paused ? sceneAuto.development : nil
+        sessionQueue.async { [weak self] in
+            guard let self, self.sceneAutoCapturePaused != paused else { return }
+            self.sceneAutoCapturePaused = paused
+            self.invalidateSceneAutoAnalysisOnQueue()
+            if paused { self.freezeSceneAutoColorOnQueue() }
+            self.publishSceneAutoOnQueue()
+        }
+    }
+
+    private func setSceneAutoHeldOnQueue(_ held: Bool) {
+        guard sceneAutoState.isEnabled, held != sceneAutoHeld,
+              pendingPhotoCompletion == nil, pendingManualControlsPhotoCompletion == nil else { return }
+        sceneAutoHeld = held
+        invalidateSceneAutoAnalysisOnQueue()
+        if held {
+            freezeSceneAutoColorOnQueue()
+            if let device = activeDevice() {
+                do {
+                    try device.lockForConfiguration()
+                    if device.isExposureModeSupported(.locked), device.exposureMode != .custom { device.exposureMode = .locked }
+                    if device.isFocusModeSupported(.locked) { device.focusMode = .locked }
+                    device.unlockForConfiguration()
+                } catch { publishStatus("Some hardware controls could not be held.") }
+            }
+        } else if let device = activeDevice(), !device.isExposureModeSupported(.custom) {
+            setAutoExposureOnQueue()
+        }
+        publishSceneAutoOnQueue()
+    }
+
+    private func freezeSceneAutoColorOnQueue() {
+        guard sceneAutoState.isEnabled, let device = activeDevice(), Self.supportsManualWhiteBalance(device),
+              !isApplyingManualWhiteBalance, device.whiteBalanceMode != .locked else { return }
+        let gains = device.deviceWhiteBalanceGains
+        guard let values = Self.whiteBalanceTemperatureAndTint(for: gains, device: device) else { return }
+        setManualWhiteBalanceOnQueue(kelvin: values.temperature, tint: values.tint, preferredGains: gains)
+    }
+
+    private func invalidateSceneAutoAnalysisOnQueue() {
+        guard sceneAutoState.isEnabled else { return }
+        sceneAutoState.generation &+= 1
+        sceneAutoPolicy.resume()
+        sceneAutoState.phase = .metering
+        publishSceneAutoOnQueue()
+    }
+
+    private func disableSceneAutoOnQueue() {
+        guard sceneAutoState.isEnabled || sceneAutoRestore != nil else { return }
+        let saved = sceneAutoRestore
+        sceneAutoRestore = nil
+        let generation = sceneAutoState.generation &+ 1
+        sceneAutoState = SceneAutoState(generation: generation)
+        sceneAutoHeld = false
+        sceneAutoPolicy = SceneAutoPolicy()
+        publishSceneAutoOnQueue()
+        guard let saved else { return }
+        selectedExposureBias = saved.bias
+        publishExposureBias(saved.bias)
+        // All restoration goes through the existing capability, completion,
+        // and stale-device checks. Never apply gains from a different camera.
+        switch saved.exposure {
+        case .auto: setAutoExposureOnQueue()
+        case let .manual(iso, duration): setManualExposureOnQueue(iso: iso, durationSeconds: duration)
+        }
+        switch saved.whiteBalance {
+        case .auto: setAutoWhiteBalanceOnQueue()
+        case let .manual(values):
+            setManualWhiteBalanceOnQueue(kelvin: values.kelvin, tint: values.tint,
+                                         preferredGains: activeDevice()?.uniqueID == values.gainsDeviceID ? values.gains : nil)
+        }
+        switch saved.focus {
+        case .auto: setAutoFocusOnQueue()
+        case let .manual(position): setManualFocusOnQueue(lensPosition: position)
+        }
+        selectedFlashMode = saved.flash
+        flashModeBeforeManualExposure = saved.flashBeforeManual
+        publishFlashMode(saved.flash)
+        configureFlashSceneMonitoringOnQueue(supportedModes: supportedFlashModeRawValuesOnQueue())
+        if let device = activeDevice(), device.uniqueID == saved.deviceID {
+            do {
+                try device.lockForConfiguration()
+                if device.isLowLightBoostSupported { device.automaticallyEnablesLowLightBoostWhenAvailable = saved.lowLightBoost }
+                if device.isSmoothAutoFocusSupported { device.isSmoothAutoFocusEnabled = saved.smoothFocus }
+                device.unlockForConfiguration()
+            } catch { publishStatus("Camera settings could not all be restored.") }
+        }
+    }
+
+    private func publishSceneAutoOnQueue() {
+        if sceneAutoState.isEnabled {
+            if sceneAutoHeld { sceneAutoState.phase = .held }
+            else if sceneAutoCapturePaused || !sceneAutoViewfinderActive { sceneAutoState.phase = .paused }
+            else if sceneAutoState.phase == .held || sceneAutoState.phase == .paused { sceneAutoState.phase = .metering }
+        }
+        let state = sceneAutoState
+        publishOnMain { [weak self] in
+            guard let self else { return }
+            var visible = state
+            if visible.isEnabled, let frozen = self.sceneAutoFrozenDevelopmentOnMain { visible.development = frozen }
+            guard self.sceneAuto != visible else { return }
+            self.sceneAuto = visible
+        }
+    }
+
+    private func submitSceneAutoFrameOnMain(_ image: CIImage) {
+        guard sceneAuto.acceptsFrames else { return }
+        let generation = sceneAuto.generation
+        sceneAutoAnalyzer.submit(image, generation: generation) { [weak self] observation, generation in
+            self?.sessionQueue.async { [weak self] in
+                self?.applySceneAutoObservationOnQueue(observation, generation: generation)
+            }
+        }
+    }
+
+    private func applySceneAutoObservationOnQueue(_ observation: SceneAutoObservation, generation: UInt64) {
+        guard sceneAutoState.isEnabled, generation == sceneAutoState.generation,
+              !sceneAutoHeld, !sceneAutoCapturePaused, sceneAutoViewfinderActive,
+              session.isRunning, wantsToRun, sessionAvailability == .running,
+              pendingPhotoCompletion == nil, pendingManualControlsPhotoCompletion == nil,
+              !isApplyingManualControls, let device = activeDevice(), device.uniqueID == sceneAutoRestore?.deviceID else { return }
+        let bounds = manualExposureBoundsOnQueue(for: device)
+        let minimumDuration = CMTimeGetSeconds(device.activeFormat.minExposureDuration)
+        let maximumDuration = CMTimeGetSeconds(device.activeFormat.maxExposureDuration)
+        let sensor = SceneAutoSensor(
+            iso: Double(device.iso), duration: CMTimeGetSeconds(device.exposureDuration),
+            minimumISO: Double(bounds?.iso.lowerBound ?? device.activeFormat.minISO),
+            maximumISO: Double(bounds?.iso.upperBound ?? device.activeFormat.maxISO),
+            minimumDuration: bounds?.duration.lowerBound ?? minimumDuration,
+            maximumDuration: bounds?.duration.upperBound ?? maximumDuration,
+            aperture: Double(device.lensAperture), targetOffset: Double(device.exposureTargetOffset),
+            zoom: Double(userFacingZoomFactorOnQueue(for: device, hardwareFactor: device.videoZoomFactor)), isAdjustingExposure: device.isAdjustingExposure,
+            isAdjustingWhiteBalance: device.isAdjustingWhiteBalance, isAdjustingFocus: device.isAdjustingFocus,
+            supportsCustomExposure: device.isExposureModeSupported(.custom) && bounds != nil
+        )
+        let now = Double(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000
+        let userFocus = latestFocusPointUpdateUptime > 0 ? Double(latestFocusPointUpdateUptime) / 1_000_000_000 : -.infinity
+        guard let decision = sceneAutoPolicy.update(observation: observation, sensor: sensor, now: now, lastUserFocus: userFocus) else { return }
+        if !decision.isMetering {
+            if sensor.supportsCustomExposure {
+                if let exposure = decision.exposure {
+                    setManualExposureOnQueue(iso: Float(exposure.iso), durationSeconds: exposure.duration)
+                } else if device.exposureMode != .custom {
+                    // A perfectly metered scene still needs a stable lock.
+                    setManualExposureOnQueue(iso: device.iso, durationSeconds: sensor.duration)
+                }
+            } else {
+                // Virtual/limited cameras retain native ISO/shutter metering.
+                // Never silently switch physical lenses to obtain custom mode.
+                let target = Float(decision.fallbackBias)
+                let next = Float(SceneAutoPolicy.approach(Double(sceneAutoFallbackBias), Double(target), by: 0.08))
+                if abs(next - sceneAutoFallbackBias) >= 0.02 {
+                    do {
+                        try device.lockForConfiguration()
+                        let bias = Self.clampedExposureBias(next, lowerBound: device.minExposureTargetBias, upperBound: device.maxExposureTargetBias)
+                        device.setExposureTargetBias(bias, completionHandler: nil)
+                        sceneAutoFallbackBias = bias
+                        device.unlockForConfiguration()
+                    } catch { publishStatus("Scene Auto exposure is temporarily limited.") }
+                }
+            }
+        }
+        switch decision.whiteBalance {
+        case .unchanged: break
+        case .lock: freezeSceneAutoColorOnQueue()
+        case .meter: setAutoWhiteBalanceOnQueue()
+        }
+        if let point = decision.focus, !isApplyingManualFocus {
+            let normalized = Self.captureDevicePoint(
+                fromRotatedPreviewPoint: CGPoint(x: point.x, y: point.y), rotationAngle: previewRotationAngleState,
+                mirrored: videoOutput.connection(with: .video)?.isVideoMirrored ?? false
+            )
+            do {
+                try device.lockForConfiguration()
+                applyAutoFocusOnQueue(to: device, at: normalized, isUserInitiated: true)
+                device.isSubjectAreaChangeMonitoringEnabled = false
+                device.unlockForConfiguration()
+            } catch { publishStatus("Scene Auto focus is temporarily limited.") }
+        }
+        sceneAutoState.scene = decision.scene
+        sceneAutoState.development = decision.development
+        if decision.isMetering { sceneAutoState.phase = .metering }
+        else if !sensor.supportsCustomExposure { sceneAutoState.phase = .limited }
+        else { sceneAutoState.phase = decision.isAdapting ? .adapting : .settled }
+        publishSceneAutoOnQueue()
     }
 }

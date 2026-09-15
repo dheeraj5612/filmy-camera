@@ -65,6 +65,12 @@ struct ManualCameraControlsView: View {
             sheetHeader
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    if camera.sceneAuto.isEnabled {
+                        Text("Scene Auto is paused. Changing a sensor control exits Auto and restores your previous settings first.")
+                            .font(.footnote)
+                            .foregroundStyle(FilmyTheme.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     if hasManualCapability { statusHeader }
 
                     if !controls.physicalLensOptions.isEmpty {

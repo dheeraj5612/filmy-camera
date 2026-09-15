@@ -55,7 +55,9 @@
     "FilmyCameraTests/FujiShootingTests": "unit",
     "FilmyCameraTests/RecipeLibraryTests": "unit",
     "FilmyCameraTests/RecipeLibraryPersistenceTests": "unit",
-    "FilmyCameraUITests/RecipeLibraryUITests": "e2e"
+    "FilmyCameraUITests/RecipeLibraryUITests": "e2e",
+    "FilmyCameraTests/SceneAutoPolicyTests": "unit",
+    "FilmyCameraTests/SceneAutoIntegrationTests": "unit"
   },
   "overrides": {
     "FilmyCameraUITests/FilmyCameraUITests/testSimulatorFallbackExposesReadableStateWithoutPreviewAction": "simulator-e2e",
