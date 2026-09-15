@@ -44,6 +44,7 @@ jobs:
               destination.parent.mkdir(parents=True, exist_ok=True)
               shutil.copyfile(source, destination)
           shutil.copyfile('.staging/integrate-smart-recipes.py', directory / 'integrate.py')
+          shutil.copyfile('.staging/adjust-smart-test-inventory.py', directory / 'adjust.py')
           PY
       - name: Select Xcode and install pinned XcodeGen
         env:
@@ -60,6 +61,7 @@ jobs:
           echo "$XCODEGEN_BINARY_SHA256  $binary" | shasum -a 256 --check
           echo "$(dirname "$binary")" >> "$GITHUB_PATH"
       - name: Integrate into clean pinned feature branch
+        id: prepare
         shell: bash
         run: |
           set -euo pipefail
@@ -68,10 +70,36 @@ jobs:
           test "$(git rev-parse FETCH_HEAD)" = "$BASE"
           git checkout -B smart-recipes-prepared "$BASE"
           python3 "$RUNNER_TEMP/smart-source/integrate.py"
+          python3 "$RUNNER_TEMP/smart-source/adjust.py"
           xcodegen generate --spec project.yml
           git diff --check
+      - name: Commit application sources and generated project to feature branch
+        id: publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add FilmyCamera/Models/SmartRecipeEngine.swift FilmyCamera/Services/SmartRecipeStore.swift \
+            FilmyCamera/Views/SmartRecipeViews.swift FilmyCamera/Views/CameraScreen.swift \
+            FilmyCameraTests/SmartRecipeEngineTests.swift FilmyCameraTests/SmartRecipeIntegrationTests.swift \
+            FilmyCameraUITests/SmartRecipeUITests.swift docs/smart-recipes.md README.md \
+            scripts/testing/suites.json scripts/testing/test_runner.py FilmyCamera.xcodeproj
+          git diff --cached --check
+          ! git diff --cached --name-only | grep -E '^(.github/|.staging/)'
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -m 'Add private on-device scene-aware recipe suggestions with one-tap apply and undo'
+          git push origin HEAD:"refs/heads/$TARGET"
+          git rev-parse HEAD > "$RUNNER_TEMP/smart-commit.txt"
+      - name: Run repository routing and contract checks
+        id: python
+        shell: bash
+        run: |
+          set -uo pipefail
           python3 -m unittest discover -s scripts/testing -p 'test_*.py' -v > "$RUNNER_TEMP/smart-python.log" 2>&1
+          status=$?
+          tail -20 "$RUNNER_TEMP/smart-python.log"
+          exit "$status"
       - name: Build and run smart recipe unit integration and UI tests
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' && steps.publish.outcome == 'success' }}
         shell: bash
         run: |
           set -uo pipefail
@@ -88,21 +116,6 @@ jobs:
           status=$?
           tail -80 "$RUNNER_TEMP/smart-native.log"
           exit "$status"
-      - name: Commit only validated application changes
-        shell: bash
-        run: |
-          set -euo pipefail
-          git add FilmyCamera/Models/SmartRecipeEngine.swift FilmyCamera/Services/SmartRecipeStore.swift \
-            FilmyCamera/Views/SmartRecipeViews.swift FilmyCamera/Views/CameraScreen.swift \
-            FilmyCameraTests/SmartRecipeEngineTests.swift FilmyCameraTests/SmartRecipeIntegrationTests.swift \
-            FilmyCameraUITests/SmartRecipeUITests.swift docs/smart-recipes.md README.md \
-            scripts/testing/suites.json FilmyCamera.xcodeproj
-          git diff --cached --check
-          ! git diff --cached --name-only | grep -E '^(.github/|.staging/)'
-          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
-            commit -m 'Add private on-device scene-aware recipe suggestions with one-tap apply and undo'
-          git push origin HEAD:"refs/heads/$TARGET"
-          git rev-parse HEAD > "$RUNNER_TEMP/smart-commit.txt"
       - name: Publish bounded validation evidence to staging only
         if: always()
         env:
