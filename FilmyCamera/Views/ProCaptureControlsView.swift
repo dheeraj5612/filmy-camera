@@ -5,6 +5,8 @@ struct ProCaptureControlsView: View {
     @AppStorage("proFocusLoupe") private var loupe = false
     @AppStorage("proFocusTracking") private var tracking = false
     @AppStorage("proFocusLoupeMagnification") private var magnification = 2.0
+    @State private var apertureDraft: Float = 1.48
+    @State private var editingAperture = false
     @State private var fixedISO = 100.0
     @State private var fixedShutter = 1.0 / 125.0
     private static let shutterValues: [Double] = [8000, 4000, 2000, 1000, 500, 250, 125, 60, 30, 15, 8, 4, 2, 1].map { 1.0 / $0 }
@@ -125,16 +127,41 @@ struct ProCaptureControlsView: View {
 
     private var retentionSection: some View {
         VStack(alignment: .leading, spacing: 12) {
+            apertureControl
             LabeledContent("Lens aperture", value: camera.captureCapabilities.aperture > 0
                 ? String(format: "ƒ/%.2f", camera.captureCapabilities.aperture) : "Unavailable")
                 .accessibilityIdentifier("pro-aperture-readout")
-            Text("Read-only with this app's public SDK. Variable-aperture control is not implemented; no exposure or blur slider is presented as an optical aperture.")
+            Text(camera.captureCapabilities.supportsVariableAperture
+                ? "Optical aperture holds the current shutter and ISO. A priority mode can then meter one parameter. Auto exposure releases the aperture lock."
+                : "Read-only on this build or lens. Optical control requires an iOS 27 SDK build, iOS 27 and a supported variable-aperture camera.")
                 .font(.caption).foregroundStyle(.secondary)
             Text("Originals and edits remain in Roll → Filmy originals, even when Photos access is denied. These are user files, not an evictable cache; deleting the app removes its local originals.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
 
+
+    @ViewBuilder
+    private var apertureControl: some View {
+        let capabilities = camera.captureCapabilities
+        if capabilities.supportsVariableAperture, capabilities.maximumAperture > capabilities.minimumAperture {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Optical aperture · ƒ/\(apertureDraft, specifier: "%.2f")").font(.caption.monospacedDigit())
+                Slider(value: $apertureDraft, in: capabilities.minimumAperture...capabilities.maximumAperture) { editing in
+                    editingAperture = editing
+                    if !editing { camera.setLensAperture(apertureDraft) }
+                }
+                .disabled(camera.manualControls.isApplying)
+                .accessibilityLabel("Optical aperture f-number")
+                .accessibilityIdentifier("pro-optical-aperture")
+                Button("Auto aperture and exposure") { camera.setAutoExposure() }.buttonStyle(.bordered)
+            }
+            .onAppear { apertureDraft = min(max(capabilities.aperture, capabilities.minimumAperture), capabilities.maximumAperture) }
+            .onChange(of: capabilities.aperture) { _, value in
+                if !editingAperture { apertureDraft = min(max(value, capabilities.minimumAperture), capabilities.maximumAperture) }
+            }
+        }
+    }
 
     private func binding<Value>(_ keyPath: WritableKeyPath<ProCaptureOptions, Value>) -> Binding<Value> {
         Binding(get: { camera.captureOptions[keyPath: keyPath] }, set: { value in

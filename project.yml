@@ -10,6 +10,9 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"
+    # Do not reference iOS 27 symbols when building against an older SDK.
+    "SWIFT_ACTIVE_COMPILATION_CONDITIONS[sdk=iphoneos27*]": "$(inherited) FILMY_IOS27_CAMERA_APIS"
+    "SWIFT_ACTIVE_COMPILATION_CONDITIONS[sdk=iphonesimulator27*]": "$(inherited) FILMY_IOS27_CAMERA_APIS"
     SWIFT_STRICT_CONCURRENCY: minimal
     TARGETED_DEVICE_FAMILY: "1,2"
     PRODUCT_BUNDLE_IDENTIFIER: com.dheeraj.filmycamera

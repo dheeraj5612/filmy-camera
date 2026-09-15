@@ -45,6 +45,9 @@ public struct ProCaptureCapabilities: Equatable, Sendable {
     public var supportsLivePhoto = false
     public var supportsHDRExport = false
     public var aperture: Float = 0
+    public var minimumAperture: Float = 0
+    public var maximumAperture: Float = 0
+    public var supportsVariableAperture = false
     public var resolutions: [ProCaptureOptions.Resolution] {
         ProCaptureOptions.Resolution.allCases.filter { resolution in
             // 24 MP is an explicitly labeled downsample of a 48 MP capture.
@@ -174,5 +177,14 @@ struct ProCaptureAccumulator {
     var isComplete: Bool {
         !processingFailed && processed != nil && (options.raw == .off || raw != nil)
             && (!options.livePhoto || movie != nil)
+    }
+}
+
+/// Reject malformed capability ranges rather than fabricating optical settings.
+enum OpticalAperturePolicy {
+    static func clamped(_ value: Float, minimum: Float, maximum: Float) -> Float? {
+        guard value.isFinite, minimum.isFinite, maximum.isFinite,
+              minimum > 0, maximum > minimum else { return nil }
+        return min(max(value, minimum), maximum)
     }
 }

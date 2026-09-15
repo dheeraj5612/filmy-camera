@@ -4,6 +4,16 @@ import XCTest
 @testable import FilmyCamera
 
 final class ProCapturePolicyTests: XCTestCase {
+    func testOpticalApertureRejectsFixedOrInvalidRangesAndClampsWithoutInventingStops() {
+        XCTAssertNil(OpticalAperturePolicy.clamped(2.8, minimum: 1.8, maximum: 1.8))
+        XCTAssertNil(OpticalAperturePolicy.clamped(.nan, minimum: 1.48, maximum: 4))
+        XCTAssertNil(OpticalAperturePolicy.clamped(2.8, minimum: 0, maximum: 4))
+        XCTAssertNil(OpticalAperturePolicy.clamped(2.8, minimum: 1.48, maximum: .infinity))
+        XCTAssertEqual(OpticalAperturePolicy.clamped(1, minimum: 1.48, maximum: 4), 1.48)
+        XCTAssertEqual(OpticalAperturePolicy.clamped(8, minimum: 1.48, maximum: 4), 4)
+        XCTAssertEqual(OpticalAperturePolicy.clamped(2.37, minimum: 1.48, maximum: 4), 2.37)
+    }
+
     private var fullCapabilities: ProCaptureCapabilities {
         var capabilities = ProCaptureCapabilities()
         capabilities.dimensions = [.init(width: 4032, height: 3024), .init(width: 5712, height: 4284), .init(width: 8064, height: 6048)]

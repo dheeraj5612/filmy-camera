@@ -434,6 +434,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private var proCapabilities = ProCaptureCapabilities()
     private var captureAccumulator: ProCaptureAccumulator?
     private var pendingMovieURL: URL?
+    private var requestedLensAperture: Float?
     private var priorityMode: ExposurePriorityMode?
     private var priorityFixedValue: Double = 0
     private var priorityTimer: DispatchSourceTimer?
@@ -1228,6 +1229,15 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             return
         }
 
+        #if FILMY_IOS27_CAMERA_APIS
+        if #available(iOS 27.0, *), let aperture = requestedLensAperture,
+           !device.activeFormat.supportsExposureModeCustom(lensAperture: aperture, duration: duration, iso: request.iso) {
+            publishStatus("That aperture, shutter and ISO combination is unsupported on this format.")
+            stopExposurePriorityOnQueue()
+            return
+        }
+        #endif
+
         do {
             try device.lockForConfiguration()
             configureFrameDurationForManualExposureOnQueue(
@@ -1258,7 +1268,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             focusExposureLocked = false
             publishFocusExposureLocked(false)
             publishManualControlsOnQueue(for: device)
-            device.setExposureModeCustom(duration: duration, iso: request.iso) { [weak self] _ in
+            let completion: @Sendable (CMTime) -> Void = { [weak self] _ in
                 self?.sessionQueue.async { [weak self] in
                     guard let self,
                           self.manualDeviceGeneration == deviceGeneration,
@@ -1275,6 +1285,15 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                     self.captureDeferredPhotoWhenManualControlsSettleOnQueue()
                 }
             }
+            #if FILMY_IOS27_CAMERA_APIS
+            if #available(iOS 27.0, *), let aperture = requestedLensAperture {
+                device.setExposureModeCustom(lensAperture: aperture, duration: duration, iso: request.iso, completionHandler: completion)
+            } else {
+                device.setExposureModeCustom(duration: duration, iso: request.iso, completionHandler: completion)
+            }
+            #else
+            device.setExposureModeCustom(duration: duration, iso: request.iso, completionHandler: completion)
+            #endif
             device.unlockForConfiguration()
         } catch {
             publishStatus("Manual exposure is unavailable right now.")
@@ -1283,6 +1302,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func setAutoExposureOnQueue() {
+        requestedLensAperture = nil
         stopExposurePriorityOnQueue()
         guard let device = activeDevice() else {
             desiredManualExposure = .auto
@@ -1546,6 +1566,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func resetManualControlsToAutoOnQueue() {
+        requestedLensAperture = nil
         stopExposurePriorityOnQueue()
         guard let device = activeDevice() else {
             desiredManualExposure = .auto
@@ -1941,6 +1962,9 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func publishManualControlsOnQueue(for device: AVCaptureDevice) {
+        let aperture = device.lensAperture
+        proCapabilities.aperture = aperture
+        publishOnMain { [weak self] in self?.captureCapabilities.aperture = aperture }
         let bounds = manualExposureBoundsOnQueue(for: device)
         let exposureSupported = device.isExposureModeSupported(.custom) && bounds != nil
         let whiteBalanceSupported = Self.supportsManualWhiteBalance(device)
@@ -2280,6 +2304,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             return
         }
         session.addInput(input)
+        requestedLensAperture = nil
         manualDeviceGeneration &+= 1
 
         guard session.canAddOutput(videoOutput) else {
@@ -2379,6 +2404,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func tearDownSessionGraphOnQueue() {
+        requestedLensAperture = nil
         manualDeviceGeneration &+= 1
         isApplyingManualExposure = false
         isApplyingManualWhiteBalance = false
@@ -2973,6 +2999,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
         cancelPendingPhotoOnQueue(status: "Capture canceled while changing lenses.")
         session.addInput(newInput)
+        requestedLensAperture = nil
         manualDeviceGeneration &+= 1
         isApplyingManualExposure = false
         isApplyingManualWhiteBalance = false
@@ -3333,6 +3360,17 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         capabilities.supportsLivePhoto = photoOutput.isLivePhotoCaptureSupported
         if #available(iOS 18.0, *) { capabilities.supportsHDRExport = capabilities.supportsHEIF }
         capabilities.aperture = device.lensAperture
+        #if FILMY_IOS27_CAMERA_APIS
+        if #available(iOS 27.0, *) {
+            capabilities.minimumAperture = device.activeFormat.minLensAperture
+            capabilities.maximumAperture = device.activeFormat.maxLensAperture
+            capabilities.supportsVariableAperture = OpticalAperturePolicy.clamped(device.lensAperture,
+                minimum: capabilities.minimumAperture, maximum: capabilities.maximumAperture) != nil
+                && device.isExposureModeSupported(.custom)
+                && device.activeFormat.supportsExposureModeCustom(lensAperture: AVCaptureDevice.currentLensAperture,
+                    duration: AVCaptureDevice.currentExposureDuration, iso: AVCaptureDevice.currentISO)
+        }
+        #endif
         proCapabilities = capabilities
         let selection = ProCapturePolicy.resolve(requestedProOptions, capabilities: capabilities,
                                                   manualExposure: device.exposureMode == .custom)
@@ -3343,6 +3381,31 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             self?.captureCapabilities = capabilities
             self?.captureOptions = selection.options
             self?.captureNotices = selection.notices
+        }
+    }
+
+    /// Optical aperture is enabled only when compiled with Apple's iOS 27 SDK
+    /// and when the active format advertises a genuine variable aperture.
+    /// Changing it keeps shutter and ISO fixed; priority modes may then meter
+    /// one of those parameters while retaining the optical aperture selection.
+    public func setLensAperture(_ value: Float) {
+        sessionQueue.async { [weak self] in
+            guard let self, self.pendingPhotoCompletion == nil,
+                  self.pendingManualControlsPhotoCompletion == nil, !self.isApplyingManualControls,
+                  let device = self.activeDevice() else { return }
+            #if FILMY_IOS27_CAMERA_APIS
+            if #available(iOS 27.0, *),
+               let aperture = OpticalAperturePolicy.clamped(value, minimum: device.activeFormat.minLensAperture,
+                    maximum: device.activeFormat.maxLensAperture),
+               device.activeFormat.supportsExposureModeCustom(lensAperture: aperture,
+                    duration: device.exposureDuration, iso: device.iso) {
+                self.stopExposurePriorityOnQueue()
+                self.requestedLensAperture = aperture
+                self.setManualExposureOnQueue(iso: device.iso, durationSeconds: CMTimeGetSeconds(device.exposureDuration))
+                return
+            }
+            #endif
+            self.publishStatus("Optical aperture control requires an iOS 27 SDK build, iOS 27 and a supported variable-aperture lens.")
         }
     }
 
