@@ -2476,6 +2476,20 @@ extension FilmRecipe {
     static let originalCreativeLooks: [FilmRecipe] = {
         var result: [FilmRecipe] = []
         let negative: [CreativeLook] = [
+            .init("ektar-100", "Ektar 100", "Ektar-inspired / vivid landscapes and fine grain", .realaAce,
+                  -0.02, -0.12, -0.03, 1.20, 1.12, 0.035, 0.02, 0.10, 0.04, 0.01, 0.12),
+            .init("ultramax-400", "Ultramax 400", "Ultramax-inspired / warm everyday color", .classicNegative,
+                  0.03, -0.16, 0.12, 1.13, 1.08, 0.10, 0.015, 0.35, 0.08, 0.03, 0.02),
+            .init("superia-400", "Superia 400", "Superia-inspired / cool shadows and lively greens", .realaAce,
+                  0.02, -0.18, 0.15, 1.09, 1.05, -0.025, -0.055, 0.32, 0.07, 0.02, 0.025),
+            .init("pro-400h", "Pro 400H", "Pro 400H-inspired / airy pastels and soft greens", .proNegStandard,
+                  0.20, -0.33, 0.25, 0.86, 0.93, -0.035, -0.025, 0.24, 0.03, 0.02, -0.09),
+            .init("portra-160", "Portra 160", "Portra-inspired / soft daylight pastels", .proNegStandard,
+                  0.16, -0.30, 0.20, 0.88, 0.94, 0.07, 0.025, 0.12, 0.03, 0.02, -0.08),
+            .init("portra-400", "Portra 400", "Portra-inspired / warm skin and open shadows", .proNegative,
+                  0.14, -0.34, 0.24, 0.92, 0.98, 0.09, 0.025, 0.26, 0.05, 0.04, -0.06),
+            .init("portra-800", "Portra 800", "Portra-inspired / evening warmth and grain", .proNegative,
+                  0.09, -0.26, 0.18, 0.96, 1.04, 0.13, 0.035, 0.42, 0.08, 0.07, -0.04),
             .init("portrait-160", "Portrait 160", "Gentle skin tones / warm daylight", .proNegStandard,
                   0.12, -0.20, 0.10, 0.94, 0.96, 0.06, 0.01, 0.16, 0.04, 0.02, -0.06),
             .init("portrait-400", "Portrait 400", "Soft warm mids / everyday negative", .proNegative,
@@ -2511,6 +2525,14 @@ extension FilmRecipe {
         ]
         result += negative.map { $0.recipe(in: .negative) }
         let slide: [CreativeLook] = [
+            .init("ektachrome-e100", "Ektachrome E100", "E100-inspired / clean whites and cool slide color", .provia,
+                  -0.035, -0.08, -0.07, 1.10, 1.14, -0.065, 0.015, 0.09, 0.04, 0.01, 0.11),
+            .init("kodachrome-25", "Kodachrome 25", "Kodachrome-inspired / fine grain and rich daylight", .classicChrome,
+                  -0.08, -0.06, -0.10, 1.12, 1.18, 0.07, 0.015, 0.08, 0.06, 0.01, 0.13),
+            .init("kodachrome-64", "Kodachrome 64", "Kodachrome-inspired / warm reds and deep color", .classicChrome,
+                  -0.06, -0.10, -0.08, 1.15, 1.16, 0.11, 0.025, 0.18, 0.08, 0.02, 0.10),
+            .init("kodachrome-200", "Kodachrome 200", "Kodachrome-inspired / textured travel slides", .classicChrome,
+                  -0.03, -0.14, -0.04, 1.08, 1.13, 0.09, 0.03, 0.33, 0.10, 0.03, 0.07),
             .init("chrome-50", "Chrome 50", "Crisp daylight / saturated primaries", .velvia,
                   -0.08, 0.06, -0.10, 1.09, 1.15, -0.01, 0.00, 0.10, 0.08, 0.01, 0.12),
             .init("chrome-100", "Chrome 100", "Clean whites / rich travel color", .provia,
@@ -2630,6 +2652,12 @@ extension FilmRecipe {
         ]
         result += experimental.map { $0.recipe(in: .experimental) }
         let monochrome: [CreativeLook] = [
+            .init("tri-x-400", "Tri-X 400", "Tri-X-inspired / bold documentary grain", .acrosYellow,
+                  0.015, -0.10, -0.12, 0, 1.18, 0, 0, 0.43, 0.09, 0, 0.10),
+            .init("hp5-plus", "HP5 Plus", "HP5-inspired / gentle highlights and open shadows", .acros,
+                  0.06, -0.27, 0.20, 0, 1.04, 0, 0, 0.35, 0.06, 0, 0.025),
+            .init("delta-3200", "Delta 3200", "Delta-inspired / soft night tones and coarse grain", .acros,
+                  0.10, -0.31, 0.24, 0, 1.02, 0, 0, 0.60, 0.12, 0, -0.07),
             .init("silver-100", "Silver 100", "Fine neutral grain / everyday monochrome", .acros,
                   0.02, -0.12, 0.09, 0, 1.06, 0, 0, 0.16, 0.06, 0.01, 0.08),
             .init("silver-400", "Silver 400", "Classic grain / documentary contrast", .acros,

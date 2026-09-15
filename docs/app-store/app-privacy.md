@@ -1,6 +1,6 @@
 # App Privacy answer matrix — en-US
 
-Status: prepared for version 1.0.0, build 15. Saved App Store Connect answers require separate readback; this document does not prove submission.
+Status: updated for version 1.0.1 metadata changes. Saved App Store Connect answers require separate readback; this document does not prove submission.
 
 ## Tracking
 
@@ -17,7 +17,7 @@ The app processes photos and camera frames on the device for the requested camer
 
 - None declared.
 
-There is no telemetry, diagnostics upload, contact import, location collection, contacts/calendar access, or account creation in the current build.
+There is no telemetry, diagnostics upload, contact import, contacts/calendar access, or account creation. With When In Use location permission, new camera captures may include a recent location in the saved JPEG and Photos asset. Imported photos retain their original geotags when supplied by the picker. Location stays with the photo on the device and follows the user’s Photos sync and sharing choices; it is not sent to a developer service. The user can deny or revoke location permission in iOS Settings and continue taking photos.
 
 ## Platform access and source evidence
 
@@ -26,6 +26,7 @@ There is no telemetry, diagnostics upload, contact import, location collection, 
 | Camera | Live preview and capture after the user opens Camera | `FilmyCamera/Info.plist`, `FilmyCamera/Services/CameraService.swift` |
 | Photos read | Review frames saved by Filmy Camera in the in-app Roll; imported photos are selected through Apple's system picker | `FilmyCamera/Info.plist`, `FilmyCamera/Services/PhotoLibraryService.swift` |
 | Photos add-only | Save a finished frame after a camera capture or when the user saves an edited import | `FilmyCamera/Info.plist`, `FilmyCamera/Services/PhotoLibraryService.swift` |
+| Location | Optional capture geotags after When In Use permission; saved with the photo, never uploaded to a developer service | `FilmyCamera/Info.plist`, `FilmyCamera/Services/CameraService.swift`, `FilmyCamera/Services/PhotoOutputEncoder.swift` |
 | Device motion | Optional horizon level uses gravity values temporarily in memory while the camera is active; motion samples are not saved or uploaded | `FilmyCamera/Info.plist`, `FilmyCamera/Services/CompositionAssistStore.swift`, `FilmyCamera/Views/CameraScreen.swift` |
 | File metadata | Inspect sizes and modification dates of app-owned cache files to enforce storage budgets and prune stale entries | `FilmyCamera/Resources/PrivacyInfo.xcprivacy`, `FilmyCamera/Services/PhotoLibraryService.swift`, `FilmyCamera/Services/FilmRenderer.swift` |
 | UserDefaults | Store selected recipe, recipe edits, and saved-frame metadata locally | `FilmyCamera/Resources/PrivacyInfo.xcprivacy`, `FilmyCamera/ViewModels/CameraViewModel.swift` |

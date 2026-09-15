@@ -2,6 +2,7 @@
 import Combine
 import CoreImage
 import CoreMedia
+import CoreLocation
 import Foundation
 import UIKit
 
@@ -278,17 +279,20 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         /// Auto flash and thermal fallback make that distinction important to
         /// downstream rendering.
         public let flashFired: Bool
+        public let location: CLLocation?
 
         public init(
             fileData: Data,
             capturedAt: Date,
             dimensions: CMVideoDimensions,
-            flashFired: Bool = false
+            flashFired: Bool = false,
+            location: CLLocation? = nil
         ) {
             self.fileData = fileData
             self.capturedAt = capturedAt
             self.dimensions = dimensions
             self.flashFired = flashFired
+            self.location = location
         }
     }
 
@@ -363,6 +367,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     @Published public private(set) var selectedLensID: String?
     @Published public private(set) var exposureBias: Float = 0
     @Published public private(set) var isFocusExposureLocked = false
+    @Published public private(set) var isLensSmudged = false
     @Published public private(set) var manualControls: CameraManualControls = .unavailable
     @Published public private(set) var previewFrameSize: CGSize = .zero
     @Published public private(set) var previewViewportSize: CGSize = .zero
@@ -411,6 +416,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private var sessionAvailability: Availability = .idle
     private var pendingPhotoCompletion: PhotoCompletion?
     private var pendingPhotoCapturedAt: Date?
+    private var pendingPhotoLocation: CLLocation?
     private var pendingPhotoUniqueID: Int64?
     private var configuredPhotoDimensions = CMVideoDimensions(width: 0, height: 0)
     private var focusExposureLocked = false
@@ -453,9 +459,14 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private var pendingManualControlsPhotoCompletion: PhotoCompletion?
     private var flashAvailabilityState: FlashAvailability = .unsupported
     private var pendingPhotoFlashFallback = false
+    @MainActor private lazy var captureLocationProvider = CameraCaptureLocationProvider()
+    private var pendingManualControlsPhotoLocation: CLLocation?
     private var sessionObservers: [NSObjectProtocol] = []
     private var activeConstituentObservation: NSKeyValueObservation?
     private var observedVirtualDeviceID: String?
+    private var lensSmudgeObservation: NSKeyValueObservation?
+    private var observedLensSmudgeDeviceID: String?
+    private var lensSmudgeObservationToken = UUID()
     private var previewRotationAngleState: CGFloat = 90
     private var captureRotationAngleState: CGFloat = 90
     private var rotationCoordinatorToken = UUID()
@@ -542,6 +553,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             self.pendingPhotoCompletion = nil
             self.pendingManualControlsPhotoCompletion = nil
             self.pendingPhotoCapturedAt = nil
+            self.pendingPhotoLocation = nil
             self.pendingPhotoUniqueID = nil
             self.pendingPhotoFlashFallback = false
         }
@@ -561,6 +573,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// Requests camera permission when needed and starts the session. On a
     /// simulator or a device without a camera this becomes a clean empty state.
     public func start() {
+        Task { @MainActor [weak self] in self?.captureLocationProvider.setActive(true) }
         sessionQueue.async { [weak self] in
             guard let self else { return }
             self.deferredStopGeneration &+= 1
@@ -580,6 +593,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// Quick trips to the Roll, Settings, or the review sheet return to a live
     /// viewfinder instantly; longer absences still release the camera.
     public func stop(after delay: TimeInterval) {
+        Task { @MainActor [weak self] in self?.captureLocationProvider.setActive(false) }
         sessionQueue.async { [weak self] in
             guard let self else { return }
             self.deferredStopGeneration &+= 1
@@ -607,6 +621,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
     /// Stops capture while retaining the configured session for a later start.
     public func stop() {
+        Task { @MainActor [weak self] in self?.captureLocationProvider.setActive(false) }
         sessionQueue.async { [weak self] in
             guard let self else { return }
             self.deferredStopGeneration &+= 1
@@ -871,11 +886,13 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// Captures a still through AVCapturePhotoOutput. The completion is
     /// delivered on the main queue and receives nil for permission, hardware,
     /// or photo-processing failures.
+    @MainActor
     public func capturePhoto(completion: @escaping PhotoCompletion) {
+        let locationAtShutter = captureLocationProvider.captureLocation()
         let completionBox = PhotoCompletionBox(completion)
         sessionQueue.async { [weak self] in
             guard let self else { return }
-            self.capturePhotoOnQueue(completion: completionBox.completion)
+            self.capturePhotoOnQueue(location: locationAtShutter, completion: completionBox.completion)
         }
     }
 
@@ -2093,7 +2110,9 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         guard !isApplyingManualControls,
               let completion = pendingManualControlsPhotoCompletion else { return }
         pendingManualControlsPhotoCompletion = nil
-        capturePhotoOnQueue(completion: completion)
+        let location = pendingManualControlsPhotoLocation
+        pendingManualControlsPhotoLocation = nil
+        capturePhotoOnQueue(location: location, completion: completion)
     }
 
     private func failDeferredPhotoForManualControlsOnQueue() {
@@ -2203,6 +2222,10 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             restoreContinuousFocusExposureOnQueue(for: device)
             reapplyDesiredManualControlsOnQueue(for: device)
             configureOrientation()
+            session.beginConfiguration()
+            configureLensSmudgeDetectionOnQueue(for: device)
+            session.commitConfiguration()
+            installLensSmudgeObservationOnQueue(for: device)
             session.startRunning()
             publishStartOutcomeOnQueue(running: session.isRunning)
             return
@@ -2270,9 +2293,11 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         session.addOutput(photoOutput)
         photoOutput.maxPhotoQualityPrioritization = .quality
         configurePhotoDimensions(for: device)
+        configureLensSmudgeDetectionOnQueue(for: device)
         session.commitConfiguration()
 
         installRotationCoordinatorOnQueue(for: device)
+        installLensSmudgeObservationOnQueue(for: device)
         configureCaptureCapabilitiesOnQueue(for: device)
         configureStartupLensOnQueue(for: device)
         refreshCameraInventoryOnQueue(for: device)
@@ -2349,6 +2374,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         isApplyingManualExposure = false
         isApplyingManualWhiteBalance = false
         isApplyingManualFocus = false
+        resetLensSmudgeObservationOnQueue()
         session.beginConfiguration()
         for input in session.inputs {
             session.removeInput(input)
@@ -2365,6 +2391,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
     private func resetSessionGraphOnQueue(pendingCaptureStatus: String) {
         cancelPendingPhotoOnQueue(status: pendingCaptureStatus)
+        resetLensSmudgeObservationOnQueue()
         activeConstituentObservation?.invalidate()
         activeConstituentObservation = nil
         observedVirtualDeviceID = nil
@@ -2791,6 +2818,81 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         publishStatus("\(option.title) lens ready")
     }
 
+    /// Opts into AVFoundation's advisory lens smudge detector while the
+    /// session graph is being configured. The caller owns the surrounding
+    /// beginConfiguration/commitConfiguration pair so enabling it is always
+    /// completed before a new session starts or an input switch commits.
+    private func configureLensSmudgeDetectionOnQueue(for device: AVCaptureDevice) {
+#if compiler(>=6.2)
+        guard #available(iOS 26.0, *),
+              device.activeFormat.isCameraLensSmudgeDetectionSupported else {
+            resetLensSmudgeObservationOnQueue()
+            return
+        }
+
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+            device.setCameraLensSmudgeDetectionEnabled(
+                true,
+                detectionInterval: CMTime(seconds: 60, preferredTimescale: 1)
+            )
+        } catch {
+            // Smudge detection is advisory; a device refusing this optional
+            // configuration must not affect capture readiness.
+            resetLensSmudgeObservationOnQueue()
+        }
+#else
+        resetLensSmudgeObservationOnQueue()
+#endif
+    }
+
+    /// Observes only the currently configured device. KVO can deliver a
+    /// callback after invalidation, so both the device ID and generation token
+    /// are checked again on sessionQueue before publishing to the main queue.
+    private func installLensSmudgeObservationOnQueue(for device: AVCaptureDevice) {
+#if compiler(>=6.2)
+        guard #available(iOS 26.0, *),
+              device.activeFormat.isCameraLensSmudgeDetectionSupported,
+              device.isCameraLensSmudgeDetectionEnabled else {
+            resetLensSmudgeObservationOnQueue()
+            return
+        }
+
+        lensSmudgeObservation?.invalidate()
+        let token = UUID()
+        lensSmudgeObservationToken = token
+        let deviceID = device.uniqueID
+        observedLensSmudgeDeviceID = deviceID
+        lensSmudgeObservation = device.observe(
+            \AVCaptureDevice.cameraLensSmudgeDetectionStatus,
+            options: [.initial, .new]
+        ) { [weak self] _, change in
+            guard let status = change.newValue else { return }
+            self?.sessionQueue.async { [weak self] in
+                guard let self,
+                      self.lensSmudgeObservationToken == token,
+                      self.observedLensSmudgeDeviceID == deviceID,
+                      let activeDevice = self.activeDevice(),
+                      activeDevice.uniqueID == deviceID else {
+                    return
+                }
+                self.publishLensSmudged(status == .smudged)
+            }
+        }
+#else
+        resetLensSmudgeObservationOnQueue()
+#endif
+    }
+
+    private func resetLensSmudgeObservationOnQueue() {
+        lensSmudgeObservation?.invalidate()
+        lensSmudgeObservation = nil
+        observedLensSmudgeDeviceID = nil
+        lensSmudgeObservationToken = UUID()
+        publishLensSmudged(false)
+    }
+
     @discardableResult
     private func setZoomOnQueue(_ factor: CGFloat) -> Bool {
         guard let device = activeDevice() else { return false }
@@ -2907,6 +3009,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
 
         let oldInput = session.inputs.compactMap { $0 as? AVCaptureDeviceInput }.first
+        resetLensSmudgeObservationOnQueue()
         session.beginConfiguration()
         if let oldInput {
             session.removeInput(oldInput)
@@ -2920,6 +3023,9 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             } else {
                 restoredPreviousInput = false
             }
+            if restoredPreviousInput, let oldDevice = oldInput?.device {
+                configureLensSmudgeDetectionOnQueue(for: oldDevice)
+            }
             session.commitConfiguration()
 
             if Self.shouldResetSessionGraphAfterFailedInputReplacement(
@@ -2928,6 +3034,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 resetSessionGraphOnQueue(
                     pendingCaptureStatus: "Camera needs to be reopened."
                 )
+            } else if restoredPreviousInput, let oldDevice = oldInput?.device {
+                installLensSmudgeObservationOnQueue(for: oldDevice)
             }
             return false
         }
@@ -2940,8 +3048,10 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         isApplyingManualFocus = false
         configurePhotoDimensions(for: device)
         configureOrientation()
+        configureLensSmudgeDetectionOnQueue(for: device)
         session.commitConfiguration()
         installRotationCoordinatorOnQueue(for: device)
+        installLensSmudgeObservationOnQueue(for: device)
         return true
     }
 
@@ -3609,7 +3719,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         connection.videoRotationAngle = angle
     }
 
-    private func capturePhotoOnQueue(completion: @escaping PhotoCompletion) {
+    private func capturePhotoOnQueue(location: CLLocation? = nil, completion: @escaping PhotoCompletion) {
         guard isConfigured, session.isRunning else {
             publishStatus("Start the camera before capturing.")
             publishPhoto(nil, completion: completion)
@@ -3629,6 +3739,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 return
             }
             pendingManualControlsPhotoCompletion = completion
+            pendingManualControlsPhotoLocation = location
             publishStatus("Applying camera controls…")
             return
         }
@@ -3669,6 +3780,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
         pendingPhotoCompletion = completion
         pendingPhotoCapturedAt = Date()
+        pendingPhotoLocation = location
         pendingPhotoUniqueID = settings.uniqueID
         pendingPhotoFlashFallback = requestedFlashMode != .off && effectiveFlashMode == .off
         photoOutput.capturePhoto(with: settings, delegate: self)
@@ -3689,6 +3801,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         let flashFallback = pendingPhotoFlashFallback
         pendingPhotoCompletion = nil
         pendingPhotoCapturedAt = nil
+        pendingPhotoLocation = nil
         pendingPhotoUniqueID = nil
         pendingPhotoFlashFallback = false
         guard let completion else { return }
@@ -3709,6 +3822,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         pendingPhotoCompletion = nil
         pendingManualControlsPhotoCompletion = nil
         pendingPhotoCapturedAt = nil
+        pendingPhotoLocation = nil
         pendingPhotoUniqueID = nil
         pendingPhotoFlashFallback = false
         publishStatus(status)
@@ -3728,6 +3842,11 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         publishOnMain { [weak self] in
             guard let self, self.isRunning != running else { return }
             self.isRunning = running
+            MainActor.assumeIsolated {
+                if running, UIApplication.shared.applicationState == .active {
+                    self.captureLocationProvider.setActive(true)
+                }
+            }
         }
     }
 
@@ -3825,6 +3944,13 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         publishOnMain { [weak self] in
             guard let self, self.isFocusExposureLocked != locked else { return }
             self.isFocusExposureLocked = locked
+        }
+    }
+
+    private func publishLensSmudged(_ smudged: Bool) {
+        publishOnMain { [weak self] in
+            guard let self, self.isLensSmudged != smudged else { return }
+            self.isLensSmudged = smudged
         }
     }
 
@@ -3993,7 +4119,8 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
                     fileData: fileData,
                     capturedAt: self.pendingPhotoCapturedAt ?? Date(),
                     dimensions: dimensions,
-                    flashFired: flashFired
+                    flashFired: flashFired,
+                    location: self.pendingPhotoLocation
                 )
             }
             self.finishPhotoOnQueue(capturedPhoto, uniqueID: uniqueID)
@@ -4018,5 +4145,70 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
             // the shutter cannot remain busy indefinitely.
             self.finishPhotoOnQueue(nil, uniqueID: uniqueID)
         }
+    }
+}
+
+
+/// Main-thread ownership keeps Core Location callbacks and shutter snapshots serialized.
+@MainActor
+final class CameraCaptureLocationProvider: NSObject, @preconcurrency CLLocationManagerDelegate {
+    private let manager = CLLocationManager()
+    private var latestLocation: CLLocation?
+    private var isActive = false
+    private var isEnabled: Bool {
+        let process = ProcessInfo.processInfo
+        return process.arguments.contains("-location-testing") ||
+            (!process.arguments.contains("-ui-testing") && process.environment["XCTestConfigurationFilePath"] == nil)
+    }
+
+    override init() {
+        super.init()
+        manager.delegate = self
+        manager.desiredAccuracy = kCLLocationAccuracyBest
+        manager.distanceFilter = 10
+    }
+
+    func setActive(_ active: Bool) {
+        isActive = active && isEnabled
+        guard isActive else {
+            manager.stopUpdatingLocation()
+            latestLocation = nil
+            return
+        }
+        if manager.authorizationStatus == .notDetermined,
+           AVCaptureDevice.authorizationStatus(for: .video) == .authorized {
+            manager.requestWhenInUseAuthorization()
+        }
+        updateTracking()
+    }
+
+    func captureLocation() -> CLLocation? {
+        guard isActive else { return nil }
+        return Self.validLocation(latestLocation, authorization: manager.authorizationStatus, at: Date())
+    }
+
+    static func validLocation(_ location: CLLocation?, authorization: CLAuthorizationStatus, at date: Date) -> CLLocation? {
+        guard authorization == .authorizedAlways || authorization == .authorizedWhenInUse,
+              let location, CLLocationCoordinate2DIsValid(location.coordinate),
+              location.horizontalAccuracy.isFinite, location.horizontalAccuracy >= 0,
+              (0...60).contains(date.timeIntervalSince(location.timestamp)) else { return nil }
+        return location
+    }
+
+    private func updateTracking() {
+        if isActive && (manager.authorizationStatus == .authorizedAlways || manager.authorizationStatus == .authorizedWhenInUse) {
+            manager.startUpdatingLocation()
+        } else {
+            manager.stopUpdatingLocation()
+            latestLocation = nil
+        }
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) { updateTracking() }
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard isActive else { return }
+        latestLocation = locations.last(where: {
+            Self.validLocation($0, authorization: manager.authorizationStatus, at: Date()) != nil
+        })
     }
 }

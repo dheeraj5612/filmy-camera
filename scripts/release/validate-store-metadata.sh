@@ -86,7 +86,8 @@ for label in "Support URL" "Marketing URL" "Privacy policy URL"; do
   fi
 done
 
-if ! grep -Fq "It is not affiliated with Fujifilm" "${metadata_file}"; then
+if ! grep -Fq -e "It is not affiliated with Fujifilm" \
+  -e "It is not affiliated with any camera manufacturer" "${metadata_file}"; then
   echo "Metadata must retain the independent-product trademark disclaimer" >&2
   failures=$((failures + 1))
 fi

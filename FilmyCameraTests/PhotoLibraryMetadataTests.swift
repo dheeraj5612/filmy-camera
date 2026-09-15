@@ -34,6 +34,52 @@ private actor PhotoLibraryTestFlag {
 }
 
 final class PhotoLibraryMetadataTests: XCTestCase {
+    @MainActor
+    func testPhotosLocationMatchesEncodedSouthernWesternCoordinates() throws {
+        let data = try jpegWithGPS([
+            kCGImagePropertyGPSLatitude as String: 33.86,
+            kCGImagePropertyGPSLatitudeRef as String: "S",
+            kCGImagePropertyGPSLongitude as String: 151.21,
+            kCGImagePropertyGPSLongitudeRef as String: "W",
+            kCGImagePropertyGPSAltitude as String: 12.5,
+            kCGImagePropertyGPSAltitudeRef as String: 1
+        ])
+        let location = try XCTUnwrap(PhotoLibraryService.location(from: data))
+        XCTAssertEqual(location.coordinate.latitude, -33.86, accuracy: 0.00001)
+        XCTAssertEqual(location.coordinate.longitude, -151.21, accuracy: 0.00001)
+        XCTAssertEqual(location.altitude, -12.5, accuracy: 0.01)
+    }
+
+    @MainActor
+    func testPhotosLocationDoesNotInventCoordinatesForMissingOrMalformedGPS() throws {
+        XCTAssertNil(PhotoLibraryService.location(from: nil))
+        XCTAssertNil(PhotoLibraryService.location(from: Data("invalid".utf8)))
+        XCTAssertNil(PhotoLibraryService.location(from: try jpegWithGPS([:])))
+        XCTAssertNil(PhotoLibraryService.location(fromGPS: [
+            kCGImagePropertyGPSLatitude as String: 40,
+            kCGImagePropertyGPSLongitude as String: 70
+        ]))
+        XCTAssertNil(PhotoLibraryService.location(from: try jpegWithGPS([
+            kCGImagePropertyGPSLatitude as String: 91,
+            kCGImagePropertyGPSLatitudeRef as String: "N",
+            kCGImagePropertyGPSLongitude as String: 70,
+            kCGImagePropertyGPSLongitudeRef as String: "E"
+        ])))
+    }
+
+    @MainActor
+    private func jpegWithGPS(_ gps: [String: Any]) throws -> Data {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).image { context in
+            UIColor.gray.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        }
+        let data = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(data, UTType.jpeg.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, try XCTUnwrap(image.cgImage), [kCGImagePropertyGPSDictionary: gps] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return data as Data
+    }
+
     func testPhotoLibraryCompletionBridgeHopsToMainActor() async {
         let completionExpectation = expectation(description: "Main actor completion")
         let callback = PhotoLibraryCompletionBridge.mainActor { success in

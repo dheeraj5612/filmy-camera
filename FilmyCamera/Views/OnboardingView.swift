@@ -41,7 +41,7 @@ struct OnboardingView: View {
                 header
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 16) {
-                        Text("A look. Your eye.")
+                        Text(AppConfiguration.isG7X ? "G7X in every frame." : "A look. Your eye.")
                             .font(.system(.largeTitle).weight(.bold))
                             .tracking(-1)
                             .foregroundStyle(FilmyTheme.primary)
@@ -51,7 +51,9 @@ struct OnboardingView: View {
                         if let recipe = previewRecipe {
                             sample(recipe, height: max(170, min(360, geometry.size.height * 0.40)))
                         }
+                        #if !G7_APP
                         recipeChooser
+                        #endif
                         Text("Camera photos save automatically to Photos. Imported photos save only when you choose.")
                             .font(.footnote)
                             .foregroundStyle(FilmyTheme.secondary)

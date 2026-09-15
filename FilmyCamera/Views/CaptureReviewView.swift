@@ -559,6 +559,31 @@ struct CaptureReviewView: View {
     }
 
     private var lookPicker: some View {
+        #if G7_APP
+        HStack(spacing: 8) {
+            Image(systemName: "film")
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Look")
+                    .font(.system(.caption2, design: .rounded).weight(.bold))
+                    .foregroundStyle(FilmyTheme.tertiary)
+                Text("G7X Compact")
+                    .font(.system(.subheadline, design: .rounded).weight(.bold))
+                    .foregroundStyle(FilmyTheme.primary)
+            }
+            Spacer(minLength: 4)
+            Image(systemName: "lock.fill")
+                .font(.system(.caption2, weight: .bold))
+                .accessibilityHidden(true)
+        }
+        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+        .padding(.horizontal, 12)
+        .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .accessibilityIdentifier("review-look-locked")
+        .accessibilityLabel("G7X Compact look")
+        .accessibilityHint("G7X Camera uses one fixed look")
+        .frame(maxWidth: .infinity)
+        #else
         Button {
             HapticFeedback.play(.selection)
             isShowingLookLibrary = true
@@ -592,6 +617,7 @@ struct CaptureReviewView: View {
         .accessibilityValue(pendingReviewRecipeName)
         .accessibilityHint("Choose a Compact, Film, or Monochrome look for this photo")
         .frame(maxWidth: .infinity)
+        #endif
     }
 
     private var comparisonControls: some View {

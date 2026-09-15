@@ -69,6 +69,27 @@ final class CameraPreviewGesturePolicyTests: XCTestCase {
         XCTAssertEqual(next.exposure, 1.25)
     }
 
+    func testExposureDragAxisRejectsDiagonalAndSmallMovement() {
+        XCTAssertEqual(CameraPreviewGesturePolicy.dragAxis(translation: CGSize(width: 3, height: -30)), .exposure)
+        XCTAssertEqual(CameraPreviewGesturePolicy.dragAxis(translation: CGSize(width: -30, height: 3)), .look)
+        XCTAssertNil(CameraPreviewGesturePolicy.dragAxis(translation: CGSize(width: 20, height: 20)))
+        XCTAssertNil(CameraPreviewGesturePolicy.dragAxis(translation: CGSize(width: 0, height: 8)))
+        XCTAssertNil(CameraPreviewGesturePolicy.dragAxis(translation: CGSize(width: CGFloat.infinity, height: 20)))
+    }
+
+    func testExposureDragUsesStartingBiasAndScalesForViewport() throws {
+        XCTAssertEqual(try XCTUnwrap(CameraPreviewGesturePolicy.exposureBias(start: 0.3,
+            translation: CGSize(width: 0, height: -100), viewportHeight: 400)), 1.3, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(CameraPreviewGesturePolicy.exposureBias(start: 0.3,
+            translation: CGSize(width: 0, height: 200), viewportHeight: 800)), -0.7, accuracy: 0.001)
+        XCTAssertNil(CameraPreviewGesturePolicy.exposureBias(start: .nan,
+            translation: .zero, viewportHeight: 400))
+        XCTAssertNil(CameraPreviewGesturePolicy.exposureBias(start: 0,
+            translation: CGSize(width: 0, height: CGFloat.infinity), viewportHeight: 400))
+        XCTAssertNil(CameraPreviewGesturePolicy.exposureBias(start: 0,
+            translation: .zero, viewportHeight: 0))
+    }
+
     private func direction(x: CGFloat, y: CGFloat) -> CameraLookDirection? {
         CameraPreviewGesturePolicy.lookDirection(translation: CGSize(width: x, height: y), viewportWidth: 390,
                                                 interactionEnabled: true, includesPinch: false)

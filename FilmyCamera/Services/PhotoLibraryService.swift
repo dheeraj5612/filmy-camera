@@ -1,4 +1,5 @@
 import Combine
+import CoreLocation
 import Foundation
 @preconcurrency import Photos
 import PhotosUI
@@ -804,6 +805,7 @@ final class PhotoLibraryService: ObservableObject {
                     request = PHAssetChangeRequest.creationRequestForAsset(from: image)
                 }
                 request.creationDate = capturedAt
+                request.location = Self.location(from: imageData)
                 assetIdentifierBox.set(request.placeholderForCreatedAsset?.localIdentifier)
             }
             PHPhotoLibrary.shared().performChanges(
@@ -811,6 +813,33 @@ final class PhotoLibraryService: ObservableObject {
                 completionHandler: photoWriteCompletion
             )
         }
+    }
+
+    nonisolated static func location(from data: Data?) -> CLLocation? {
+        guard let data,
+              let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any],
+              let gps = properties[kCGImagePropertyGPSDictionary as String] as? [String: Any] else { return nil }
+        return location(fromGPS: gps)
+    }
+
+    nonisolated static func location(fromGPS gps: [String: Any]) -> CLLocation? {
+        guard let latitude = (gps[kCGImagePropertyGPSLatitude as String] as? NSNumber)?.doubleValue,
+              let longitude = (gps[kCGImagePropertyGPSLongitude as String] as? NSNumber)?.doubleValue else { return nil }
+        let latRef = (gps[kCGImagePropertyGPSLatitudeRef as String] as? String)?.uppercased()
+        let lonRef = (gps[kCGImagePropertyGPSLongitudeRef as String] as? String)?.uppercased()
+        guard (latRef == "N" || latRef == "S"), (lonRef == "E" || lonRef == "W"),
+              latitude >= 0, latitude <= 90, longitude >= 0, longitude <= 180 else { return nil }
+        let coordinate = CLLocationCoordinate2D(
+            latitude: (latRef == "S" ? -1 : 1) * latitude,
+            longitude: (lonRef == "W" ? -1 : 1) * longitude
+        )
+        guard CLLocationCoordinate2DIsValid(coordinate) else { return nil }
+        let altitude = (gps[kCGImagePropertyGPSAltitude as String] as? NSNumber)?.doubleValue ?? 0
+        let altitudeRef = (gps[kCGImagePropertyGPSAltitudeRef as String] as? NSNumber)?.intValue ?? 0
+        return CLLocation(coordinate: coordinate, altitude: altitudeRef == 1 ? -altitude : altitude,
+                          horizontalAccuracy: kCLLocationAccuracyBest, verticalAccuracy: -1,
+                          timestamp: Date())
     }
 
     func metadata(for asset: PHAsset) -> SavedFrameMetadata? {

@@ -51,7 +51,7 @@ struct SettingsView: View {
 
     private var settingsHeader: some View {
         SectionHeading(eyebrow: "FILMY CAMERA \(appVersion)", title: "Settings")
-            .accessibilityLabel("Filmy Camera settings, version \(appVersion)")
+            .accessibilityLabel("\(AppConfiguration.displayName) settings, version \(appVersion)")
     }
 
     private var flashSettingDetail: String {
@@ -79,6 +79,17 @@ struct SettingsView: View {
 
     private var captureSettings: some View {
         settingsSection(title: "CAPTURE") {
+            if #available(iOS 26.0, *) {
+                SettingRow(
+                    systemName: "airpodspro",
+                    title: "AirPods camera remote",
+                    detail: "With supported AirPods connected, choose Camera Remote in their system settings. Use your chosen stem gesture to take a photo while Filmy Camera is open. The capture timer applies too."
+                ) {
+                    EmptyView()
+                }
+                settingsDivider
+            }
+
             VStack(alignment: .leading, spacing: 12) {
                 SettingRow(
                     systemName: "bolt.fill",
@@ -289,7 +300,7 @@ struct SettingsView: View {
                 SettingIcon(systemName: "camera.aperture")
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Filmy Camera")
+                    Text(AppConfiguration.displayName)
                         .font(.system(.subheadline, design: .default).weight(.semibold))
                         .foregroundStyle(FilmyTheme.primary)
                     Text("Version \(appVersion)")
@@ -303,7 +314,7 @@ struct SettingsView: View {
 
             settingsDivider
 
-            Text("Recipe names are original, camera-inspired descriptions. Filmy Camera is an independent experience; it does not include camera firmware, proprietary LUTs, or calibration data. Your frames save to Photos; local copies are temporary and removable.")
+            Text(AppConfiguration.isG7X ? "G7X Camera is an independent experience. Your frames save to Photos; local copies are temporary and removable." : "Recipe names are original, camera-inspired descriptions. Filmy Camera is an independent experience; it does not include camera firmware, proprietary LUTs, or calibration data. Your frames save to Photos; local copies are temporary and removable.")
                 .font(.system(.footnote, design: .default).weight(.medium))
                 .foregroundStyle(FilmyTheme.secondary)
                 .fixedSize(horizontal: false, vertical: true)

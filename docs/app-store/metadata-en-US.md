@@ -2,11 +2,13 @@
 
 Status: final
 
+Prepared for App Store Connect 1.0.1; Description and release notes including Roll favorites, filtering, and sorting were saved and reload-verified in App Store Connect on 2026-09-14. Submission requires matching build, screenshots, and release acceptance.
+
 ## Listing fields
 
-- **App name:** Filmy Camera
-- **Subtitle:** Film recipes, made for now.
-- **Promotional text:** Film looks, G7 X Compact color, manual camera controls, and an Instant Print border. Every feature is free for this launch.
+- **App name:** Filmy Camera: Film Filters
+- **Subtitle:** Retro Photos & Manual Controls
+- **Promotional text:** Find your look with 128 editable film recipes, compact-digital color, manual camera controls, and Instant Print borders. Free, with no account or watermark.
 - **Primary category:** Photo & Video
 - **Secondary category:** Lifestyle
 - **Age rating:** 4+ (no user-generated content, unrestricted web access, or simulated gambling)
@@ -15,36 +17,35 @@ Status: final
 
 ## Description
 
-Filmy Camera is a camera for people who want to choose a feeling before they shoot.
+Create film-style photos with 128 editable looks, vintage grain, and manual camera controls. Filmy Camera brings analog-inspired color and compact-digital character to your iPhone and iPad, with no account or watermark.
 
-Choose the G7 X Compact look for warm compact-digital color and direct-flash character, or explore expressive film-style recipes. Frame the moment with a live preview, then capture and automatically save the finished photo.
+Pick a look, frame it in the live preview, and capture. Your finished photo saves automatically. Or import a photo, compare it with the original, and save your own edit.
 
-What you get:
+MAKE IT YOUR LOOK
+Explore 128 editable looks across color film, cinema, instant, digital, experimental, and monochrome collections. Search your favorites, try the warm G7 X Compact look, and adjust tone, color, white balance, grain, clarity, and vignette.
 
-- A focused camera screen designed for one-handed shooting
-- 128 editable looks with compact-digital, color-film, cinema, instant, and monochrome collections
-- Search and favorite looks for quick access
-- A 3-, 5-, or 10-second capture timer with a visible cancel action
-- 4:3, square, 3:2, and 16:9 framing with optional composition guides
-- Optional horizon level, live histogram, clipping warnings, and focus peaking
-- Import an existing photo with its framing preserved, at full resolution up to 40 MP
-- Adjustable tone, color, Kelvin white balance, fine-tuning, grain, clarity, and vignette controls
-- Live preview and full-resolution exports with the selected look applied
-- Manual ISO, shutter speed, sensor white balance, and focus on supported cameras
-- Re-edit photos from your Roll, compare the original, and save the version you love
-- Optional Instant Print borders with the entire photo preserved inside a white frame
-- Automatic saving for camera captures and an explicit review-and-save step for imported photos
-- An in-app Roll for browsing the moments you just made
-- Every included feature is free: no subscription, trial, paywall, or export watermark
-- No account required
+TAKE CONTROL
+Use manual ISO, shutter speed, sensor white balance, and focus on supported cameras. Compose with 4:3, square, 3:2, or 16:9 framing, optional guides, a horizon level, live histogram, clipping warnings, and focus peaking. Set a 3-, 5-, or 10-second timer.
 
-Filmy Camera uses public camera-control terminology and original rendering parameters. It is not affiliated with Fujifilm or any other camera manufacturer, and it does not include proprietary camera firmware, LUTs, or calibration data. Results vary with the camera, exposure, white balance, and lighting.
+EDIT AND KEEP
+Import photos at full resolution up to 40 MP with their framing preserved. Revisit your photos in Roll, compare the original, and re-edit. Add an optional Instant Print border that keeps the whole photo inside a white frame.
+
+Organize your Roll with favorites, filter frames by film or digital-style looks, and sort by newest, oldest, or look name. Browse photos in your chosen order and favorite or unfavorite frames from the grid or photo view.
+
+Keep available camera, lens, exposure, and capture-time metadata with your photos. Imported photos retain their location information. You can also choose to add location to new captures by granting location permission.
+
+MADE FOR THE MOMENT
+A focused camera interface with a new coral-and-black identity, portrait shooting on iPhone, and layouts that rotate on iPad.
+
+Every included feature is free. No account, subscription, trial, paywall, or export watermark.
+
+Filmy Camera uses original rendering parameters and public camera-control terminology. It is not affiliated with any camera manufacturer and does not include proprietary camera firmware, LUTs, or calibration data. Results vary with your camera, exposure, white balance, and lighting.
 
 ## Keywords
 
-`film,camera,analog,grain,recipes,retro,photo,photography,filter,colour,light,editor`
+`analog,vintage,grain,recipes,editor,instant,monochrome,cinema,digital,white balance,focus,exposure`
 
-The keyword field is below Apple's 100-character limit for this localization.
+The keyword field uses 98 of Apple's 100 characters. It avoids words already covered by the name, subtitle, and primary category. Search demand and competition are hypotheses, not measured rankings.
 
 ## URLs and contact
 
@@ -52,9 +53,18 @@ The keyword field is below Apple's 100-character limit for this localization.
 - **Marketing URL:** `https://github.com/dheeraj5612/filmy-camera` (optional)
 - **Privacy policy URL:** `https://dheeraj5612.github.io/filmycam-legal/privacy-policy.html`
 
-## What's New — version 1.0
+## What's New — version 1.0.1
 
-Meet Filmy Camera: 128 editable looks, a capture timer, framing and composition tools, manual camera controls, automatic camera saving, imported-photo review, and optional Instant Print borders. All included features are free for this launch.
+A fresh look for Filmy Camera.
+
+- New coral-and-black app icon and redesigned camera interface.
+- Refined camera controls and layouts for portrait shooting on iPhone and rotation on iPad.
+- Improved hardware shutter handling and capture reliability.
+- Refined skin tones and highlight rendering.
+- Smoother look drawer animation.
+- Organize your Roll with favorites, filtering, and sorting.
+- Preserve available photo metadata and imported photo locations, with optional location tagging for new captures.
+- Steadier camera layout when returning to the app.
 
 ## App Review notes
 

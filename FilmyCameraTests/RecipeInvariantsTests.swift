@@ -85,7 +85,7 @@ final class RecipeInvariantsTests: XCTestCase {
         XCTAssertEqual(FilmRecipe.expandedInternetRecipeIDs.count, 18)
         XCTAssertEqual(Set(FilmRecipe.expandedInternetRecipeIDs).count, 18)
         XCTAssertEqual(FilmRecipe.legacyBuiltIns.count, 36)
-        XCTAssertEqual(FilmRecipe.builtIns.count, 128)
+        XCTAssertEqual(FilmRecipe.builtIns.count, 142)
 
         let builtInIDs = Set(FilmRecipe.builtIns.map(\.id))
         XCTAssertTrue(Set(FilmRecipe.expandedInternetRecipeIDs).isSubset(of: builtInIDs))
@@ -723,8 +723,8 @@ final class RecipeInvariantsTests: XCTestCase {
 
 final class ExpandedCreativeCatalogTests: XCTestCase {
     func testOriginalCollectionsContainEveryAuthoredRecipe() {
-        let expected: [FilmRecipe.Collection: Int] = [.negative:16, .slide:10, .cinema:12, .instant:8, .digital:16, .experimental:6, .monochrome:24]
-        XCTAssertEqual(FilmRecipe.originalCreativeLooks.count, 92)
+        let expected: [FilmRecipe.Collection: Int] = [.negative:23, .slide:14, .cinema:12, .instant:8, .digital:16, .experimental:6, .monochrome:27]
+        XCTAssertEqual(FilmRecipe.originalCreativeLooks.count, 106)
         XCTAssertEqual(Array(FilmRecipe.builtIns.prefix(36)), FilmRecipe.legacyBuiltIns)
         for (collection,count) in expected {
             XCTAssertEqual(FilmRecipe.originalCreativeLooks.filter { $0.creativeCollection == collection }.count, count)

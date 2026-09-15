@@ -50,7 +50,6 @@ if ! plutil -lint "${privacy_manifest}" >/dev/null; then
 fi
 
 require_spec_value 'PRODUCT_BUNDLE_IDENTIFIER: com.dheeraj.filmycamera' "production bundle identifier"
-require_spec_value 'MARKETING_VERSION: "1.0.0"' "marketing version"
 require_spec_value 'DEVELOPMENT_TEAM: 6ALSCF5GBV' "development team"
 require_spec_value 'CFBundleDisplayName: Filmy Camera' "display name"
 require_spec_value 'ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon' "app icon configuration"
@@ -66,6 +65,11 @@ if [[ -z "${build_number}" ]] || [[ ! "${build_number}" =~ ^[1-9][0-9]*$ ]]; the
 fi
 
 marketing_version="$(sed -n 's/^[[:space:]]*MARKETING_VERSION:[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' "${project_spec}" | head -n 1)"
+
+if [[ ! "${marketing_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "MARKETING_VERSION must use major.minor.patch format in project.yml" >&2
+  failures=$((failures + 1))
+fi
 
 if ! grep -Fq 'NSPrivacyTracking' "${privacy_manifest}" \
   || ! grep -Fq 'NSPrivacyCollectedDataTypes' "${privacy_manifest}" \

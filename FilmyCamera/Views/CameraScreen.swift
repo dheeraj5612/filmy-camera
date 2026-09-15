@@ -171,6 +171,9 @@ struct CameraScreen: View {
     @State private var pinchStartZoom: CGFloat = 1
     @State private var isPinching = false
     @State private var previewDragMaySelectLook: Bool?
+    @State private var previewDragAxis: CameraPreviewDragAxis?
+    @State private var exposureDragStart: Float?
+    @State private var focusFeedbackRevision = 0
     @State private var suppressLookSwipeUntil = Date.distantPast
     @State private var viewfinderChromeHeights: [ViewfinderChromeEdge: CGFloat] = [:]
     @State private var isShutterBlinking = false
@@ -179,6 +182,7 @@ struct CameraScreen: View {
     @AppStorage("favoriteRecipeIDs.v1") private var favoriteData = Data()
     @AppStorage("cameraGripUseLeftHanded.v1") private var useLeftHandedGrip = false
     @State private var hardwareShutterCaptureRequest = 0
+    @State private var hasDismissedLensAdvisory = false
 #if DEBUG
     @State private var hardwareShutterEventCount = 0
     @State private var hardwareShutterLastPhase = "none"
@@ -206,14 +210,12 @@ struct CameraScreen: View {
         self.onImportPhoto = onImportPhoto
         self.isImportInProgress = isImportInProgress
 
-        // The tools strip stays hidden until asked for so the viewfinder
-        // opens quiet. UI tests that exercise exposure and zoom launch with
-        // it open; the viewfinder-chrome preview launches with it closed so
-        // the toggle itself can be verified.
+        // Show capture controls on launch. The explicit collapsed-chrome
+        // test fixture still exercises revealing them with the toggle.
         let arguments = ProcessInfo.processInfo.arguments
         let isUITesting = arguments.contains("-ui-testing")
         let isViewfinderPreview = arguments.contains("-ui-testing-viewfinder-chrome")
-        _isShowingTools = State(initialValue: isUITesting && !isViewfinderPreview)
+        _isShowingTools = State(initialValue: !(isUITesting && isViewfinderPreview))
     }
 
     var body: some View {
@@ -254,6 +256,20 @@ struct CameraScreen: View {
                     } else if let toastMessage = viewModel.toastMessage {
                         ToastView(message: toastMessage, style: viewModel.toastStyle)
                             .transition(.opacity)
+                    } else if camera.isLensSmudged && !hasDismissedLensAdvisory && camera.availability == .running {
+                        HStack(spacing: 12) {
+                            Label("Wipe the camera lens for a clearer photo", systemImage: "camera.aperture")
+                                .font(.subheadline)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Button { hasDismissedLensAdvisory = true } label: {
+                                Image(systemName: "xmark")
+                                    .frame(width: 44, height: 44)
+                            }
+                            .accessibilityLabel("Dismiss lens cleaning tip")
+                        }
+                        .padding(.leading, 14)
+                        .viewfinderChrome(RoundedRectangle(cornerRadius: 16))
+                        .accessibilityIdentifier("camera-lens-cleaning-tip")
                     }
                 }
                 .padding(.horizontal, 16)
@@ -330,11 +346,16 @@ struct CameraScreen: View {
             if !enabled {
                 isPinching = false
                 previewDragMaySelectLook = nil
+                previewDragAxis = nil
+                exposureDragStart = nil
             }
         }
         // Re-enter through current SwiftUI state after the system callback,
         // avoiding a retained callback snapshot with stale scene values.
         .onChange(of: hardwareShutterCaptureRequest) { _, _ in capture() }
+        .onChange(of: camera.isLensSmudged) { _, smudged in
+            if !smudged { hasDismissedLensAdvisory = false }
+        }
         .onChange(of: camera.previewViewportSize) { _, _ in
             // A mask from the previous crop must not stretch over a newly
             // rotated or resized viewfinder while its replacement renders.
@@ -498,6 +519,7 @@ struct CameraScreen: View {
                 .disabled(isChromeDisabled)
         }
         .overlay(alignment: .bottom) {
+            #if !G7_APP
             if isShowingLookDrawer {
                 lookDrawer(
                     maxHeight: max(
@@ -510,6 +532,7 @@ struct CameraScreen: View {
                     .disabled(isChromeDisabled)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+            #endif
         }
     }
 
@@ -541,6 +564,7 @@ struct CameraScreen: View {
         .padding(.horizontal, isPad ? 20 : 12)
         .padding(.vertical, isPad ? 12 : 6)
         .overlay(alignment: drawerOnLeading ? .bottomLeading : .bottomTrailing) {
+            #if !G7_APP
             if isShowingLookDrawer {
                 lookDrawer(
                     maxHeight: isLandscape
@@ -557,6 +581,7 @@ struct CameraScreen: View {
                     .disabled(isChromeDisabled)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+            #endif
         }
     }
 
@@ -617,12 +642,23 @@ struct CameraScreen: View {
                 // hit-test transparent so a visible reticle cannot swallow the
                 // next focus tap.
                 FocusReticle()
+                    .overlay(alignment: .bottom) {
+                        if camera.manualControls.exposureMode != .manual {
+                            Label(String(format: "%+.1f EV", camera.exposureBias), systemImage: "sun.max.fill")
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(FilmyTheme.accent)
+                                .padding(4)
+                                .background(.black.opacity(0.65), in: Capsule())
+                                .offset(y: 28)
+                                .accessibilityHidden(true)
+                        }
+                    }
                     .position(focusPoint)
                     .transition(reduceMotion ? .opacity : .scale(scale: 1.15).combined(with: .opacity))
                     .allowsHitTesting(false)
-                    .task(id: focusPoint) {
-                        try? await Task.sleep(for: .seconds(1.2))
-                        guard !Task.isCancelled else { return }
+                    .task(id: focusFeedbackRevision) {
+                        try? await Task.sleep(for: .seconds(5))
+                        guard !Task.isCancelled, exposureDragStart == nil else { return }
                         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) {
                             self.focusPoint = nil
                         }
@@ -687,6 +723,8 @@ struct CameraScreen: View {
             .onChange(of: proxy.size) { _, size in
                 isPinching = false
                 previewDragMaySelectLook = nil
+                previewDragAxis = nil
+                exposureDragStart = nil
                 camera.updateOrientation(for: size)
             }
         }
@@ -698,10 +736,12 @@ struct CameraScreen: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Live camera preview")
             .accessibilityValue("Showing the \(viewModel.selectedRecipe.name) look")
-            .accessibilityHint("Tap to focus, swipe left or right to change looks, double tap to switch cameras, or pinch to zoom. These controls are also available as accessibility actions.")
+            .accessibilityHint("Tap to focus, then slide up to brighten or down to darken. Swipe left or right to change looks, double tap to switch cameras, or pinch to zoom. These controls are also available as accessibility actions.")
             .accessibilityAction(named: "Focus and expose at center") {
                 focusPreview(at: CGPoint(x: size.width / 2, y: size.height / 2), in: size)
             }
+            .accessibilityAction(named: "Brighten exposure") { adjustPreviewExposure(by: 0.3) }
+            .accessibilityAction(named: "Darken exposure") { adjustPreviewExposure(by: -0.3) }
             .accessibilityAction(named: "Next look") { selectAdjacentLook(.next) }
             .accessibilityAction(named: "Previous look") { selectAdjacentLook(.previous) }
             .accessibilityAction(named: "Switch camera", switchCameraFromPreview)
@@ -744,6 +784,7 @@ struct CameraScreen: View {
         let normalizedPoint = normalizedFocusPoint(for: location, in: size)
         camera.focus(at: normalizedPoint)
         focusNormalizedPoint = normalizedPoint
+        focusFeedbackRevision += 1
         withAnimation(reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.72)) {
             focusPoint = location
         }
@@ -758,6 +799,9 @@ struct CameraScreen: View {
     }
 
     private func selectAdjacentLook(_ direction: CameraLookDirection) {
+        #if G7_APP
+        return
+        #else
         guard canTriggerShutter, !isPinching,
               let recipe = CameraPreviewGesturePolicy.targetRecipe(
                 in: viewModel.recipes, selectedIdentifier: viewModel.selectedRecipeID,
@@ -765,18 +809,49 @@ struct CameraScreen: View {
               ) else { return }
         viewModel.select(recipe: recipe)
         HapticFeedback.play(.selection)
+        #endif
+    }
+
+    private var canAdjustPreviewExposure: Bool {
+        canTriggerShutter && !isPinching && camera.manualControls.exposureMode != .manual
+            && !camera.manualControls.isApplying
+    }
+
+    private func adjustPreviewExposure(by delta: Float) {
+        guard canAdjustPreviewExposure else { return }
+        camera.setExposureBias(camera.exposureBias + delta)
+        focusFeedbackRevision += 1
     }
 
     private func previewLookSwipe(in size: CGSize) -> some Gesture {
         DragGesture(minimumDistance: 12)
-            .onChanged { _ in
+            .onChanged { value in
                 let enabled = canTriggerShutter && !isPinching && Date() >= suppressLookSwipeUntil
                 if previewDragMaySelectLook == nil { previewDragMaySelectLook = enabled }
                 if !enabled { previewDragMaySelectLook = false }
+                guard previewDragMaySelectLook == true else { return }
+                if previewDragAxis == nil {
+                    previewDragAxis = CameraPreviewGesturePolicy.dragAxis(translation: value.translation)
+                    if previewDragAxis == .exposure, focusPoint != nil, canAdjustPreviewExposure {
+                        exposureDragStart = camera.exposureBias
+                    }
+                }
+                guard previewDragAxis == .exposure, canAdjustPreviewExposure,
+                      let start = exposureDragStart,
+                      let bias = CameraPreviewGesturePolicy.exposureBias(start: start,
+                          translation: value.translation, viewportHeight: size.height) else { return }
+                camera.setExposureBias(bias)
+                focusFeedbackRevision += 1
             }
             .onEnded { value in
-                defer { previewDragMaySelectLook = nil }
-                guard let direction = CameraPreviewGesturePolicy.lookDirection(
+                defer {
+                    previewDragMaySelectLook = nil
+                    previewDragAxis = nil
+                    exposureDragStart = nil
+                    focusFeedbackRevision += 1
+                }
+                guard previewDragAxis == .look,
+                      let direction = CameraPreviewGesturePolicy.lookDirection(
                     translation: value.translation,
                     viewportWidth: size.width,
                     interactionEnabled: canTriggerShutter && previewDragMaySelectLook == true,
@@ -803,11 +878,11 @@ struct CameraScreen: View {
                 toolStrip(minWidth: width - 24)
             }
 
-            // The presets need a live camera; the chrome preview shows them
-            // so the full capture layout can be verified without hardware.
-            if !isShowingLookDrawer,
-               camera.isRunning || isViewfinderChromePreview,
-               !isReviewing {
+            // Keep the zoom row mounted while the session stops/restarts.
+            // Removing it moves the utility rail (and histogram exclusion
+            // area) on every foreground transition. Only visibility and
+            // interaction depend on camera readiness, never its layout.
+            if !isShowingLookDrawer, !isReviewing {
                 ZoomPresetBar(
                     value: camera.zoomFactor,
                     minZoom: camera.minZoomFactor,
@@ -818,7 +893,9 @@ struct CameraScreen: View {
                         camera.setZoom(camera.zoomFactor + delta)
                     }
                 )
-                .transition(.opacity)
+                .opacity(camera.isRunning || isViewfinderChromePreview ? 1 : 0)
+                .disabled(!camera.isRunning && !isViewfinderChromePreview)
+                .accessibilityHidden(!camera.isRunning && !isViewfinderChromePreview)
             }
         }
     }
@@ -1141,7 +1218,11 @@ struct CameraScreen: View {
                 recipe: viewModel.selectedRecipe,
                 isCustomized: viewModel.isCustomized(viewModel.selectedRecipe),
                 compactLayout: compact,
-                action: toggleLookDrawer
+                action: {
+                    #if !G7_APP
+                    toggleLookDrawer()
+                    #endif
+                }
             )
             Button {
                 let shouldOpen = !isShowingLiveAdjustments
@@ -1394,7 +1475,6 @@ struct CameraScreen: View {
         } label: {
             VStack(spacing: 3) {
                 RollThumbnail(asset: photoLibrary.galleryAssets.first, photoLibrary: photoLibrary)
-                    .frame(width: 44, height: 44)
                 Text("Roll")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(FilmyTheme.secondary)
@@ -1798,6 +1878,9 @@ private struct RollThumbnail: View {
                     .foregroundStyle(.white)
             }
         }
+        // Constrain the aspect-fill image before clipping, so portrait and
+        // landscape photos cannot draw over the Roll label below it.
+        .frame(width: 44, height: 44)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 12, style: .continuous)

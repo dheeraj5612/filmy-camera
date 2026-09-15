@@ -164,6 +164,16 @@ struct ManualCameraControlsView: View {
             .accessibilityValue(manual ? "Manual" : "Auto")
     }
 
+    private var compactSectionTitles: Bool {
+        horizontalSizeClass == .compact && !dynamicTypeSize.isAccessibilitySize
+    }
+
+    private var sectionTitleLayout: AnyLayout {
+        compactSectionTitles
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 7))
+    }
+
     private var sectionPicker: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Adjust")
@@ -184,16 +194,17 @@ struct ManualCameraControlsView: View {
                     } label: {
                         ZStack(alignment: .topTrailing) {
                             VStack(alignment: .leading, spacing: 5) {
-                                HStack(alignment: .top, spacing: 7) {
+                                sectionTitleLayout {
                                     Image(systemName: section.symbolName)
-                                        .font(.system(.subheadline, weight: .bold))
+                                        .font(.system(.caption, weight: .bold))
                                     Text(section.title)
-                                        .font(.system(.subheadline, design: .rounded).weight(.bold))
+                                        .font(.system(compactSectionTitles ? .caption : .subheadline, design: .rounded).weight(.bold))
                                         .lineLimit(2)
+                                        .minimumScaleFactor(0.85)
                                         .fixedSize(horizontal: false, vertical: true)
                                         .layoutPriority(1)
                                 }
-                                .padding(.trailing, 24)
+                                .padding(.trailing, compactSectionTitles ? 0 : 24)
                                 Text(sectionSummary(section))
                                     .font(.system(.caption2, design: .rounded).weight(.medium))
                                     .foregroundStyle(selectedSection == section ? FilmyTheme.primary : FilmyTheme.secondary)

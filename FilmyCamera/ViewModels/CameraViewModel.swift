@@ -1,4 +1,5 @@
 import Combine
+import CoreLocation
 import CoreImage
 import CoreMedia
 import ImageIO
@@ -107,7 +108,7 @@ final class CameraViewModel: ObservableObject {
 #if DEBUG
     @Published private(set) var captureTimingStatus = "idle"
 #endif
-    nonisolated static let defaultRecipeID = "g7x-compact"
+    nonisolated static let defaultRecipeID = AppConfiguration.defaultRecipeID
 
     private static let builtInRecipesByID = Dictionary(
         uniqueKeysWithValues: FilmRecipe.builtIns.map { ($0.id, $0) }
@@ -121,7 +122,7 @@ final class CameraViewModel: ObservableObject {
     /// the actual first look, including a customized color cube.
     nonisolated static func launchRecipe(defaults: UserDefaults = .standard) -> FilmRecipe {
         let storedID = defaults.string(forKey: selectedRecipeIDKey) ?? defaultRecipeID
-        let base = FilmRecipe.builtIns.first { $0.id == storedID }
+        let base = FilmRecipe.builtIns.first { $0.id == storedID && AppConfiguration.isRecipeAllowed($0.id) }
             ?? FilmRecipe.builtIns.first { $0.id == defaultRecipeID }
             ?? FilmRecipe.builtIns[0]
         guard let saved = decodeRecipeOverrides(from: defaults.data(forKey: recipeOverridesKey))
@@ -160,6 +161,7 @@ final class CameraViewModel: ObservableObject {
         let capturedAt: Date
         var isFullResolution = true
         var flashFired = false
+        var location: CLLocation? = nil
         var normalizedSubjectRegions: [CGRect]? = nil
     }
 
@@ -185,13 +187,15 @@ final class CameraViewModel: ObservableObject {
         let capturedAt: Date
         let mode: Mode
         let normalizedSubjectRegions: [CGRect]?
+        var location: CLLocation? = nil
 
         func storing(normalizedSubjectRegions: [CGRect]?) -> Self {
             Self(
                 data: data,
                 capturedAt: capturedAt,
                 mode: mode,
-                normalizedSubjectRegions: normalizedSubjectRegions
+                normalizedSubjectRegions: normalizedSubjectRegions,
+                location: location
             )
         }
     }
@@ -266,7 +270,7 @@ final class CameraViewModel: ObservableObject {
 
     /// New installs and unknown persisted selections land on the G7 X profile.
     private static let fallbackRecipeID = CameraViewModel.defaultRecipeID
-    private static let validRecipeIDs = Set(FilmRecipe.builtIns.map(\.id))
+    private static let validRecipeIDs = Set(FilmRecipe.builtIns.map(\.id).filter(AppConfiguration.isRecipeAllowed))
 
     private let defaults: UserDefaults
 
@@ -466,11 +470,12 @@ final class CameraViewModel: ObservableObject {
     /// the same effective values. Returning resolved overrides here prevents
     /// a customized look from being represented by a stale stock thumbnail.
     var recipes: [FilmRecipe] {
-        FilmRecipe.builtIns.map { recipe(for: $0.id) }
+        FilmRecipe.builtIns.filter { Self.validRecipeIDs.contains($0.id) }.map { recipe(for: $0.id) }
     }
 
     func recipe(for id: String) -> FilmRecipe {
-        recipeOverrides[id]
+        guard Self.validRecipeIDs.contains(id) else { return Self.defaultRecipe }
+        return recipeOverrides[id]
             ?? Self.builtInRecipesByID[id]
             ?? Self.defaultRecipe
     }
@@ -485,6 +490,7 @@ final class CameraViewModel: ObservableObject {
     }
 
     func update(recipe: FilmRecipe) {
+        guard Self.validRecipeIDs.contains(recipe.id) else { return }
         guard let parent = FilmRecipe.builtIns.first(where: {
             $0.id == recipe.id
         }) else {
@@ -499,6 +505,7 @@ final class CameraViewModel: ObservableObject {
     }
 
     func reset(recipeID: String) {
+        guard Self.validRecipeIDs.contains(recipeID) else { return }
         guard recipeOverrides.removeValue(forKey: recipeID) != nil else { return }
         persistRecipeOverrides()
     }
@@ -579,6 +586,7 @@ final class CameraViewModel: ObservableObject {
                             previewDrawableSize: previewDrawableSize,
                             capturedAt: capturedPhoto.capturedAt,
                             flashFired: capturedPhoto.flashFired,
+                            location: capturedPhoto.location,
                             grainSeed: grainSeed,
                             finish: finish
                         )
@@ -710,7 +718,8 @@ final class CameraViewModel: ObservableObject {
             data: data,
             capturedAt: importedAt,
             mode: .photoLibrary,
-            normalizedSubjectRegions: renderedPhoto.normalizedSubjectRegions
+            normalizedSubjectRegions: renderedPhoto.normalizedSubjectRegions,
+            location: nil
         )
         fullResolutionReviewRecipe = recipe
         fullResolutionReviewFinish = .photo
@@ -1056,6 +1065,7 @@ final class CameraViewModel: ObservableObject {
         previewDrawableSize: CGSize,
         capturedAt: Date,
         flashFired: Bool,
+        location: CLLocation? = nil,
         grainSeed: UInt32,
         normalizedSubjectRegions: [CGRect]? = nil,
         finish: PhotoFinish = .photo
@@ -1131,7 +1141,8 @@ final class CameraViewModel: ObservableObject {
             for: output,
             sourceData: sourceData,
             capturedAt: capturedAt,
-            recipe: recipe
+            recipe: recipe,
+            location: location
         ) else {
             return nil
         }
@@ -1143,6 +1154,7 @@ final class CameraViewModel: ObservableObject {
             data: data,
             capturedAt: capturedAt,
             flashFired: flashFired,
+            location: location,
             normalizedSubjectRegions: resolvedSubjectRegions
         )
     }
@@ -1232,7 +1244,8 @@ final class CameraViewModel: ObservableObject {
                 for: output,
                 sourceData: sourceData,
                 capturedAt: importedAt,
-                recipe: recipe
+                recipe: recipe,
+                location: nil
               ) else {
             return nil
         }
@@ -1261,6 +1274,7 @@ final class CameraViewModel: ObservableObject {
                 previewDrawableSize: previewDrawableSize,
                 capturedAt: source.capturedAt,
                 flashFired: flashFired,
+                location: source.location,
                 grainSeed: grainSeed,
                 normalizedSubjectRegions: source.normalizedSubjectRegions,
                 finish: finish
