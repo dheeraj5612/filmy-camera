@@ -273,9 +273,11 @@ struct FilmyPhotoEditorView: View {
         defer { busy = false }
         do {
             let identifier = try await FilmyPhotosExporter.save(documentID, asNewCopy: asNewCopy)
-            if let document, let revision = document.currentRevision {
+            let latest = try await FilmyPhotoStore.shared.load(documentID)
+            let thumbnail = try await FilmyPhotoStore.shared.thumbnailData(documentID).flatMap { UIImage(data: $0) }
+            if let revision = latest.currentRevision {
                 await photoLibrary.registerDocumentExport(identifier, recipe: revision.recipe,
-                                                          capturedAt: document.capturedAt, thumbnail: preview)
+                                                          capturedAt: latest.capturedAt, thumbnail: thumbnail)
             }
             await load()
             message = "Saved to Photos with original resources and reversible Filmy edits."

@@ -729,13 +729,13 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// consumers share the stream (the Metal viewfinder and the live recipe
     /// swatches), so handlers fan out rather than replace one another, and a
     /// stale SwiftUI representable can only remove its own callback.
-    @discardableResult
     private func updateFrameConsumersOnMain(hasOnFrame: Bool) {
         frameHandlersLock.lock()
         hasOnFrameConsumer = hasOnFrame
         frameHandlersLock.unlock()
     }
 
+    @discardableResult
     public func installFrameHandler(_ handler: @escaping FrameHandler) -> UUID {
         let id = UUID()
         frameHandlersLock.lock()

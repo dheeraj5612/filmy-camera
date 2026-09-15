@@ -202,7 +202,7 @@ final class ProCaptureTests: XCTestCase {
         let decoded = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
         XCTAssertEqual(decoded.width, 64)
         XCTAssertEqual(decoded.height, 48)
-        XCTAssertEqual(decoded.colorSpace?.name, CGColorSpace.displayP3)
+        XCTAssertEqual(decoded.colorSpace?.name as String?, CGColorSpace.displayP3 as String)
         let metadata = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any])
         XCTAssertNil(metadata[kCGImagePropertyGPSDictionary as String])
     }
@@ -216,6 +216,29 @@ final class ProCaptureTests: XCTestCase {
         let standard = try XCTUnwrap(ProPhotoOutput.preservingHeadroom(film: film, sourceSDR: sdr, sourceHDR: sdr))
         XCTAssertGreaterThan(try firstChannel(extended), 1)
         XCTAssertEqual(try firstChannel(standard), 0.9, accuracy: 0.02)
+    }
+
+    func testHEIFAndHDRFilesContainTheirDeclaredPixelFormat() throws {
+        let image = CIImage(color: CIColor(red: 0.8, green: 0.2, blue: 0.1))
+            .cropped(to: CGRect(x: 0, y: 0, width: 64, height: 48))
+        for dynamicRange in ProCaptureSettings.DynamicRange.allCases {
+            var settings = ProCaptureSettings()
+            settings.dynamicRange = dynamicRange
+            let result = ProPhotoOutput.encode(image, sourceData: Data(), capturedAt: .distantPast,
+                recipe: FilmRecipe.builtIns[0], settings: settings)
+#if targetEnvironment(simulator)
+            guard let data = result else { throw XCTSkip("The simulator does not provide this HEIF encoder; verify on device") }
+#else
+            let data = try XCTUnwrap(result)
+#endif
+            let source = try XCTUnwrap(CGImageSourceCreateWithData(data as CFData, nil))
+            let type = try XCTUnwrap(CGImageSourceGetType(source) as String?)
+            XCTAssertTrue(UTType(type)?.conforms(to: .heic) == true || UTType(type)?.conforms(to: .heif) == true)
+            let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any])
+            XCTAssertEqual(properties[kCGImagePropertyPixelWidth as String] as? Int, 64)
+            XCTAssertEqual(properties[kCGImagePropertyPixelHeight as String] as? Int, 48)
+            if dynamicRange == .hdr { XCTAssertEqual(properties[kCGImagePropertyDepth as String] as? Int, 10) }
+        }
     }
 
     private var geometry: FilmyRenderGeometry {

@@ -71,7 +71,7 @@ enum FilmyPhotosExporter {
         let adjustmentBox = Box(adjustment)
         // For stills, original + RAW companion + rendered edit are committed
         // in one PhotoKit transaction and require only add-only permission.
-        try await PHPhotoLibrary.shared().performChanges {
+        let createChanges: @Sendable () -> Void = {
             let request = PHAssetCreationRequest.forAsset()
             request.creationDate = document.capturedAt
             request.addResource(with: .photo, fileURL: original, options: nil)
@@ -90,6 +90,7 @@ enum FilmyPhotosExporter {
                 request.contentEditingOutput = output
             } catch { editError.set(true) }
         }
+        try await PHPhotoLibrary.shared().performChanges(createChanges)
         defer { if let url = outputURL.get() { try? FileManager.default.removeItem(at: url) } }
         guard let assetID = identifier.get() else { throw ExportError.writeFailed }
         // Link immediately after creation, including a failed edit. Retrying
@@ -112,16 +113,18 @@ enum FilmyPhotosExporter {
         options.isNetworkAccessAllowed = true
         // Returning true for Filmy adjustments asks Photos for the original,
         // not the previous baked-in look. A version is never graded twice.
-        options.canHandleAdjustmentData = { data in
+        let canHandle: @Sendable (PHAdjustmentData) -> Bool = { data in
             let recognized = data.formatIdentifier == adjustmentIdentifier && data.formatVersion == "1"
             if !recognized { externalAdjustment.set(true) }
             return recognized
         }
+        options.canHandleAdjustmentData = canHandle
         let input: PHContentEditingInput = try await withCheckedThrowingContinuation { continuation in
-            asset.requestContentEditingInput(with: options) { input, _ in
+            let completion: @Sendable (PHContentEditingInput?, [AnyHashable: Any]) -> Void = { input, _ in
                 if let input { continuation.resume(returning: input) }
                 else { continuation.resume(throwing: ExportError.writeFailed) }
             }
+            asset.requestContentEditingInput(with: options, completionHandler: completion)
         }
         if externalAdjustment.get() { throw ExportError.externalEdit }
         if let data = input.adjustmentData, data.formatIdentifier != adjustmentIdentifier {
@@ -135,7 +138,7 @@ enum FilmyPhotosExporter {
             let geometry = document.geometry
             let orientation = context.orientation
             context.audioVolume = revision.output.livePhotoAudio ? 1 : 0
-            context.frameProcessor = { frame, error in
+            let processor: @Sendable (PHLivePhotoFrame, NSErrorPointer) -> CIImage? = { frame, error in
                 autoreleasepool {
                     let viewport = CGSize(width: geometry.viewportWidth, height: geometry.viewportHeight)
                     let sideways = [CGImagePropertyOrientation.left, .leftMirrored, .right, .rightMirrored].contains(orientation)
@@ -164,6 +167,7 @@ enum FilmyPhotosExporter {
                     return CIImage(cgImage: rendered)
                 }
             }
+            context.frameProcessor = processor
             try await context.saveLivePhoto(to: output, options: nil)
         } else {
             let type: UTType = rendition.pathExtension == "heic" ? .heic : .jpeg
@@ -173,9 +177,10 @@ enum FilmyPhotosExporter {
         }
         let outputBox = Box(output)
         let assetBox = Box(asset)
-        try await PHPhotoLibrary.shared().performChanges {
+        let updateChanges: @Sendable () -> Void = {
             PHAssetChangeRequest(for: assetBox.get()).contentEditingOutput = outputBox.get()
         }
+        try await PHPhotoLibrary.shared().performChanges(updateChanges)
         // Photos has consumed its copy. Only remove the URL it explicitly
         // gave us; do not enumerate or purge the shared temporary directory.
         try? FileManager.default.removeItem(at: output.renderedContentURL)
