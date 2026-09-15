@@ -1,0 +1,76 @@
+name: Prepare smart recipe Xcode project
+on:
+  push:
+    branches: [work/scene-smart-recipes-validation]
+    paths: [.staging/smart-project-ready]
+permissions:
+  contents: write
+jobs:
+  project:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      TARGET: feature/smart-look-suggestions
+      EXPECTED: 84f8850646dab3f472af4bfa20d053f8cb9e3c92
+      STAGING: work/scene-smart-recipes-validation
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: feature/smart-look-suggestions
+          persist-credentials: false
+      - name: Build pinned XcodeGen from official sources
+        run: |
+          set -euo pipefail
+          exec > >(tee "$RUNNER_TEMP/smart-project.log") 2>&1
+          swift --version
+          git clone --depth 1 --branch 2.45.4 https://github.com/yonaskolb/XcodeGen.git "$RUNNER_TEMP/XcodeGen"
+          cd "$RUNNER_TEMP/XcodeGen"
+          swift build -c release --product xcodegen --jobs 2
+          echo "$RUNNER_TEMP/XcodeGen/.build/release" >> "$GITHUB_PATH"
+      - name: Generate twice and verify deterministic project output
+        run: |
+          set -euo pipefail
+          exec >> "$RUNNER_TEMP/smart-project.log" 2>&1
+          test "$(git rev-parse HEAD)" = "$EXPECTED"
+          xcodegen generate --spec project.yml
+          git diff --check
+          git diff -- FilmyCamera.xcodeproj > "$RUNNER_TEMP/smart-project-first.diff"
+          xcodegen generate --spec project.yml
+          git diff -- FilmyCamera.xcodeproj > "$RUNNER_TEMP/smart-project-second.diff"
+          cmp "$RUNNER_TEMP/smart-project-first.diff" "$RUNNER_TEMP/smart-project-second.diff"
+          python3 -m unittest discover -s scripts/testing -p 'test_*.py' -v
+      - name: Commit only generated project with concurrency guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          git fetch --no-tags origin "$TARGET"
+          test "$(git rev-parse FETCH_HEAD)" = "$EXPECTED"
+          git add FilmyCamera.xcodeproj
+          git diff --cached --check
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -m 'Regenerate Xcode project with pinned XcodeGen for Smart looks sources and tests'
+          git push origin HEAD:"refs/heads/$TARGET"
+          git rev-parse HEAD >> "$RUNNER_TEMP/smart-project.log"
+      - name: Record portable generation evidence
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_RESULT: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, json, base64
+          from pathlib import Path
+          temp = Path(os.environ['RUNNER_TEMP'])
+          log = temp / 'smart-project.log'
+          text = 'Run ' + os.environ['GITHUB_RUN_ID'] + '\nResult: ' + os.environ['JOB_RESULT'] + '\n'
+          text += log.read_text(errors='replace')[-24000:] if log.exists() else 'No build log.'
+          (temp / 'smart-project-report.json').write_text(json.dumps({
+              'message': 'Record portable XcodeGen attempt [skip ci]', 'branch': os.environ['STAGING'],
+              'content': base64.b64encode(text.encode()).decode()}))
+          print(text)
+          PY
+          gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/.staging/smart-project-result.txt" \
+            --input "$RUNNER_TEMP/smart-project-report.json" --silent
