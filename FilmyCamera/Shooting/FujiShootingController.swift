@@ -47,6 +47,7 @@ final class FujiShootingController: ObservableObject {
     private weak var viewModel: CameraViewModel?
     private var frameHandlerID: UUID?
     private var task: Task<Void, Never>?
+    private var developmentTask: Task<Void, Error>?
     private var active = false
     private var multipleRequest: FujiSequenceRequest?
     private var multipleDeviceID: String?
@@ -452,6 +453,7 @@ final class FujiShootingController: ObservableObject {
 
     func cancel() {
         task?.cancel()
+        developmentTask?.cancel()
         camera?.cancelFujiCapture()
         clearMultiple()
         sampler.reset()
@@ -512,16 +514,27 @@ final class FujiShootingController: ObservableObject {
     }
 
     func saveDevelopment(_ record: FujiOriginalRecord, photoLibrary: any PhotoSaving) async throws {
-        guard !isBusy else { throw FujiShootingError.busy }
+        guard !settingsLocked else { throw FujiShootingError.busy }
         isBusy = true; status = "Developing original…"; errorMessage = nil
-        defer { finishActivity() }
-        try await library.updateOriginal(record)
-        let data = try await library.originalData(record)
-        let worker = FujiDevelopmentWorker()
-        let result = try await worker.develop(data: data, record: record)
-        try await export(result.data, recipe: record.recipe, capturedAt: record.capturedAt, label: "RAW development", photoLibrary: photoLibrary)
-        status = "Development saved. Original unchanged."
-        await reloadLibrary()
+        keepScreenAwake()
+        defer { developmentTask = nil; finishActivity() }
+        let operation = Task { @MainActor in
+            try Task.checkCancellation()
+            try await library.updateOriginal(record)
+            let data = try await library.originalData(record)
+            try Task.checkCancellation()
+            let developmentWorker = FujiDevelopmentWorker()
+            let result = try await developmentWorker.develop(data: data, record: record)
+            try Task.checkCancellation()
+            try await export(result.data, recipe: record.recipe, capturedAt: record.capturedAt,
+                             label: "RAW development", photoLibrary: photoLibrary)
+            status = "Development saved. Original unchanged."
+            await reloadLibrary()
+        }
+        developmentTask = operation
+        try await withTaskCancellationHandler {
+            try await operation.value
+        } onCancel: { operation.cancel() }
     }
 
     func originalURL(_ record: FujiOriginalRecord) async throws -> URL { try await library.originalURL(record) }
