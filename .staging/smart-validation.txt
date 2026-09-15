@@ -1,14 +1,16 @@
-Run 34926370410
+Run 34927678199
 Result: failure
 
 ## smart-commit.txt
-Not produced
+c280a28d24be4db1456ec7dbe6d6b43170da4571
 
 ## smart-integration.log
 From https://github.com/dheeraj5612/filmy-camera
  * branch            feat/scene-smart-recipes -> FETCH_HEAD
 Switched to a new branch 'smart-recipes-prepared'
 Integrated smart recipes with exact source anchors and registered test suites.
+Extended exact simulator-only test inventory while preserving all routing assertions.
+Added compound-label disambiguation and full-body portrait color protection with regressions.
 ⚙️  Generating plists...
 ⚙️  Generating project...
 ⚙️  Writing project...
@@ -16,7 +18,6 @@ Created project at /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera.xcod
 
 ## smart-python.log
 test_failed_phase_exit_code_and_summary_survive_cleanup_timeout (test_runner.SuiteRoutingTests.test_failed_phase_exit_code_and_summary_survive_cleanup_timeout) ... ok
-FAILED (failures=1)
 test_every_legacy_and_original_look_has_a_concrete_renderer_case (test_catalog_contract.CatalogContractTests.test_every_legacy_and_original_look_has_a_concrete_renderer_case) ... ok
 test_every_manifest_id_has_exactly_one_authored_definition (test_catalog_contract.CatalogContractTests.test_every_manifest_id_has_exactly_one_authored_definition) ... ok
 test_hardware_shutter_keeps_the_ios18_guard_and_older_os_fallback (test_catalog_contract.CatalogContractTests.test_hardware_shutter_keeps_the_ios18_guard_and_older_os_fallback) ... ok
@@ -88,25 +89,120 @@ test_photos_methods_run_once_in_isolated_invocations_and_aggregate (test_runner.
 test_photos_setup_failure_deletes_only_its_own_simulator (test_runner.SuiteRoutingTests.test_photos_setup_failure_deletes_only_its_own_simulator) ... ok
 test_routine_ci_includes_all_deterministic_tests_and_no_opt_ins (test_runner.SuiteRoutingTests.test_routine_ci_includes_all_deterministic_tests_and_no_opt_ins) ... ok
 test_simulator_and_device_lanes_reject_wrong_platform (test_runner.SuiteRoutingTests.test_simulator_and_device_lanes_reject_wrong_platform) ... ok
-test_simulator_only_ui_cases_run_in_e2e_and_ci_but_not_on_device (test_runner.SuiteRoutingTests.test_simulator_only_ui_cases_run_in_e2e_and_ci_but_not_on_device) ... FAIL
+test_simulator_only_ui_cases_run_in_e2e_and_ci_but_not_on_device (test_runner.SuiteRoutingTests.test_simulator_only_ui_cases_run_in_e2e_and_ci_but_not_on_device) ... ok
 test_test_failure_is_not_masked_by_owned_cleanup_timeout (test_runner.SuiteRoutingTests.test_test_failure_is_not_masked_by_owned_cleanup_timeout) ... ok
 test_unknown_and_stale_tests_fail_inventory (test_runner.SuiteRoutingTests.test_unknown_and_stale_tests_fail_inventory) ... ok
 
-======================================================================
-FAIL: test_simulator_only_ui_cases_run_in_e2e_and_ci_but_not_on_device (test_runner.SuiteRoutingTests.test_simulator_only_ui_cases_run_in_e2e_and_ci_but_not_on_device)
 ----------------------------------------------------------------------
-Traceback (most recent call last):
-  File "/Users/runner/work/filmy-camera/filmy-camera/scripts/testing/test_runner.py", line 44, in test_simulator_only_ui_cases_run_in_e2e_and_ci_but_not_on_device
-    self.assertEqual({test for test, group in tests.items() if group == "simulator-e2e"}, expected)
-    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-AssertionError: Items in the first set but not the second:
-'FilmyCameraUITests/SmartRecipeUITests/testSmartLooksIsDiscoverableAndUnavailableSceneHasNoApplyAction'
-'FilmyCameraUITests/SmartRecipeUITests/testDisablingSuggestionsPersistsAcrossRelaunch'
+Ran 74 tests in 0.203s
 
-----------------------------------------------------------------------
-Ran 74 tests in 0.283s
-
-FAILED (failures=1)
+OK
 
 ## smart-native.log
-Not produced
+Command SwiftCompile failed with a nonzero exit code
+Failed frontend command:
+Testing failed:
+	Command SwiftCompile failed with a nonzero exit code
+	Testing cancelled because the build failed.
+** TEST FAILED **
+The following build commands failed:
+    
+
+LinkAssetCatalog /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Resources/Assets.xcassets (in target 'FilmyCamera' from project 'FilmyCamera')
+    cd /Users/runner/work/filmy-camera/filmy-camera
+    builtin-linkAssetCatalog --thinned /Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/assetcatalog_output/thinned --thinned-dependencies /Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/assetcatalog_dependencies_thinned --thinned-info-plist-content /Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/assetcatalog_generated_info.plist_thinned --unthinned /Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/assetcatalog_output/unthinned --unthinned-dependencies /Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/assetcatalog_dependencies_unthinned --unthinned-info-plist-content /Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/assetcatalog_generated_info.plist_unthinned --output /Users/runner/work/_temp/smart-derived/Build/Products/Debug-iphonesimulator/FilmyCamera.app --plist-output /Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/assetcatalog_generated_info.plist
+note: Emplaced /Users/runner/work/_temp/smart-derived/Build/Products/Debug-iphonesimulator/FilmyCamera.app/AppIcon60x60@2x.png (in target 'FilmyCamera' from project 'FilmyCamera')
+note: Emplaced /Users/runner/work/_temp/smart-derived/Build/Products/Debug-iphonesimulator/FilmyCamera.app/AppIcon76x76@2x~ipad.png (in target 'FilmyCamera' from project 'FilmyCamera')
+note: Emplaced /Users/runner/work/_temp/smart-derived/Build/Products/Debug-iphonesimulator/FilmyCamera.app/Assets.car (in target 'FilmyCamera' from project 'FilmyCamera')
+
+SwiftDriverJobDiscovery normal arm64 Emitting module for FilmyCamera (in target 'FilmyCamera' from project 'FilmyCamera')
+
+SwiftDriver\ Compilation\ Requirements FilmyCamera normal arm64 com.apple.xcode.tools.swift.compiler (in target 'FilmyCamera' from project 'FilmyCamera')
+    cd /Users/runner/work/filmy-camera/filmy-camera
+    builtin-Swift-Compilation-Requirements -- /Applications/Xcode_16.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name FilmyCamera -Onone -enforce-exclusivity\=checked @/Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/Objects-normal/arm64/FilmyCamera.SwiftFileList -DDEBUG -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode_16.4.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator18.5.sdk -target arm64-apple-ios17.0-simulator -g -module-cache-path /Users/runner/work/_temp/smart-derived/ModuleCache.noindex -Xfrontend -serialize-debugging-options -enable-testing -index-store-path /Users/runner/work/_temp/smart-derived/Index.noindex/DataStore -swift-version 6 -I /Users/runner/work/_temp/smart-derived/Build/Products/Debug-iphonesimulator -F /Users/runner/work/_temp/smart-derived/Build/Products/Debug-iphonesimulator -emit-localized-strings -emit-localized-strings-path /Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/Objects-normal/arm64 -c -j3 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /Users/runner/work/_temp/smart-derived/SDKStatCaches.noindex/iphonesimulator18.5-22F76-96ae0914227b19deccb34b33ba7b5dea.sdkstatcache -output-file-map /Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/Objects-normal/arm64/FilmyCamera-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/Objects-normal/arm64/FilmyCamera.swiftmodule -validate-clang-modules-once -clang-build-session-file /Users/runner/work/_temp/smart-derived/ModuleCache.noindex/Session.modulevalidation -Xcc -I/Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/Objects-normal/arm64/FilmyCamera_const_extract_protocols.json -Xcc -iquote -Xcc /Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/FilmyCamera-generated-files.hmap -Xcc -I/Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/FilmyCamera-own-target-headers.hmap -Xcc -I/Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/FilmyCamera-all-target-headers.hmap -Xcc -iquote -Xcc /Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/FilmyCamera-project-headers.hmap -Xcc -I/Users/runner/work/_temp/smart-derived/Build/Products/Debug-iphonesimulator/include -Xcc -I/Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/DerivedSources-normal/arm64 -Xcc -I/Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/DerivedSources/arm64 -Xcc -I/Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/Objects-normal/arm64/FilmyCamera-Swift.h -working-directory /Users/runner/work/filmy-camera/filmy-camera -experimental-emit-module-separately -disable-cmo
+
+ProcessInfoPlistFile /Users/runner/work/_temp/smart-derived/Build/Products/Debug-iphonesimulator/FilmyCamera.app/Info.plist /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Info.plist (in target 'FilmyCamera' from project 'FilmyCamera')
+    cd /Users/runner/work/filmy-camera/filmy-camera
+    builtin-infoPlistUtility /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Info.plist -producttype com.apple.product-type.application -genpkginfo /Users/runner/work/_temp/smart-derived/Build/Products/Debug-iphonesimulator/FilmyCamera.app/PkgInfo -expandbuildsettings -format binary -platform iphonesimulator -additionalcontentfile /Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/assetcatalog_generated_info.plist -o /Users/runner/work/_temp/smart-derived/Build/Products/Debug-iphonesimulator/FilmyCamera.app/Info.plist
+
+SwiftMergeGeneratedHeaders /Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/DerivedSources/FilmyCamera-Swift.h /Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/Objects-normal/arm64/FilmyCamera-Swift.h (in target 'FilmyCamera' from project 'FilmyCamera')
+    cd /Users/runner/work/filmy-camera/filmy-camera
+    builtin-swiftHeaderTool -arch arm64 /Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/Objects-normal/arm64/FilmyCamera-Swift.h -o /Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/DerivedSources/FilmyCamera-Swift.h
+
+Copy /Users/runner/work/_temp/smart-derived/Build/Products/Debug-iphonesimulator/FilmyCamera.swiftmodule/arm64-apple-ios-simulator.swiftmodule /Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/Objects-normal/arm64/FilmyCamera.swiftmodule (in target 'FilmyCamera' from project 'FilmyCamera')
+    cd /Users/runner/work/filmy-camera/filmy-camera
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/Objects-normal/arm64/FilmyCamera.swiftmodule /Users/runner/work/_temp/smart-derived/Build/Products/Debug-iphonesimulator/FilmyCamera.swiftmodule/arm64-apple-ios-simulator.swiftmodule
+
+Copy /Users/runner/work/_temp/smart-derived/Build/Products/Debug-iphonesimulator/FilmyCamera.swiftmodule/arm64-apple-ios-simulator.swiftdoc /Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/Objects-normal/arm64/FilmyCamera.swiftdoc (in target 'FilmyCamera' from project 'FilmyCamera')
+    cd /Users/runner/work/filmy-camera/filmy-camera
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/Objects-normal/arm64/FilmyCamera.swiftdoc /Users/runner/work/_temp/smart-derived/Build/Products/Debug-iphonesimulator/FilmyCamera.swiftmodule/arm64-apple-ios-simulator.swiftdoc
+
+Copy /Users/runner/work/_temp/smart-derived/Build/Products/Debug-iphonesimulator/FilmyCamera.swiftmodule/arm64-apple-ios-simulator.abi.json /Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/Objects-normal/arm64/FilmyCamera.abi.json (in target 'FilmyCamera' from project 'FilmyCamera')
+    cd /Users/runner/work/filmy-camera/filmy-camera
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/Objects-normal/arm64/FilmyCamera.abi.json /Users/runner/work/_temp/smart-derived/Build/Products/Debug-iphonesimulator/FilmyCamera.swiftmodule/arm64-apple-ios-simulator.abi.json
+
+Copy /Users/runner/work/_temp/smart-derived/Build/Products/Debug-iphonesimulator/FilmyCamera.swiftmodule/Project/arm64-apple-ios-simulator.swiftsourceinfo /Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/Objects-normal/arm64/FilmyCamera.swiftsourceinfo (in target 'FilmyCamera' from project 'FilmyCamera')
+    cd /Users/runner/work/filmy-camera/filmy-camera
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/Objects-normal/arm64/FilmyCamera.swiftsourceinfo /Users/runner/work/_temp/smart-derived/Build/Products/Debug-iphonesimulator/FilmyCamera.swiftmodule/Project/arm64-apple-ios-simulator.swiftsourceinfo
+
+SwiftCompile normal arm64 Compiling\ CameraFrameLayout.swift,\ CameraManualControls.swift,\ CameraPreviewGesturePolicy.swift,\ CameraScreen.swift,\ CameraService.swift,\ CameraViewModel.swift,\ CaptureReviewView.swift,\ Components.swift,\ CompositionAssistStore.swift,\ ContentView.swift,\ FilmRecipe.swift /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Services/CameraFrameLayout.swift /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Models/CameraManualControls.swift /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Models/CameraPreviewGesturePolicy.swift /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Views/CameraScreen.swift /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Services/CameraService.swift /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/ViewModels/CameraViewModel.swift /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Views/CaptureReviewView.swift /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Views/Components.swift /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Services/CompositionAssistStore.swift /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/ContentView.swift /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Models/FilmRecipe.swift (in target 'FilmyCamera' from project 'FilmyCamera')
+
+SwiftCompile normal arm64 /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Services/CameraFrameLayout.swift (in target 'FilmyCamera' from project 'FilmyCamera')
+    cd /Users/runner/work/filmy-camera/filmy-camera
+    
+
+SwiftCompile normal arm64 /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Models/CameraManualControls.swift (in target 'FilmyCamera' from project 'FilmyCamera')
+    cd /Users/runner/work/filmy-camera/filmy-camera
+    
+
+SwiftCompile normal arm64 /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Models/CameraPreviewGesturePolicy.swift (in target 'FilmyCamera' from project 'FilmyCamera')
+    cd /Users/runner/work/filmy-camera/filmy-camera
+    
+
+SwiftCompile normal arm64 /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Views/CameraScreen.swift (in target 'FilmyCamera' from project 'FilmyCamera')
+    cd /Users/runner/work/filmy-camera/filmy-camera
+    
+
+SwiftCompile normal arm64 /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Services/CameraService.swift (in target 'FilmyCamera' from project 'FilmyCamera')
+    cd /Users/runner/work/filmy-camera/filmy-camera
+    
+
+SwiftCompile normal arm64 /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/ViewModels/CameraViewModel.swift (in target 'FilmyCamera' from project 'FilmyCamera')
+    cd /Users/runner/work/filmy-camera/filmy-camera
+    
+
+SwiftCompile normal arm64 /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Views/CaptureReviewView.swift (in target 'FilmyCamera' from project 'FilmyCamera')
+    cd /Users/runner/work/filmy-camera/filmy-camera
+    
+
+SwiftCompile normal arm64 /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Views/Components.swift (in target 'FilmyCamera' from project 'FilmyCamera')
+    cd /Users/runner/work/filmy-camera/filmy-camera
+    
+
+SwiftCompile normal arm64 /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Services/CompositionAssistStore.swift (in target 'FilmyCamera' from project 'FilmyCamera')
+    cd /Users/runner/work/filmy-camera/filmy-camera
+    
+
+SwiftCompile normal arm64 /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/ContentView.swift (in target 'FilmyCamera' from project 'FilmyCamera')
+    cd /Users/runner/work/filmy-camera/filmy-camera
+    
+
+SwiftCompile normal arm64 /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Models/FilmRecipe.swift (in target 'FilmyCamera' from project 'FilmyCamera')
+    cd /Users/runner/work/filmy-camera/filmy-camera
+    
+
+
+Test session results, code coverage, and logs:
+	/Users/runner/work/_temp/SmartRecipes.xcresult
+
+Testing failed:
+	Command SwiftCompile failed with a nonzero exit code
+	Testing cancelled because the build failed.
+
+** TEST FAILED **
+
+
+The following build commands failed:
+	SwiftCompile normal arm64 Compiling\ PhotoFinish.swift,\ PhotoLibraryService.swift,\ PhotoOutputEncoder.swift,\ PhotoPrintCompositor.swift,\ RecipePickerView.swift,\ ReviewComparisonState.swift,\ SettingsView.swift,\ SmartRecipeEngine.swift,\ SmartRecipeStore.swift,\ SmartRecipeViews.swift,\ GeneratedAssetSymbols.swift /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Models/PhotoFinish.swift /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Services/PhotoLibraryService.swift /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Services/PhotoOutputEncoder.swift /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Services/PhotoPrintCompositor.swift /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Views/RecipePickerView.swift /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Models/ReviewComparisonState.swift /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Views/SettingsView.swift /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Models/SmartRecipeEngine.swift /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Services/SmartRecipeStore.swift /Users/runner/work/filmy-camera/filmy-camera/FilmyCamera/Views/SmartRecipeViews.swift /Users/runner/work/_temp/smart-derived/Build/Intermediates.noindex/FilmyCamera.build/Debug-iphonesimulator/FilmyCamera.build/DerivedSources/GeneratedAssetSymbols.swift (in target 'FilmyCamera' from project 'FilmyCamera')
+	Testing project FilmyCamera with scheme FilmyCamera
+(2 failures)
