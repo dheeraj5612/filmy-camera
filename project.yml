@@ -107,6 +107,7 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
         SWIFT_EMIT_LOC_STRINGS: YES
         OTHER_LDFLAGS: ["$(inherited)", "-ObjC"]
+        SWIFT_OBJC_BRIDGING_HEADER: FilmyCamera/FilmyCamera-Bridging-Header.h
     info:
       path: FilmyCamera/Info.plist
       properties:

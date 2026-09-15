@@ -87,3 +87,10 @@ and ranks the actual available recipes, including edited controls. It uses bound
 background work, pauses for capture and heat, and never uploads image data. These are aesthetic
 starting points, not a guarantee of the best filter. See [the implementation and device-validation
 notes](docs/smart-recipes.md).
+
+## Pro capture and persistent originals
+
+Capability-gated resolution, RAW/ProRAW, HEIF/P3, HDR highlight preservation,
+silent original Live Photos, exposure priority, focus aids and a persistent
+non-destructive photo library are documented in
+[Pro camera features and limitations](docs/PRO_CAMERA_FEATURES.md).

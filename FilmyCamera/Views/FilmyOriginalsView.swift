@@ -195,7 +195,7 @@ struct FilmyPhotoEditorView: View {
 
     private func load() async {
         do {
-            let value = try await FilmyPhotoStore.shared.load(documentID)
+            let value = try await FilmyPhotoStore.shared.loadDocument(documentID)
             document = value
             recipe = value.currentRevision?.recipe
             finish = value.currentRevision?.finish ?? .photo
@@ -273,7 +273,7 @@ struct FilmyPhotoEditorView: View {
         defer { busy = false }
         do {
             let identifier = try await FilmyPhotosExporter.save(documentID, asNewCopy: asNewCopy)
-            let latest = try await FilmyPhotoStore.shared.load(documentID)
+            let latest = try await FilmyPhotoStore.shared.loadDocument(documentID)
             let thumbnail = try await FilmyPhotoStore.shared.thumbnailData(documentID).flatMap { UIImage(data: $0) }
             if let revision = latest.currentRevision {
                 await photoLibrary.registerDocumentExport(identifier, recipe: revision.recipe,

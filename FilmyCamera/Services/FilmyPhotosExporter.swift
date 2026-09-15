@@ -38,7 +38,7 @@ enum FilmyPhotosExporter {
     static func save(_ id: UUID, asNewCopy: Bool = false, store: FilmyPhotoStore = .shared) async throws -> String {
         guard exporting.insert(id).inserted else { throw ExportError.busy }
         defer { exporting.remove(id) }
-        let document = try await store.load(id)
+        let document = try await store.loadDocument(id)
         guard let revision = document.currentRevision else { throw ExportError.writeFailed }
         guard !(document.hasLivePhoto && (revision.output.dynamicRange == .hdr || revision.finish != .photo)) else {
             throw ExportError.unsupportedOutput

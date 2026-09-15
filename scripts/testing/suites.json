@@ -68,7 +68,10 @@
     "FilmyCameraTests/MembershipStoreTests": "unit",
     "FilmyCameraTests/MembershipStoreKitTests": "integration",
     "FilmyCameraUITests/MonetizationUITests": "e2e",
-    "FilmyCameraTests/FujiShootingTests": "integration"
+    "FilmyCameraTests/FujiShootingTests": "integration",
+    "FilmyCameraTests/ProCapturePolicyTests": "unit",
+    "FilmyCameraTests/FilmyPhotoStoreTests": "integration",
+    "FilmyCameraTests/ProPhotoEncoderTests": "integration"
   },
   "overrides": {
     "FilmyCameraUITests/FilmyCameraUITests/testSimulatorFallbackExposesReadableStateWithoutPreviewAction": "simulator-e2e",

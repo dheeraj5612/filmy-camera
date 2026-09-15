@@ -189,7 +189,7 @@ enum PhotoOutputEncoder {
         return properties
     }
 
-    private static func captureExif(from sourceData: Data) -> [String: Any] {
+    static func captureExif(from sourceData: Data) -> [String: Any] {
         guard let properties = sourceProperties(from: sourceData),
               let sourceExif = properties[kCGImagePropertyExifDictionary as String] as? [String: Any] else {
             return [:]
@@ -268,7 +268,7 @@ enum PhotoOutputEncoder {
         return value
     }
 
-    private static func provenanceJSON(
+    static func provenanceJSON(
         for recipe: FilmRecipe,
         appVersion: String,
         appBuild: String

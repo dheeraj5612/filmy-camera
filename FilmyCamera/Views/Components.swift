@@ -125,7 +125,7 @@ enum FilmyTheme {
     static let viewfinderBand = Color.black
     // A restrained radius keeps the live frame camera-like while softening
     // the hard rectangular edge on the main camera screen.
-    static let viewfinderCornerRadius: CGFloat = 10
+    static let viewfinderCornerRadius: CGFloat = 14
 
     static let cornerRadius: CGFloat = 18
     static let controlRadius: CGFloat = 12
