@@ -1,5 +1,16 @@
 import SwiftUI
 
+extension LookLibraryView {
+    /// Camera callers can opt into membership management without changing the
+    /// existing selection/close initializer contract used by capture review.
+    init(recipes: [FilmRecipe], selectedRecipeID: String,
+         onSelect: @escaping (FilmRecipe) -> Void, onClose: @escaping () -> Void,
+         libraryPreferences: Binding<RecipeLibraryPreferences>) {
+        self.init(recipes: recipes, selectedRecipeID: selectedRecipeID,
+                  libraryPreferences: libraryPreferences, onSelect: onSelect, onClose: onClose)
+    }
+}
+
 /// Pack operations are explicit bulk changes; recipe toggles are exceptions.
 /// This sheet manages menu membership, never edits or replaces saved recipes.
 struct RecipeLibraryManagerView: View {
