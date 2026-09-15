@@ -1,0 +1,26 @@
+diff --git a/FilmyCamera/Services/FilmyPhotosExporter.swift b/FilmyCamera/Services/FilmyPhotosExporter.swift
+index de5e0be..e954313 100644
+--- a/FilmyCamera/Services/FilmyPhotosExporter.swift
++++ b/FilmyCamera/Services/FilmyPhotosExporter.swift
+@@ -158,7 +158,7 @@ enum FilmyPhotosExporter {
+                           let rendered = ProPhotoOutput.context.createCGImage(
+                             filtered, from: filtered.extent, format: .RGBA8, colorSpace: colorSpace
+                           ) else {
+-                        error.pointee = ExportError.writeFailed as NSError
++                        error?.pointee = ExportError.writeFailed as NSError
+                         return nil
+                     }
+                     return CIImage(cgImage: rendered)
+diff --git a/FilmyCamera/Services/SubjectFocusTracker.swift b/FilmyCamera/Services/SubjectFocusTracker.swift
+index 675fbe1..0bfc646 100644
+--- a/FilmyCamera/Services/SubjectFocusTracker.swift
++++ b/FilmyCamera/Services/SubjectFocusTracker.swift
+@@ -53,7 +53,7 @@ final class SubjectFocusTracker {
+             }
+             guard let request else { return nil }
+             try sequence.perform([request], on: image)
+-            guard let observation = request.results?.first,
++            guard let observation = request.results?.first as? VNDetectedObjectObservation,
+                   Self.isUsable(rectangle: observation.boundingBox, confidence: observation.confidence) else {
+                 lost = true
+                 self.request = nil
