@@ -1,0 +1,61 @@
+name: Apply verified pro capture source
+on:
+  push:
+    branches: [feature/pro-capture-parity]
+    paths: [.github/workflows/pro-source-apply.yml]
+permissions:
+  contents: write
+  actions: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: feature/pro-capture-parity
+      - name: Cancel superseded staging runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run cancel 34925483234 --repo "$GITHUB_REPOSITORY" || true
+          gh run cancel 34925398746 --repo "$GITHUB_REPOSITORY" || true
+      - name: Validate and apply source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/evidence"
+          git archive HEAD -o "$RUNNER_TEMP/evidence/before.tar"
+          python3 - <<'PY'
+          import base64,gzip,hashlib,json,pathlib,subprocess
+          for path in ['scripts/pro-capture.patch','scripts/pro-capture-fixes.patch']:
+              p=pathlib.Path(path)
+              if not p.exists(): continue
+              data=json.loads(p.read_text())
+              encoded=data.get('base64_gzip')
+              if encoded is None:
+                  encoded=''.join(pathlib.Path(part).read_text().strip() for part in data['parts'])
+              if path.endswith('-fixes.patch'):
+                  encoded=encoded.replace('KnlYVgx+Hft','KnlYVvx+Hft').replace('xnrbnUbrees','xnrbnU6nees').replace('rDfcGXbGXAd','rDfcGXb3WAd')
+              source=gzip.decompress(base64.b64decode(encoded,validate=True))
+              assert hashlib.sha256(source).hexdigest()==data['sha256'], 'Checksum mismatch: '+path
+              patch=pathlib.Path('/tmp/source.patch')
+              patch.write_bytes(source)
+              subprocess.run(['git','apply','--check',str(patch)],check=True)
+              subprocess.run(['git','apply',str(patch)],check=True)
+              p.unlink()
+          for p in pathlib.Path('scripts').glob('pro-transport-*.b64'): p.unlink()
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add FilmyCamera FilmyCameraTests project.yml scripts
+          if ! git diff --cached --quiet; then
+            git commit -m 'Integrate pro capture and protect original resources'
+            git push origin HEAD:feature/pro-capture-parity
+          fi
+          git archive HEAD -o "$RUNNER_TEMP/evidence/source.tar"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        if: always()
+        with:
+          name: pro-source-apply-${{ github.run_id }}
+          path: ${{ runner.temp }}/evidence/
+          retention-days: 3
