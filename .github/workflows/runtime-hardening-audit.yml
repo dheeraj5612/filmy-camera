@@ -1,0 +1,39 @@
+name: Runtime hardening audit
+
+on:
+  push:
+    branches: [perf/runtime-hardening-20260914]
+    paths: [.github/workflows/runtime-hardening-audit.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  source-audit:
+    if: github.repository == 'dheeraj5612/filmy-camera'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Package tracked source for offline audit
+        shell: python
+        run: |
+          import pathlib
+          import subprocess
+          import zipfile
+          extensions = {'.swift', '.py', '.sh', '.json', '.yml', '.yaml', '.plist', '.pbxproj', '.xcscheme', '.md', '.txt', '.xcprivacy', '.xcworkspacedata', '.xcconfig', '.storekit', '.html', '.css', '.js'}
+          paths = subprocess.check_output(['git', 'ls-files', '-z']).decode().split('\0')
+          with zipfile.ZipFile('runtime-hardening-source.zip', 'w', zipfile.ZIP_DEFLATED) as archive:
+              for name in paths:
+                  path = pathlib.Path(name)
+                  if path.is_file() and (path.suffix in extensions or path.name in {'.gitignore', 'Makefile', 'Package.resolved'}):
+                      archive.write(path, name)
+              archive.writestr('AUDIT_SOURCE_SHA.txt', subprocess.check_output(['git', 'rev-parse', 'HEAD']))
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: runtime-hardening-source
+          path: runtime-hardening-source.zip
+          if-no-files-found: error
+          retention-days: 1
