@@ -4,6 +4,10 @@
 
 - [ ] For camera/control changes, verify the current revision in portrait on an iPhone simulator or physical iPhone (iPhone compatibility mode on iPad is an acceptable fallback), including large text. Retain screenshots and test results before merge/release. Native iPad coverage is additional. See [primary portrait iPhone acceptance](testing.md#primary-portrait-iphone-acceptance).
 
+## Monetized candidate
+
+Do not reuse the historical free-release approvals below for this branch. Complete [monetization setup](monetization.md), [new store/privacy disclosures](app-store/monetized-release.md), real-provider tests and a new version/build review before release. Production billing and ads are disabled until owner configuration and legal approval.
+
 The current build 15 candidate carries the consolidated camera and gallery corrections while preserving the refreshed opaque app icon. Its source changes and generated icon provenance are documented in [the icon record](app-store/icon/README.md). Build 12 has already uploaded and finished processing; its distribution binary retains the earlier icon.
 
 ## Build 15 release gates

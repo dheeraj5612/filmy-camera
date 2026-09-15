@@ -64,6 +64,10 @@
     "FilmyCameraUITests/PhysicalReviewFlowTests": "device",
     "FilmyCameraTests/ReviewComparisonStateTests": "unit",
     "FilmyCameraUITests/SignalFrameUITests": "e2e",
+    "FilmyCameraTests/MembershipPolicyTests": "unit",
+    "FilmyCameraTests/MembershipStoreTests": "unit",
+    "FilmyCameraTests/MembershipStoreKitTests": "integration",
+    "FilmyCameraUITests/MonetizationUITests": "e2e",
     "FilmyCameraTests/FujiShootingTests": "integration"
   },
   "overrides": {

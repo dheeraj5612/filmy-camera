@@ -27,6 +27,7 @@ struct SettingsView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 26) {
                         settingsHeader
+                        AccountSettingsSection()
 
                         captureSettings
                         permissions

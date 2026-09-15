@@ -442,6 +442,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
     private let frameHandlersLock = NSLock()
 
+    private var premiumControlsEnabled = MonetizationConfiguration.isAutomatedTest
+
     private let sessionQueue = DispatchQueue(
         label: "com.dheeraj.filmycamera.camera-session",
         qos: .userInitiated
@@ -1198,6 +1200,15 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// Locks sensor ISO and shutter duration as one exposure mode. Both values
     /// are sanitized against the active format and the applied hardware
     /// readback is published from AVFoundation's completion callback.
+    /// Entitlement changes and manual operations are serialized with capture.
+    public func setPremiumControlsEnabled(_ enabled: Bool) {
+        sessionQueue.async { [weak self] in
+            guard let self, self.premiumControlsEnabled != enabled else { return }
+            self.premiumControlsEnabled = enabled
+            if !enabled { self.resetManualControlsToAutoOnQueue() }
+        }
+    }
+
     public func setManualExposure(iso: Float, durationSeconds: Double) {
         sessionQueue.async { [weak self] in
             guard self?.fujiAutoISOProfile == nil else {
@@ -1206,6 +1217,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             }
             guard self?.fujiLease == nil else { return }
             self?.disableSceneAutoOnQueue()
+            guard self?.premiumControlsEnabled == true else { return }
             self?.setManualExposureOnQueue(iso: iso, durationSeconds: durationSeconds)
         }
     }
@@ -1231,6 +1243,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 return
             }
             guard self?.fujiLease == nil else { return }
+            guard self?.premiumControlsEnabled == true else { return }
             guard let self, let device = self.activeDevice() else { return }
             let iso = device.iso
             let duration = CMTimeGetSeconds(device.exposureDuration)
@@ -1243,6 +1256,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         sessionQueue.async { [weak self] in
             guard self?.fujiLease == nil else { return }
             self?.disableSceneAutoOnQueue()
+            guard self?.premiumControlsEnabled == true else { return }
             self?.setManualWhiteBalanceOnQueue(kelvin: kelvin, tint: tint)
         }
     }
@@ -1259,6 +1273,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     public func lockCurrentWhiteBalance() {
         sessionQueue.async { [weak self] in
             guard self?.fujiLease == nil else { return }
+            guard self?.premiumControlsEnabled == true else { return }
             guard let self, let device = self.activeDevice() else { return }
             let gains = device.deviceWhiteBalanceGains
             guard let current = Self.whiteBalanceTemperatureAndTint(for: gains, device: device) else {
@@ -1279,6 +1294,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             guard self?.fujiLease == nil else { return }
             self?.disableSceneAutoOnQueue()
             self?.setSubjectTrackingOnQueue(false)
+            guard self?.premiumControlsEnabled == true else { return }
             self?.setManualFocusOnQueue(lensPosition: lensPosition)
         }
     }
@@ -1295,6 +1311,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     public func lockCurrentFocus() {
         sessionQueue.async { [weak self] in
             guard self?.fujiLease == nil else { return }
+            guard self?.premiumControlsEnabled == true else { return }
             guard let self, let device = self.activeDevice() else { return }
             let position = device.lensPosition
             self.disableSceneAutoOnQueue()
@@ -1324,6 +1341,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             guard self?.fujiPrimeLensID == nil else { return }
             guard self?.fujiLease == nil else { return }
             self?.disableSceneAutoOnQueue()
+            guard self?.premiumControlsEnabled == true else { return }
             self?.setManualControlLensOnQueue(id: id)
         }
     }

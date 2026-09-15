@@ -278,6 +278,12 @@ final class CameraViewModel: ObservableObject {
     @Published var selectedRecipeID: String {
         didSet {
             guard selectedRecipeID != oldValue else { return }
+            guard MembershipStore.shared.allowsRecipe(selectedRecipeID) else {
+                let requestedID = selectedRecipeID
+                selectedRecipeID = oldValue
+                _ = MembershipStore.shared.requireRecipe(requestedID)
+                return
+            }
             guard Self.validRecipeIDs.contains(selectedRecipeID) else {
                 selectedRecipeID = Self.fallbackRecipeID
                 defaults.set(Self.fallbackRecipeID, forKey: Self.selectedRecipeIDKey)
@@ -470,8 +476,12 @@ final class CameraViewModel: ObservableObject {
         return (recoveredRecipes, true)
     }
 
+    var effectiveSelectedRecipeID: String {
+        MembershipStore.shared.allowsRecipe(selectedRecipeID) ? selectedRecipeID : Self.defaultRecipeID
+    }
+
     var selectedRecipe: FilmRecipe {
-        recipe(for: selectedRecipeID)
+        recipe(for: effectiveSelectedRecipeID)
     }
 
     /// The recipe rail, detail sheet, live preview, and exports must all use
@@ -495,13 +505,15 @@ final class CameraViewModel: ObservableObject {
 
     func recipe(for id: String) -> FilmRecipe {
         guard Self.validRecipeIDs.contains(id) else { return Self.defaultRecipe }
+        // Preserve paid customizations on disk, but never apply them while free.
+        if !MembershipStore.shared.isPremium { return Self.builtInRecipesByID[id] ?? Self.defaultRecipe }
         return recipeOverrides[id]
             ?? Self.builtInRecipesByID[id]
             ?? Self.defaultRecipe
     }
 
     func select(recipe: FilmRecipe) {
-        guard Self.validRecipeIDs.contains(recipe.id) else { return }
+        guard Self.validRecipeIDs.contains(recipe.id), MembershipStore.shared.requireRecipe(recipe.id) else { return }
         selectedRecipeID = recipe.id
     }
 
@@ -511,6 +523,7 @@ final class CameraViewModel: ObservableObject {
 
     func update(recipe: FilmRecipe) {
         guard Self.validRecipeIDs.contains(recipe.id) else { return }
+        guard MembershipStore.shared.require(.recipeEditing) else { return }
         guard let parent = FilmRecipe.builtIns.first(where: {
             $0.id == recipe.id
         }) else {
@@ -569,6 +582,10 @@ final class CameraViewModel: ObservableObject {
             }
             return
         }
+        let membership = MembershipStore.shared
+        guard let permit = membership.reserveCapture() else { return }
+        // This update is ordered before capture on the camera's session queue.
+        camera.setPremiumControlsEnabled(membership.isPremium)
         isCapturing = true
         toastTask?.cancel()
         toastMessage = nil
@@ -578,8 +595,11 @@ final class CameraViewModel: ObservableObject {
         // in the viewfinder. Async rendering never reads mutable Auto state.
         camera.setSceneAutoCapturePaused(true)
         let recipe = camera.sceneAuto.development.applying(to: selectedRecipe)
-        let finish = PhotoFinish(rawValue: defaults.string(forKey: "captureFinish") ?? "") ?? .photo
+        let finish = membership.isPremium
+            ? (PhotoFinish(rawValue: defaults.string(forKey: "captureFinish") ?? "") ?? .photo)
+            : .photo
         if camera.proCaptureSettings.livePhoto && finish != .photo {
+            membership.finishCapture(permit, succeeded: false)
             isCapturing = false
             showToast("Live Photos require Photo finish. Turn off Instant Print before capturing.", style: .error)
             return
@@ -610,7 +630,11 @@ final class CameraViewModel: ObservableObject {
 
         camera.capturePhoto { [weak self] capturedPhoto in
             Task { @MainActor [weak self] in
-                defer { camera.setSceneAutoCapturePaused(false) }
+                var succeeded = false
+                defer {
+                    camera.setSceneAutoCapturePaused(false)
+                    membership.finishCapture(permit, succeeded: succeeded)
+                }
                 guard let self else { return }
 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains("-ui-testing") { self.captureTimingStatus = "capture-complete:\(captureStartedAt.duration(to: .now).components.seconds)s" }
@@ -629,7 +653,7 @@ final class CameraViewModel: ObservableObject {
                     return
                 }
 
-                await self.developCapture(
+                succeeded = await self.developCapture(
                     CapturedWork(photo: capturedPhoto, recipe: recipe, finish: finish,
                                  viewport: viewportSize, drawable: previewDrawableSize, grainSeed: grainSeed),
                     captureStartedAt: captureStartedAt,
@@ -644,7 +668,7 @@ final class CameraViewModel: ObservableObject {
         captureStartedAt: ContinuousClock.Instant,
         camera: CameraService,
         photoLibrary: any PhotoSaving
-    ) async {
+    ) async -> Bool {
         let recipe = work.recipe
         let finish = work.finish
         let grainSeed = work.grainSeed
@@ -666,7 +690,7 @@ final class CameraViewModel: ObservableObject {
             pendingOriginalRetention = work
             isCapturing = false
             showToast("Original not saved. Free storage, then tap the shutter to retry. Keep Filmy open.", style: .error)
-            return
+            return false
         }
         let rendered = await Task.detached(priority: .userInitiated) {
             autoreleasepool {
@@ -681,7 +705,7 @@ final class CameraViewModel: ObservableObject {
         guard var renderedPhoto = rendered, let firstRevision = document.currentRevision else {
             isCapturing = false
             showToast("Original retained in Filmy originals. Open it there to retry developing this look.", style: .error)
-            return
+            return false
         }
         do {
             try await FilmyPhotoStore.shared.addRevision(
@@ -691,7 +715,7 @@ final class CameraViewModel: ObservableObject {
         } catch {
             isCapturing = false
             showToast("Original retained. Filmy could not save the developed version; retry from Filmy originals.", style: .error)
-            return
+            return false
         }
         renderedPhoto.documentID = document.id
 #if DEBUG
@@ -733,6 +757,9 @@ final class CameraViewModel: ObservableObject {
 #endif
         saveCapturedPhoto(renderedPhoto, recipe: recipe, finish: finish, photoLibrary: photoLibrary)
         isCapturing = false
+        // A rendered photo counts once even if Photos saving must be retried.
+        // Retry/discard never recaptures or charges again.
+        return true
     }
 
     /// Shares the tested, generation-guarded save transaction with imports,
@@ -761,6 +788,7 @@ final class CameraViewModel: ObservableObject {
 
     func importPhoto(data: Data, camera: CameraService? = nil) async {
         guard !isCapturing, !isImporting, !isSaving, reviewImage == nil else { return }
+        guard MembershipStore.shared.require(.photoImport) else { return }
 
         isImporting = true
         saveErrorMessage = nil
@@ -834,6 +862,9 @@ final class CameraViewModel: ObservableObject {
     }
 
     private func applyReview(recipe: FilmRecipe, finish: PhotoFinish) {
+        guard MembershipStore.shared.require(.photoImport),
+              MembershipStore.shared.requireRecipe(recipe.id) else { return }
+        if finish != .photo && !MembershipStore.shared.require(.photoFinishes) { return }
         guard reviewImage != nil,
               let source = reviewRenderSource,
               !isSaving,
