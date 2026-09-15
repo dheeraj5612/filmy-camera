@@ -1,105 +1,105 @@
 name: Pro capture workbench
-
 on:
   push:
     branches: [feature/pro-capture-parity]
-    paths:
-      - .github/workflows/pro-capture-workbench.yml
-      - scripts/pro-capture.patch
-
+    paths: [.github/workflows/pro-capture-workbench.yml, scripts/pro-capture.patch]
 permissions:
   contents: write
-
+concurrency:
+  group: pro-capture-workbench
+  cancel-in-progress: false
 jobs:
-  workbench:
+  apply:
     runs-on: macos-15
-    timeout-minutes: 40
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           ref: feature/pro-capture-parity
-          fetch-depth: 1
-      - name: Apply verified source patch when present
+      - name: Apply source patch and regenerate project
+        id: source
         shell: bash
         run: |
           set -euo pipefail
           if [[ -f scripts/pro-capture.patch ]]; then
             python3 - <<'PY'
-          import base64, gzip, hashlib, json, pathlib
-          source = pathlib.Path('scripts/pro-capture.patch').read_bytes()
+          import base64,gzip,hashlib,json,pathlib
+          manifest=pathlib.Path('scripts/pro-capture.patch')
+          source=manifest.read_bytes()
           if source.startswith(b'{'):
-              transport = json.loads(source)
-              source = gzip.decompress(base64.b64decode(transport['base64_gzip'], validate=True))
-              assert hashlib.sha256(source).hexdigest() == transport['sha256']
+              data=json.loads(source)
+              encoded=data.get('base64_gzip')
+              if encoded is None:
+                  paths=data['parts']
+                  assert all(p.startswith('scripts/pro-transport-') and p.endswith('.b64') for p in paths)
+                  encoded=''.join(pathlib.Path(p).read_text().strip() for p in paths)
+              source=gzip.decompress(base64.b64decode(encoded,validate=True))
+              assert hashlib.sha256(source).hexdigest()==data['sha256']
           pathlib.Path('/tmp/pro-capture-source.patch').write_bytes(source)
           PY
             git apply --check /tmp/pro-capture-source.patch
             git apply /tmp/pro-capture-source.patch
             rm scripts/pro-capture.patch
+            rm -f scripts/pro-transport-*.b64
             brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
             xcodegen generate
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
             git add FilmyCamera FilmyCameraTests FilmyCameraUITests FilmyCamera.xcodeproj project.yml docs scripts
-            git commit -m 'Implement capability-aware pro capture, persistent originals and focus tools'
+            git commit -m 'Integrate pro capture resources, controls and nondestructive development'
             git push origin HEAD:feature/pro-capture-parity
           fi
-      - name: Package source and SDK evidence
-        shell: bash
-        run: |
-          set -euo pipefail
-          evidence="${RUNNER_TEMP}/pro-capture-source"
-          mkdir -p "${evidence}/sdk"
-          git archive HEAD -o "${evidence}/source.tar"
-          git rev-parse HEAD > "${evidence}/source-sha.txt"
-          ls /Applications > "${evidence}/sdk/applications.txt"
-          for app in /Applications/Xcode_27*.app /Applications/Xcode_26.3.app; do
-            [[ -d "$app" ]] || continue
-            label=$(basename "$app")
-            sdk=$(DEVELOPER_DIR="$app/Contents/Developer" xcrun --sdk iphoneos --show-sdk-path)
-            mkdir -p "${evidence}/sdk/${label}"
-            cp "$sdk/System/Library/Frameworks/AVFoundation.framework/Headers/AVCaptureDevice.h" "${evidence}/sdk/${label}/" || true
-            cp "$sdk/System/Library/Frameworks/AVFoundation.framework/Headers/AVCapturePhotoOutput.h" "${evidence}/sdk/${label}/" || true
-            cp "$sdk/System/Library/Frameworks/CoreImage.framework/Headers/CIContext.h" "${evidence}/sdk/${label}/" || true
-          done
-          python3 - "${evidence}/sdk" <<'PY'
-          import pathlib, sys, urllib.request
-          base = pathlib.Path(sys.argv[1])
-          paths = {
-              'aperture': 'avfoundation/avcapturedevice/setexposuremodecustom(lensaperture:duration:iso:completionhandler:)',
-              'priority-support': 'avfoundation/avcapturedevice/format/supportsexposuremodecustom(lensaperture:duration:iso:)',
-              'tracked-focus': 'avfoundation/avcapturedevice/iscontinuousautofocustrackingsubjectacquired',
-              'live-edit': 'photos/phlivephotoeditingcontext',
-              'heif10': 'coreimage/cicontext/heif10representation(of:colorspace:options:)',
-          }
-          for name, path in paths.items():
-              try:
-                  url = 'https://developer.apple.com/tutorials/data/documentation/' + path + '.json'
-                  data = urllib.request.urlopen(url, timeout=20).read()
-                  (base / (name + '.json')).write_bytes(data)
-              except Exception as e:
-                  (base / (name + '-error.txt')).write_text(str(e))
-          PY
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          mkdir -p "${RUNNER_TEMP}/source"
+          git archive HEAD -o "${RUNNER_TEMP}/source/source.tar"
+          git rev-parse HEAD > "${RUNNER_TEMP}/source/sha.txt"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: pro-capture-source-${{ github.run_id }}
-          path: ${{ runner.temp }}/pro-capture-source/
+          path: ${{ runner.temp }}/source/
           retention-days: 3
-      - name: Native build after patch application
-        if: ${{ hashFiles('FilmyCamera/Models/ProCaptureSettings.swift') != '' }}
+  build:
+    needs: apply
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, xcode-27]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ needs.apply.outputs.sha }}
+          persist-credentials: false
+      - name: Build native simulator target
         shell: bash
         run: |
           set -euo pipefail
-          export DEVELOPER_DIR=/Applications/Xcode_26.3.app/Contents/Developer
+          [[ '${{ matrix.runner }}' != 'macos-15' ]] || export DEVELOPER_DIR=/Applications/Xcode_26.3.app/Contents/Developer
           xcodebuild -version
           xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera \
             -destination 'generic/platform=iOS Simulator' -derivedDataPath "${RUNNER_TEMP}/ProCaptureBuild" \
             CODE_SIGNING_ALLOWED=NO build > "${RUNNER_TEMP}/pro-capture-build.log" 2>&1
-      - name: Preserve native validation log
+      - name: Run focused regression tests when present
+        if: ${{ hashFiles('FilmyCameraTests/ProCaptureTests.swift') != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ '${{ matrix.runner }}' != 'macos-15' ]] || export DEVELOPER_DIR=/Applications/Xcode_26.3.app/Contents/Developer
+          device=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for ds in json.load(sys.stdin)["devices"].values() for d in ds if "iPhone" in d["name"]))')
+          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera -destination "platform=iOS Simulator,id=$device" \
+            -parallel-testing-enabled NO -derivedDataPath "${RUNNER_TEMP}/ProCaptureBuild" \
+            -only-testing:FilmyCameraTests CODE_SIGNING_ALLOWED=NO test > "${RUNNER_TEMP}/pro-capture-tests.log" 2>&1
+      - name: Preserve validation logs
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
-          name: pro-capture-build-${{ github.run_id }}
-          path: ${{ runner.temp }}/pro-capture-build.log
-          if-no-files-found: ignore
+          name: pro-capture-validation-${{ matrix.runner }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/pro-capture-build.log
+            ${{ runner.temp }}/pro-capture-tests.log
+          if-no-files-found: warn
           retention-days: 7
