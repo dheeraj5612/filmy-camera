@@ -1,0 +1,21 @@
+name: Pro Camera Source Review
+on:
+  push:
+    branches: [feat/pro-camera-capture-parity]
+    paths: [.github/workflows/pro-camera-source-review.yml]
+permissions:
+  contents: read
+jobs:
+  source-review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Package tracked source for offline review
+        run: git archive HEAD -o filmy-camera-source.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: filmy-camera-source
+          path: filmy-camera-source.tar
+          retention-days: 1
