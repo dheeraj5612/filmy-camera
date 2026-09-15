@@ -58,3 +58,10 @@ The recipe controls intentionally model the public vocabulary used by Fujifilm c
 ## Research
 
 See [docs/research.md](docs/research.md) for the open-source architecture review and the rendering decisions used here.
+
+## Pro capture and persistent originals
+
+Capability-gated resolution, RAW/ProRAW, HEIF/P3, HDR highlight preservation,
+silent original Live Photos, exposure priority, focus aids and a persistent
+non-destructive photo library are documented in
+[Pro camera features and limitations](docs/PRO_CAMERA_FEATURES.md).

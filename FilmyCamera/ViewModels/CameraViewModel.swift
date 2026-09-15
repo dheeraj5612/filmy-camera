@@ -193,6 +193,13 @@ final class CameraViewModel: ObservableObject {
         }
     }
 
+    @Published private(set) var originalRecoveryRequired = false
+    @Published private(set) var originalRecoveryMessage: String?
+    private var pendingProjectOriginal: CameraService.CapturedPhoto?
+    private var pendingProjectEdit: FilmyPhotoEdit?
+    private var pendingProject: FilmyPhotoProject?
+    private var pendingProjectRenditionSaved = false
+
     typealias ReviewPreviewRenderer = @Sendable (ReviewRenderSource, FilmRecipe, PhotoFinish) -> ReviewPreview?
     typealias ReviewFullRenderer = @Sendable (ReviewRenderSource, FilmRecipe, PhotoFinish) -> RenderedPhoto?
     typealias ReviewOriginalRenderer = @Sendable (ReviewRenderSource) -> UIImage?
@@ -513,7 +520,7 @@ final class CameraViewModel: ObservableObject {
     var hasPendingCapture: Bool { reviewSource == .camera && reviewImage != nil }
 
     func capture(camera: CameraService, photoLibrary: any PhotoSaving) {
-        guard !isCapturing, !isImporting, !isSaving, reviewImage == nil else { return }
+        guard !isCapturing, !isImporting, !isSaving, reviewImage == nil, !originalRecoveryRequired else { return }
         isCapturing = true
         toastTask?.cancel()
         toastMessage = nil
@@ -556,6 +563,21 @@ final class CameraViewModel: ObservableObject {
                     return
                 }
 
+                let edit = FilmyPhotoEdit(recipe: recipe, finish: finish, options: capturedPhoto.options,
+                    viewport: viewportSize, previewDrawable: previewDrawableSize, grainSeed: grainSeed,
+                    flashFired: capturedPhoto.flashFired)
+                self.pendingProjectOriginal = capturedPhoto
+                self.pendingProjectEdit = edit
+                self.pendingProjectRenditionSaved = false
+                do {
+                    self.pendingProject = try await self.persistPendingOriginal()
+                    self.pendingProjectOriginal = nil
+                } catch {
+                    // Keep the exact capture alive. The existing Photos-save
+                    // recovery surface will retry this transaction, not recapture.
+                    self.originalRecoveryMessage = error.localizedDescription
+                }
+
                 // The camera stays live. Rendering and Photos IO must not
                 // stop the session or present a Retake/Save interstitial.
                 // Keep the Photos saver on the main actor; only the render
@@ -570,7 +592,8 @@ final class CameraViewModel: ObservableObject {
                             capturedAt: capturedPhoto.capturedAt,
                             flashFired: capturedPhoto.flashFired,
                             grainSeed: grainSeed,
-                            finish: finish
+                            finish: finish,
+                            outputOptions: capturedPhoto.options
                         )
                     }
                 }.value
@@ -581,7 +604,12 @@ final class CameraViewModel: ObservableObject {
                     // whether the camera should resume.
                     camera.setFrameDeliveryPaused(false)
                     self.isCapturing = false
-                    self.showToast("The selected look could not be rendered. Try the capture again.", style: .error)
+                    if self.pendingProject != nil {
+                        self.showToast("Original saved in Filmy originals. Open it to retry the edit.", style: .info)
+                        self.clearProjectCaptureState()
+                    } else {
+                        self.originalRecoveryRequired = true
+                    }
                     return
                 }
 #if DEBUG
@@ -627,8 +655,8 @@ final class CameraViewModel: ObservableObject {
     }
 
     /// Shares the tested, generation-guarded save transaction with imports,
-    /// but camera frames never enter the visible review editor. Retain only
-    /// finished pixels and encoded data, not a second full sensor original.
+    /// but camera frames never enter the visible review editor. Source bytes
+    /// are durably retained before the finished pixels are exported to Photos.
     func saveCapturedPhoto(
         _ photo: RenderedPhoto,
         recipe: FilmRecipe,
@@ -950,6 +978,38 @@ final class CameraViewModel: ObservableObject {
         capturedAt: Date,
         generation: UInt64
     ) {
+        if let edit = pendingProjectEdit {
+            if !pendingProjectRenditionSaved {
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    do {
+                        if self.pendingProject == nil {
+                            self.pendingProject = try await self.persistPendingOriginal()
+                            self.pendingProjectOriginal = nil
+                        }
+                        guard let project = self.pendingProject else { throw FilmyPhotoStoreError.invalidManifest }
+                        self.pendingProject = try await FilmyPhotoStore.shared.commitRendition(project.id,
+                            data: imageData, edit: edit, expectedRevision: project.revision)
+                        // The original pair is separately exported for RAW/Live
+                        // captures. The Filmy-rendered still never impersonates
+                        // an unmodified Live Photo or a sensor DNG.
+                        if edit.options.raw != .off || edit.options.livePhoto {
+                            try await FilmyPhotoStore.shared.exportOriginal(project.id)
+                        }
+                        guard self.reviewWorkGeneration == generation, self.isSaving else { return }
+                        self.pendingProjectRenditionSaved = true
+                        self.performPhotoSave(photoLibrary: photoLibrary, image: image, imageData: imageData,
+                            recipe: recipe, capturedAt: capturedAt, generation: generation)
+                    } catch {
+                        guard self.reviewWorkGeneration == generation else { return }
+                        self.isSaving = false
+                        self.saveErrorMessage = "The capture is retained for retry. " + error.localizedDescription
+                        self.saveErrorRequiresSettings = (error as? PhotoLibrarySaveError) == .accessDenied
+                    }
+                }
+                return
+            }
+        }
         photoLibrary.save(
             image: image,
             imageData: imageData,
@@ -976,7 +1036,44 @@ final class CameraViewModel: ObservableObject {
         clearReviewState()
     }
 
+    private func persistPendingOriginal() async throws -> FilmyPhotoProject {
+        guard let capture = pendingProjectOriginal, let edit = pendingProjectEdit else { throw FilmyPhotoStoreError.invalidManifest }
+        return try await FilmyPhotoStore.shared.insert(original: capture.fileData, raw: capture.rawData,
+            movieURL: capture.livePhotoMovie?.url, capturedAt: capture.capturedAt,
+            dimensions: ProPhotoDimensions(width: capture.dimensions.width, height: capture.dimensions.height), edit: edit)
+    }
+
+    func retryOriginalRetention() {
+        guard originalRecoveryRequired, !isSaving else { return }
+        isSaving = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                _ = try await self.persistPendingOriginal()
+                self.clearProjectCaptureState()
+                self.showToast("Original saved in Filmy originals. Open it to develop.", style: .success)
+            } catch { self.originalRecoveryMessage = error.localizedDescription }
+            self.isSaving = false
+        }
+    }
+
+    func discardUnsavedOriginal() {
+        guard !isSaving else { return }
+        clearProjectCaptureState()
+    }
+
+    private func clearProjectCaptureState() {
+        pendingProjectOriginal = nil
+        pendingProjectEdit = nil
+        pendingProject = nil
+        pendingProjectRenditionSaved = false
+        originalRecoveryRequired = false
+        originalRecoveryMessage = nil
+    }
+
     private func clearReviewState() {
+        clearProjectCaptureState()
+
         reviewWorkGeneration &+= 1
         reviewWorkQueue.cancelPending()
         reviewImage = nil
@@ -1038,7 +1135,8 @@ final class CameraViewModel: ObservableObject {
         flashFired: Bool,
         grainSeed: UInt32,
         normalizedSubjectRegions: [CGRect]? = nil,
-        finish: PhotoFinish = .photo
+        finish: PhotoFinish = .photo,
+        outputOptions: ProCaptureOptions? = nil
     ) -> RenderedPhoto? {
         // Resolve the source image's EXIF orientation before applying the
         // preview crop. The finished JPEG is written with orientation=1, so
@@ -1105,19 +1203,24 @@ final class CameraViewModel: ObservableObject {
             grainSeed: grainSeed,
             grainPhase: grainPhase
         )
-        guard let finished = PhotoPrintCompositor.composedImage(filtered, finish: finish),
-              let output = FilmRenderer.outputCGImage(finished, from: finished.extent) else { return nil }
-        guard let data = PhotoOutputEncoder.jpegData(
-            for: output,
-            sourceData: sourceData,
-            capturedAt: capturedAt,
-            recipe: recipe
-        ) else {
-            return nil
+        guard let composed = PhotoPrintCompositor.composedImage(filtered, finish: finish) else { return nil }
+        let finished = outputOptions.map { ProPhotoEncoder.sized(composed, resolution: $0.resolution) } ?? composed
+        let encoded: Data?
+        if let options = outputOptions, options.codec == .heif {
+            var framedHDR: CIImage?
+            if options.hdr, finish == .photo,
+               let hdr = CIImage(data: sourceData, options: [.applyOrientationProperty: true, .expandToHDR: true]) {
+                let crop = CameraFrameLayout.aspectFillCrop(sourceExtent: hdr.extent,
+                    targetSize: viewportSize.width > 0 && viewportSize.height > 0 ? viewportSize : hdr.extent.size)
+                framedHDR = hdr.cropped(to: crop).transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
+            }
+            encoded = ProPhotoEncoder.heifData(image: finished, sourceSDR: framedInput, sourceHDR: framedHDR,
+                sourceData: sourceData, recipe: recipe, capturedAt: capturedAt, options: options)
+        } else {
+            guard let output = FilmRenderer.outputCGImage(finished, from: finished.extent) else { return nil }
+            encoded = PhotoOutputEncoder.jpegData(for: output, sourceData: sourceData, capturedAt: capturedAt, recipe: recipe)
         }
-
-        let reviewImage = downsampledReviewImage(from: data)
-            ?? UIImage(cgImage: output)
+        guard let data = encoded, let reviewImage = downsampledReviewImage(from: data) else { return nil }
         return RenderedPhoto(
             image: reviewImage,
             data: data,
