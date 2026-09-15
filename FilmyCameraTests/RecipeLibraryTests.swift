@@ -20,10 +20,21 @@ final class RecipeLibraryTests: XCTestCase {
             XCTAssertEqual(record.recipe.vignette, 0, record.id)
             XCTAssertEqual(record.recipe.blueResponse, 0, record.id)
             XCTAssertEqual(try JSONDecoder().decode(FilmRecipe.self, from: JSONEncoder().encode(record.recipe)), record.recipe)
+            let json = String(decoding: try JSONEncoder().encode(record.source), as: UTF8.self)
+            let asciiJSON = PhotoOutputEncoder.asciiSafeJSON(json)
+            XCTAssertTrue(asciiJSON.unicodeScalars.allSatisfy { $0.value < 128 }, record.id)
+            XCTAssertEqual(try JSONDecoder().decode(CameraRecipeSource.self, from: Data(asciiJSON.utf8)), record.source,
+                           "EXIF-safe JSON must preserve source punctuation, Unicode minus signs, and creator names")
             for control in FilmRecipe.Control.allCases {
                 XCTAssertTrue(control.editorRange.contains(control.value(in: record.recipe)), "\(record.id): \(control)")
             }
         }
+        let unicode = ["text": "−4 ‑2 “Eterna” café 東京 🌈 \n \" \\"]
+        let unicodeJSON = String(decoding: try JSONEncoder().encode(unicode), as: UTF8.self)
+        let escaped = PhotoOutputEncoder.asciiSafeJSON(unicodeJSON)
+        XCTAssertTrue(escaped.unicodeScalars.allSatisfy { $0.value < 128 })
+        XCTAssertEqual(try JSONDecoder().decode([String: String].self, from: Data(escaped.utf8)), unicode,
+                       "Non-BMP surrogate pairs and existing JSON escapes must survive unchanged")
     }
 
     func testPackOwnershipPartitionsTheEntireCatalogAndDefaultsPreserveOriginals() {
