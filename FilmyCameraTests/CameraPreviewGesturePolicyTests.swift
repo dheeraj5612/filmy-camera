@@ -77,6 +77,24 @@ final class CameraPreviewGesturePolicyTests: XCTestCase {
         XCTAssertNil(CameraPreviewGesturePolicy.dragAxis(translation: CGSize(width: CGFloat.infinity, height: 20)))
     }
 
+    func testVerticalDragWaitsForTapFocusBeforeClaimingExposureAxis() {
+        XCTAssertNil(CameraPreviewGesturePolicy.eligibleDragAxis(
+            translation: CGSize(width: 3, height: -30),
+            hasFocusPoint: false,
+            canAdjustExposure: true
+        ))
+        XCTAssertNil(CameraPreviewGesturePolicy.eligibleDragAxis(
+            translation: CGSize(width: 3, height: -30),
+            hasFocusPoint: true,
+            canAdjustExposure: false
+        ))
+        XCTAssertEqual(CameraPreviewGesturePolicy.eligibleDragAxis(
+            translation: CGSize(width: 3, height: -30),
+            hasFocusPoint: true,
+            canAdjustExposure: true
+        ), .exposure)
+    }
+
     func testExposureDragUsesStartingBiasAndScalesForViewport() throws {
         XCTAssertEqual(try XCTUnwrap(CameraPreviewGesturePolicy.exposureBias(start: 0.3,
             translation: CGSize(width: 0, height: -100), viewportHeight: 400)), 1.3, accuracy: 0.001)

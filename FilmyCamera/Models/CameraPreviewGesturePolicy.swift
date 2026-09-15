@@ -20,6 +20,17 @@ enum CameraPreviewGesturePolicy {
         return nil
     }
 
+    /// Do not claim a vertical drag until tap-to-focus has made exposure
+    /// adjustment available. Returning nil keeps the axis undecided so a
+    /// focus state update that lands during the first drag events can still
+    /// start the exposure gesture.
+    static func eligibleDragAxis(translation: CGSize, hasFocusPoint: Bool,
+                                 canAdjustExposure: Bool) -> CameraPreviewDragAxis? {
+        guard let axis = dragAxis(translation: translation) else { return nil }
+        guard axis != .exposure || (hasFocusPoint && canAdjustExposure) else { return nil }
+        return axis
+    }
+
     /// One stop per quarter-viewfinder, with a minimum travel for small previews.
     /// CameraService remains responsible for the active sensor's supported range.
     static func exposureBias(start: Float, translation: CGSize, viewportHeight: CGFloat) -> Float? {

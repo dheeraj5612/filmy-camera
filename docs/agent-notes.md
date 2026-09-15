@@ -114,3 +114,7 @@
 - Rounded the main viewfinder from radius 10 to 14 using the existing continuous rounded clip in `CameraScreen`; the change is in `FilmyCamera/Views/Components.swift`.
 - Core suite reached 781 passed with one transient catalog-render SIGSEGV in the combined run (`/private/tmp/filmy-camera-integration/pr110-final/core-final/run-zzh66yt4/result.json`); the exact catalog test passed in isolation (`/private/tmp/filmy-camera-integration/pr110-final/catalog-focused/run-vswoyxqt/result.json`).
 - The Downloads patch files inspected were unrelated command-gate/tank/optical-train changes and were not applied to Filmy Camera. No newer open PR than #110 was present at the final sweep; older open drafts remain visible for the monitor.
+
+## Tap-to-focus exposure gesture fix — 2026-09-15
+- A vertical preview drag could lock the exposure axis before the tap-to-focus state had propagated, leaving `exposureDragStart` unset for the rest of that gesture. `CameraPreviewGesturePolicy.eligibleDragAxis` now keeps the axis undecided until focus and exposure adjustment are available, allowing the stable starting EV baseline to be captured on a later drag event.
+- Focused simulator validation passed all 10 `CameraPreviewGesturePolicyTests`: `/private/tmp/filmy-camera-ev-fix.fuvIbn/run-1pw8akg9/result.json`.

@@ -925,8 +925,12 @@ struct CameraScreen: View {
                 if !enabled { previewDragMaySelectLook = false }
                 guard previewDragMaySelectLook == true else { return }
                 if previewDragAxis == nil {
-                    previewDragAxis = CameraPreviewGesturePolicy.dragAxis(translation: value.translation)
-                    if previewDragAxis == .exposure, focusPoint != nil, canAdjustPreviewExposure {
+                    previewDragAxis = CameraPreviewGesturePolicy.eligibleDragAxis(
+                        translation: value.translation,
+                        hasFocusPoint: focusPoint != nil,
+                        canAdjustExposure: canAdjustPreviewExposure
+                    )
+                    if previewDragAxis == .exposure {
                         exposureDragStart = camera.exposureBias
                     }
                 }
