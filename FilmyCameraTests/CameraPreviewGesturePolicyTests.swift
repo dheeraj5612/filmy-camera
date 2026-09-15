@@ -74,3 +74,76 @@ final class CameraPreviewGesturePolicyTests: XCTestCase {
                                                 interactionEnabled: true, includesPinch: false)
     }
 }
+
+/// Kept in an existing test-target source so Xcode and XcodeGen builds both
+/// discover these regressions without an unregistered source-file reference.
+final class FilmyControlInteractionTests: XCTestCase {
+    func testReducedMotionNeverTransformsAPressedControl() {
+        for requested: CGFloat in [0.88, 0.94, 0.97, 0.98, 1] {
+            XCTAssertEqual(FilmyInteractionPolicy.pressScale(
+                isPressed: true, isEnabled: true, reduceMotion: true, requestedScale: requested), 1)
+        }
+    }
+
+    func testDisabledAndRestingControlsKeepTheirOriginalGeometry() {
+        for pressed in [false, true] {
+            XCTAssertEqual(FilmyInteractionPolicy.pressScale(
+                isPressed: pressed, isEnabled: false, reduceMotion: false, requestedScale: 0.94), 1)
+        }
+        XCTAssertEqual(FilmyInteractionPolicy.pressScale(
+            isPressed: false, isEnabled: true, reduceMotion: false, requestedScale: 0.94), 1)
+    }
+
+    func testEnabledPressUsesTheRequestedFeedback() {
+        for requested: CGFloat in [0.94, 0.97, 0.98, 1] {
+            XCTAssertEqual(FilmyInteractionPolicy.pressScale(
+                isPressed: true, isEnabled: true, reduceMotion: false, requestedScale: requested), requested)
+        }
+    }
+
+    func testInvalidPressScalesCannotExpandOrCollapseTheControl() {
+        for requested: CGFloat in [.nan, .infinity, -.infinity] {
+            XCTAssertEqual(FilmyInteractionPolicy.pressScale(
+                isPressed: true, isEnabled: true, reduceMotion: false, requestedScale: requested), 1)
+        }
+        XCTAssertEqual(FilmyInteractionPolicy.pressScale(
+            isPressed: true, isEnabled: true, reduceMotion: false, requestedScale: -2), 0.85)
+        XCTAssertEqual(FilmyInteractionPolicy.pressScale(
+            isPressed: true, isEnabled: true, reduceMotion: false, requestedScale: 2), 1)
+    }
+
+    func testZoomPresetsRespectStandardCameraRanges() {
+        XCTAssertEqual(FilmyInteractionPolicy.zoomPresets(minZoom: 0.5, maxZoom: 5), [0.5, 1, 2, 3, 5])
+        XCTAssertEqual(FilmyInteractionPolicy.zoomPresets(minZoom: 1, maxZoom: 3), [1, 2, 3])
+        XCTAssertEqual(FilmyInteractionPolicy.zoomPresets(minZoom: 2, maxZoom: 2), [2])
+    }
+
+    func testNarrowZoomRangeNeverOffersAnOutOfRangeOneTimesPreset() {
+        XCTAssertEqual(FilmyInteractionPolicy.zoomPresets(minZoom: 1.2, maxZoom: 1.8), [1.2])
+        XCTAssertEqual(FilmyInteractionPolicy.zoomPresets(minZoom: 6, maxZoom: 8), [6])
+    }
+
+    func testInvalidZoomRangesHaveADeterministicFallback() {
+        let ranges: [(CGFloat, CGFloat)] = [(0, 5), (-1, 3), (3, 1), (.nan, 3), (1, .infinity), (1, .nan)]
+        for (minimum, maximum) in ranges {
+            XCTAssertEqual(FilmyInteractionPolicy.zoomPresets(minZoom: minimum, maxZoom: maximum), [1])
+        }
+    }
+
+    func testEveryOfferedPresetIsInsideItsValidHardwareRange() {
+        for minimum in stride(from: 0.25, through: 8.0, by: 0.25) {
+            for span in [0.0, 0.1, 0.5, 1.5, 5.0] {
+                let lower = CGFloat(minimum)
+                let upper = CGFloat(minimum + span)
+                let presets = FilmyInteractionPolicy.zoomPresets(minZoom: lower, maxZoom: upper)
+                XCTAssertFalse(presets.isEmpty)
+                XCTAssertEqual(presets, presets.sorted())
+                XCTAssertEqual(Set(presets).count, presets.count)
+                for preset in presets {
+                    XCTAssertGreaterThanOrEqual(preset, lower)
+                    XCTAssertLessThanOrEqual(preset, upper)
+                }
+            }
+        }
+    }
+}
