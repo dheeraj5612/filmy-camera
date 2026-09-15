@@ -1,0 +1,90 @@
+name: Fuji Shooting Checks
+
+on:
+  push:
+    branches: [feature/fuji-shooting-system]
+    paths:
+      - 'FilmyCamera/**'
+      - 'FilmyCameraTests/**'
+      - 'FilmyCamera.xcodeproj/**'
+      - 'project.yml'
+      - 'scripts/testing/**'
+      - '.github/workflows/fuji-shooting-checks.yml'
+  pull_request:
+    paths:
+      - 'FilmyCamera/**'
+      - 'FilmyCameraTests/**'
+      - 'FilmyCamera.xcodeproj/**'
+      - 'project.yml'
+      - 'scripts/testing/**'
+      - '.github/workflows/fuji-shooting-checks.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuji-shooting-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-routing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Validate suite routing and result parsing
+        run: python3 -m unittest discover -s scripts/testing -p 'test_*.py' -v
+
+  native-validation:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Select an installed iPhone simulator
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcrun simctl list devices available --json > "$RUNNER_TEMP/fuji-simulators.json"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          data = json.loads((Path(os.environ['RUNNER_TEMP']) / 'fuji-simulators.json').read_text())
+          phones = [device for runtime, devices in data['devices'].items() if '.iOS-' in runtime
+                    for device in devices if device.get('isAvailable') and device['name'].startswith('iPhone')]
+          if not phones:
+              raise SystemExit('No available iPhone simulator on this runner')
+          preferred = next((device for device in phones if device['name'] == 'iPhone 16 Pro'), phones[0])
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write(f"FUJI_SIMULATOR_ID={preferred['udid']}\n")
+          print(f"Testing on {preferred['name']} ({preferred['udid']})")
+          PY
+      - name: Build and run Fuji shooting regression tests
+        run: |
+          set -o pipefail
+          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera \
+            -destination "platform=iOS Simulator,id=$FUJI_SIMULATOR_ID" \
+            -parallel-testing-enabled NO -maximum-parallel-testing-workers 1 \
+            -only-testing:FilmyCameraTests/FujiShootingTests \
+            -resultBundlePath "$RUNNER_TEMP/FujiTests.xcresult" \
+            test CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/fuji-build.log"
+      - name: Summarize diagnostics
+        if: always()
+        run: |
+          grep -E 'error:|warning:|Test Case|Executed |TEST SUCCEEDED|TEST FAILED' \
+            "$RUNNER_TEMP/fuji-build.log" > "$RUNNER_TEMP/fuji-diagnostics.txt" || true
+          cat "$RUNNER_TEMP/fuji-diagnostics.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuji-native-validation-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/fuji-build.log
+            ${{ runner.temp }}/fuji-diagnostics.txt
+            ${{ runner.temp }}/FujiTests.xcresult
+          retention-days: 7

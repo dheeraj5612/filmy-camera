@@ -12,6 +12,7 @@
 		0F78AF03F58F3B9498AA5889 /* HistogramPlacementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5D96E086FC9CCF420279875 /* HistogramPlacementTests.swift */; };
 		10B76FC5874DC16B348CCDB8 /* FilmyCaptureDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 003018A2653FF10D42B98591 /* FilmyCaptureDiagnostics.swift */; };
 		19E345353E2942C8157EE673 /* ReviewComparisonState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99E28DFBB94E495FBDCE48DB /* ReviewComparisonState.swift */; };
+		1BB76F31C8EBD2DE0E8B6430 /* FujiFrameSampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56FDFA56B98EB5B99277D2F2 /* FujiFrameSampler.swift */; };
 		1DB34E65B1543DDA2A1AF9B9 /* RecipeControlEffectTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C1C3F4E707A5DADA6142F6E /* RecipeControlEffectTests.swift */; };
 		1FA4D1311CC59621E8A662B9 /* FilmyCameraApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D59729E8AC667A9120C460CB /* FilmyCameraApp.swift */; };
 		2445E3AD0B06312916D6EE89 /* RendererRedCreaseRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F1F58788021769171897C0 /* RendererRedCreaseRegressionTests.swift */; };
@@ -20,7 +21,9 @@
 		2700E6F80817004C1415242D /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 432F02B03418EEADA550733F /* PrivacyInfo.xcprivacy */; };
 		28C6A5B2352ED08BD1E21114 /* CameraViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A9AFC52D1FB5ECED33CB2DA /* CameraViewModel.swift */; };
 		2959F22572BAEE1007915415 /* CameraFrameLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D82A69BBE148C6317A2FA41 /* CameraFrameLayout.swift */; };
+		2A3125B2135FA34B9054451E /* FujiImageProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 012E5206A0C55AD2779FE70D /* FujiImageProcessor.swift */; };
 		3D00E159DAA3E3944EACD36E /* CaptureReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53925B09E478B6CD4AF36BE1 /* CaptureReviewView.swift */; };
+		3D133A052888DF63B17DB970 /* FujiCaptureLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8559B96419D6082B784C9BD5 /* FujiCaptureLibrary.swift */; };
 		3E434087A6331965A83F900D /* RecipeReferenceCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 348CFAEC84B4CF9E4F843E66 /* RecipeReferenceCatalogTests.swift */; };
 		3F104912E7B0F794D16EC5E3 /* GalleryScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10A0F8269AA5365633E9A3C0 /* GalleryScreen.swift */; };
 		47FDBDD59FA6A75558E422B8 /* FilmRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F56BE8EB7D6BDB867CFD8C3A /* FilmRenderer.swift */; };
@@ -44,13 +47,16 @@
 		7C42415792CAC6505DD18170 /* CameraManualControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E9A15C80F9345FFEE2F001 /* CameraManualControls.swift */; };
 		7DCDAA29B2717548B36D8992 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8F580BECA95D881DF1EB3789 /* Assets.xcassets */; };
 		801054D3CB7F421A0300E64B /* FilteredCameraPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E3E5451BF5130228EAD7B57 /* FilteredCameraPreview.swift */; };
+		87F366B0A614D62A51C8E6CB /* FujiShootingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B789FB18A249A0C3CBA9971 /* FujiShootingTests.swift */; };
 		8B6935AD478A697DD4C23AE6 /* PhotoPrintCompositorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2933638DF96CE284BC58BC2 /* PhotoPrintCompositorTests.swift */; };
 		8C7CB45FC3BFE9E2C786ACCF /* PhotoOutputEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AD7C3AEFA8B673A5F790009 /* PhotoOutputEncoderTests.swift */; };
 		8E91CEFD6D898EFB969567DD /* FilmyIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AF17D88FBFA77FB56E7868B /* FilmyIdentity.swift */; };
 		96625C5D9B641248AC46F516 /* NormalRollManagementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82B8CDEF0CFFC1C7810C1E66 /* NormalRollManagementTests.swift */; };
 		9962D2011C0D8FAA6CF131B3 /* CameraLensAcceptanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0569FE61E3015B082CAB8031 /* CameraLensAcceptanceTests.swift */; };
 		9A3B1EEA1EC3911B9B7E0C00 /* GalleryPagingUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7423EA06DA8F5FB5EE92E47C /* GalleryPagingUITests.swift */; };
+		9A8B24849CC58E0C3AB441A0 /* FujiViewfinderOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF5018192232DA5220D33404 /* FujiViewfinderOverlay.swift */; };
 		9CDBE678DD0FD47E87EDCB2D /* ComprehensiveSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67723B708854007A2748F2D2 /* ComprehensiveSettingsTests.swift */; };
+		9E15182543F76F2F699F6045 /* FujiShootingSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43B4432B1BC7734B4118CFD8 /* FujiShootingSettings.swift */; };
 		9E575EACB950986DE7E5DEF9 /* SignalFrameUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BA00D8FA3F0F24067FEC604 /* SignalFrameUITests.swift */; };
 		9FB74EFBFC5A955FCF341E7C /* PhotoFinish.swift in Sources */ = {isa = PBXBuildFile; fileRef = F355DB84E4E768575297585A /* PhotoFinish.swift */; };
 		AAA72B6A7DD8688BFD065F7D /* PhotoPrintCompositor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51B0F84271C9B08AE6A3D78A /* PhotoPrintCompositor.swift */; };
@@ -69,12 +75,16 @@
 		D28FC5CE68D1A36040EFD9B0 /* PhotoLibraryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8433ABA6CF2F34E7F51023B6 /* PhotoLibraryService.swift */; };
 		D37FAD0E5D6E20A91026F4EB /* CameraPreviewGesturePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CB7F2591CB64D86D0681D20 /* CameraPreviewGesturePolicyTests.swift */; };
 		D39BB0008BA980EC359FF95F /* ColorSpaceBoundaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 535194C6145CBC3D755665B3 /* ColorSpaceBoundaryTests.swift */; };
+		D8217DC766797E980F6F9AED /* FujiQuickMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01F8B6B4725B049B4C986C5C /* FujiQuickMenuView.swift */; };
 		D85A08E3EF9A9317F589EBD3 /* PhotoOutputEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E54A0716052C16B09DBEF38 /* PhotoOutputEncoder.swift */; };
+		D97DC1B3E968906ACF324B7E /* FujiShootingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A487F72831A6DFD826D669F0 /* FujiShootingController.swift */; };
 		DE50626271FEA74A974F0056 /* RecipeDetailCommitPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09CCB0FEDDDA669EB40BAF2B /* RecipeDetailCommitPolicyTests.swift */; };
 		E158A342AF6261EDB5736968 /* CameraCatalogHardwareTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B23B5C550DB001D0819FC64E /* CameraCatalogHardwareTests.swift */; };
 		E1D802D0212D6E268DD15A8E /* CameraViewModelPersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F595081C082AD030B6FE6A2F /* CameraViewModelPersistenceTests.swift */; };
+		E22CEAF80D685C7F0764CCE9 /* FujiCaptureHardware.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04441168C55E44EF88A8015A /* FujiCaptureHardware.swift */; };
 		E7ED80C5D0D3078DFCB8CC02 /* CameraManualHardwareTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 979D033B221CDD724A21C7EE /* CameraManualHardwareTests.swift */; };
 		E9619C95C6EF4EC86F964D60 /* PhotoLibraryMetadataTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB68FCDDC4EB7CE97CF2AD4F /* PhotoLibraryMetadataTests.swift */; };
+		EA34D5908603473AE955AFDE /* FujiRAWLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07E085A48795752A7456FDE3 /* FujiRAWLibraryView.swift */; };
 		EB0B9B31A8898628DD8BD80F /* HalationArtifactRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC88255748574951C8FDBFCB /* HalationArtifactRegressionTests.swift */; };
 		EC2F24E354BEA00F79F85586 /* RecipeInvariantsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33F33B6C5BE2B0CAE0ECA261 /* RecipeInvariantsTests.swift */; };
 		F84D685F791EF68BD232EC02 /* FilmRecipe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2742A27161237B210E4D8A3C /* FilmRecipe.swift */; };
@@ -99,10 +109,15 @@
 
 /* Begin PBXFileReference section */
 		003018A2653FF10D42B98591 /* FilmyCaptureDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmyCaptureDiagnostics.swift; sourceTree = "<group>"; };
+		012E5206A0C55AD2779FE70D /* FujiImageProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FujiImageProcessor.swift; sourceTree = "<group>"; };
+		01F8B6B4725B049B4C986C5C /* FujiQuickMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FujiQuickMenuView.swift; sourceTree = "<group>"; };
 		034A4A43A70736DF08762220 /* CameraReviewEditingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraReviewEditingTests.swift; sourceTree = "<group>"; };
+		04441168C55E44EF88A8015A /* FujiCaptureHardware.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FujiCaptureHardware.swift; sourceTree = "<group>"; };
 		0569FE61E3015B082CAB8031 /* CameraLensAcceptanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraLensAcceptanceTests.swift; sourceTree = "<group>"; };
+		07E085A48795752A7456FDE3 /* FujiRAWLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FujiRAWLibraryView.swift; sourceTree = "<group>"; };
 		09CCB0FEDDDA669EB40BAF2B /* RecipeDetailCommitPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeDetailCommitPolicyTests.swift; sourceTree = "<group>"; };
 		10A0F8269AA5365633E9A3C0 /* GalleryScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalleryScreen.swift; sourceTree = "<group>"; };
+		1B789FB18A249A0C3CBA9971 /* FujiShootingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FujiShootingTests.swift; sourceTree = "<group>"; };
 		1E3E5451BF5130228EAD7B57 /* FilteredCameraPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilteredCameraPreview.swift; sourceTree = "<group>"; };
 		1F50AF57ED0353408C3CC952 /* FlashHardwareDeviceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlashHardwareDeviceTests.swift; sourceTree = "<group>"; };
 		2742A27161237B210E4D8A3C /* FilmRecipe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmRecipe.swift; sourceTree = "<group>"; };
@@ -119,12 +134,14 @@
 		3E85F3412BBC965E4A33B9EB /* RecipePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipePickerView.swift; sourceTree = "<group>"; };
 		3EC33B29E08BDF6AF6178EFA /* StoreScreenshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreScreenshotTests.swift; sourceTree = "<group>"; };
 		432F02B03418EEADA550733F /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		43B4432B1BC7734B4118CFD8 /* FujiShootingSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FujiShootingSettings.swift; sourceTree = "<group>"; };
 		44FCA4AA16B8B0B93F53C10A /* ReviewComparisonStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewComparisonStateTests.swift; sourceTree = "<group>"; };
 		4C1C3F4E707A5DADA6142F6E /* RecipeControlEffectTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeControlEffectTests.swift; sourceTree = "<group>"; };
 		508F5A8D0240EAE79AE6048E /* GalleryPagingPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalleryPagingPolicy.swift; sourceTree = "<group>"; };
 		51B0F84271C9B08AE6A3D78A /* PhotoPrintCompositor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoPrintCompositor.swift; sourceTree = "<group>"; };
 		535194C6145CBC3D755665B3 /* ColorSpaceBoundaryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorSpaceBoundaryTests.swift; sourceTree = "<group>"; };
 		53925B09E478B6CD4AF36BE1 /* CaptureReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureReviewView.swift; sourceTree = "<group>"; };
+		56FDFA56B98EB5B99277D2F2 /* FujiFrameSampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FujiFrameSampler.swift; sourceTree = "<group>"; };
 		57D96867146ACDDA4F134F19 /* CameraScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraScreen.swift; sourceTree = "<group>"; };
 		5DEAF80BF98F3BCC9BB1DBC1 /* CompositionAssistStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompositionAssistStore.swift; sourceTree = "<group>"; };
 		61617C6B4DB09D291F5DEA10 /* FilmyCameraUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmyCameraUITests.swift; sourceTree = "<group>"; };
@@ -138,6 +155,7 @@
 		7423EA06DA8F5FB5EE92E47C /* GalleryPagingUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalleryPagingUITests.swift; sourceTree = "<group>"; };
 		82B8CDEF0CFFC1C7810C1E66 /* NormalRollManagementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NormalRollManagementTests.swift; sourceTree = "<group>"; };
 		8433ABA6CF2F34E7F51023B6 /* PhotoLibraryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibraryService.swift; sourceTree = "<group>"; };
+		8559B96419D6082B784C9BD5 /* FujiCaptureLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FujiCaptureLibrary.swift; sourceTree = "<group>"; };
 		8CB7F2591CB64D86D0681D20 /* CameraPreviewGesturePolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraPreviewGesturePolicyTests.swift; sourceTree = "<group>"; };
 		8D82A69BBE148C6317A2FA41 /* CameraFrameLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraFrameLayout.swift; sourceTree = "<group>"; };
 		8DA89A5E0FC0285D78CD4582 /* CameraManualControlsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraManualControlsTests.swift; sourceTree = "<group>"; };
@@ -147,6 +165,7 @@
 		99D74C27D238C00120CAABB3 /* RecipeRenderGalleryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeRenderGalleryTests.swift; sourceTree = "<group>"; };
 		99E28DFBB94E495FBDCE48DB /* ReviewComparisonState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewComparisonState.swift; sourceTree = "<group>"; };
 		A3940D2834957A9E44F66872 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		A487F72831A6DFD826D669F0 /* FujiShootingController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FujiShootingController.swift; sourceTree = "<group>"; };
 		A657E128117A2C10BAD8B761 /* FilmyCamera.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = FilmyCamera.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A89BFC50D79A0FAEB41F1D3C /* ManualCameraControlsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualCameraControlsView.swift; sourceTree = "<group>"; };
 		A9F1F58788021769171897C0 /* RendererRedCreaseRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RendererRedCreaseRegressionTests.swift; sourceTree = "<group>"; };
@@ -155,6 +174,7 @@
 		C2E9A15C80F9345FFEE2F001 /* CameraManualControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraManualControls.swift; sourceTree = "<group>"; };
 		C2F0913587D09FEB4D0E8E14 /* RendererOutputBoundsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RendererOutputBoundsTests.swift; sourceTree = "<group>"; };
 		C34BB7CBA412A194086446CD /* FilmyCameraTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = FilmyCameraTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		CF5018192232DA5220D33404 /* FujiViewfinderOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FujiViewfinderOverlay.swift; sourceTree = "<group>"; };
 		D5373778E34C64A9AC521C02 /* CameraViewModelRenderingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraViewModelRenderingTests.swift; sourceTree = "<group>"; };
 		D59729E8AC667A9120C460CB /* FilmyCameraApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmyCameraApp.swift; sourceTree = "<group>"; };
 		D5D96E086FC9CCF420279875 /* HistogramPlacementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistogramPlacementTests.swift; sourceTree = "<group>"; };
@@ -200,6 +220,7 @@
 				D5373778E34C64A9AC521C02 /* CameraViewModelRenderingTests.swift */,
 				535194C6145CBC3D755665B3 /* ColorSpaceBoundaryTests.swift */,
 				1F50AF57ED0353408C3CC952 /* FlashHardwareDeviceTests.swift */,
+				1B789FB18A249A0C3CBA9971 /* FujiShootingTests.swift */,
 				FF42BA8A443489B0CB928D60 /* GalleryPagingPolicyTests.swift */,
 				DC88255748574951C8FDBFCB /* HalationArtifactRegressionTests.swift */,
 				D5D96E086FC9CCF420279875 /* HistogramPlacementTests.swift */,
@@ -258,6 +279,7 @@
 				2F0DC1C823C53C01F796F1A7 /* Models */,
 				16D40A895F8235E60F3CB3A9 /* Resources */,
 				325853F97B7E117222F4E01E /* Services */,
+				A35BA009A04AAE769B5EE94E /* Shooting */,
 				A1BC3FAE028DD404AB38DF50 /* ViewModels */,
 				8001ED3E67EA6235B02CFA09 /* Views */,
 				F84BD1235DF873E06F8C6282 /* ContentView.swift */,
@@ -317,6 +339,22 @@
 				6A9AFC52D1FB5ECED33CB2DA /* CameraViewModel.swift */,
 			);
 			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		A35BA009A04AAE769B5EE94E /* Shooting */ = {
+			isa = PBXGroup;
+			children = (
+				04441168C55E44EF88A8015A /* FujiCaptureHardware.swift */,
+				8559B96419D6082B784C9BD5 /* FujiCaptureLibrary.swift */,
+				56FDFA56B98EB5B99277D2F2 /* FujiFrameSampler.swift */,
+				012E5206A0C55AD2779FE70D /* FujiImageProcessor.swift */,
+				01F8B6B4725B049B4C986C5C /* FujiQuickMenuView.swift */,
+				07E085A48795752A7456FDE3 /* FujiRAWLibraryView.swift */,
+				A487F72831A6DFD826D669F0 /* FujiShootingController.swift */,
+				43B4432B1BC7734B4118CFD8 /* FujiShootingSettings.swift */,
+				CF5018192232DA5220D33404 /* FujiViewfinderOverlay.swift */,
+			);
+			path = Shooting;
 			sourceTree = "<group>";
 		};
 		C5B3349F6C5CE5C0FE6113FE = {
@@ -437,6 +475,16 @@
 			buildActionMask = 2147483647;
 			files = (
 				7DCDAA29B2717548B36D8992 /* Assets.xcassets in Resources */,
+				E22CEAF80D685C7F0764CCE9 /* FujiCaptureHardware.swift in Sources */,
+				3D133A052888DF63B17DB970 /* FujiCaptureLibrary.swift in Sources */,
+				1BB76F31C8EBD2DE0E8B6430 /* FujiFrameSampler.swift in Sources */,
+				2A3125B2135FA34B9054451E /* FujiImageProcessor.swift in Sources */,
+				D8217DC766797E980F6F9AED /* FujiQuickMenuView.swift in Sources */,
+				EA34D5908603473AE955AFDE /* FujiRAWLibraryView.swift in Sources */,
+				D97DC1B3E968906ACF324B7E /* FujiShootingController.swift in Sources */,
+				9E15182543F76F2F699F6045 /* FujiShootingSettings.swift in Sources */,
+				87F366B0A614D62A51C8E6CB /* FujiShootingTests.swift in Sources */,
+				9A8B24849CC58E0C3AB441A0 /* FujiViewfinderOverlay.swift in Sources */,
 				2700E6F80817004C1415242D /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
