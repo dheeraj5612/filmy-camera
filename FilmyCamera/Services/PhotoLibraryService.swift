@@ -336,6 +336,16 @@ enum PhotoLibraryCachePath {
 
 @MainActor
 final class PhotoLibraryService: ObservableObject {
+    /// Immutable registration ownership; NotificationCenter removal is thread-safe.
+    /// Keep non-Sendable Objective-C token access out of the service's actor-isolated lifetime.
+    private final class MemoryWarningObservation: @unchecked Sendable {
+        private let token: NSObjectProtocol
+
+        init(token: NSObjectProtocol) { self.token = token }
+
+        deinit { NotificationCenter.default.removeObserver(token) }
+    }
+
     private final class IdentifierBox: @unchecked Sendable {
         private let lock = NSLock()
         private var value: String?
@@ -375,12 +385,14 @@ final class PhotoLibraryService: ObservableObject {
         private var fallbackImage: UIImage?
         private var didFinish = false
         private var didProduceCacheableImage = false
+        private var timeout: DispatchWorkItem?
 
         init(imageManager: PHImageManager) {
             self.imageManager = imageManager
         }
 
-        func install(_ continuation: CheckedContinuation<UIImage?, Never>) {
+        @discardableResult
+        func install(_ continuation: CheckedContinuation<UIImage?, Never>) -> Bool {
             lock.lock()
             let shouldFinish = didFinish
             if !shouldFinish {
@@ -391,6 +403,7 @@ final class PhotoLibraryService: ObservableObject {
             if shouldFinish {
                 continuation.resume(returning: nil)
             }
+            return !shouldFinish
         }
 
         func install(requestID: PHImageRequestID) {
@@ -404,6 +417,26 @@ final class PhotoLibraryService: ObservableObject {
             if shouldCancel {
                 imageManager.cancelImageRequest(requestID)
             }
+        }
+
+        /// A degraded-only or stalled iCloud request must not retain a suspended
+        /// task forever. A timeout may display a preview but never cache it as final.
+        func startTimeout(after interval: TimeInterval = 30) {
+            let seconds = interval.isFinite ? min(max(interval, 0), 120) : 30
+            let work = DispatchWorkItem { [weak self] in self?.expire() }
+            lock.lock()
+            guard !didFinish else {
+                lock.unlock()
+                return
+            }
+            timeout?.cancel()
+            timeout = work
+            lock.unlock()
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + seconds, execute: work)
+        }
+
+        func expire() {
+            finish(with: nil, cancelRequest: true, allowFallback: true)
         }
 
         func rememberFallback(_ image: UIImage?) {
@@ -435,7 +468,10 @@ final class PhotoLibraryService: ObservableObject {
             self.continuation = nil
             let requestID = self.requestID
             self.requestID = nil
+            let timeout = self.timeout
+            self.timeout = nil
             lock.unlock()
+            timeout?.cancel()
 
             if cancelRequest, let requestID {
                 imageManager.cancelImageRequest(requestID)
@@ -481,6 +517,7 @@ final class PhotoLibraryService: ObservableObject {
     private let isUITesting: Bool
     private let thumbnailCache = NSCache<NSString, UIImage>()
     private var thumbnailCacheGeneration: UInt64 = 0
+    private var memoryWarningObserver: MemoryWarningObservation?
     private var savedFrameResourcesCache: [String: SavedFrameResource]?
     private var savedAssetIdentifiersCache: [String]?
     private var ownedAssetIdentifierSet = Set<String>()
@@ -511,6 +548,13 @@ final class PhotoLibraryService: ObservableObject {
             // applied here, after which the Roll thumbnail refreshes.
             scheduleCacheMaintenance(includingLaunchPasses: true)
         }
+        let observer = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            // UIKit posts this notification on the main thread.
+            MainActor.assumeIsolated { self?.invalidateThumbnailCache() }
+        }
+        memoryWarningObserver = MemoryWarningObservation(token: observer)
     }
 
     private struct CacheMaintenanceInput: Sendable {
@@ -535,26 +579,33 @@ final class PhotoLibraryService: ObservableObject {
     /// Runs migration, reconciliation, budget trimming, and share-file pruning
     /// on a background executor, then applies the result on the main actor.
     private func scheduleCacheMaintenance(includingLaunchPasses: Bool) {
-        let input = CacheMaintenanceInput(
-            legacyDirectoryURL: legacyLocalFramesDirectoryURL,
-            directoryURL: localFramesDirectoryURL,
-            shareDirectoryURL: temporaryShareDirectoryURL,
-            savedAssetIdentifiers: savedAssetIdentifiers,
-            resources: savedFrameResources,
-            maxBytes: localCacheMaxBytes,
-            includingLaunchPasses: includingLaunchPasses
-        )
         let previous = cacheMaintenanceTask
         cacheMaintenanceTask = Task(priority: .utility) { [weak self] in
-            // Passes touch the same directory; keep them strictly sequential.
+            // Snapshot only when this pass can run. A queued pass must not
+            // reconcile a resource index captured before a newer save/clear.
             await previous?.value
+            guard let self, !Task.isCancelled else { return }
+            let generation = self.cacheWriteGeneration
+            let input = CacheMaintenanceInput(
+                legacyDirectoryURL: self.legacyLocalFramesDirectoryURL,
+                directoryURL: self.localFramesDirectoryURL,
+                shareDirectoryURL: self.temporaryShareDirectoryURL,
+                savedAssetIdentifiers: self.savedAssetIdentifiers,
+                resources: self.savedFrameResources,
+                maxBytes: self.localCacheMaxBytes,
+                includingLaunchPasses: includingLaunchPasses
+            )
             let result = await Task.detached(priority: .utility) {
                 Self.runCacheMaintenance(input)
             }.value
-            guard let self else { return }
+            guard self.cacheWriteGeneration == generation else { return }
             if !result.removedIdentifiers.isEmpty {
                 var resources = self.savedFrameResources
                 for identifier in result.removedIdentifiers {
+                    guard CacheMaintenancePolicy.canRemove(
+                        currentFilename: resources[identifier]?.filename,
+                        inspectedFilename: input.resources[identifier]?.filename
+                    ) else { continue }
                     resources.removeValue(forKey: identifier)
                 }
                 self.savedFrameResources = resources
@@ -1325,20 +1376,28 @@ final class PhotoLibraryService: ObservableObject {
                 removed.insert(identifier)
                 continue
             }
-            let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
-            let byteCount = (attributes?[.size] as? NSNumber)?.intValue ?? 0
+            let attributes: [FileAttributeKey: Any]
+            do {
+                attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+            } catch {
+                if CacheMaintenancePolicy.confirmsMissingFile(error) { removed.insert(identifier) }
+                // Protected-data, permission, and transient I/O errors are not
+                // deletion. Preserve the mapping and retry on a later pass.
+                continue
+            }
+            let byteCount = (attributes[.size] as? NSNumber)?.intValue ?? 0
             guard byteCount > 0 else {
                 removed.insert(identifier)
                 continue
             }
 
-            if totalBytes + byteCount > maxBytes {
+            if byteCount > max(0, maxBytes - totalBytes) {
                 do {
                     try FileManager.default.removeItem(at: url)
                     removed.insert(identifier)
                 } catch {
                     // Keep the mapping so a later pass can retry the eviction.
-                    totalBytes += byteCount
+                    totalBytes = maxBytes
                 }
             } else {
                 protectLocalResource(at: url)
@@ -1565,6 +1624,7 @@ final class PhotoLibraryService: ObservableObject {
         targetSize: CGSize,
         contentMode: PHImageContentMode = .aspectFill
     ) async -> UIImage? {
+        guard !Task.isCancelled, ImageSizePolicy.isFinitePositive(targetSize) else { return nil }
         switch asset {
         case .photos(let photoAsset):
             return await image(
@@ -1590,17 +1650,27 @@ final class PhotoLibraryService: ObservableObject {
                 return cached
             }
             let cacheGeneration = thumbnailCacheGeneration
-            let loaded = await Task.detached(priority: .utility) {
-                CachedThumbnail(
-                    image: Self.cachedImage(at: resourceURL, targetSize: targetSize)
-                )
-            }.value.image
-            guard !Task.isCancelled else { return loaded }
-            if cacheGeneration == thumbnailCacheGeneration {
-                storeThumbnail(loaded, forKey: nsCacheKey)
+            let result = await ImageDecodeQueue.shared.value {
+                CachedThumbnail(image: Self.cachedImage(at: resourceURL, targetSize: targetSize))
             }
+            guard !Task.isCancelled,
+                  cacheGeneration == thumbnailCacheGeneration,
+                  ownsAsset(frame.assetIdentifier),
+                  savedFrameResources[frame.assetIdentifier] == resource else { return nil }
+            let loaded = result?.image
+            storeThumbnail(loaded, forKey: nsCacheKey)
             return loaded
         }
+    }
+
+    private func canReadImageNow(for asset: PHAsset) -> Bool {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard PhotoLibraryAuthorizationPolicy.canRead(status) else { return false }
+        // A user's limited selection can change while status stays .limited.
+        // Do not let a cached thumbnail bypass removal from that selection.
+        return status != .limited || PHAsset.fetchAssets(
+            withLocalIdentifiers: [asset.localIdentifier], options: nil
+        ).count > 0
     }
 
     func image(
@@ -1608,6 +1678,11 @@ final class PhotoLibraryService: ObservableObject {
         targetSize: CGSize,
         contentMode: PHImageContentMode = .aspectFill
     ) async -> UIImage? {
+        guard !Task.isCancelled, ImageSizePolicy.isFinitePositive(targetSize),
+              canReadImageNow(for: asset) else {
+            return nil
+        }
+        refreshAuthorizationStatuses()
         let revision = "\(asset.pixelWidth)x\(asset.pixelHeight)|\(asset.modificationDate?.timeIntervalSinceReferenceDate ?? -1)"
         let cacheKey = PhotoLibraryThumbnailCachePolicy.key(
             assetIdentifier: asset.localIdentifier,
@@ -1627,19 +1702,17 @@ final class PhotoLibraryService: ObservableObject {
 
         let loaded = await withTaskCancellationHandler(operation: {
             await withCheckedContinuation { continuation in
-                state.install(continuation)
+                guard state.install(continuation) else { return }
+                state.startTimeout()
                 let options = PHImageRequestOptions()
                 options.deliveryMode = .opportunistic
                 options.resizeMode = .fast
                 options.isNetworkAccessAllowed = true
                 options.isSynchronous = false
 
-                let requestID = imageManager.requestImage(
-                    for: asset,
-                    targetSize: targetSize,
-                    contentMode: contentMode,
-                    options: options
-                ) { image, info in
+                // PhotoKit may call back off-main. Explicit @Sendable keeps
+                // this closure from inheriting the caller's main-actor isolation.
+                let resultHandler: @Sendable (UIImage?, [AnyHashable: Any]?) -> Void = { image, info in
                     let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
                     let isCancelled = (info?[PHImageCancelledKey] as? Bool) ?? false
                     let hasError = info?[PHImageErrorKey] != nil
@@ -1658,14 +1731,21 @@ final class PhotoLibraryService: ObservableObject {
                         cacheable: !isDegraded && !isCancelled && !hasError && image != nil
                     )
                 }
+                let requestID = imageManager.requestImage(
+                    for: asset, targetSize: targetSize, contentMode: contentMode,
+                    options: options, resultHandler: resultHandler
+                )
                 state.install(requestID: requestID)
             }
         }, onCancel: {
             state.cancel()
         })
-        if !Task.isCancelled,
-           cacheGeneration == thumbnailCacheGeneration,
-           state.canCacheResult() {
+        guard !Task.isCancelled,
+              cacheGeneration == thumbnailCacheGeneration,
+              canReadImageNow(for: asset) else {
+            return nil
+        }
+        if state.canCacheResult() {
             storeThumbnail(loaded, forKey: nsCacheKey)
         }
         return loaded
@@ -1678,8 +1758,6 @@ final class PhotoLibraryService: ObservableObject {
         guard let image, let key else {
             return
         }
-        let width = max(Int((image.size.width * image.scale).rounded(.up)), 1)
-        let height = max(Int((image.size.height * image.scale).rounded(.up)), 1)
         let byteCount: Int64
         if let cgImage = image.cgImage {
             let result = Int64(cgImage.bytesPerRow).multipliedReportingOverflow(
@@ -1688,6 +1766,10 @@ final class PhotoLibraryService: ObservableObject {
             guard !result.overflow, result.partialValue > 0 else { return }
             byteCount = result.partialValue
         } else {
+            let size = CGSize(width: image.size.width * image.scale, height: image.size.height * image.scale)
+            guard ImageSizePolicy.isFinitePositive(size), size.width <= 8_192, size.height <= 8_192 else { return }
+            let width = Int(size.width.rounded(.up))
+            let height = Int(size.height.rounded(.up))
             let rowBytes = Int64(width).multipliedReportingOverflow(by: 4)
             guard !rowBytes.overflow else { return }
             let result = rowBytes.partialValue.multipliedReportingOverflow(by: Int64(height))

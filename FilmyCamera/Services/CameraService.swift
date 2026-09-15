@@ -418,6 +418,9 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private var pendingPhotoCapturedAt: Date?
     private var pendingPhotoLocation: CLLocation?
     private var pendingPhotoUniqueID: Int64?
+    // Session-queue confined; tokens reject a cancelled timer already dequeued.
+    private var pendingCaptureTimeout: DispatchWorkItem?
+    private var pendingCaptureTimeoutToken: UUID?
     private var configuredPhotoDimensions = CMVideoDimensions(width: 0, height: 0)
     private var focusExposureLocked = false
     private var latestFocusPointUpdateUptime: UInt64 = 0
@@ -545,6 +548,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         let session = session
         var pendingCompletion: PhotoCompletion?
         let stopSession = { [self] in
+            self.cancelCaptureTimeoutOnQueue()
             if session.isRunning {
                 session.stopRunning()
             }
@@ -593,12 +597,13 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// Quick trips to the Roll, Settings, or the review sheet return to a live
     /// viewfinder instantly; longer absences still release the camera.
     public func stop(after delay: TimeInterval) {
+        let boundedDelay = delay.isFinite ? min(max(delay, 0), 60) : 0
         Task { @MainActor [weak self] in self?.captureLocationProvider.setActive(false) }
         sessionQueue.async { [weak self] in
             guard let self else { return }
             self.deferredStopGeneration &+= 1
             let generation = self.deferredStopGeneration
-            self.sessionQueue.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self.sessionQueue.asyncAfter(deadline: .now() + boundedDelay) { [weak self] in
                 guard let self,
                       self.deferredStopGeneration == generation,
                       self.wantsToRun else { return }
@@ -2112,12 +2117,14 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         pendingManualControlsPhotoCompletion = nil
         let location = pendingManualControlsPhotoLocation
         pendingManualControlsPhotoLocation = nil
+        cancelCaptureTimeoutOnQueue()
         capturePhotoOnQueue(location: location, completion: completion)
     }
 
     private func failDeferredPhotoForManualControlsOnQueue() {
         guard let completion = pendingManualControlsPhotoCompletion else { return }
         pendingManualControlsPhotoCompletion = nil
+        cancelCaptureTimeoutOnQueue()
         publishPhoto(nil, completion: completion)
     }
 
@@ -2390,6 +2397,10 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func resetSessionGraphOnQueue(pendingCaptureStatus: String) {
+        manualDeviceGeneration &+= 1
+        isApplyingManualExposure = false
+        isApplyingManualWhiteBalance = false
+        isApplyingManualFocus = false
         cancelPendingPhotoOnQueue(status: pendingCaptureStatus)
         resetLensSmudgeObservationOnQueue()
         activeConstituentObservation?.invalidate()
@@ -3740,6 +3751,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             }
             pendingManualControlsPhotoCompletion = completion
             pendingManualControlsPhotoLocation = location
+            armCaptureTimeoutOnQueue(after: 15)
             publishStatus("Applying camera controls…")
             return
         }
@@ -3783,7 +3795,36 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         pendingPhotoLocation = location
         pendingPhotoUniqueID = settings.uniqueID
         pendingPhotoFlashFallback = requestedFlashMode != .off && effectiveFlashMode == .off
+        armCaptureTimeoutOnQueue(after: Self.captureTimeout(exposureSeconds: device.exposureDuration.seconds))
         photoOutput.capturePhoto(with: settings, delegate: self)
+    }
+
+    /// Leave headroom for long exposures and computational processing without
+    /// permitting a missing delegate callback to disable the shutter forever.
+    static func captureTimeout(exposureSeconds: TimeInterval) -> TimeInterval {
+        guard exposureSeconds.isFinite, exposureSeconds >= 0 else { return 30 }
+        return min(120, max(30, exposureSeconds * 2 + 15))
+    }
+
+    private func armCaptureTimeoutOnQueue(after seconds: TimeInterval) {
+        cancelCaptureTimeoutOnQueue()
+        let token = UUID()
+        pendingCaptureTimeoutToken = token
+        let timeout = DispatchWorkItem { [weak self] in
+            guard let self, self.pendingCaptureTimeoutToken == token,
+                  self.pendingPhotoCompletion != nil || self.pendingManualControlsPhotoCompletion != nil else { return }
+            // Reuse the existing bounded recovery path. Never retry a shutter
+            // request automatically: that could create an unintended duplicate.
+            self.resetSessionGraphOnQueue(pendingCaptureStatus: "Capture timed out. Reopening the camera.")
+        }
+        pendingCaptureTimeout = timeout
+        sessionQueue.asyncAfter(deadline: .now() + seconds, execute: timeout)
+    }
+
+    private func cancelCaptureTimeoutOnQueue() {
+        pendingCaptureTimeoutToken = nil
+        pendingCaptureTimeout?.cancel()
+        pendingCaptureTimeout = nil
     }
 
     private func finishPhotoOnQueue(_ photo: CapturedPhoto?, uniqueID: Int64) {
@@ -3797,6 +3838,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             return
         }
 
+        cancelCaptureTimeoutOnQueue()
         let completion = pendingPhotoCompletion
         let flashFallback = pendingPhotoFlashFallback
         pendingPhotoCompletion = nil
@@ -3817,6 +3859,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func cancelPendingPhotoOnQueue(status: String) {
+        cancelCaptureTimeoutOnQueue()
         let completion = pendingPhotoCompletion ?? pendingManualControlsPhotoCompletion
         guard let completion else { return }
         pendingPhotoCompletion = nil

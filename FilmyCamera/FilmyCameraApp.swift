@@ -4,6 +4,11 @@ import UIKit
 /// Keep UIKit presentations aligned with the camera's device-specific
 /// orientation contract, including sharing and photo selection.
 final class FilmyAppDelegate: NSObject, UIApplicationDelegate {
+    func applicationDidReceiveMemoryWarning(_ application: UIApplication) {
+        FilmRenderer.purgeTransientCaches()
+        Task { await RecipeSwatchRenderer.shared.purgeCache() }
+    }
+
     func application(
         _ application: UIApplication,
         supportedInterfaceOrientationsFor window: UIWindow?

@@ -981,6 +981,10 @@ actor RecipeSwatchRenderer {
         return CIImage(cgImage: small)
     }()
 
+    func purgeCache() {
+        sampleCache.removeAllObjects()
+    }
+
     func render(recipe: FilmRecipe) -> UIImage? {
         guard !Task.isCancelled else { return nil }
         return autoreleasepool {

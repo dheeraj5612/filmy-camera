@@ -2,6 +2,7 @@ import CoreGraphics
 import CoreImage
 import CryptoKit
 import Foundation
+import ImageIO
 import Metal
 import MetalKit
 import UIKit
@@ -150,6 +151,8 @@ public final class FilmRenderer {
             storage.totalCostLimit = 28 * 1024 * 1024
         }
 
+        func removeAll() { storage.removeAllObjects() }
+
         func data(for key: CubeCacheKey, make: () -> NSData) -> NSData {
             let wrappedKey = Key(key)
             if let cached = storage.object(forKey: wrappedKey) {
@@ -200,6 +203,8 @@ public final class FilmRenderer {
             storage.countLimit = 48
             storage.totalCostLimit = 12 * 1024 * 1024
         }
+
+        func removeAll() { storage.removeAllObjects() }
 
         func image(for key: ThumbnailCacheKey) -> UIImage? {
             storage.object(forKey: Key(key))
@@ -335,6 +340,22 @@ public final class FilmRenderer {
 
     private init() {}
 
+    /// Discard reproducible GPU/CPU caches, never saved photos or recipe state.
+    /// CIContext and NSCache support concurrent callers; active graphs retain
+    /// their immutable cube data independently of cache ownership.
+    static func purgeTransientCaches() {
+        cubeCache.removeAll()
+        thumbnailCache.removeAll()
+        sharedContext.clearCaches()
+    }
+
+    static func boundedThumbnailSize(_ size: CGSize) -> CGSize? {
+        guard ImageSizePolicy.isFinitePositive(size) else { return nil }
+        // Keep the historical rounding/cache identity for ordinary swatches.
+        let rounded = CGSize(width: max(size.width.rounded(), 1), height: max(size.height.rounded(), 1))
+        return ImageSizePolicy.boundedSize(rounded, maximumPixels: 1_048_576, maximumDimension: 1_024)
+    }
+
     /// Builds a tiny deterministic reference scene for recipe selection UI.
     /// It is deliberately synthetic rather than a bundled photograph, so the
     /// picker previews the real renderer without introducing an unlicensed
@@ -343,8 +364,9 @@ public final class FilmRenderer {
         for recipe: FilmRecipe,
         size: CGSize = CGSize(width: 264, height: 160)
     ) -> UIImage? {
-        let width = max(size.width.rounded(), 1)
-        let height = max(size.height.rounded(), 1)
+        guard let size = boundedThumbnailSize(size) else { return nil }
+        let width = size.width
+        let height = size.height
         let cacheKey = ThumbnailCacheKey(
             recipe: recipe,
             width: Int(width),
@@ -378,6 +400,7 @@ public final class FilmRenderer {
         for recipe: FilmRecipe,
         size: CGSize
     ) -> String? {
+        guard let size = boundedThumbnailSize(size) else { return nil }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         guard let recipeData = try? encoder.encode(recipe) else { return nil }
@@ -395,9 +418,12 @@ public final class FilmRenderer {
     /// snapshot, at that scene's size. Not cached: callers debounce.
     public static func previewThumbnail(for recipe: FilmRecipe, over scene: CIImage) -> UIImage? {
         let extent = scene.extent
-        guard extent.width >= 1, extent.height >= 1 else { return nil }
-        let rendered = render(scene, recipe: recipe, quality: .preview)
-        guard let image = outputCGImage(rendered, from: extent) else { return nil }
+        guard extent.origin.x.isFinite, extent.origin.y.isFinite,
+              let size = boundedThumbnailSize(extent.size) else { return nil }
+        let target = CGRect(origin: .zero, size: size)
+        let bounded = CameraFrameLayout.aspectFill(scene, in: target)
+        let rendered = render(bounded, recipe: recipe, quality: .preview)
+        guard let image = outputCGImage(rendered, from: target) else { return nil }
         return UIImage(cgImage: image)
     }
 
@@ -490,26 +516,9 @@ public final class FilmRenderer {
         /// The directory itself is capped by count, oldest first, so slider
         /// drafts that pause long enough to persist cannot grow it unbounded.
         private static let entryLimit = 240
-        private static let pruneCounter = PruneCounter(every: 40)
-
-        private final class PruneCounter: @unchecked Sendable {
-            private let lock = NSLock()
-            private let interval: Int
-            private var count = 0
-
-            init(every interval: Int) {
-                self.interval = interval
-            }
-
-            func recordStore() -> Bool {
-                lock.lock()
-                defer { lock.unlock() }
-                count += 1
-                guard count >= interval else { return false }
-                count = 0
-                return true
-            }
-        }
+        private static let byteLimit = 32 * 1024 * 1024
+        private static let maximumEntryBytes = 5 * 1024 * 1024
+        private static let mutationLock = NSLock()
 
         private static let directoryURL: URL? = {
             guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
@@ -530,22 +539,24 @@ public final class FilmRenderer {
         }()
 
         private static func prune(in directory: URL) {
-            let fileManager = FileManager.default
-            guard let files = try? fileManager.contentsOfDirectory(
-                at: directory,
-                includingPropertiesForKeys: [.contentModificationDateKey],
-                options: .skipsHiddenFiles
-            ), files.count > entryLimit else {
-                return
-            }
-            let dated = files.map { url -> (URL, Date) in
-                let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
-                    .contentModificationDate ?? .distantPast
-                return (url, date)
-            }
-            .sorted { $0.1 < $1.1 }
-            for (url, _) in dated.prefix(files.count - entryLimit) {
-                try? fileManager.removeItem(at: url)
+            let manager = FileManager.default
+            let keys: Set<URLResourceKey> = [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey]
+            guard let files = try? manager.contentsOfDirectory(
+                at: directory, includingPropertiesForKeys: Array(keys), options: .skipsHiddenFiles
+            ) else { return }
+            let entries = files.compactMap { url -> (URL, Date, Int)? in
+                guard let values = try? url.resourceValues(forKeys: keys), values.isRegularFile == true else { return nil }
+                return (url, values.contentModificationDate ?? .distantPast, max(values.fileSize ?? 0, 0))
+            }.sorted { $0.1 > $1.1 }
+            var bytes = 0
+            var count = 0
+            for (url, _, size) in entries {
+                if count >= entryLimit || size > byteLimit - bytes {
+                    try? manager.removeItem(at: url)
+                } else {
+                    bytes += size
+                    count += 1
+                }
             }
         }
 
@@ -562,21 +573,34 @@ public final class FilmRenderer {
 
         static func image(for key: ThumbnailCacheKey) -> UIImage? {
             guard let url = fileURL(for: key),
-                  let data = try? Data(contentsOf: url) else {
-                return nil
-            }
-            return UIImage(data: data)
+                  let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey]),
+                  values.isRegularFile == true, values.isSymbolicLink != true,
+                  let bytes = values.fileSize, bytes > 0, bytes <= maximumEntryBytes,
+                  let source = CGImageSourceCreateWithURL(
+                    url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary
+                  ),
+                  let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any],
+                  (properties[kCGImagePropertyPixelWidth as String] as? NSNumber)?.intValue == key.width,
+                  (properties[kCGImagePropertyPixelHeight as String] as? NSNumber)?.intValue == key.height,
+                  let image = CGImageSourceCreateImageAtIndex(
+                    source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary
+                  ) else { return nil }
+            return UIImage(cgImage: image)
         }
 
         static func store(_ image: UIImage, for key: ThumbnailCacheKey) {
-            guard let url = fileURL(for: key),
-                  let directoryURL,
-                  let data = image.pngData() else {
-                return
-            }
-            try? data.write(to: url, options: .atomic)
-            if pruneCounter.recordStore() {
+            guard let url = fileURL(for: key), let directoryURL,
+                  let data = image.pngData(), data.count <= maximumEntryBytes else { return }
+            // Cache directories may be purged by iOS after static initialization.
+            // Serialize only mutations; cache hits and film rendering remain parallel.
+            mutationLock.lock()
+            defer { mutationLock.unlock() }
+            do {
+                try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+                try data.write(to: url, options: .atomic)
                 prune(in: directoryURL)
+            } catch {
+                // A cache miss must never make the live renderer fail.
             }
         }
     }
@@ -588,10 +612,12 @@ public final class FilmRenderer {
         _ image: CIImage,
         from extent: CGRect? = nil
     ) -> CGImage? {
-        guard let sRGBColorSpace else { return nil }
+        let bounds = extent ?? image.extent
+        guard let sRGBColorSpace, ImageSizePolicy.isFinitePositive(bounds.size),
+              bounds.origin.x.isFinite, bounds.origin.y.isFinite else { return nil }
         return sharedContext.createCGImage(
             image,
-            from: extent ?? image.extent,
+            from: bounds,
             format: .RGBA8,
             colorSpace: sRGBColorSpace
         )
