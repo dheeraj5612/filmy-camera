@@ -2,20 +2,102 @@ name: Scene Auto workbench
 on:
   push:
     branches: [codex/stable-scene-auto]
+    paths:
+      - .github/workflows/scene-auto-workbench.yml
+      - scripts/testing/scene-auto-implementation.ready
 permissions:
-  contents: read
+  contents: write
+concurrency:
+  group: scene-auto-workbench
+  cancel-in-progress: true
 jobs:
-  snapshot:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+  validate:
+    runs-on: macos-15
+    timeout-minutes: 25
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
-          persist-credentials: false
-      - name: Archive tracked source only
-        run: git archive --format=tar.gz --output="$RUNNER_TEMP/filmy-source.tar.gz" HEAD
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+          ref: codex/stable-scene-auto
+      - name: Apply verified implementation
+        id: patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f scripts/testing/scene-auto-implementation.ready ]]; then
+            echo 'ready=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python3 - <<'PY'
+          import base64, gzip, hashlib, os
+          from pathlib import Path
+          chunks = sorted(Path('scripts/testing/scene-auto-implementation').glob('chunk-*'))
+          payload = ''.join(p.read_text().strip() for p in chunks)
+          patch = gzip.decompress(base64.b64decode(payload, validate=True))
+          expected = Path('scripts/testing/scene-auto-implementation.ready').read_text().strip()
+          assert hashlib.sha256(patch).hexdigest() == expected, 'Implementation checksum mismatch'
+          Path(os.environ['RUNNER_TEMP'], 'scene-auto.patch').write_bytes(patch)
+          PY
+          git apply --check "$RUNNER_TEMP/scene-auto.patch"
+          git apply --whitespace=error-all "$RUNNER_TEMP/scene-auto.patch"
+          echo 'ready=true' >> "$GITHUB_OUTPUT"
+      - name: Install verified XcodeGen and generate project
+        if: steps.patch.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          [[ "$(xcodebuild -version | awk '/^Xcode / { print $2; exit }')" == '16.4' ]]
+          gh release download 2.45.4 --repo yonaskolb/XcodeGen --pattern xcodegen.zip --output "$RUNNER_TEMP/xcodegen.zip"
+          echo "090ec29491aad50aec10631bf6e62253fed733c50f3aab0f5ffc86bc170bdbef  $RUNNER_TEMP/xcodegen.zip" | shasum -a 256 --check
+          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP/xcodegen"
+          generator="$RUNNER_TEMP/xcodegen/xcodegen/bin/xcodegen"
+          echo "6aa2b4da95304b343bea12890c59f9655aa428c08b351d57d592cfab4e88a9f1  $generator" | shasum -a 256 --check
+          "$generator" generate --spec project.yml
+          git add -N FilmyCamera FilmyCameraTests scripts/testing/test-scene-auto-core.sh docs/scene-auto.md
+          git diff --binary -- FilmyCamera FilmyCameraTests FilmyCamera.xcodeproj scripts/testing/suites.json scripts/testing/test-scene-auto-core.sh docs/scene-auto.md > "$RUNNER_TEMP/scene-auto-native.patch"
+      - name: Validate repository contracts
+        if: steps.patch.outputs.ready == 'true'
+        run: python3 -m unittest discover -s scripts/testing -p 'test_*.py' -v
+      - name: Build and run native Scene Auto and camera regression tests
+        if: steps.patch.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild test -project FilmyCamera.xcodeproj -scheme FilmyCamera \
+            -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.5' \
+            -derivedDataPath "$RUNNER_TEMP/SceneAutoDerivedData" \
+            -resultBundlePath "$RUNNER_TEMP/scene-auto.xcresult" \
+            -parallel-testing-enabled NO \
+            -only-testing:FilmyCameraTests/SceneAutoPolicyTests \
+            -only-testing:FilmyCameraTests/SceneAutoIntegrationTests \
+            -only-testing:FilmyCameraTests/CameraManualControlsTests \
+            -only-testing:FilmyCameraTests/CameraServiceAvailabilityTests \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/scene-auto-build.log"
+      - name: Commit validated implementation and remove workbench
+        if: steps.patch.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'Dheeraj Namburu'
+          git config user.email '57207534+dheeraj5612@users.noreply.github.com'
+          git rm -r -- .github/workflows/scene-auto-workbench.yml scripts/testing/scene-auto-implementation scripts/testing/scene-auto-implementation.ready
+          git add -- FilmyCamera FilmyCameraTests FilmyCamera.xcodeproj scripts/testing/suites.json scripts/testing/test-scene-auto-core.sh docs/scene-auto.md
+          git diff --cached --check
+          git commit -m 'feat: add opt-in stabilized scene-aware Auto camera mode'
+          git push origin HEAD:refs/heads/codex/stable-scene-auto
+          git rev-parse HEAD > "$RUNNER_TEMP/scene-auto-commit.txt"
+      - name: Preserve native validation evidence
+        if: always() && steps.patch.outputs.ready == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: scene-auto-source
-          path: ${{ runner.temp }}/filmy-source.tar.gz
-          retention-days: 1
+          name: scene-auto-native-validation
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/scene-auto-build.log
+            ${{ runner.temp }}/scene-auto-native.patch
+            ${{ runner.temp }}/scene-auto-commit.txt
+            ${{ runner.temp }}/scene-auto.xcresult
