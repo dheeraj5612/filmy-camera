@@ -40,40 +40,33 @@ jobs:
           ''')
           text = replace_once(text, 'private var memoryWarningObserver: NSObjectProtocol?', 'private var memoryWarningObserver: MemoryWarningObservation?')
           text = replace_once(text, 'memoryWarningObserver = NotificationCenter.default.addObserver(', 'let observer = NotificationCenter.default.addObserver(')
-          before = '''                  MainActor.assumeIsolated { self?.invalidateThumbnailCache() }
-                  }
-              }
-
-              deinit {
-                  if let memoryWarningObserver {
-                      NotificationCenter.default.removeObserver(memoryWarningObserver)
-                  }
-              }
-          '''
-          after = '''                  MainActor.assumeIsolated { self?.invalidateThumbnailCache() }
-                  }
-                  memoryWarningObserver = MemoryWarningObservation(token: observer)
-              }
-          '''
+          before = '\n'.join([
+              '            MainActor.assumeIsolated { self?.invalidateThumbnailCache() }',
+              '        }', '    }', '', '    deinit {', '        if let memoryWarningObserver {',
+              '            NotificationCenter.default.removeObserver(memoryWarningObserver)',
+              '        }', '    }', ''
+          ])
+          after = '\n'.join([
+              '            MainActor.assumeIsolated { self?.invalidateThumbnailCache() }',
+              '        }', '        memoryWarningObserver = MemoryWarningObservation(token: observer)', '    }', ''
+          ])
           text = replace_once(text, before, after)
           path.write_text(text)
           path = Path('FilmyCamera/Views/FilteredCameraPreview.swift')
           text = path.read_text()
-          before = '''            if Thread.isMainThread {
-                          MainActor.assumeIsolated { [weak self] in
-                              self?.previewView?.display(image: image)
-                          }
-                      } else {
-                          let imageBox = CIImageBox(image)
-          '''
-          after = '''            // Xcode 16.4 does not yet mark immutable CIImage as Sendable.
-                      let imageBox = CIImageBox(image)
-                      if Thread.isMainThread {
-                          MainActor.assumeIsolated { [weak self] in
-                              self?.previewView?.display(image: imageBox.image)
-                          }
-                      } else {
-          '''
+          before = '\n'.join([
+              '            if Thread.isMainThread {',
+              '                MainActor.assumeIsolated { [weak self] in',
+              '                    self?.previewView?.display(image: image)',
+              '                }', '            } else {', '                let imageBox = CIImageBox(image)', ''
+          ])
+          after = '\n'.join([
+              '            // Xcode 16.4 does not yet mark immutable CIImage as Sendable.',
+              '            let imageBox = CIImageBox(image)', '            if Thread.isMainThread {',
+              '                MainActor.assumeIsolated { [weak self] in',
+              '                    self?.previewView?.display(image: imageBox.image)',
+              '                }', '            } else {', ''
+          ])
           path.write_text(replace_once(text, before, after))
           path = Path('docs/hardening/runtime-performance-2026-09-14.md')
           path.write_text(replace_once(path.read_text(), 'Per-frame autorelease scope and no extra box on the normal main-thread delivery path.', 'Per-frame autorelease scope; retain the immutable CIImage sendability bridge required by the Xcode 16.4 compatibility lane.'))
