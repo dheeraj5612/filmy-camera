@@ -158,6 +158,7 @@ final class CameraViewModel: ObservableObject {
         var isFullResolution = true
         var flashFired = false
         var normalizedSubjectRegions: [CGRect]? = nil
+        var documentID: UUID? = nil
     }
 
     struct ReviewPreview: @unchecked Sendable {
@@ -509,11 +510,28 @@ final class CameraViewModel: ObservableObject {
         defaults.set(data, forKey: Self.recipeOverridesKey)
     }
 
+    private var reviewDocumentID: UUID?
+    private var pendingOriginalRetention: CapturedWork?
+
+    private struct CapturedWork: Sendable {
+        let photo: CameraService.CapturedPhoto
+        let recipe: FilmRecipe
+        let finish: PhotoFinish
+        let viewport: CGSize
+        let drawable: CGSize
+        let grainSeed: UInt32
+    }
+
     var isReviewingImport: Bool { reviewSource == .photoLibrary && reviewImage != nil }
     var hasPendingCapture: Bool { reviewSource == .camera && reviewImage != nil }
 
     func capture(camera: CameraService, photoLibrary: any PhotoSaving) {
         guard !isCapturing, !isImporting, !isSaving, reviewImage == nil else { return }
+        if let pendingOriginalRetention {
+            isCapturing = true
+            Task { await developCapture(pendingOriginalRetention, camera: camera, photoLibrary: photoLibrary) }
+            return
+        }
         isCapturing = true
         toastTask?.cancel()
         toastMessage = nil
@@ -521,6 +539,11 @@ final class CameraViewModel: ObservableObject {
         saveErrorRequiresSettings = false
         let recipe = selectedRecipe
         let finish = PhotoFinish(rawValue: defaults.string(forKey: "captureFinish") ?? "") ?? .photo
+        if camera.proCaptureSettings.livePhoto && finish != .photo {
+            isCapturing = false
+            showToast("Live Photos require Photo finish. Turn off Instant Print before capturing.", style: .error)
+            return
+        }
         let viewportSize = camera.previewViewportSize
         // Use the drawable the viewfinder really rendered into: its scale
         // comes from the window's screen (which can differ from the main
@@ -551,63 +574,94 @@ final class CameraViewModel: ObservableObject {
                     if camera.availability == .simulator {
                         self.showToast("Capture is available on a physical device", style: .info)
                     } else {
-                        self.showToast("Capture could not be completed. Resume the camera and try again.", style: .error)
+                        self.showToast(camera.statusMessage, style: .error)
                     }
                     return
                 }
 
-                // The camera stays live. Rendering and Photos IO must not
-                // stop the session or present a Retake/Save interstitial.
-                // Keep the Photos saver on the main actor; only the render
-                // inputs cross into the detached background task.
-                let renderedPhoto = await Task.detached(priority: .userInitiated) {
-                    autoreleasepool {
-                        Self.render(
-                            sourceData: capturedPhoto.fileData,
-                            recipe: recipe,
-                            viewportSize: viewportSize,
-                            previewDrawableSize: previewDrawableSize,
-                            capturedAt: capturedPhoto.capturedAt,
-                            flashFired: capturedPhoto.flashFired,
-                            grainSeed: grainSeed,
-                            finish: finish
-                        )
-                    }
-                }.value
+                await self.developCapture(
+                    CapturedWork(photo: capturedPhoto, recipe: recipe, finish: finish,
+                                 viewport: viewportSize, drawable: previewDrawableSize, grainSeed: grainSeed),
+                    camera: camera, photoLibrary: photoLibrary
+                )
+            }
+        }
+    }
 
-                guard let renderedPhoto else {
-                    // CameraScreen owns session lifecycle. Ending the capture
-                    // without a review lets its visibility-aware policy decide
-                    // whether the camera should resume.
-                    camera.setFrameDeliveryPaused(false)
-                    self.isCapturing = false
-                    self.showToast("The selected look could not be rendered. Try the capture again.", style: .error)
-                    return
-                }
+    private func developCapture(_ work: CapturedWork, camera: CameraService, photoLibrary: any PhotoSaving) async {
+        let recipe = work.recipe
+        let finish = work.finish
+        let grainSeed = work.grainSeed
+        let document: FilmyPhotoDocument
+        do {
+            document = try await FilmyPhotoStore.shared.create(
+                processed: work.photo.fileData, raw: work.photo.rawFileData,
+                liveMovieURL: work.photo.livePhotoMovieURL, capturedAt: work.photo.capturedAt,
+                geometry: .init(viewportWidth: work.viewport.width, viewportHeight: work.viewport.height,
+                                previewWidth: work.drawable.width, previewHeight: work.drawable.height,
+                                grainSeed: grainSeed, flashFired: work.photo.flashFired),
+                recipe: recipe, finish: finish, settings: work.photo.outputSettings
+            )
+            pendingOriginalRetention = nil
+            if let movie = work.photo.livePhotoMovieURL { CameraService.removeOwnedTemporaryMovie(movie) }
+        } catch {
+            // Keep the captured bytes and owned Live movie for an explicit
+            // retry. A disk failure must not silently throw away a RAW capture.
+            pendingOriginalRetention = work
+            isCapturing = false
+            showToast("Original not saved. Free storage, then tap the shutter to retry. Keep Filmy open.", style: .error)
+            return
+        }
+        let rendered = await Task.detached(priority: .userInitiated) {
+            autoreleasepool {
+                Self.render(
+                    sourceData: work.photo.fileData, recipe: recipe,
+                    viewportSize: work.viewport, previewDrawableSize: work.drawable,
+                    capturedAt: work.photo.capturedAt, flashFired: work.photo.flashFired,
+                    grainSeed: grainSeed, finish: finish, outputSettings: work.photo.outputSettings
+                )
+            }
+        }.value
+        guard var renderedPhoto = rendered, let firstRevision = document.currentRevision else {
+            isCapturing = false
+            showToast("Original retained in Filmy originals. Open it there to retry developing this look.", style: .error)
+            return
+        }
+        do {
+            try await FilmyPhotoStore.shared.addRevision(
+                document.id, expectedRevisionID: firstRevision.id, recipe: recipe, finish: finish,
+                settings: work.photo.outputSettings, renderedData: renderedPhoto.data
+            )
+        } catch {
+            isCapturing = false
+            showToast("Original retained. Filmy could not save the developed version; retry from Filmy originals.", style: .error)
+            return
+        }
+        renderedPhoto.documentID = document.id
 #if DEBUG
                 if FilmyCaptureDiagnostics.isEnabled() {
                     let metadata = FilmyCaptureDiagnostics.Metadata(
-                        capturedAt: capturedPhoto.capturedAt,
+                        capturedAt: work.photo.capturedAt,
                         sourceDimensions: .init(
-                            width: Int(capturedPhoto.dimensions.width),
-                            height: Int(capturedPhoto.dimensions.height)
+                            width: Int(work.photo.dimensions.width),
+                            height: Int(work.photo.dimensions.height)
                         ),
                         viewportSize: .init(
-                            width: viewportSize.width.isFinite ? max(viewportSize.width, 0) : 0,
-                            height: viewportSize.height.isFinite ? max(viewportSize.height, 0) : 0
+                            width: work.viewport.width.isFinite ? max(work.viewport.width, 0) : 0,
+                            height: work.viewport.height.isFinite ? max(work.viewport.height, 0) : 0
                         ),
                         previewDrawableSize: .init(
-                            width: previewDrawableSize.width.isFinite ? max(previewDrawableSize.width, 0) : 0,
-                            height: previewDrawableSize.height.isFinite ? max(previewDrawableSize.height, 0) : 0
+                            width: work.drawable.width.isFinite ? max(work.drawable.width, 0) : 0,
+                            height: work.drawable.height.isFinite ? max(work.drawable.height, 0) : 0
                         ),
                         grainSeed: grainSeed,
-                        flashFired: capturedPhoto.flashFired,
+                        flashFired: work.photo.flashFired,
                         finish: finish,
                         appVersion: PhotoOutputEncoder.currentApplicationVersion,
                         appBuild: PhotoOutputEncoder.currentApplicationBuild,
                         recipe: recipe
                     )
-                    let originalData = capturedPhoto.fileData
+                    let originalData = work.photo.fileData
                     let finalJPEGData = renderedPhoto.data
                     Task.detached(priority: .utility) {
                         _ = await FilmyCaptureDiagnostics.persist(
@@ -618,12 +672,8 @@ final class CameraViewModel: ObservableObject {
                     }
                 }
 #endif
-                self.saveCapturedPhoto(
-                    renderedPhoto, recipe: recipe, finish: finish, photoLibrary: photoLibrary
-                )
-                self.isCapturing = false
-            }
-        }
+        saveCapturedPhoto(renderedPhoto, recipe: recipe, finish: finish, photoLibrary: photoLibrary)
+        isCapturing = false
     }
 
     /// Shares the tested, generation-guarded save transaction with imports,
@@ -637,6 +687,7 @@ final class CameraViewModel: ObservableObject {
     ) {
         guard !isSaving, !isImporting, reviewImage == nil else { return }
         reviewSource = .camera
+        reviewDocumentID = photo.documentID
         reviewImage = photo.image
         reviewImageData = photo.data
         reviewCapturedAt = photo.capturedAt
@@ -954,7 +1005,8 @@ final class CameraViewModel: ObservableObject {
             image: image,
             imageData: imageData,
             recipe: recipe,
-            capturedAt: capturedAt
+            capturedAt: capturedAt,
+            documentID: reviewDocumentID
         ) { [weak self] result in
             guard let self, self.reviewWorkGeneration == generation, self.isSaving else { return }
             self.isSaving = false
@@ -980,6 +1032,7 @@ final class CameraViewModel: ObservableObject {
         reviewWorkGeneration &+= 1
         reviewWorkQueue.cancelPending()
         reviewImage = nil
+        reviewDocumentID = nil
         reviewImageData = nil
         reviewCapturedAt = nil
         reviewRecipe = nil
@@ -1038,7 +1091,8 @@ final class CameraViewModel: ObservableObject {
         flashFired: Bool,
         grainSeed: UInt32,
         normalizedSubjectRegions: [CGRect]? = nil,
-        finish: PhotoFinish = .photo
+        finish: PhotoFinish = .photo,
+        outputSettings: ProCaptureSettings? = nil
     ) -> RenderedPhoto? {
         // Resolve the source image's EXIF orientation before applying the
         // preview crop. The finished JPEG is written with orientation=1, so
@@ -1048,7 +1102,9 @@ final class CameraViewModel: ObservableObject {
             options: [.applyOrientationProperty: true]
         ) else { return nil }
         let framedInput: CIImage
-        if viewportSize.width > 0, viewportSize.height > 0 {
+        if let outputSettings {
+            framedInput = ProPhotoOutput.framedSource(input, viewportSize: viewportSize, resolution: outputSettings.resolution)
+        } else if viewportSize.width > 0, viewportSize.height > 0 {
             let crop = CameraFrameLayout.aspectFillCrop(
                 sourceExtent: input.extent,
                 targetSize: viewportSize
@@ -1105,6 +1161,23 @@ final class CameraViewModel: ObservableObject {
             grainSeed: grainSeed,
             grainPhase: grainPhase
         )
+        if let outputSettings {
+            let graded: CIImage
+            if outputSettings.dynamicRange == .hdr {
+                guard let expanded = CIImage(data: sourceData, options: [.applyOrientationProperty: true, .expandToHDR: true]),
+                      let hdr = ProPhotoOutput.preservingHeadroom(
+                        film: filtered, sourceSDR: framedInput,
+                        sourceHDR: ProPhotoOutput.framedSource(expanded, viewportSize: viewportSize, resolution: outputSettings.resolution)
+                      ) else { return nil }
+                graded = hdr
+            } else { graded = filtered }
+            guard let finished = PhotoPrintCompositor.composedImage(graded, finish: finish),
+                  let data = ProPhotoOutput.encode(
+                    finished, sourceData: sourceData, capturedAt: capturedAt, recipe: recipe, settings: outputSettings
+                  ), let image = downsampledReviewImage(from: data) else { return nil }
+            return RenderedPhoto(image: image, data: data, capturedAt: capturedAt, flashFired: flashFired,
+                                 normalizedSubjectRegions: resolvedSubjectRegions)
+        }
         guard let finished = PhotoPrintCompositor.composedImage(filtered, finish: finish),
               let output = FilmRenderer.outputCGImage(finished, from: finished.extent) else { return nil }
         guard let data = PhotoOutputEncoder.jpegData(

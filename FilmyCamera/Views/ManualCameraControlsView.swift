@@ -35,6 +35,7 @@ struct ManualCameraControlsView: View {
             sheetHeader
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    ProCaptureControlsView(camera: camera)
                     if hasManualCapability { statusHeader }
 
                     if !controls.physicalLensOptions.isEmpty {
@@ -42,7 +43,7 @@ struct ManualCameraControlsView: View {
                     }
 
                     if hasManualCapability {
-                        exposureSection
+                        if [.automatic, .manual].contains(camera.exposureProgram) { exposureSection }
                         whiteBalanceSection
                         focusSection
                     } else {
