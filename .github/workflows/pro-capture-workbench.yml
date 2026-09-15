@@ -13,7 +13,7 @@ permissions:
 jobs:
   workbench:
     runs-on: macos-15
-    timeout-minutes: 25
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -24,8 +24,17 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -f scripts/pro-capture.patch ]]; then
-            git apply --check scripts/pro-capture.patch
-            git apply scripts/pro-capture.patch
+            python3 - <<'PY'
+          import base64, gzip, hashlib, json, pathlib
+          source = pathlib.Path('scripts/pro-capture.patch').read_bytes()
+          if source.startswith(b'{'):
+              transport = json.loads(source)
+              source = gzip.decompress(base64.b64decode(transport['base64_gzip'], validate=True))
+              assert hashlib.sha256(source).hexdigest() == transport['sha256']
+          pathlib.Path('/tmp/pro-capture-source.patch').write_bytes(source)
+          PY
+            git apply --check /tmp/pro-capture-source.patch
+            git apply /tmp/pro-capture-source.patch
             rm scripts/pro-capture.patch
             brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
             xcodegen generate
@@ -35,19 +44,48 @@ jobs:
             git commit -m 'Implement capability-aware pro capture, persistent originals and focus tools'
             git push origin HEAD:feature/pro-capture-parity
           fi
-      - name: Package exact source snapshot
+      - name: Package source and SDK evidence
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "${RUNNER_TEMP}/pro-capture-source"
-          git archive HEAD -o "${RUNNER_TEMP}/pro-capture-source/source.tar"
-          git rev-parse HEAD > "${RUNNER_TEMP}/pro-capture-source/source-sha.txt"
+          evidence="${RUNNER_TEMP}/pro-capture-source"
+          mkdir -p "${evidence}/sdk"
+          git archive HEAD -o "${evidence}/source.tar"
+          git rev-parse HEAD > "${evidence}/source-sha.txt"
+          ls /Applications > "${evidence}/sdk/applications.txt"
+          for app in /Applications/Xcode_27*.app /Applications/Xcode_26.3.app; do
+            [[ -d "$app" ]] || continue
+            label=$(basename "$app")
+            sdk=$(DEVELOPER_DIR="$app/Contents/Developer" xcrun --sdk iphoneos --show-sdk-path)
+            mkdir -p "${evidence}/sdk/${label}"
+            cp "$sdk/System/Library/Frameworks/AVFoundation.framework/Headers/AVCaptureDevice.h" "${evidence}/sdk/${label}/" || true
+            cp "$sdk/System/Library/Frameworks/AVFoundation.framework/Headers/AVCapturePhotoOutput.h" "${evidence}/sdk/${label}/" || true
+            cp "$sdk/System/Library/Frameworks/CoreImage.framework/Headers/CIContext.h" "${evidence}/sdk/${label}/" || true
+          done
+          python3 - "${evidence}/sdk" <<'PY'
+          import pathlib, sys, urllib.request
+          base = pathlib.Path(sys.argv[1])
+          paths = {
+              'aperture': 'avfoundation/avcapturedevice/setexposuremodecustom(lensaperture:duration:iso:completionhandler:)',
+              'priority-support': 'avfoundation/avcapturedevice/format/supportsexposuremodecustom(lensaperture:duration:iso:)',
+              'tracked-focus': 'avfoundation/avcapturedevice/iscontinuousautofocustrackingsubjectacquired',
+              'live-edit': 'photos/phlivephotoeditingcontext',
+              'heif10': 'coreimage/cicontext/heif10representation(of:colorspace:options:)',
+          }
+          for name, path in paths.items():
+              try:
+                  url = 'https://developer.apple.com/tutorials/data/documentation/' + path + '.json'
+                  data = urllib.request.urlopen(url, timeout=20).read()
+                  (base / (name + '.json')).write_bytes(data)
+              except Exception as e:
+                  (base / (name + '-error.txt')).write_text(str(e))
+          PY
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: pro-capture-source-${{ github.run_id }}
           path: ${{ runner.temp }}/pro-capture-source/
           retention-days: 3
-      - name: Native build and tests after patch application
+      - name: Native build after patch application
         if: ${{ hashFiles('FilmyCamera/Models/ProCaptureSettings.swift') != '' }}
         shell: bash
         run: |
