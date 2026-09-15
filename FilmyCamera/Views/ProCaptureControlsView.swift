@@ -133,7 +133,7 @@ struct ProCaptureControlsView: View {
                 .accessibilityIdentifier("pro-aperture-readout")
             Text(camera.captureCapabilities.supportsVariableAperture
                 ? "Optical aperture holds the current shutter and ISO. A priority mode can then meter one parameter. Auto exposure releases the aperture lock."
-                : "Read-only on this build or lens. Optical control requires an iOS 27 SDK build, iOS 27 and a supported variable-aperture camera.")
+                : "Read-only on this OS or lens. Optical control requires the public iOS 27 camera APIs and a supported variable-aperture camera.")
                 .font(.caption).foregroundStyle(.secondary)
             Text("Originals and edits remain in Roll → Filmy originals, even when Photos access is denied. These are user files, not an evictable cache; deleting the app removes its local originals.")
                 .font(.caption).foregroundStyle(.secondary)
