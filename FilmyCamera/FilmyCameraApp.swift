@@ -4,6 +4,11 @@ import UIKit
 /// Enforce the same portrait contract for presented UIKit controllers as for
 /// SwiftUI, including the system share and photo-picker presentations.
 final class FilmyAppDelegate: NSObject, UIApplicationDelegate {
+    func applicationDidReceiveMemoryWarning(_ application: UIApplication) {
+        FilmRenderer.purgeTransientCaches()
+        Task { await RecipeSwatchRenderer.shared.purgeCache() }
+    }
+
     func application(
         _ application: UIApplication,
         supportedInterfaceOrientationsFor window: UIWindow?

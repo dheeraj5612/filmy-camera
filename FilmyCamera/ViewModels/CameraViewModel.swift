@@ -1133,25 +1133,55 @@ final class CameraViewModel: ObservableObject {
     /// pixel count before rendering. Everyday phone photos stay untouched.
     nonisolated static let importPixelBudget: CGFloat = 40_000_000
 
+    nonisolated static let importMaximumDimension: CGFloat = 16_384
+
+    nonisolated static func boundedImportSize(_ size: CGSize) -> CGSize? {
+        ImageSizePolicy.boundedSize(
+            size, maximumPixels: importPixelBudget, maximumDimension: importMaximumDimension
+        )
+    }
+
     nonisolated static func boundedImportInput(_ image: CIImage) -> CIImage {
         let extent = image.extent
-        let area = extent.width * extent.height
-        guard area > importPixelBudget, area.isFinite, area > 0,
-              let lanczos = CIFilter(name: "CILanczosScaleTransform") else {
-            return image
-        }
+        guard extent.origin.x.isFinite, extent.origin.y.isFinite,
+              let size = boundedImportSize(extent.size) else { return CIImage.empty() }
+        guard size != extent.size else { return image }
+        return CameraFrameLayout.aspectFill(image, in: CGRect(origin: .zero, size: size))
+    }
 
-        let scale = (importPixelBudget / area).squareRoot()
-        lanczos.setValue(image, forKey: kCIInputImageKey)
-        lanczos.setValue(scale, forKey: kCIInputScaleKey)
-        lanczos.setValue(1.0, forKey: kCIInputAspectRatioKey)
-        let boundedExtent = CGRect(
-            x: 0,
-            y: 0,
-            width: max((extent.width * scale).rounded(.down), 1),
-            height: max((extent.height * scale).rounded(.down), 1)
-        )
-        return lanczos.outputImage?.cropped(to: boundedExtent) ?? image
+    /// Inspect encoded metadata before asking a decoder for pixels. For large
+    /// scans/panoramas, ImageIO downsamples first instead of building a full-size
+    /// CI source and shrinking it only after decoding. Normal imports retain the
+    /// original CI decoding/color-management path and EXIF orientation behavior.
+    nonisolated static func preparedImportInput(data: Data) -> (image: CIImage, isFullResolution: Bool)? {
+        guard !Task.isCancelled,
+              let source = CGImageSourceCreateWithData(
+                data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary
+              ),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any],
+              let width = (properties[kCGImagePropertyPixelWidth as String] as? NSNumber)?.doubleValue,
+              let height = (properties[kCGImagePropertyPixelHeight as String] as? NSNumber)?.doubleValue else { return nil }
+        let orientation = (properties[kCGImagePropertyOrientation as String] as? NSNumber)?.uint32Value ?? 1
+        let sourceSize = (5...8).contains(orientation)
+            ? CGSize(width: height, height: width) : CGSize(width: width, height: height)
+        guard let size = boundedImportSize(sourceSize) else { return nil }
+        if size == sourceSize {
+            guard let image = CIImage(data: data, options: [.applyOrientationProperty: true]),
+                  ImageSizePolicy.isFinitePositive(image.extent.size),
+                  image.extent.origin.x.isFinite, image.extent.origin.y.isFinite else { return nil }
+            return (image, true)
+        }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: Int(max(size.width, size.height))
+        ]
+        guard !Task.isCancelled,
+              let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary),
+              !Task.isCancelled else { return nil }
+        let input = CameraFrameLayout.aspectFill(CIImage(cgImage: thumbnail), in: CGRect(origin: .zero, size: size))
+        return (input, false)
     }
 
     private nonisolated static func renderImported(
@@ -1161,11 +1191,8 @@ final class CameraViewModel: ObservableObject {
         normalizedSubjectRegions: [CGRect]? = nil,
         finish: PhotoFinish = .photo
     ) -> RenderedPhoto? {
-        guard !Task.isCancelled, let input = CIImage(
-            data: sourceData,
-            options: [.applyOrientationProperty: true]
-        ) else { return nil }
-
+        guard let prepared = preparedImportInput(data: sourceData) else { return nil }
+        let input = prepared.image
         let extent = input.extent
         guard !extent.isEmpty, extent.width.isFinite, extent.height.isFinite else {
             return nil
@@ -1178,7 +1205,7 @@ final class CameraViewModel: ObservableObject {
             y: -extent.minY
         ))
         let framedInput = Self.boundedImportInput(unboundedInput)
-        let isFullResolution = framedInput.extent.size == unboundedInput.extent.size
+        let isFullResolution = prepared.isFullResolution && framedInput.extent.size == unboundedInput.extent.size
         guard !Task.isCancelled else { return nil }
         let renderContext: FilmRenderer.CaptureContext
         let resolvedSubjectRegions: [CGRect]?
@@ -1377,7 +1404,9 @@ final class CameraViewModel: ObservableObject {
     private nonisolated static func preparedReviewInput(
         source: ReviewRenderSource
     ) -> (image: CIImage, isFullResolution: Bool, exportExtent: CGRect?)? {
-        guard let imageSource = CGImageSourceCreateWithData(source.data as CFData, nil) else {
+        guard let imageSource = CGImageSourceCreateWithData(
+            source.data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary
+        ) else {
             return nil
         }
         let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil)
@@ -1433,13 +1462,8 @@ final class CameraViewModel: ObservableObject {
                 exportExtent
             )
         case .photoLibrary:
-            let sourceArea = (sourceWidth ?? Double(thumbnail.width))
-                * (sourceHeight ?? Double(thumbnail.height))
-            return (
-                input,
-                sourceArea.isFinite && sourceArea <= Double(importPixelBudget),
-                exportExtent
-            )
+            let originalSize = CGSize(width: sourceWidth ?? Double(thumbnail.width), height: sourceHeight ?? Double(thumbnail.height))
+            return (input, boundedImportSize(originalSize) == originalSize, exportExtent)
         }
     }
 
@@ -1460,13 +1484,8 @@ final class CameraViewModel: ObservableObject {
             let crop = CameraFrameLayout.aspectFillCrop(sourceExtent: extent, targetSize: viewport)
             return CGRect(origin: .zero, size: crop.size)
         case .photoLibrary:
-            let area = size.width * size.height
-            guard area.isFinite else { return nil }
-            guard area > importPixelBudget else { return extent }
-            let scale = (importPixelBudget / area).squareRoot()
-            return CGRect(x: 0, y: 0,
-                          width: max((size.width * scale).rounded(.down), 1),
-                          height: max((size.height * scale).rounded(.down), 1))
+            guard let boundedSize = boundedImportSize(size) else { return nil }
+            return CGRect(origin: .zero, size: boundedSize)
         }
     }
 
