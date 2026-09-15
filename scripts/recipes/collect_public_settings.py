@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Development-only collector of public camera-setting facts, not images/prose.
+"""Development-only, bounded collector of public camera-setting facts.
 
-Output is a staging artifact, never directly a shipping catalog. Requires
-beautifulsoup4; respects robots.txt, bounds requests, and rejects ambiguous
-multi-block recipes and unsupported capture methods. No app/paywall access.
+No photographs, article prose, paywalled recipes, app databases, or LUTs are
+retained. Output is a staging artifact, NOT a production catalog. Normalize,
+review source settings and review distribution rights before shipping a record.
+Requires beautifulsoup4. Fetches are serial, robots-aware and allowlisted.
 """
 import argparse
 import hashlib
@@ -30,7 +31,7 @@ KEYS = (
     "Noise Reduction", "High ISO NR", "High ISO Noise Reduction", "Sharpening", "Sharpness",
     "Clarity", "Grain Effect", "Grain Size", "White Balance Shift", "WB Shift",
     "White Balance", "WB", "Exposure Compensation", "Exposure Comp", "Exposure",
-    "Monochromatic Color", "Monochromatic Colour", "Monochrome Color", "Toning", "ISO", "Color", "Colour",
+    "Mono Colour", "Mono Color", "Monochromatic Color", "Monochromatic Colour", "Monochrome Color", "Toning", "ISO", "Color", "Colour", "Col. Chr. Effect", "Col. Chr. Blue", "EV Comp.", "Grain", "B&W Adjustment",
 )
 PATTERN = re.compile(r"(?<!\w)(" + "|".join(re.escape(k) for k in sorted(KEYS, key=len, reverse=True)) + r")\s*:\s*", re.I)
 
@@ -45,9 +46,10 @@ def setting_blocks(root):
             cells = row.find_all(["td", "th"])
             if len(cells) >= 2:
                 key = text(cells[0]).rstrip(":")
-                if any(key.lower().startswith(k.lower()) for k in KEYS):
-                    settings[key] = " | ".join(text(c) for c in cells[1:])[:180]
-        if len(settings) >= 5:
+                settings[key] = " | ".join(text(c) for c in cells[1:])[:180]
+        if len(settings) >= 5 and any(k.lower() == "film simulation" for k in settings):
+            # Keep unknown table fields so normalization can quarantine them,
+            # instead of silently losing camera controls.
             blocks.append(settings)
     if blocks:
         return blocks
@@ -141,6 +143,7 @@ def main():
             blocks = setting_blocks(root)
             if len(blocks) != 1:
                 raise ValueError(f"Requires manual review: {len(blocks)} setting blocks")
+            # Do not silently approximate capture methods the app cannot implement.
             body = text(root).lower()
             if any(term in body for term in ("double-exposure", "double exposure", "full spectrum", "infrared filter")):
                 raise ValueError("Requires unsupported capture method review")

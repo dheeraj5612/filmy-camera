@@ -78,6 +78,12 @@
 		EB0B9B31A8898628DD8BD80F /* HalationArtifactRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC88255748574951C8FDBFCB /* HalationArtifactRegressionTests.swift */; };
 		EC2F24E354BEA00F79F85586 /* RecipeInvariantsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33F33B6C5BE2B0CAE0ECA261 /* RecipeInvariantsTests.swift */; };
 		F84D685F791EF68BD232EC02 /* FilmRecipe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2742A27161237B210E4D8A3C /* FilmRecipe.swift */; };
+		95FF05BD32D2804EA3D3BD5D /* RecipeCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79E3B8ECEB84060326FBFBA5 /* RecipeCatalog.swift */; };
+		57503B4BBC5BA442BEAD486A /* RecipeLibraryPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = C128A7F4E71273875AB2E7A1 /* RecipeLibraryPreferences.swift */; };
+		CA27AD152C21A2F18D141D47 /* RecipeLibraryManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F620B76530D2AD2802F8862 /* RecipeLibraryManagerView.swift */; };
+		94CB4514A5F4ADECFF9A939C /* RecipeCatalog.json in Resources */ = {isa = PBXBuildFile; fileRef = 0977B38D70937B7C1F2439D8 /* RecipeCatalog.json */; };
+		139D79C2D63A680232BC7322 /* RecipeLibraryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2ACC2237993B0CB8B76B62E1 /* RecipeLibraryTests.swift */; };
+		AEA2844955BAFE4FC67E9526 /* RecipeLibraryUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 483C844483FF1DBBB009F7D7 /* RecipeLibraryUITests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -173,12 +179,19 @@
 		F6151D36AD2BD5096C1D2A5E /* SignatureCharacterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignatureCharacterTests.swift; sourceTree = "<group>"; };
 		F84BD1235DF873E06F8C6282 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		FF42BA8A443489B0CB928D60 /* GalleryPagingPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalleryPagingPolicyTests.swift; sourceTree = "<group>"; };
+		79E3B8ECEB84060326FBFBA5 /* RecipeCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeCatalog.swift; sourceTree = "<group>"; };
+		C128A7F4E71273875AB2E7A1 /* RecipeLibraryPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeLibraryPreferences.swift; sourceTree = "<group>"; };
+		5F620B76530D2AD2802F8862 /* RecipeLibraryManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeLibraryManagerView.swift; sourceTree = "<group>"; };
+		0977B38D70937B7C1F2439D8 /* RecipeCatalog.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = RecipeCatalog.json; sourceTree = "<group>"; };
+		2ACC2237993B0CB8B76B62E1 /* RecipeLibraryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeLibraryTests.swift; sourceTree = "<group>"; };
+		483C844483FF1DBBB009F7D7 /* RecipeLibraryUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeLibraryUITests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
 		16D40A895F8235E60F3CB3A9 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				0977B38D70937B7C1F2439D8 /* RecipeCatalog.json */,
 				8F580BECA95D881DF1EB3789 /* Assets.xcassets */,
 				432F02B03418EEADA550733F /* PrivacyInfo.xcprivacy */,
 			);
@@ -188,6 +201,7 @@
 		2B5AB398864BBC150E221C4B /* FilmyCameraTests */ = {
 			isa = PBXGroup;
 			children = (
+				2ACC2237993B0CB8B76B62E1 /* RecipeLibraryTests.swift */,
 				B23B5C550DB001D0819FC64E /* CameraCatalogHardwareTests.swift */,
 				0569FE61E3015B082CAB8031 /* CameraLensAcceptanceTests.swift */,
 				8DA89A5E0FC0285D78CD4582 /* CameraManualControlsTests.swift */,
@@ -225,6 +239,8 @@
 		2F0DC1C823C53C01F796F1A7 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				C128A7F4E71273875AB2E7A1 /* RecipeLibraryPreferences.swift */,
+				79E3B8ECEB84060326FBFBA5 /* RecipeCatalog.swift */,
 				C2E9A15C80F9345FFEE2F001 /* CameraManualControls.swift */,
 				8DFB07E3B45FEBEFDD56A8A0 /* CameraPreviewGesturePolicy.swift */,
 				2742A27161237B210E4D8A3C /* FilmRecipe.swift */,
@@ -270,6 +286,7 @@
 		422ACC7B39302C2548143BD0 /* FilmyCameraUITests */ = {
 			isa = PBXGroup;
 			children = (
+				483C844483FF1DBBB009F7D7 /* RecipeLibraryUITests.swift */,
 				3B590E685DFF7F8542F446B4 /* AdditionalInteractionTests.swift */,
 				67723B708854007A2748F2D2 /* ComprehensiveSettingsTests.swift */,
 				61617C6B4DB09D291F5DEA10 /* FilmyCameraUITests.swift */,
@@ -287,6 +304,7 @@
 		8001ED3E67EA6235B02CFA09 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				5F620B76530D2AD2802F8862 /* RecipeLibraryManagerView.swift */,
 				57D96867146ACDDA4F134F19 /* CameraScreen.swift */,
 				53925B09E478B6CD4AF36BE1 /* CaptureReviewView.swift */,
 				ED28FA298007EE9E0D94A12B /* Components.swift */,
@@ -436,6 +454,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				94CB4514A5F4ADECFF9A939C /* RecipeCatalog.json in Resources */,
 				7DCDAA29B2717548B36D8992 /* Assets.xcassets in Resources */,
 				2700E6F80817004C1415242D /* PrivacyInfo.xcprivacy in Resources */,
 			);
@@ -448,6 +467,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				139D79C2D63A680232BC7322 /* RecipeLibraryTests.swift in Sources */,
 				E158A342AF6261EDB5736968 /* CameraCatalogHardwareTests.swift in Sources */,
 				9962D2011C0D8FAA6CF131B3 /* CameraLensAcceptanceTests.swift in Sources */,
 				7A5DABF28E29506453015E21 /* CameraManualControlsTests.swift in Sources */,
@@ -485,6 +505,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CA27AD152C21A2F18D141D47 /* RecipeLibraryManagerView.swift in Sources */,
+				57503B4BBC5BA442BEAD486A /* RecipeLibraryPreferences.swift in Sources */,
+				95FF05BD32D2804EA3D3BD5D /* RecipeCatalog.swift in Sources */,
 				2959F22572BAEE1007915415 /* CameraFrameLayout.swift in Sources */,
 				7C42415792CAC6505DD18170 /* CameraManualControls.swift in Sources */,
 				4ADAD343F6286FDD1118F527 /* CameraPreviewGesturePolicy.swift in Sources */,
@@ -521,6 +544,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AEA2844955BAFE4FC67E9526 /* RecipeLibraryUITests.swift in Sources */,
 				CE8930CAD4D8D206662E65A4 /* AdditionalInteractionTests.swift in Sources */,
 				9CDBE678DD0FD47E87EDCB2D /* ComprehensiveSettingsTests.swift in Sources */,
 				C70373098CEE45627237523A /* FilmyCameraUITests.swift in Sources */,
