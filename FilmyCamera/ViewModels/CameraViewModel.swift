@@ -270,6 +270,12 @@ final class CameraViewModel: ObservableObject {
     @Published var selectedRecipeID: String {
         didSet {
             guard selectedRecipeID != oldValue else { return }
+            guard MembershipStore.shared.allowsRecipe(selectedRecipeID) else {
+                let requestedID = selectedRecipeID
+                selectedRecipeID = oldValue
+                _ = MembershipStore.shared.requireRecipe(requestedID)
+                return
+            }
             guard Self.validRecipeIDs.contains(selectedRecipeID) else {
                 selectedRecipeID = Self.fallbackRecipeID
                 defaults.set(Self.fallbackRecipeID, forKey: Self.selectedRecipeIDKey)
@@ -455,8 +461,12 @@ final class CameraViewModel: ObservableObject {
         return (recoveredRecipes, true)
     }
 
+    var effectiveSelectedRecipeID: String {
+        MembershipStore.shared.allowsRecipe(selectedRecipeID) ? selectedRecipeID : Self.defaultRecipeID
+    }
+
     var selectedRecipe: FilmRecipe {
-        recipe(for: selectedRecipeID)
+        recipe(for: effectiveSelectedRecipeID)
     }
 
     /// The recipe rail, detail sheet, live preview, and exports must all use
@@ -467,13 +477,15 @@ final class CameraViewModel: ObservableObject {
     }
 
     func recipe(for id: String) -> FilmRecipe {
-        recipeOverrides[id]
+        // Preserve paid customizations on disk, but never apply them while free.
+        if !MembershipStore.shared.isPremium { return Self.builtInRecipesByID[id] ?? Self.defaultRecipe }
+        return recipeOverrides[id]
             ?? Self.builtInRecipesByID[id]
             ?? Self.defaultRecipe
     }
 
     func select(recipe: FilmRecipe) {
-        guard Self.validRecipeIDs.contains(recipe.id) else { return }
+        guard Self.validRecipeIDs.contains(recipe.id), MembershipStore.shared.requireRecipe(recipe.id) else { return }
         selectedRecipeID = recipe.id
     }
 
@@ -482,6 +494,7 @@ final class CameraViewModel: ObservableObject {
     }
 
     func update(recipe: FilmRecipe) {
+        guard MembershipStore.shared.require(.recipeEditing) else { return }
         guard let parent = FilmRecipe.builtIns.first(where: {
             $0.id == recipe.id
         }) else {
@@ -514,13 +527,18 @@ final class CameraViewModel: ObservableObject {
 
     func capture(camera: CameraService, photoLibrary: any PhotoSaving) {
         guard !isCapturing, !isImporting, !isSaving, reviewImage == nil else { return }
+        let membership = MembershipStore.shared
+        guard let permit = membership.reserveCapture() else { return }
+        // This update is ordered before capture on the camera's session queue.
+        camera.setPremiumControlsEnabled(membership.isPremium)
         isCapturing = true
         toastTask?.cancel()
         toastMessage = nil
         saveErrorMessage = nil
         saveErrorRequiresSettings = false
         let recipe = selectedRecipe
-        let finish = PhotoFinish(rawValue: defaults.string(forKey: "captureFinish") ?? "") ?? .photo
+        let finish = membership.isPremium
+            ? (PhotoFinish(rawValue: defaults.string(forKey: "captureFinish") ?? "") ?? .photo) : .photo
         let viewportSize = camera.previewViewportSize
         // Use the drawable the viewfinder really rendered into: its scale
         // comes from the window's screen (which can differ from the main
@@ -544,6 +562,8 @@ final class CameraViewModel: ObservableObject {
 
         camera.capturePhoto { [weak self] capturedPhoto in
             Task { @MainActor [weak self] in
+                var succeeded = false
+                defer { membership.finishCapture(permit, succeeded: succeeded) }
                 guard let self else { return }
 
                 guard let capturedPhoto else {
@@ -618,6 +638,9 @@ final class CameraViewModel: ObservableObject {
                     }
                 }
 #endif
+                // A rendered photo counts once even if Photos saving must be
+                // retried. Retry/discard never recaptures or charges again.
+                succeeded = true
                 self.saveCapturedPhoto(
                     renderedPhoto, recipe: recipe, finish: finish, photoLibrary: photoLibrary
                 )
@@ -651,6 +674,7 @@ final class CameraViewModel: ObservableObject {
 
     func importPhoto(data: Data, camera: CameraService? = nil) async {
         guard !isCapturing, !isImporting, !isSaving, reviewImage == nil else { return }
+        guard MembershipStore.shared.require(.photoImport) else { return }
 
         isImporting = true
         saveErrorMessage = nil
@@ -723,6 +747,9 @@ final class CameraViewModel: ObservableObject {
     }
 
     private func applyReview(recipe: FilmRecipe, finish: PhotoFinish) {
+        guard MembershipStore.shared.require(.photoImport),
+              MembershipStore.shared.requireRecipe(recipe.id) else { return }
+        if finish != .photo && !MembershipStore.shared.require(.photoFinishes) { return }
         guard reviewImage != nil,
               let source = reviewRenderSource,
               !isSaving,

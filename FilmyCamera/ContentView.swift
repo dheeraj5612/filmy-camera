@@ -177,6 +177,12 @@ struct ContentView: View {
 
     var body: some View {
         selectedTabContent
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(spacing: 0) {
+                    MembershipStatusBar()
+                    if selectedTab != .camera { MonetizationBanner() }
+                }
+            }
             .allowsHitTesting(!isImportInProgress)
             .accessibilityHidden(isImportInProgress)
             // Release hardware even when the camera screen is not mounted.
@@ -221,6 +227,7 @@ struct ContentView: View {
     }
 
     private func startImport(_ item: PhotosPickerItem) {
+        guard MembershipStore.shared.require(.photoImport) else { return }
         guard !cameraViewModel.isCapturing, !cameraViewModel.isSaving,
               !cameraViewModel.isImporting, cameraViewModel.reviewImage == nil,
               let id = importSession.begin() else { return }
@@ -313,7 +320,7 @@ struct ContentView: View {
                 onOpenGallery: { open(.gallery) },
                 onOpenSettings: { open(.settings) },
                 onImportPhoto: {
-                    guard !isCameraBusy else { return }
+                    guard !isCameraBusy, MembershipStore.shared.require(.photoImport) else { return }
                     isShowingImporter = true
                 },
                 isImportInProgress: isImportInProgress || isShowingImporter
