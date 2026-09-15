@@ -43,6 +43,16 @@ struct GalleryScreen: View {
                                 .padding(.horizontal, FilmyTheme.pageMargin)
                         }
 
+                        NavigationLink {
+                            FilmyOriginalsView(photoLibrary: photoLibrary)
+                        } label: {
+                            Label("Filmy originals · edit again", systemImage: "photo.stack")
+                                .font(.headline).padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                                .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 16))
+                        }
+                        .padding(.horizontal, FilmyTheme.pageMargin)
+                        .accessibilityIdentifier("roll-filmy-originals")
+
                         galleryContent
 
                         if photoLibrary.galleryAssets.isEmpty {

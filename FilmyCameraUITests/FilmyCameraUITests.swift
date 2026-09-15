@@ -95,6 +95,9 @@ final class FilmyCameraUITests: XCTestCase {
                       "The presented Pro controls must settle at a hittable 44pt target")
         assertMinimumHitTarget(done, named: "Done with Pro controls")
 
+        XCTAssertTrue(app.descendants(matching: .any)["pro-resolution"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["pro-format"].exists)
+
         #if targetEnvironment(simulator)
         XCTAssertTrue(app.descendants(matching: .any)["manual-controls-unavailable"].exists)
         XCTAssertFalse(app.sliders["manual-iso-slider"].exists,
