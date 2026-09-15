@@ -1,58 +1,70 @@
-# Fuji-inspired shooting system
+# Fuji-style shooting system
 
-Open **Q**, enable **Shooting system**, and choose a drive mode. Off preserves the original camera workflow. No network service, credentials, subscription, or proprietary Fujifilm LUT is used.
+Open **Q** in the camera's top bar. Ordinary Single-frame shooting remains on the existing capture path unless RAW, Auto ISO, a digital crop, pre-shot, or another drive mode requires the sequence coordinator. This is an independent implementation of publicly documented shooting concepts, not Fujifilm firmware, sensor calibration, or an exact-camera-output claim.
 
-## Implemented paths and boundaries
+## Controls and behavior
 
-| Control | Implementation | Boundary |
+| Feature | Implemented behavior | Boundaries |
 | --- | --- | --- |
-| C1–C7 | Seven named persistent banks, full customized recipe, shooting settings, physical-lens identity, exposure/WB/focus, zoom, flash, timer, aspect and finish; copy and recall | Recall on the same lens; hardware still validates applied values |
-| Film BKT | One camera original developed with up to three selected recipes | Independent approximations, not proprietary Fuji conversions |
-| Auto ISO 1/2/3 | Three persisted min/max ISO and preferred-minimum-shutter profiles; bounded metering feedback | Needs custom exposure; device limits override profile; minimum shutter can relax at max ISO |
-| Computational ND | Half-float linear-light temporal averaging, bounded preview copies, measured frame count and elapsed span | Up to 8 samples/s, 1280 px; not an ND filter or continuous shutter; cannot recover clipped highlights |
-| Hybrid finder | Natural electronic feed and developed inset; OVF-style frame lines | No optical path, parallax measurement, or image beyond the sensor |
-| Digital prime | Fixed 1.4x, 2x, 3x crop in preview and capture; matching focus coordinates; pinch disabled | Relative to existing lens/zoom, no upsampling or claimed optical resolution |
-| Q menu | Up to 16 persistent, reorderable/removable slots; all controls remain reachable | Accessible labeled buttons; disabled during a sequence |
-| Focus aids | Magnified live/reference split comparison and local-contrast microprism-style view | No fabricated phase or defocus-direction measurement |
-| Multiple exposure | Separate shutter presses, 2–9 sources, average/additive/bright/dark blend, onion skin and retake | 4096 px composite; additive highlights can clip; originals retained |
-| Pre-shot | Age- and count-bounded copied preview ring followed by a full-resolution still | Up to 12 frames / 2 seconds, 1280 px, up to 8 samples/s, not RAW pre-capture |
-| DR100/200/400 | DR200/400 shorten RAW exposure 1/2 stops at the metered ISO, verify EXIF and develop with matching linear sensor-domain shoulder | Requires RAW + custom exposure; phone sensor behavior is not Fuji calibration; shadow-noise tradeoff |
-| Natural live view | Bypass film renderer in live preview only | Camera ISP processing still applies; captured recipe is unchanged |
-| Focus stack | Real actuator sweep, local sharpness selection with feathered masks, immutable source retention | Tripod/stationary subjects; no registration or focus-breathing correction; inspect seams; 4096 px output |
-| Drive/BKT | Single, CL, CH, AE/ISO/film/WB/DR/focus BKT, focus merge, multiple exposure, pre-shot, temporal average, interval | Bounded counts, sequential still completion; no guaranteed FPS; interval is pause after completion |
-| RAW development | Native CIRAWFilter decode, push/pull, as-shot/manual WB, tint, RAW sharpness/noise reduction, film recipe, tone, original sharing and JPEG export | Original DNG immutable; edits in JSON sidecar; not Fujifilm's proprietary RAW converter |
+| C1–C7 | Seven named, explicit-save banks containing the complete recipe, shooting settings, active camera/lens, zoom, exposure/ISO/shutter, WB/focus, flash preference, framing, timer, and print finish. Recall does not silently overwrite a bank. | An unavailable saved lens is an error. Device values are limited to its supported ranges. |
+| Film Simulation BKT | One real sensor capture, developed with three selected recipes and exported as three photos. | Not three different moments. Choose the recipes in BKT settings. |
+| Auto ISO 1/2/3 | Three persistent editable profiles with base ISO, ISO ceiling, preferred minimum shutter, and optional reciprocal focal-length/motion rule. Closed-loop metering changes real shutter and ISO. | At the ISO ceiling, the shutter can get slower. Sensor custom exposure support is required. |
+| Computational ND | A fixed-exposure sequence of 2, 4, 8, 16, or 32 still frames; linear-light temporal averaging produces a longer-exposure motion effect. | Not an optical ND filter; cannot prevent clipping within each frame. Gaps between stills are possible. Tripod recommended. Composite limited to 6 MP. |
+| Hybrid finder | Electronic preview, natural wide-context OVF-style preview with crop bright lines, or the latter plus a processed-crop inset. | All views are electronic. A phone cannot become an optical finder. |
+| Digital prime | Shared center crop at 1×, 1.4×, 2×, or 3× for preview, saved image, tap-focus mapping, and composition aids. Optional physical-lens lock prevents automatic lens substitutions and zoom changes. | Cropped sensor pixels, not additional optical resolution or upscaling. |
+| Q Menu | Reorder, remove, and add the 16 available controls; layout persists. All Controls remains reachable when the grid is empty. | Changes are locked during capture/assembly. |
+| Split image / microprism | Magnified monochrome focus patch with contrast-dependent split displacement or alternating prism tiles, relative-contrast readout, reference reset, and manual lens-position control. | Contrast-based visual aids, not sensor phase-detection measurements or a guarantee of correct focus. |
+| Multiple exposure | 2–9 deliberately composed shutter presses; prior-layer ghost overlay; average, additive, bright, or dark blending; cancel/discard and optional source retention. | Settings freeze at the first layer. Composite limited to 6 MP. |
+| Pre-shot | A bounded rolling buffer of owned preview images; exports preceding frames plus the normal still using their original timestamps. | 0–1.5 seconds, at most 16 frames / 32 MB / 768-pixel longest edge. Single-frame only, no RAW/DR. Not full-resolution sensor pre-capture or half-press hardware. |
+| Capture DR100/200/400 | DR200/400 request actual −1/−2 EV sensor exposure, retain RAW, verify captured EXIF exposure against the request, restore midtones in RAW linear-space development, and compress highlights. DR BKT takes three separate sensor exposures. | Requires RAW plus custom exposure on the selected lens. Rejects unattainable exposure; never labels an ordinary JPEG tone edit as protected RAW. This is separate from a recipe's legacy Dynamic Range aesthetic. |
+| Natural Live View | Bypasses the film recipe for the viewfinder only. | Saved images still use the selected recipe. It does not undo sensor exposure, sensor WB, or the phone's ISP preview processing. |
+| Focus stack | Explicit near/far endpoints, settle delay and 2–20 real lens-position captures, translation registration, and per-pixel local-sharpness fusion. Source frames may be retained. | Tripod/static subject. No full breathing, parallax, rotation, or moving-subject correction. Rejects excessive translation. Composite limited to 6 MP. |
+| Drive/BKT | Single, bounded Continuous Low/High, AE 3/5/7/9 frames with selectable order and spacing, same-source ISO/WB/film BKT, three-exposure DR BKT, focus BKT/stack, ND, multiple exposure, foreground interval shooting, and the existing self-timer. | High means fastest sequential still delivery, not a guaranteed FPS. ISO BKT is same-source exposure development, not different sensor noise. WB BKT is a temperature-axis variant. Intervals are start-to-start without catch-up bursts; no background scheduling. |
+| RAW development | Capture Bayer RAW or Apple ProRAW when exposed by the lens; retain untouched files, import supported RAW files, edit exposure/as-shot or custom WB/highlight shoulder/shadows plus the full film recipe, preview, persist edit sidecars, export JPEG, and share the untouched source. | Decoder support comes from Core Image. Originals up to 200 MB / 100 MP; development bounded to 40 MP, interactive preview to 1200 pixels. RAW capture conservatively requests the smallest supported still dimensions. Photos export is SDR JPEG; this does not implement a general HDR exporter. |
 
-## Safety and lifecycle
+## Safety, concurrency, and ownership
 
-`FujiCaptureBridge` borrows CameraService's serial session queue, device and photo output. Only one lease and photo callback can be active. Ordinary capture and lens/zoom/manual-control mutations are blocked during that lease. Exposure and focus completion handlers are awaited before capture. State restoration is also serialized. Timeout forces session recovery instead of admitting overlapping captures.
+- `CameraService` owns AVFoundation on its existing serial session queue. A capture lease excludes ordinary capture, camera/lens changes, and competing manual changes. Sensor configuration completion handlers are awaited before each exposure; photo completion waits for the final native callback and both RAW/JPEG payloads when requested.
+- Capture requests snapshot settings/recipes. Captures are written to disk before expensive development. Only metadata grows with sequence length, not a RAM array of full-resolution images. Composite processing is serialized and materialized between frames to keep filter graphs bounded.
+- Every native callback, cancellation, timeout, and interruption races through an exactly-once completion gate. Leases restore prior exposure, focus, WB mode, monitoring, and frame-duration configuration; cancellation waits for restoration. A failed restoration is surfaced instead of silently reporting success.
+- All advanced-coordinator captures use flash **Off**. The remembered ordinary-camera flash preference is restored. Auto ISO and manual exposure must not fight each other; turn off Auto ISO before using the ordinary manual exposure panel.
+- Background/tab changes, memory warnings, and critical thermal state cancel active sequences and clear preview buffers. Interval capture deliberately requires foreground operation and temporarily keeps the screen awake.
+- Preview aids never enter exported photos. The pre-shot sampler copies scaled images instead of holding camera-owned pixel buffers. Its queue allows one frame in flight and does not create a second live display layer.
+- Originals and pending rendered JPEGs are atomically persisted under Application Support, with manifests written last. Failed Photos exports remain in the outbox with a Retry action. Successfully exported temporary processed originals are removed unless composite-source retention is enabled; RAW originals remain until explicitly deleted. App deletion removes this local library: share important originals first.
 
-Preview retention owns CGImages, not AVFoundation pool buffers. Backgrounding, camera changes and memory warnings clear transient previews. Cancellation propagates to development workers. Every accepted still is archived before development or Photos export. Export failures leave an original available for explicit retry. The on-device archive has a 2 GB budget; reaching it fails rather than silently deleting photographs. The library is app-container storage, not a substitute for a backup; use Share unchanged original before removing the app.
+## Source layout
 
-`DR200/400` is distinct from the legacy recipe's rendering-only DR intent. The capture path requires real RAW, takes a shorter verified shutter exposure at constant ISO, disables RAW decoder baseline/boost/local tone mapping for this path, and applies a shadow-gain/highlight-shoulder function in `CIRAWFilter.linearSpaceFilter`. The legacy recipe DR stage is set to DR100 to avoid applying a second DR treatment. DR cannot be reassigned to a previously captured JPEG.
+`FilmyCamera/Shooting` contains persistent settings and exposure/drive planning, the RAW/original/outbox actor, native photo delegates, linear image processing, bounded preview sampling, the sequence controller, Q/bank configuration, RAW development UI, and viewfinder/status overlays. The existing camera service, screen, preview, and assist store have small integration hooks. New files are included by `project.yml`; regenerate the checked-in Xcode project whenever adding a source.
 
-## Validation
+## Automated validation
 
-`FujiShootingTests` covers defaults, profile solving and sensor bounds, serialization, corrupt preference backup, bracket ordering, one-original film/WB BKT, interval bounds, pre-shot eviction, crop geometry, linear-light blend values, linear RAW shoulder values, no JPEG-as-RAW fallback, immutable originals and archive quota. Hardware behavior still requires physical-device acceptance; simulator tests cannot certify RAW availability, exposure readback, focus motor timing, actual burst rate, thermal behavior, optical equivalence, or visual Fuji matching.
+`FujiShootingTests` is registered in the integration test suite. It covers all drive plans, same-source vs sensor brackets, Auto ISO policy, exposure bounds, persistence/recovery, pre-shot bounds/timestamps, exactly-once completion, crop geometry, rejecting fake RAW/DR, linear development/compositing, focus-fusion ties, original/outbox recovery, sequencing, restoration before Photos writes, and save-failure retention.
 
-### Physical-device acceptance checklist
+```sh
+xcodegen generate --spec project.yml
+xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera \
+  -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.5' \
+  -parallel-testing-enabled NO -maximum-parallel-testing-workers 1 \
+  -only-testing:FilmyCameraTests/FujiShootingTests test CODE_SIGNING_ALLOWED=NO
+```
 
-- Standard shooting with system off: capture, flash, manual controls, gallery and background/resume unchanged.
-- Each supported physical rear lens: inspect RAW/custom-exposure/focus capabilities; reject unsupported modes with actionable text.
-- DR target: fixed illumination, DR100/200/400 DNGs show approximately 1x/0.5x/0.25x exposure duration and stable ISO; inspect highlight and shadow ramps after development.
-- AE and ISO BKT: independent EXIF values, distinct exposures, original controls restored; repeat cancellation and interruption during each callback phase.
-- CL/CH: no concurrent photos, accurate frame count; interval remains foreground-only.
-- Focus sweep: near/far endpoints, motor movement, original focus restored; inspect stack seams and breathing on stationary macro subjects.
-- Pre-shot and ND: frame timestamps/elapsed span match actual sampled frames, app memory stays bounded, no stale buffers after backgrounding or changing lenses.
-- Multiple exposure: all four blend modes, onion skin, retake, cancellation and Photos permission failures.
-- RAW editor: preserve original bytes across edit/export, share DNG, delete confirmation, full-library error, relaunch persistence.
-- VoiceOver, largest Dynamic Type, portrait iPad, Q reorder, bank recall and lens mismatch.
+Syntax parsing and model-only tests do not establish native camera behavior. The PR's build/test checks are the record of which native checks actually ran. No physical iPhone camera was available during implementation; the following checks remain required before release.
 
-## API and behavior references
+## Physical-device acceptance checklist
 
-- [Apple RAW and ProRAW capture](https://developer.apple.com/documentation/avfoundation/capturing-photos-in-raw-and-apple-proraw-formats)
-- [Apple CIRAWFilter](https://developer.apple.com/documentation/coreimage/cirawfilter)
-- [Apple custom exposure](https://developer.apple.com/documentation/avfoundation/avcapturedevice/setexposuremodecustom(duration:iso:completionhandler:))
-- [Apple manual focus completion](https://developer.apple.com/documentation/avfoundation/avcapturedevice/setfocusmodelocked(lensposition:completionhandler:))
-- [Fujifilm X-T5 image-quality controls](https://fujifilm-dsc.com/en/manual/x-t5/menu_shooting/image_quality_setting/)
+1. Supported Bayer RAW and ProRAW lenses plus an unsupported front/virtual lens: capture/import/reopen, original-byte identity, EXIF orientation, flash-off policy, and explicit unsupported-state messages.
+2. Manual exposure, focus, WB, flash, lens lock, and C1–C7: switch away/back, restore on success/error/background/timeout, and verify device readback values rather than labels alone.
+3. A fixed high-contrast scene on a tripod: inspect RAW EXIF and histogram at DR100/200/400 for −1/−2 EV capture, shadow-noise tradeoffs, highlight retention, color, and development midtone accuracy. Do not claim extra dynamic range from already clipped input or proprietary-ISP equivalence.
+4. An exposure ramp: verify three Auto ISO ceilings/shutter preferences, reciprocal rule, cadence, no oscillation, and handoff to manual exposure. Verify new OS versions do not silently ignore custom controls.
+5. Focus ruler/static near/far scene: inspect every original for distinct focus, then fused regions, registration direction, borders, breathing artifacts, and rejection on excessive movement. Compare to simple whole-frame selection to confirm local fusion actually adds detail.
+6. Moving water/light trails: evaluate ND sampling gaps, stable brightness, composite fidelity and heat at all frame counts. Compare multiple-exposure blend modes and ghost crop alignment.
+7. Pre-shot: compare original frame times to shutter time, verify buffer clearing on lens/recipe/framing/background changes, inspect preview-resolution labeling, and measure live-preview pacing/memory.
+8. Deny Photos permission and force disk errors/interruption: retry without losing pending bytes or originals, relaunch the app, discard partial assemblies, and check that UI controls cannot deadlock the camera.
+9. VoiceOver, largest Dynamic Type, iPhone/iPad layouts: Q, bank confirmation, reorder/remove, all-control recovery, progress cancellation, RAW sidecars, and unchanged ordinary capture/roll/import flows.
 
-Fuji minimum-ISO thresholds depend on the Fuji sensor generation and are not copied onto unrelated iPhone sensors. Camera capability checks, actual exposure metadata and explicit limitations take precedence over feature labels.
+## Primary references
+
+- [Fujifilm X100VI shooting settings](https://fujifilm-dsc.com/en/manual/x100vi/menu_shooting/shooting_setting/index.html): Auto ISO profiles, bracketing, multiple exposure, digital teleconverter and pre-shot vocabulary.
+- [Apple RAW and ProRAW capture](https://developer.apple.com/documentation/avfoundation/capturing-photos-in-raw-and-apple-proraw-formats): hardware capability discovery and paired capture.
+- [CIRAWFilter](https://developer.apple.com/documentation/coreimage/cirawfilter) and [linear-space filter](https://developer.apple.com/documentation/coreimage/cirawfilter/linearspacefilter): genuine RAW development before display rendering.
+- [Photo dimensions](https://developer.apple.com/documentation/avfoundation/avcapturephotooutput/maxphotodimensions): device-supported per-photo dimensions.

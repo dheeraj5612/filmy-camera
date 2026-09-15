@@ -1,6 +1,5 @@
 {
   "classes": {
-    "FilmyCameraTests/ProCaptureTests": "integration",
     "FilmyCameraTests/CameraServiceAvailabilityTests": "unit",
     "FilmyCameraTests/CameraManualControlsTests": "unit",
     "FilmyCameraTests/CameraManualHardwareTests": "device",
@@ -45,16 +44,9 @@
     "FilmyCameraUITests/ComprehensiveSettingsTests": "e2e",
     "FilmyCameraTests/CameraPreviewGesturePolicyTests": "unit",
     "FilmyCameraTests/FilmyControlInteractionTests": "unit",
-    "FilmyCameraUITests/AdditionalInteractionTests": "device",
-    "FilmyCameraTests/PhotoLibraryLargeRollTests": "fixtures",
-    "FilmyCameraUITests/NormalRollManagementTests": "photos-e2e",
-    "FilmyCameraUITests/PhysicalReviewFlowTests": "device",
-    "FilmyCameraTests/ReviewComparisonStateTests": "unit",
-    "FilmyCameraUITests/SignalFrameUITests": "e2e",
     "FilmyCameraTests/ImageSizePolicyTests": "unit",
     "FilmyCameraTests/ImageDecodeQueueTests": "unit",
     "FilmyCameraTests/RuntimeHardeningTests": "integration",
-    "FilmyCameraTests/FujiShootingTests": "unit",
     "FilmyCameraTests/RecipeLibraryTests": "unit",
     "FilmyCameraTests/RecipeLibraryPersistenceTests": "unit",
     "FilmyCameraUITests/RecipeLibraryUITests": "e2e",
@@ -62,9 +54,17 @@
     "FilmyCameraTests/SceneAutoIntegrationTests": "unit",
     "FilmyCameraTests/CaptureModesPolicyTests": "unit",
     "FilmyCameraTests/CaptureModesProcessingTests": "unit",
+    "FilmyCameraTests/ProCaptureTests": "integration",
     "FilmyCameraTests/SmartRecipeEngineTests": "unit",
     "FilmyCameraTests/SmartRecipeIntegrationTests": "integration",
-    "FilmyCameraUITests/SmartRecipeUITests": "e2e"
+    "FilmyCameraUITests/SmartRecipeUITests": "e2e",
+    "FilmyCameraUITests/AdditionalInteractionTests": "device",
+    "FilmyCameraTests/PhotoLibraryLargeRollTests": "fixtures",
+    "FilmyCameraUITests/NormalRollManagementTests": "photos-e2e",
+    "FilmyCameraUITests/PhysicalReviewFlowTests": "device",
+    "FilmyCameraTests/ReviewComparisonStateTests": "unit",
+    "FilmyCameraUITests/SignalFrameUITests": "e2e",
+    "FilmyCameraTests/FujiShootingTests": "integration"
   },
   "overrides": {
     "FilmyCameraUITests/FilmyCameraUITests/testSimulatorFallbackExposesReadableStateWithoutPreviewAction": "simulator-e2e",
@@ -82,6 +82,8 @@
     "FilmyCameraUITests/FilmyCameraUITests/testPhysicalLaunchPerformance": "performance",
     "FilmyCameraUITests/ComprehensiveSettingsTests/testPhysicalEveryAspectAndTimerCapturesThenFrontCameraReturnsLive": "device",
     "FilmyCameraUITests/SmartRecipeUITests/testSmartLooksIsDiscoverableAndUnavailableSceneHasNoApplyAction": "simulator-e2e",
-    "FilmyCameraUITests/SmartRecipeUITests/testDisablingSuggestionsPersistsAcrossRelaunch": "simulator-e2e"
+    "FilmyCameraUITests/SmartRecipeUITests/testDisablingSuggestionsPersistsAcrossRelaunch": "simulator-e2e",
+    "FilmyCameraTests/CameraViewModelRenderingTests/testCaptureDiagnosticsRequiresExplicitOptIn": "unit",
+    "FilmyCameraTests/CameraViewModelRenderingTests/testCaptureDiagnosticsReplacesTheLatestSourceAndFinalPair": "unit"
   }
 }

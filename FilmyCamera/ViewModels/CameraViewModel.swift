@@ -556,9 +556,17 @@ final class CameraViewModel: ObservableObject {
 
     func capture(camera: CameraService, photoLibrary: any PhotoSaving) {
         guard !isCapturing, !isImporting, !isSaving, reviewImage == nil else { return }
+        let captureStartedAt = ContinuousClock.now
         if let pendingOriginalRetention {
             isCapturing = true
-            Task { await developCapture(pendingOriginalRetention, camera: camera, photoLibrary: photoLibrary) }
+            Task {
+                await developCapture(
+                    pendingOriginalRetention,
+                    captureStartedAt: captureStartedAt,
+                    camera: camera,
+                    photoLibrary: photoLibrary
+                )
+            }
             return
         }
         isCapturing = true
@@ -597,7 +605,6 @@ final class CameraViewModel: ObservableObject {
         }
         let grainSeed = camera.previewGrainSeed
 #if DEBUG
-        let captureStartedAt = ContinuousClock.now
         if ProcessInfo.processInfo.arguments.contains("-ui-testing") { captureTimingStatus = "requested" }
 #endif
 
@@ -614,7 +621,10 @@ final class CameraViewModel: ObservableObject {
                     if camera.availability == .simulator {
                         self.showToast("Capture is available on a physical device", style: .info)
                     } else {
-                        self.showToast(camera.statusMessage, style: .error)
+                        let message = camera.statusMessage == "Start the camera before capturing."
+                            ? "Capture could not be completed. Resume the camera and try again."
+                            : camera.statusMessage
+                        self.showToast(message, style: .error)
                     }
                     return
                 }
@@ -622,13 +632,19 @@ final class CameraViewModel: ObservableObject {
                 await self.developCapture(
                     CapturedWork(photo: capturedPhoto, recipe: recipe, finish: finish,
                                  viewport: viewportSize, drawable: previewDrawableSize, grainSeed: grainSeed),
+                    captureStartedAt: captureStartedAt,
                     camera: camera, photoLibrary: photoLibrary
                 )
             }
         }
     }
 
-    private func developCapture(_ work: CapturedWork, camera: CameraService, photoLibrary: any PhotoSaving) async {
+    private func developCapture(
+        _ work: CapturedWork,
+        captureStartedAt: ContinuousClock.Instant,
+        camera: CameraService,
+        photoLibrary: any PhotoSaving
+    ) async {
         let recipe = work.recipe
         let finish = work.finish
         let grainSeed = work.grainSeed
@@ -679,10 +695,10 @@ final class CameraViewModel: ObservableObject {
         }
         renderedPhoto.documentID = document.id
 #if DEBUG
-                if ProcessInfo.processInfo.arguments.contains("-ui-testing") { self.captureTimingStatus = "render-complete:\(captureStartedAt.duration(to: .now).components.seconds)s" }
+        if ProcessInfo.processInfo.arguments.contains("-ui-testing") { self.captureTimingStatus = "render-complete:\(captureStartedAt.duration(to: .now).components.seconds)s" }
 #endif
 #if DEBUG
-                if FilmyCaptureDiagnostics.isEnabled() {
+        if FilmyCaptureDiagnostics.isEnabled() {
                     let metadata = FilmyCaptureDiagnostics.Metadata(
                         capturedAt: work.photo.capturedAt,
                         sourceDimensions: .init(

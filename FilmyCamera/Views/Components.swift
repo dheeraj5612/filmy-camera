@@ -123,7 +123,9 @@ enum FilmyTheme {
     /// The letterbox bands around the viewfinder. Pure black, like a camera
     /// body, so the frame reads as the only picture on screen.
     static let viewfinderBand = Color.black
-    static let viewfinderCornerRadius: CGFloat = 2
+    // A restrained radius keeps the live frame camera-like while softening
+    // the hard rectangular edge on the main camera screen.
+    static let viewfinderCornerRadius: CGFloat = 10
 
     static let cornerRadius: CGFloat = 18
     static let controlRadius: CGFloat = 12
