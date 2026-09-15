@@ -71,7 +71,7 @@ struct FilmyCameraApp: App {
         WindowGroup {
             Group {
                 if !isShowingOnboarding {
-                    ContentView(
+                    CaptureModesRoot(
                         camera: camera,
                         cameraViewModel: cameraViewModel,
                         photoLibrary: photoLibrary

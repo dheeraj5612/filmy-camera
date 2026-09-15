@@ -4684,3 +4684,20 @@ extension CameraService {
         publishSceneAutoOnQueue()
     }
 }
+
+// MARK: - Exclusive capture-workspace handoff
+extension CameraService {
+    /// Acknowledges release on the same queue that owns start/stop. Callers must
+    /// unmount the legacy camera surface before awaiting this method, so its
+    /// lifecycle cannot enqueue a later start while another workspace is active.
+    public func suspendForCaptureModes() async {
+        await withCheckedContinuation { continuation in
+            sessionQueue.async { [weak self] in
+                guard let self else { continuation.resume(); return }
+                self.deferredStopGeneration &+= 1
+                self.stopOnQueue()
+                continuation.resume()
+            }
+        }
+    }
+}
