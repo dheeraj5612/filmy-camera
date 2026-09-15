@@ -1,0 +1,100 @@
+name: Pro camera iOS 27
+
+on:
+  pull_request:
+    paths:
+      - 'FilmyCamera/**'
+      - 'FilmyCameraTests/**'
+      - 'FilmyCamera.xcodeproj/**'
+      - 'project.yml'
+      - 'scripts/testing/**'
+      - '.github/workflows/pro-camera-sdk.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'FilmyCamera/**'
+      - 'FilmyCameraTests/**'
+      - 'FilmyCamera.xcodeproj/**'
+      - 'project.yml'
+      - 'scripts/testing/**'
+      - '.github/workflows/pro-camera-sdk.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pro-camera-27-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  camera-sdk:
+    # Hardware additions postdate some SDK 27 betas. Never assume SDK version
+    # alone proves these selectors exist on a particular OS and camera.
+    runs-on: xcode-27
+    timeout-minutes: 25
+    env:
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Record exact toolchain and source
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/pro-camera"
+          git rev-parse HEAD > "$RUNNER_TEMP/pro-camera/source-sha.txt"
+          xcodebuild -version | tee "$RUNNER_TEMP/pro-camera/xcode.txt"
+          xcrun --sdk iphoneos --show-sdk-version | tee "$RUNNER_TEMP/pro-camera/sdk.txt"
+          grep -q '^27\.' "$RUNNER_TEMP/pro-camera/sdk.txt"
+      - name: Compile the physical camera implementation
+        run: |
+          set -euo pipefail
+          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera -configuration Release \
+            -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/ProCameraDevice" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build \
+            > "$RUNNER_TEMP/pro-camera/device-build.log" 2>&1 || {
+              tail -120 "$RUNNER_TEMP/pro-camera/device-build.log"
+              exit 1
+            }
+      - name: Run every method in the capture and retention regression suites
+        run: |
+          python3 - <<'PY'
+          import importlib.util, json, os, subprocess
+          from pathlib import Path
+          spec = importlib.util.spec_from_file_location('filmy_runner', 'scripts/testing/run.py')
+          runner = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(runner)
+          classes = {'ProCapturePolicyTests', 'FilmyPhotoStoreTests', 'ProPhotoEncoderTests',
+                     'CameraReviewSaveTests', 'CameraViewModelRenderingTests',
+                     'CameraManualControlsTests', 'PhotoOutputEncoderTests'}
+          selected = sorted(test for test in runner.inventory() if test.split('/')[1] in classes)
+          assert {test.split('/')[1] for test in selected} == classes, 'Missing pro-camera suites'
+          devices = json.loads(subprocess.check_output(['xcrun', 'simctl', 'list', 'devices', 'available', '-j']))
+          simulator = next(d['udid'] for key, values in devices['devices'].items() if 'iOS-27-' in key
+                           for d in values if 'iPhone' in d['name'] and d.get('isAvailable', False))
+          output = Path(os.environ['RUNNER_TEMP']) / 'pro-camera'
+          result = output / 'Tests.xcresult'
+          (output / 'selected-tests.json').write_text(json.dumps(selected, indent=2))
+          command = runner.xcode_command('platform=iOS Simulator,id=' + simulator, output / 'DerivedData')
+          command += ['-configuration', 'Debug', '-resultBundlePath', str(result)]
+          command += ['-only-testing:' + test for test in selected] + ['test']
+          with (output / 'tests.log').open('w') as log:
+              code = subprocess.call(command, stdout=log, stderr=subprocess.STDOUT, env=runner.test_environment('core'))
+          summary = runner.summarize_result(result, code)
+          runner.require_complete_run('core', selected, summary)
+          (output / 'summary.json').write_text(json.dumps(summary, indent=2))
+          print(json.dumps(summary, indent=2))
+          raise SystemExit(0 if summary['status'] == 'passed' else 1)
+          PY
+      - name: Keep inspectable evidence, not build products
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: pro-camera-ios27-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/pro-camera/*.txt
+            ${{ runner.temp }}/pro-camera/*.log
+            ${{ runner.temp }}/pro-camera/*.json
+            ${{ runner.temp }}/pro-camera/Tests.xcresult
+          retention-days: 7

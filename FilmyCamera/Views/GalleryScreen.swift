@@ -12,6 +12,7 @@ struct GalleryScreen: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var selectedAsset: PhotoLibraryGalleryAsset?
+    @State private var showingOriginals = false
     @AppStorage("rollRoomyGrid") private var roomyGrid = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -37,6 +38,13 @@ struct GalleryScreen: View {
                             trailing: photoLibrary.galleryAssets.isEmpty ? nil : "\(photoLibrary.galleryAssets.count) frames"
                         )
                         .padding(.horizontal, FilmyTheme.pageMargin)
+
+                        Button { showingOriginals = true } label: {
+                            Label("Filmy originals · edit again", systemImage: "photo.stack")
+                        }
+                        .buttonStyle(.bordered)
+                        .padding(.horizontal, FilmyTheme.pageMargin)
+                        .accessibilityIdentifier("roll-filmy-originals")
 
                         if !photoLibrary.galleryAssets.isEmpty {
                             rollSummary
@@ -87,6 +95,7 @@ struct GalleryScreen: View {
         .onChange(of: photoLibrary.localSavedFrames.map(\.assetIdentifier)) { _, _ in
             clearSelectionIfUnavailable()
         }
+        .sheet(isPresented: $showingOriginals) { FilmyOriginalsView(photoLibrary: photoLibrary) }
         .fullScreenCover(isPresented: Binding(
             get: { selectedAsset != nil },
             set: { if !$0 { selectedAsset = nil } }
