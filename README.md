@@ -66,3 +66,17 @@ See [docs/research.md](docs/research.md) for the open-source architecture review
 Open the camera look popup, then **Packs**. Open a pack to choose individual looks, or use **Actions > Enable all 743 looks**. Hiding a look does not change the current capture, delete edits, or remove favorites. **Browse all** and capture review retain the full catalog.
 
 See [the catalog and fidelity audit](docs/recipe-library-and-fidelity.md), [all 128 original-look audit rows](docs/original-recipe-audit.csv), and [the machine-readable source audit](docs/recipe-catalog-audit.json). The rendering tests check operational consistency, not a measured match to camera JPEGs.
+
+## Smart looks
+
+The Smart looks control above the viewfinder offers on-device, scene-aware recipe suggestions.
+Tap **Apply** for the leading recommendation, or open it to compare three renders of the same
+frame, choose Natural, Vivid, Cinema, or B&W, and apply a look with one tap. Undo restores the
+previous look unless you have since chosen another manually. Suggestions never select a recipe
+or save a photo automatically. Toggle analysis off in the Smart looks sheet.
+
+The engine combines Apple Vision scene/face detection with light, contrast, and color measurements
+and ranks the actual available recipes, including edited controls. It uses bounded, throttled
+background work, pauses for capture and heat, and never uploads image data. These are aesthetic
+starting points, not a guarantee of the best filter. See [the implementation and device-validation
+notes](docs/smart-recipes.md).

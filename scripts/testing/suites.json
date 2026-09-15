@@ -60,7 +60,10 @@
     "FilmyCameraTests/SceneAutoPolicyTests": "unit",
     "FilmyCameraTests/SceneAutoIntegrationTests": "unit",
     "FilmyCameraTests/CaptureModesPolicyTests": "unit",
-    "FilmyCameraTests/CaptureModesProcessingTests": "unit"
+    "FilmyCameraTests/CaptureModesProcessingTests": "unit",
+    "FilmyCameraTests/SmartRecipeEngineTests": "unit",
+    "FilmyCameraTests/SmartRecipeIntegrationTests": "integration",
+    "FilmyCameraUITests/SmartRecipeUITests": "e2e"
   },
   "overrides": {
     "FilmyCameraUITests/FilmyCameraUITests/testSimulatorFallbackExposesReadableStateWithoutPreviewAction": "simulator-e2e",
@@ -76,6 +79,8 @@
     "FilmyCameraUITests/FilmyCameraUITests/testPhysicalTimerCancellationAndSquareCaptureWithLiveHistogram": "device",
     "FilmyCameraUITests/FilmyCameraUITests/testPhysicalVolumeButtonsCaptureAndAutoSave": "device",
     "FilmyCameraUITests/FilmyCameraUITests/testPhysicalLaunchPerformance": "performance",
-    "FilmyCameraUITests/ComprehensiveSettingsTests/testPhysicalEveryAspectAndTimerCapturesThenFrontCameraReturnsLive": "device"
+    "FilmyCameraUITests/ComprehensiveSettingsTests/testPhysicalEveryAspectAndTimerCapturesThenFrontCameraReturnsLive": "device",
+    "FilmyCameraUITests/SmartRecipeUITests/testSmartLooksIsDiscoverableAndUnavailableSceneHasNoApplyAction": "simulator-e2e",
+    "FilmyCameraUITests/SmartRecipeUITests/testDisablingSuggestionsPersistsAcrossRelaunch": "simulator-e2e"
   }
 }
