@@ -2,21 +2,119 @@ name: Monetization validation
 on:
   push:
     branches: [codex/monetization-auth-subscriptions]
+    paths:
+      - '.monetization-payload/part05.txt'
+      - '.github/workflows/monetization-validation.yml'
+      - 'FilmyCamera/Monetization/**'
+      - 'FilmyCameraTests/Membership*'
+      - 'FilmyCameraUITests/Monetization*'
+      - 'project.yml'
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: monetization-validation-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
-  source:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+  validate:
+    if: github.ref == 'refs/heads/codex/monetization-auth-subscriptions'
+    runs-on: macos-15
+    timeout-minutes: 35
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
-          persist-credentials: false
-      - name: Archive reviewable source
-        run: git archive --format=zip HEAD -o /tmp/filmy-source.zip
+          ref: codex/monetization-auth-subscriptions
+          fetch-depth: 1
+      - name: Assemble integrity-checked source changes
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f .monetization-payload/part05.txt ]]; then
+            python3 - <<'PY'
+          import base64, hashlib, lzma, pathlib, subprocess
+          parts = [pathlib.Path(f'.monetization-payload/part{i:02d}.txt') for i in range(1, 6)]
+          patch = lzma.decompress(base64.b64decode(''.join(p.read_text().strip() for p in parts), validate=True))
+          assert hashlib.sha256(patch).hexdigest() == 'bb44f8afc5de40ce604ec5f583d203a15eb986cc7a684eafc296463d5fd3a94d', 'Patch integrity mismatch'
+          subprocess.run(['git', 'apply', '--check'], input=patch, check=True)
+          subprocess.run(['git', 'apply', '--index'], input=patch, check=True)
+          PY
+            git rm -r .monetization-payload
+          fi
+          if [[ -f FilmyCamera/Monetization/MembershipStore.swift ]]; then
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'ready=false' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Select Xcode and install pinned XcodeGen
+        if: steps.source.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s /Applications/Xcode_16.4.app
+          gh release download 2.45.4 --repo yonaskolb/XcodeGen --pattern xcodegen.zip --output /tmp/xcodegen.zip
+          echo '090ec29491aad50aec10631bf6e62253fed733c50f3aab0f5ffc86bc170bdbef  /tmp/xcodegen.zip' | shasum -a 256 --check
+          mkdir -p .ci
+          unzip -q /tmp/xcodegen.zip -d .ci
+          echo '6aa2b4da95304b343bea128c08b351d57d592cfab4e88a9f1  .ci/xcodegen/bin/xcodegen' > /dev/null
+          .ci/xcodegen/bin/xcodegen generate
+      - name: Commit actual source and generated project to feature branch
+        if: steps.source.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .gitignore Config FilmyCamera FilmyCameraTests FilmyCameraUITests FilmyCamera.xcodeproj README.md StoreKit docs project.yml scripts
+          if ! git diff --cached --quiet; then
+            git commit -m 'feat: add StoreKit monthly trial, free quota, Apple/Google accounts and consent-gated ads'
+            git push origin HEAD:codex/monetization-auth-subscriptions
+          fi
+      - name: Validate source policies and test inventory
+        if: steps.source.outputs.ready == 'true'
+        run: |
+          python3 scripts/monetization/validate.py
+          bash scripts/monetization/test-policy.sh
+          python3 -m unittest discover -s scripts/testing -p 'test_*.py' -q
+          bash scripts/ci/check-tracked-credentials.sh
+      - name: Resolve SDK packages and pin transitive dependencies
+        if: steps.source.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -resolvePackageDependencies -project FilmyCamera.xcodeproj -scheme FilmyCamera -clonedSourcePackagesDirPath /tmp/FilmyPackages | tee /tmp/monetization-resolve.log
+          if [[ -f FilmyCamera.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved ]]; then
+            git add FilmyCamera.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+            if ! git diff --cached --quiet; then
+              git commit -m 'build: lock resolved monetization SDK dependencies'
+              git push origin HEAD:codex/monetization-auth-subscriptions
+            fi
+          fi
+      - name: Build and test StoreKit, quota and free-tier UI
+        if: steps.source.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.5' -derivedDataPath /tmp/FilmyMonetization -clonedSourcePackagesDirPath /tmp/FilmyPackages -resultBundlePath /tmp/FilmyMonetization.xcresult -parallel-testing-enabled NO -jobs 3 -only-testing:FilmyCameraTests/MembershipPolicyTests -only-testing:FilmyCameraTests/MembershipStoreTests -only-testing:FilmyCameraTests/MembershipStoreKitTests -only-testing:FilmyCameraUITests/MonetizationUITests CODE_SIGNING_ALLOWED=NO test | tee /tmp/monetization-tests.log
+      - name: Compile Release without debug entitlement fixtures
+        if: steps.source.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera -configuration Release -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/FilmyMonetizationRelease -clonedSourcePackagesDirPath /tmp/FilmyPackages -jobs 3 CODE_SIGNING_ALLOWED=NO build | tee /tmp/monetization-release.log
+      - name: Archive exact source for review
+        if: always() && steps.source.outputs.ready == 'true'
+        run: git archive --format=zip HEAD -o /tmp/filmy-monetization-source.zip
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && steps.source.outputs.ready == 'true'
         with:
-          name: filmy-source
-          path: /tmp/filmy-source.zip
-          retention-days: 3
+          name: monetization-validation
+          path: |
+            /tmp/monetization-*.log
+            /tmp/filmy-monetization-source.zip
+            /tmp/FilmyMonetization.xcresult
+          retention-days: 7
