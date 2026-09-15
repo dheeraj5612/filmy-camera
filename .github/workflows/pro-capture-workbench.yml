@@ -7,7 +7,7 @@ permissions:
   contents: write
 concurrency:
   group: pro-capture-workbench
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   apply:
     runs-on: macos-15
@@ -25,8 +25,7 @@ jobs:
           if [[ -f scripts/pro-capture.patch ]]; then
             python3 - <<'PY'
           import base64,gzip,hashlib,json,pathlib
-          manifest=pathlib.Path('scripts/pro-capture.patch')
-          source=manifest.read_bytes()
+          source=pathlib.Path('scripts/pro-capture.patch').read_bytes()
           if source.startswith(b'{'):
               data=json.loads(source)
               encoded=data.get('base64_gzip')
@@ -66,7 +65,7 @@ jobs:
       matrix:
         runner: [macos-15, xcode-27]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 35
+    timeout-minutes: 25
     permissions:
       contents: read
     steps:
@@ -74,7 +73,7 @@ jobs:
         with:
           ref: ${{ needs.apply.outputs.sha }}
           persist-credentials: false
-      - name: Build native simulator target
+      - name: Build and test native simulator target
         shell: bash
         run: |
           set -euo pipefail
@@ -83,16 +82,12 @@ jobs:
           xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera \
             -destination 'generic/platform=iOS Simulator' -derivedDataPath "${RUNNER_TEMP}/ProCaptureBuild" \
             CODE_SIGNING_ALLOWED=NO build > "${RUNNER_TEMP}/pro-capture-build.log" 2>&1
-      - name: Run focused regression tests when present
-        if: ${{ hashFiles('FilmyCameraTests/ProCaptureTests.swift') != '' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ '${{ matrix.runner }}' != 'macos-15' ]] || export DEVELOPER_DIR=/Applications/Xcode_26.3.app/Contents/Developer
-          device=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for ds in json.load(sys.stdin)["devices"].values() for d in ds if "iPhone" in d["name"]))')
-          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera -destination "platform=iOS Simulator,id=$device" \
-            -parallel-testing-enabled NO -derivedDataPath "${RUNNER_TEMP}/ProCaptureBuild" \
-            -only-testing:FilmyCameraTests CODE_SIGNING_ALLOWED=NO test > "${RUNNER_TEMP}/pro-capture-tests.log" 2>&1
+          if [[ -f FilmyCameraTests/ProCaptureTests.swift ]]; then
+            device=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for ds in json.load(sys.stdin)["devices"].values() for d in ds if "iPhone" in d["name"]))')
+            xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera -destination "platform=iOS Simulator,id=$device" \
+              -parallel-testing-enabled NO -derivedDataPath "${RUNNER_TEMP}/ProCaptureBuild" \
+              -only-testing:FilmyCameraTests/ProCaptureTests CODE_SIGNING_ALLOWED=NO test > "${RUNNER_TEMP}/pro-capture-tests.log" 2>&1
+          fi
       - name: Preserve validation logs
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
