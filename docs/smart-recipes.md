@@ -63,7 +63,13 @@ crop bounds, preference isolation/persistence, and unchanged manual selection.
 SmartRecipeUITests covers discoverability, honest no-camera behavior, and the persistent off switch
 on the simulator. All classes are registered in scripts/testing/suites.json.
 
-Targeted native command after `xcodegen generate`:
+The checked-in Xcode project includes the three application files and all three test classes.
+When adding or moving files, regenerate with the repository's pinned XcodeGen 2.45.4 and commit
+the generated project rather than editing project identifiers by hand. A second generation must
+leave the project unchanged. Portable policy tests and project generation are useful checks, but
+neither substitutes for compiling the application against the iOS SDK and running native tests.
+
+Targeted native command after `xcodegen generate --spec project.yml`:
 
 ```sh
 xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera \
