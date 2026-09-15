@@ -12,11 +12,32 @@ permissions:
 
 concurrency:
   group: fuji-shooting-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
-  native-validation:
+  apply-source:
     if: github.ref == 'refs/heads/feature/fuji-shooting-system' && contains(github.event.head_commit.message, 'Apply Fuji')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: feature/fuji-shooting-system
+          fetch-depth: 0
+      - name: Apply verified source and commit
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/fuji-apply.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add FilmyCamera FilmyCameraTests README.md docs/fuji-shooting-system.md scripts/testing/suites.json
+          git rm scripts/ci/fuji-apply.py scripts/ci/fuji-payload-*.txt
+          git commit -m 'feat: implement integrated Fuji shooting, RAW development, and regression tests'
+          git push origin HEAD:refs/heads/feature/fuji-shooting-system
+      - name: Validate test routing
+        run: python3 -m unittest discover -s scripts/testing -p 'test_*.py' -v
+
+  native-validation:
+    needs: apply-source
     runs-on: macos-15
     timeout-minutes: 30
     env:
@@ -36,19 +57,17 @@ jobs:
           unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP/fuji-tools"
           echo "6aa2b4da95304b343bea12890c59f9655aa428c08b351d57d592cfab4e88a9f1  $RUNNER_TEMP/fuji-tools/xcodegen/bin/xcodegen" | shasum -a 256 --check
           echo "$RUNNER_TEMP/fuji-tools/xcodegen/bin" >> "$GITHUB_PATH"
-      - name: Apply reviewed implementation and commit generated project
+      - name: Regenerate and commit Xcode project
         run: |
           set -euo pipefail
-          python3 scripts/ci/fuji-apply.py
           xcodegen generate --spec project.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add FilmyCamera FilmyCameraTests FilmyCamera.xcodeproj README.md docs/fuji-shooting-system.md scripts/testing/suites.json
-          git rm scripts/ci/fuji-apply.py scripts/ci/fuji-payload-*.txt
-          git commit -m 'feat: implement integrated Fuji shooting, RAW development, and regression tests'
-          git push origin HEAD:refs/heads/feature/fuji-shooting-system
-      - name: Validate test routing
-        run: python3 -m unittest discover -s scripts/testing -p 'test_*.py' -v
+          git add FilmyCamera.xcodeproj
+          if ! git diff --cached --quiet; then
+            git commit -m 'build: regenerate Xcode project for Fuji shooting system'
+            git push origin HEAD:refs/heads/feature/fuji-shooting-system
+          fi
       - name: Build and run shooting regression tests
         run: |
           set -o pipefail
