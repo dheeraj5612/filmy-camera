@@ -15,46 +15,44 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           ref: feat/pro-camera-capture-parity
-      - name: Verify and apply source patch
-        shell: bash
+      - name: Apply compile fixes
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/pro-camera-evidence"
           python3 - <<'PY'
           from pathlib import Path
-          import base64, hashlib, lzma, subprocess
-          parts = sorted(Path('.pro-camera-patches').glob('part-*.b64'))
-          if parts:
-              text = ''.join(p.read_text().strip() for p in parts)
-              packed = base64.b64decode(text, validate=True)
-              assert hashlib.sha256(packed).hexdigest() == '0532f6700b933b0ff2a4220ddab0e25c9147cde1c5f6e5ddad34cc149c6d2cdf'
-              patch = lzma.decompress(packed)
-              subprocess.run(['git', 'apply', '--check', '-'], input=patch, check=True)
-              subprocess.run(['git', 'apply', '-'], input=patch, check=True)
-              for part in parts: part.unlink()
+          p = Path('FilmyCamera/Services/FocusAssistStore.swift')
+          s = p.read_text().replace('guard let result = request.results?.first, result.confidence >= 0.55,', 'guard let result = request.results?.first as? VNDetectedObjectObservation, result.confidence >= 0.55,')
+          p.write_text(s)
+          p = Path('FilmyCamera/Services/ProPhotoEncoder.swift')
+          p.write_text(p.read_text().replace('.workingFormat: CIFormat.RGBAh,', '.workingFormat: CIFormat.RGBAh.rawValue,'))
+          p = Path('FilmyCamera/Views/ProCaptureControlsView.swift')
+          s = p.read_text()
+          if 'private var captureFormatSection' not in s:
+              start = s.index('        VStack(alignment: .leading, spacing: 16) {')
+              end = s.index('\n    private func binding<Value>')
+              blocks = s[start:end].split('            Divider()\n')
+              assert len(blocks) == 4
+              blocks[0] = blocks[0].removeprefix('        VStack(alignment: .leading, spacing: 16) {\n')
+              blocks[3] = blocks[3][:blocks[3].index('\n        }\n        .foregroundStyle')]
+              names = ['captureFormatSection','exposurePrioritySection','focusAidsSection','retentionSection']
+              new = '        VStack(alignment: .leading, spacing: 16) {\n' + '\n            Divider()\n'.join('            ' + n for n in names) + '\n        }\n        .foregroundStyle(FilmyTheme.primary)\n        .padding(16)\n        .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 18))\n        .accessibilityIdentifier("pro-capture-controls")\n    }\n\n'
+              for name, block in zip(names, blocks):
+                  new += f'    private var {name}: some View {{\n        VStack(alignment: .leading, spacing: 12) {{\n' + block + '\n        }\n    }\n\n'
+              s = s[:start] + new + s[end:]
+              a = s.index('ForEach([1.0 / 8000'); b = s.index(', id: \\.self) { duration in', a)
+              s = s[:a] + 'ForEach(Self.shutterValues' + s[b:]
+              s = s.replace('ForEach([25.0, 50, 100, 200, 400, 800, 1600, 3200], id:', 'ForEach(Self.isoValues, id:')
+              s = s.replace('    private var options:', '    private static let shutterValues: [Double] = [8000, 4000, 2000, 1000, 500, 250, 125, 60, 30, 15, 8, 4, 2, 1].map { 1.0 / $0 }\n    private static let isoValues: [Double] = [25, 50, 100, 200, 400, 800, 1600, 3200]\n    private var options:')
+              p.write_text(s)
           PY
-      - name: Install pinned project generator
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh release download 2.45.4 --repo yonaskolb/XcodeGen --pattern xcodegen.zip --output "$RUNNER_TEMP/xcodegen.zip"
-          echo "090ec29491aad50aec10631bf6e62253fed733c50f3aab0f5ffc86bc170bdbef  $RUNNER_TEMP/xcodegen.zip" | shasum -a 256 --check
-          mkdir -p .ci
-          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d .ci
-          echo '6aa2b4da95304b343bea12890c59f9655aa428c08b351d57d592cfab4e88a9f1  .ci/xcodegen/bin/xcodegen' | shasum -a 256 --check
-          .ci/xcodegen/bin/xcodegen generate --spec project.yml
-      - name: Commit implementation only to isolated feature branch
-        run: |
-          set -euo pipefail
           test "$GITHUB_REF_NAME" = feat/pro-camera-capture-parity
           git config user.name 'Dheeraj Namburu'
           git config user.email '57207534+dheeraj5612@users.noreply.github.com'
-          git add FilmyCamera FilmyCameraTests FilmyCamera.xcodeproj README.md docs/PRO_CAMERA_FEATURES.md scripts/testing/suites.json
-          if git ls-files .pro-camera-patches | grep -q .; then git add -u .pro-camera-patches; fi
+          git add FilmyCamera
           git diff --cached --check
           if ! git diff --cached --quiet; then
-            git commit -m 'feat: add pro capture, focus aids, HDR and persistent non-destructive originals'
+            git commit -m 'fix: type Vision results and split capture controls for Apple SDK compilation'
             git push origin HEAD:feat/pro-camera-capture-parity
           fi
           git rev-parse HEAD | tee "$RUNNER_TEMP/pro-camera-evidence/source-sha.txt"
@@ -80,7 +78,7 @@ jobs:
           tail -25 "$RUNNER_TEMP/pro-camera-evidence/tests.log"
       - name: Retain build and test evidence
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: pro-camera-evidence-${{ github.run_id }}
           path: ${{ runner.temp }}/pro-camera-evidence
