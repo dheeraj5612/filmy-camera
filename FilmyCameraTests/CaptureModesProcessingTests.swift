@@ -82,4 +82,23 @@ final class CaptureModesProcessingTests: XCTestCase {
         try CaptureMediaStore.persist(media)
         XCTAssertEqual(try CaptureMediaStore.load(id).originals, ["original-000.heic"])
     }
+
+    func testUnfinalizedMoviesAreNotPromotedToDevelopedOrSpatial() async throws {
+        for mode in [CaptureMode.filmVideo, .spatialVideo] {
+            let id = UUID()
+            defer { try? CaptureMediaStore.delete(id) }
+            var media = CaptureMedia(id: id, mode: mode, createdAt: Date(), recipeName: "Test")
+            media.originals = ["original-video.mov"]
+            let url = try CaptureMediaStore.file("original-video.mov", in: id)
+            try Data([0, 1, 2, 3]).write(to: url)
+            try CaptureMediaStore.persist(media)
+            do {
+                _ = try await CaptureImageProcessor.process(media, recipe: FilmRecipe.builtIns[0])
+                XCTFail("An unfinished movie must not become a developed capture")
+            } catch {
+                XCTAssertEqual(try CaptureMediaStore.load(id).status, .originalsOnly)
+                XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+            }
+        }
+    }
 }
