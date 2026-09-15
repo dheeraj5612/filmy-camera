@@ -19,6 +19,7 @@ final class RecipeReferenceCatalogTests: XCTestCase {
         XCTAssertEqual(
             FilmRecipeReferenceCatalog.document.intentionallyUnlistedBuiltInRecipeIDs,
             ["sepia-archive", "g7x-compact"] + FilmRecipe.expandedInternetRecipeIDs + FilmRecipe.originalCreativeRecipeIDs
+            + RecipeCatalog.cameraBaselines.map(\.id) + RecipeCatalog.sourcedRecipes.map(\.id)
         )
     }
 

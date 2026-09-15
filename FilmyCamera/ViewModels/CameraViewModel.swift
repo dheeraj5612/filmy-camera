@@ -41,7 +41,7 @@ extension FilmRecipe {
         case .velvia: return "sparkles"
         case .astia: return "person.crop.square.filled.and.at.rectangle"
         case .eterna, .eternaBleachBypass: return "film.stack"
-        case .acros, .acrosYellow, .acrosRed, .acrosGreen, .monochrome: return "circle.lefthalf.filled"
+        case .acros, .acrosYellow, .acrosRed, .acrosGreen, .monochrome, .monochromeYellow, .monochromeRed, .monochromeGreen: return "circle.lefthalf.filled"
         case .sepia: return "clock.arrow.circlepath"
         case .compactDigital: return "camera.fill"
         case .standard, .provia: return "camera.aperture"
@@ -301,6 +301,12 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var isPreparingReviewOriginal = false
     @Published private(set) var pendingReviewRecipeID: String?
     @Published private var recipeOverrides: [String: FilmRecipe] = [:]
+    @Published var libraryPreferences = RecipeLibraryPreferences() {
+        didSet {
+            guard libraryPreferences != oldValue else { return }
+            defaults.set(libraryPreferences.encoded(), forKey: RecipeLibraryPreferences.storageKey)
+        }
+    }
 
     private var toastTask: Task<Void, Never>?
     private var reviewImageData: Data?
@@ -326,6 +332,7 @@ final class CameraViewModel: ObservableObject {
         reviewOriginalRenderer: ReviewOriginalRenderer? = nil
     ) {
         self.defaults = defaults
+        libraryPreferences = .decode(defaults.data(forKey: RecipeLibraryPreferences.storageKey))
         self.reviewPreviewRenderer = reviewPreviewRenderer ?? { source, recipe, finish in
             Self.renderReviewPreview(source: source, recipe: recipe, finish: finish)
         }
@@ -464,6 +471,18 @@ final class CameraViewModel: ObservableObject {
     /// a customized look from being represented by a stale stock thumbnail.
     var recipes: [FilmRecipe] {
         FilmRecipe.builtIns.map { recipe(for: $0.id) }
+    }
+
+    /// Membership is deliberately separate from the full editing/review catalog.
+    var quickRecipes: [FilmRecipe] {
+        FilmRecipe.builtIns.filter { libraryPreferences.isEnabled($0.id) }.map { recipe(for: $0.id) }
+    }
+
+    /// A hidden current look remains an ordering anchor for an explicit swipe.
+    /// It is not reinserted into the popup or made active by this navigation aid.
+    var quickNavigationRecipes: [FilmRecipe] {
+        FilmRecipe.builtIns.filter { $0.id == selectedRecipeID || libraryPreferences.isEnabled($0.id) }
+            .map { recipe(for: $0.id) }
     }
 
     func recipe(for id: String) -> FilmRecipe {

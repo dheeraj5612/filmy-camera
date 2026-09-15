@@ -107,3 +107,17 @@ CI runs portable routing checks on Linux before starting macOS. It retains the e
 ## Remaining validation limits
 
 The deterministic suite does not inject every PhotoKit service-level interleaving (for example, cache maintenance racing a save), or pause a renderer mid-import to force every cancellation schedule. Real permission revocation, add-only/limited access, storage pressure, thermal interruption, and long camera sessions still need device acceptance. Pixel-level assertions and public fixture E2Es do not replace visual comparison of skin tones, flash scenes, G7 X character, and Fuji looks on current hardware. See `docs/ipad-ui-acceptance-20260904.md` for the separate physical-device evidence.
+
+## Source-linked recipe library
+
+`RecipeLibraryTests` and `RecipeLibraryPersistenceTests` belong to the unit lane;
+`RecipeLibraryUITests` belongs to e2e and the iPhone/iPad screenshot workflow.
+`RecipeControlEffectTests` includes source-camera MG-axis polarity across all
+render qualities. The catalog acceptance workflow requires 167 passed cases,
+including two cases that enumerate all 595 sourced looks and 20 camera foundations
+in addition to the 128 original per-look cases. Counted tests and counted recipes
+are deliberately different. See `docs/recipe-library-and-fidelity.md`.
+
+```sh
+python3 -m unittest discover -s scripts/recipes -p 'test_*.py' -v
+```

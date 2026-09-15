@@ -1,0 +1,260 @@
+{
+  "schemaVersion": 1,
+  "candidates": 655,
+  "accepted": 595,
+  "publisherCounts": {
+    "filmRecipes": 319,
+    "fujiXWeekly": 276
+  },
+  "distinctControlSets": 594,
+  "sameControlGroups": [
+    [
+      "source-filmrecipes-forest-ranger-629d82bf5b14",
+      "source-filmrecipes-olive-garden-30a37ae4ad9e"
+    ]
+  ],
+  "rejected": [
+    {
+      "url": "https://fujixweekly.com/2023/04/25/getting-a-wes-anderson-look-from-your-fujifilm-camera-4-new-film-simulation-recipes/",
+      "reason": "Requires manual review: 4 setting blocks"
+    },
+    {
+      "url": "https://fujixweekly.com/2023/04/29/can-ai-make-a-fujifilm-recipe-kodak-ektachrome-e100vs-two-fujifilm-x-t5-x-trans-v-x-trans-iv-film-simulation-recipes/",
+      "reason": "Requires manual review: 2 setting blocks"
+    },
+    {
+      "url": "https://fujixweekly.com/2024/02/05/vintage-eterna-fujifilm-x-trans-v-x-trans-iv-x-h1-film-simulation-recipes/",
+      "reason": "Requires manual review: 3 setting blocks"
+    },
+    {
+      "url": "https://fujixweekly.com/2021/04/05/two-fujifilm-x-trans-iv-film-simulation-recipes-kodachrome-ii/",
+      "reason": "Requires manual review: 2 setting blocks"
+    },
+    {
+      "url": "https://fujixweekly.com/2022/10/13/four-fujifilm-x-trans-iv-film-simulation-recipes-kodaneg-vc-nc/",
+      "reason": "Requires manual review: 4 setting blocks"
+    },
+    {
+      "url": "https://fujixweekly.com/2020/07/08/fujifilm-x100v-film-simulation-recipe-bleach-bypass/",
+      "reason": "Requires unsupported capture method review"
+    },
+    {
+      "url": "https://fujixweekly.com/2021/02/22/fujifilm-x100v-film-simulation-recipe-faded-negative/",
+      "reason": "Requires unsupported capture method review"
+    },
+    {
+      "url": "https://fujixweekly.com/2021/06/21/two-fujifilm-x-trans-iv-film-simulation-recipes-expired-slide-expired-slide-v2/",
+      "reason": "Requires manual review: 2 setting blocks"
+    },
+    {
+      "url": "https://fujixweekly.com/2020/08/11/fujifilm-x100v-film-simulation-recipe-black-white-infrared/",
+      "reason": "Requires unsupported capture method review"
+    },
+    {
+      "url": "https://fujixweekly.com/2020/07/01/sepia-the-forgotten-film-simulation/",
+      "reason": "Requires manual review: 0 setting blocks"
+    },
+    {
+      "url": "https://fujixweekly.com/2019/06/06/my-fujifilm-x-t30-expired-eterna-film-simulation-recipe/",
+      "reason": "Requires manual review: 2 setting blocks"
+    },
+    {
+      "url": "https://fujixweekly.com/2019/06/15/my-fujifilm-x-t30-faded-color-film-simulation-recipe/",
+      "reason": "Requires unsupported capture method review"
+    },
+    {
+      "url": "https://fujixweekly.com/2020/02/25/my-fujifilm-x-t30-vintage-color-fade-film-simulation-recipe/",
+      "reason": "Requires manual review: 2 setting blocks"
+    },
+    {
+      "url": "https://fujixweekly.com/2021/05/24/a-different-approach-7-new-fujicolor-pro-160ns-film-simulation-recipes-yes-7/",
+      "reason": "Requires manual review: 7 setting blocks"
+    },
+    {
+      "url": "https://fujixweekly.com/2021/05/25/7-new-fujicolor-pro-400h-film-simulation-recipes/",
+      "reason": "Requires manual review: 7 setting blocks"
+    },
+    {
+      "url": "https://fujixweekly.com/2020/02/24/my-fujifilm-bleach-bypass-film-simulation-recipe/",
+      "reason": "Requires manual review: 2 setting blocks"
+    },
+    {
+      "url": "https://fujixweekly.com/2021/05/02/fujifilm-x-trans-iii-x-t30-x-t3-film-simulation-recipe-chrome-bypass/",
+      "reason": "Requires unsupported capture method review"
+    },
+    {
+      "url": "https://fujixweekly.com/2019/04/18/my-fujifilm-x-t30-acros-film-simulation-recipe-agfa-apx-400/",
+      "reason": "Requires manual review: 0 setting blocks"
+    },
+    {
+      "url": "https://fujixweekly.com/2019/05/29/my-fujifilm-x-t30-ilford-hp5-plus-400-push-process-film-simulation-recipe/",
+      "reason": "Requires manual review: 0 setting blocks"
+    },
+    {
+      "url": "https://fujixweekly.com/2020/04/24/not-my-fujifilm-x-t30-ilford-delta-push-process-film-simulation-recipe/",
+      "reason": "Requires manual review: 0 setting blocks"
+    },
+    {
+      "url": "https://fujixweekly.com/2020/02/11/my-fujifilm-x-t30-dramatic-monochrome-film-simulation-recipe/",
+      "reason": "Requires manual review: 0 setting blocks"
+    },
+    {
+      "url": "https://fujixweekly.com/2019/06/21/my-fujifilm-x-t30-faded-monochrome-film-simulation-recipe/",
+      "reason": "Requires manual review: 0 setting blocks"
+    },
+    {
+      "url": "https://fujixweekly.com/2020/02/24/my-fujifilm-x-t30-split-toned-bw-film-simulation-recipe/",
+      "reason": "Requires unsupported capture method review"
+    },
+    {
+      "url": "https://fujixweekly.com/2017/08/27/my-fujifilm-x100f-acros-film-simulation-recipe/",
+      "reason": "Requires manual review: 0 setting blocks"
+    },
+    {
+      "url": "https://fujixweekly.com/2017/11/11/my-fujifilm-x100f-acros-push-process-film-simulation-recipe/",
+      "reason": "Requires manual review: 0 setting blocks"
+    },
+    {
+      "url": "https://fujixweekly.com/2018/08/12/my-fujifilm-x100f-agfa-scala-film-simulation-recipe/",
+      "reason": "Requires manual review: 0 setting blocks"
+    },
+    {
+      "url": "https://fujixweekly.com/2018/12/01/my-fujifilm-x100f-ilford-hp5-plus-film-simulation-recipe/",
+      "reason": "Requires manual review: 0 setting blocks"
+    },
+    {
+      "url": "https://fujixweekly.com/2018/08/25/not-my-fujifilm-x-pro2-tri-x-push-process-film-simulation-recipe/",
+      "reason": "Requires manual review: 0 setting blocks"
+    },
+    {
+      "url": "https://fujixweekly.com/2020/01/21/first-fujifilm-x-t1-film-simulation-recipes/",
+      "reason": "Requires manual review: 2 setting blocks"
+    },
+    {
+      "url": "https://fujixweekly.com/2020/03/09/fujifilm-x-t1-x-trans-ii-faded-monochrome-film-simulation-recipe/",
+      "reason": "Requires manual review: 0 setting blocks"
+    },
+    {
+      "url": "https://fujixweekly.com/2023/11/10/kodak-portra-160-v2-fujifilm-x-t5-x-trans-v-film-simulation-recipe/",
+      "reason": "Ambiguous dynamic range: d-range priority (dr-p) auto"
+    },
+    {
+      "url": "https://fujixweekly.com/2024/02/14/kodak-portra-800-v3-fujifilm-x-t5-x-trans-v-x-e4-x-trans-iv-film-simulation-recipe/",
+      "reason": "FX Blue: ambiguous strength Off (X-Trans V); Weak (X-Trans IV)"
+    },
+    {
+      "url": "https://fujixweekly.com/2024/03/06/kodak-royal-gold-400-fujifilm-x-trans-iv-x-trans-v-film-simulation-recipe/",
+      "reason": "FX Blue: ambiguous strength Strong (X-Trans IV), Weak (X-Trans V)"
+    },
+    {
+      "url": "https://fujixweekly.com/2024/04/22/classic-color-fujifilm-x-t5-x-trans-v-and-x-e4-x-trans-iv-film-simulation-recipe/",
+      "reason": "FX Blue: ambiguous strength Strong (X-Trans IV), Weak (X-Trans V)"
+    },
+    {
+      "url": "https://fujixweekly.com/2024/02/01/expired-ecn-2-100t-fujifilm-x-trans-iv-x-trans-v-film-simulation-recipe/",
+      "reason": "FX Blue: ambiguous strength Strong - Weak for X-Trans V"
+    },
+    {
+      "url": "https://fujixweekly.com/2025/12/23/expired-kodak-vision2-250d-a-film-simulation-recipe-for-fujifilm-x-trans-iv-x-trans-v-cameras/",
+      "reason": "Dynamic Range Priority needs a separate supported mapping"
+    },
+    {
+      "url": "https://fujixweekly.com/2024/07/15/1960-chrome-fujifilm-x-t5-x-trans-v-x-e4-x-trans-iv-film-simulation-recipe/",
+      "reason": "FX Blue: ambiguous strength Off (X-Trans V); Weak (X-Trans IV)"
+    },
+    {
+      "url": "https://fujixweekly.com/2024/04/08/eterna-summer-fujifilm-x-trans-iv-x-trans-v-film-simulation-recipe/",
+      "reason": "FX Blue: ambiguous strength Strong (X-Trans IV); Weak (X-Trans V)"
+    },
+    {
+      "url": "https://fujixweekly.com/2024/05/16/fujifilm-x-t50-film-dial-settings-14-new-film-simulation-recipes-yes-14/",
+      "reason": "Unsupported or ambiguous film simulation: Any (See Below)"
+    },
+    {
+      "url": "https://fujixweekly.com/2025/03/28/universal-negative-14-fujifilm-x100vi-x-trans-v-film-simulation-recipes-yes-14/",
+      "reason": "Unsupported or ambiguous film simulation: Any (See Below)"
+    },
+    {
+      "url": "https://fujixweekly.com/2024/01/25/mccurry-kodachrome-a-fujifilm-x-trans-iv-film-simulation-recipe/",
+      "reason": "FX Blue: ambiguous strength Off - N/A for X-T3/X-T30"
+    },
+    {
+      "url": "https://fujixweekly.com/2021/09/22/fujifilm-x-e4-x-trans-iv-film-simulation-recipe-portra-style/",
+      "reason": "Ambiguous dynamic range: d-range priority auto"
+    },
+    {
+      "url": "https://fujixweekly.com/2021/06/01/fujifilm-x-e4-x-trans-iv-film-simulation-recipe-positive-film/",
+      "reason": "Noise reduction: ambiguous scalar -4 Sharpeness: -2"
+    },
+    {
+      "url": "https://fujixweekly.com/2021/11/30/fujifilm-x-trans-iv-film-simulation-recipe-vintage-negative/",
+      "reason": "Noise reduction: ambiguous scalar -4 Sharpeness: -4"
+    },
+    {
+      "url": "https://fujixweekly.com/2021/04/27/fujifilm-x-trans-iv-film-simulation-recipe-eterna-v2/",
+      "reason": "Unsupported white balance mode: auto white priority (x100v + x-pro3: auto )"
+    },
+    {
+      "url": "https://fujixweekly.com/2021/09/15/fujifilm-x-e4-x-trans-iv-film-simulation-recipe-scanned-superia/",
+      "reason": "Ambiguous dynamic range: d-range priority auto"
+    },
+    {
+      "url": "https://fujixweekly.com/2021/10/11/fujifilm-x100v-x-trans-iv-film-simulation-recipe-pulled-fujicolor-superia/",
+      "reason": "Ambiguous dynamic range: d-range priority strong"
+    },
+    {
+      "url": "https://fujixweekly.com/2021/05/30/fujifilm-x-trans-iv-x-pro3-x100v-x-t4-x-s10-x-e4-film-simulation-recipe-fujicolor-nps-160-pulled/",
+      "reason": "Noise reduction: ambiguous scalar -4 Sharpeness: +1"
+    },
+    {
+      "url": "https://fujixweekly.com/2021/05/13/fujifilm-x-trans-iv-film-simulation-recipe-fujicolor-c200/",
+      "reason": "Ambiguous dynamic range: dr400 (dr200 in low contrast situations)"
+    },
+    {
+      "url": "https://fujixweekly.com/2021/08/25/fujifilm-x100v-x-trans-iii-x-trans-iv-film-simulation-recipe-monochrome-negative/",
+      "reason": "Unsupported grain size: Strong, Small ( Strong for those cameras without Grain Size)"
+    },
+    {
+      "url": "https://fujixweekly.com/2019/09/21/my-fujifilm-x-t30-kodak-elite-chrome-200-color-fade-film-simulation-recipe/",
+      "reason": "Color Chrome: ambiguous strength Strong Image Quality: Normal"
+    },
+    {
+      "url": "https://fujixweekly.com/2019/10/26/my-fujifilm-x-t30-color-negative-film-simulation-recipe/",
+      "reason": "Unsupported white balance mode: daylight fluorescent (1)"
+    },
+    {
+      "url": "https://fujixweekly.com/2019/11/01/my-fujifilm-x-t30-provia-film-simulation-recipe-fujichrome-sensia-100/",
+      "reason": "Unsupported white balance mode: warm-white fluorescent (2)"
+    },
+    {
+      "url": "https://fujixweekly.com/2020/04/28/my-fujifilm-x-t30-kodacolor-ii-126-film-simulation-recipe/",
+      "reason": "Color Chrome: ambiguous strength Strong Image Quality: Normal Aspect Ratio : 1:1"
+    },
+    {
+      "url": "https://fujixweekly.com/2020/04/12/my-fujifilm-x-t30-cyanotype-film-simulation-recipe/",
+      "reason": "Unmapped monochrome toning axis: -9"
+    },
+    {
+      "url": "https://fujixweekly.com/2018/04/25/my-fujifilm-x100f-cinestill-800t-film-simulation-recipe/",
+      "reason": "Highlight: ambiguous scalar +3 (+2 when there is a bright light source in the image)"
+    },
+    {
+      "url": "https://fujixweekly.com/2018/03/02/my-fujifilm-x100f-eterna-film-simulation-recipe/",
+      "reason": "Color: ambiguous scalar -4 Noise-Reduction: -4"
+    },
+    {
+      "url": "https://fujixweekly.com/2018/05/30/my-fujifilm-x100f-kodak-portra-400-film-simulation-recipe/",
+      "reason": "Unsupported white balance mode: custom"
+    },
+    {
+      "url": "https://fujixweekly.com/2020/08/02/fujifilm-xq1-x-trans-ii-film-simulation-recipe-kodachrome-without-classic-chrome/",
+      "reason": "Unsupported white balance mode: daylight (fujifilm calls it “fine” for some reason)"
+    },
+    {
+      "url": "https://fujixweekly.com/2021/02/21/fujifilm-x-m1-x-trans-i-film-simulation-recipe-winter-blue/",
+      "reason": "Unsupported white balance mode: daylight (“fine”)"
+    }
+  ],
+  "mappingVersion": 1,
+  "calibration": "Not calibrated to camera hardware; source settings are not pixel-match evidence."
+}
