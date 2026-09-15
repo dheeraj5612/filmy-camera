@@ -71,6 +71,7 @@ struct ManualCameraControlsView: View {
                             .foregroundStyle(FilmyTheme.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
+                    ProCaptureControlsView(camera: camera)
                     if hasManualCapability { statusHeader }
 
                     if !controls.physicalLensOptions.isEmpty {

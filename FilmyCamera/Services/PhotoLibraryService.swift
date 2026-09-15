@@ -5,6 +5,7 @@ import Foundation
 import PhotosUI
 import ImageIO
 import UIKit
+import UniformTypeIdentifiers
 
 struct SavedFrameMetadata: Codable, Hashable, Sendable {
     let recipe: FilmRecipe
@@ -177,6 +178,21 @@ protocol PhotoSaving: AnyObject {
         capturedAt: Date,
         completion: @escaping @MainActor (Result<Void, PhotoLibrarySaveError>) -> Void
     )
+    func save(
+        image: UIImage, imageData: Data?, recipe: FilmRecipe, capturedAt: Date,
+        documentID: UUID?, completion: @escaping @MainActor (Result<Void, PhotoLibrarySaveError>) -> Void
+    )
+}
+
+extension PhotoSaving {
+    // Preserve existing import and test-double behavior. Concrete Photos
+    // exports override this witness to retain original resources and edits.
+    func save(
+        image: UIImage, imageData: Data?, recipe: FilmRecipe, capturedAt: Date,
+        documentID: UUID?, completion: @escaping @MainActor (Result<Void, PhotoLibrarySaveError>) -> Void
+    ) {
+        save(image: image, imageData: imageData, recipe: recipe, capturedAt: capturedAt, completion: completion)
+    }
 }
 
 enum PhotoLibraryCompletionBridge {
@@ -893,6 +909,32 @@ final class PhotoLibraryService: ObservableObject {
                           timestamp: Date())
     }
 
+    func save(
+        image: UIImage, imageData: Data?, recipe: FilmRecipe, capturedAt: Date,
+        documentID: UUID?, completion: @escaping @MainActor (Result<Void, PhotoLibrarySaveError>) -> Void
+    ) {
+        guard let documentID else {
+            save(image: image, imageData: imageData, recipe: recipe, capturedAt: capturedAt, completion: completion)
+            return
+        }
+        Task { @MainActor in
+            do {
+                let assetID = try await FilmyPhotosExporter.save(documentID)
+                await rememberSavedAsset(assetID, metadata: SavedFrameMetadata(recipe: recipe, capturedAt: capturedAt),
+                                         imageData: imageData, image: image)
+                refreshAuthorizationStatuses()
+                refresh()
+                completion(.success(()))
+                if PhotoLibraryAuthorizationPolicy.canManageCollections(authorizationStatus) {
+                    addToAppAlbum(assetIdentifier: assetID) { [weak self] _ in self?.refresh() }
+                }
+            } catch {
+                if case FilmyPhotosExporter.ExportError.accessDenied = error { completion(.failure(.accessDenied)) }
+                else { completion(.failure(.writeFailed)) }
+            }
+        }
+    }
+
     func metadata(for asset: PHAsset) -> SavedFrameMetadata? {
         metadataByAssetIdentifier[asset.localIdentifier]
     }
@@ -1025,6 +1067,19 @@ final class PhotoLibraryService: ObservableObject {
         }
     }
 
+    func registerDocumentExport(_ identifier: String, recipe: FilmRecipe, capturedAt: Date, thumbnail: UIImage?) async {
+        if let thumbnail {
+            await rememberSavedAsset(identifier, metadata: SavedFrameMetadata(recipe: recipe, capturedAt: capturedAt),
+                                     imageData: nil, image: thumbnail)
+        } else {
+            savedAssetIdentifiers = PhotoLibraryAssetOwnership.adding(identifier, to: savedAssetIdentifiers)
+            metadataByAssetIdentifier[identifier] = SavedFrameMetadata(recipe: recipe, capturedAt: capturedAt)
+            persistMetadata()
+        }
+        refreshAuthorizationStatuses()
+        refresh()
+    }
+
     private func rememberSavedAsset(
         _ identifier: String,
         metadata: SavedFrameMetadata,
@@ -1152,7 +1207,7 @@ final class PhotoLibraryService: ObservableObject {
             return
         }
 
-        let filename = "\(UUID().uuidString).jpg"
+        let filename = "\(UUID().uuidString).\(FilmyPhotoStore.imageExtension(data) ?? "jpg")"
         guard let resourceURL = localFrameURL(for: filename) else { return }
         let dimensions = Self.pixelDimensions(in: data, fallbackImage: fallbackImage)
         let generation = cacheWriteGeneration
@@ -1472,14 +1527,14 @@ final class PhotoLibraryService: ObservableObject {
             let resources = PHAssetResource.assetResources(for: photoAsset)
             guard PhotoLibraryAuthorizationPolicy.canRead(status),
                   ownsAsset(photoAsset.localIdentifier),
-                  let resource = resources.first(where: { $0.type == .photo }) ?? resources.first,
+                  let resource = resources.first(where: { $0.type == .fullSizePhoto }) ?? resources.first(where: { $0.type == .photo }),
                   let cachesURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
                 return nil
             }
 
             let directoryURL = cachesURL.appendingPathComponent(shareDirectoryName, isDirectory: true)
             let destinationURL = directoryURL.appendingPathComponent(
-                "\(UUID().uuidString).jpg",
+                "\(UUID().uuidString).\(UTType(resource.uniformTypeIdentifier)?.preferredFilenameExtension ?? "jpg")",
                 isDirectory: false
             )
             do {

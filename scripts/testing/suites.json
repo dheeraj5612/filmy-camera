@@ -1,5 +1,6 @@
 {
   "classes": {
+    "FilmyCameraTests/ProCaptureTests": "integration",
     "FilmyCameraTests/CameraServiceAvailabilityTests": "unit",
     "FilmyCameraTests/CameraManualControlsTests": "unit",
     "FilmyCameraTests/CameraManualHardwareTests": "device",
