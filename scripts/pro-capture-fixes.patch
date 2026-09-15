@@ -1,0 +1,164 @@
+diff --git a/FilmyCamera/Services/CameraService.swift b/FilmyCamera/Services/CameraService.swift
+index 0031d34..d19cb82 100644
+--- a/FilmyCamera/Services/CameraService.swift
++++ b/FilmyCamera/Services/CameraService.swift
+@@ -729,13 +729,13 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
+     /// consumers share the stream (the Metal viewfinder and the live recipe
+     /// swatches), so handlers fan out rather than replace one another, and a
+     /// stale SwiftUI representable can only remove its own callback.
+-    @discardableResult
+     private func updateFrameConsumersOnMain(hasOnFrame: Bool) {
+         frameHandlersLock.lock()
+         hasOnFrameConsumer = hasOnFrame
+         frameHandlersLock.unlock()
+     }
+ 
++    @discardableResult
+     public func installFrameHandler(_ handler: @escaping FrameHandler) -> UUID {
+         let id = UUID()
+         frameHandlersLock.lock()
+diff --git a/FilmyCamera/Services/FilmyPhotosExporter.swift b/FilmyCamera/Services/FilmyPhotosExporter.swift
+index e954313..9bbf851 100644
+--- a/FilmyCamera/Services/FilmyPhotosExporter.swift
++++ b/FilmyCamera/Services/FilmyPhotosExporter.swift
+@@ -71,7 +71,7 @@ enum FilmyPhotosExporter {
+         let adjustmentBox = Box(adjustment)
+         // For stills, original + RAW companion + rendered edit are committed
+         // in one PhotoKit transaction and require only add-only permission.
+-        try await PHPhotoLibrary.shared().performChanges {
++        let createChanges: @Sendable () -> Void = {
+             let request = PHAssetCreationRequest.forAsset()
+             request.creationDate = document.capturedAt
+             request.addResource(with: .photo, fileURL: original, options: nil)
+@@ -90,6 +90,7 @@ enum FilmyPhotosExporter {
+                 request.contentEditingOutput = output
+             } catch { editError.set(true) }
+         }
++        try await PHPhotoLibrary.shared().performChanges(createChanges)
+         defer { if let url = outputURL.get() { try? FileManager.default.removeItem(at: url) } }
+         guard let assetID = identifier.get() else { throw ExportError.writeFailed }
+         // Link immediately after creation, including a failed edit. Retrying
+@@ -112,16 +113,18 @@ enum FilmyPhotosExporter {
+         options.isNetworkAccessAllowed = true
+         // Returning true for Filmy adjustments asks Photos for the original,
+         // not the previous baked-in look. A version is never graded twice.
+-        options.canHandleAdjustmentData = { data in
++        let canHandle: @Sendable (PHAdjustmentData) -> Bool = { data in
+             let recognized = data.formatIdentifier == adjustmentIdentifier && data.formatVersion == "1"
+             if !recognized { externalAdjustment.set(true) }
+             return recognized
+         }
++        options.canHandleAdjustmentData = canHandle
+         let input: PHContentEditingInput = try await withCheckedThrowingContinuation { continuation in
+-            asset.requestContentEditingInput(with: options) { input, _ in
++            let completion: @Sendable (PHContentEditingInput?, [AnyHashable: Any]) -> Void = { input, _ in
+                 if let input { continuation.resume(returning: input) }
+                 else { continuation.resume(throwing: ExportError.writeFailed) }
+             }
++            asset.requestContentEditingInput(with: options, completionHandler: completion)
+         }
+         if externalAdjustment.get() { throw ExportError.externalEdit }
+         if let data = input.adjustmentData, data.formatIdentifier != adjustmentIdentifier {
+@@ -135,7 +138,7 @@ enum FilmyPhotosExporter {
+             let geometry = document.geometry
+             let orientation = context.orientation
+             context.audioVolume = revision.output.livePhotoAudio ? 1 : 0
+-            context.frameProcessor = { frame, error in
++            let processor: @Sendable (PHLivePhotoFrame, NSErrorPointer) -> CIImage? = { frame, error in
+                 autoreleasepool {
+                     let viewport = CGSize(width: geometry.viewportWidth, height: geometry.viewportHeight)
+                     let sideways = [CGImagePropertyOrientation.left, .leftMirrored, .right, .rightMirrored].contains(orientation)
+@@ -164,6 +167,7 @@ enum FilmyPhotosExporter {
+                     return CIImage(cgImage: rendered)
+                 }
+             }
++            context.frameProcessor = processor
+             try await context.saveLivePhoto(to: output, options: nil)
+         } else {
+             let type: UTType = rendition.pathExtension == "heic" ? .heic : .jpeg
+@@ -173,9 +177,10 @@ enum FilmyPhotosExporter {
+         }
+         let outputBox = Box(output)
+         let assetBox = Box(asset)
+-        try await PHPhotoLibrary.shared().performChanges {
++        let updateChanges: @Sendable () -> Void = {
+             PHAssetChangeRequest(for: assetBox.get()).contentEditingOutput = outputBox.get()
+         }
++        try await PHPhotoLibrary.shared().performChanges(updateChanges)
+         // Photos has consumed its copy. Only remove the URL it explicitly
+         // gave us; do not enumerate or purge the shared temporary directory.
+         try? FileManager.default.removeItem(at: output.renderedContentURL)
+diff --git a/FilmyCamera/Views/FilmyOriginalsView.swift b/FilmyCamera/Views/FilmyOriginalsView.swift
+--- a/FilmyCamera/Views/FilmyOriginalsView.swift
++++ b/FilmyCamera/Views/FilmyOriginalsView.swift
+@@ -273,9 +273,11 @@ struct FilmyPhotoEditorView: View {
+         defer { busy = false }
+         do {
+             let identifier = try await FilmyPhotosExporter.save(documentID, asNewCopy: asNewCopy)
+-            if let document, let revision = document.currentRevision {
++            let latest = try await FilmyPhotoStore.shared.load(documentID)
++            let thumbnail = try await FilmyPhotoStore.shared.thumbnailData(documentID).flatMap { UIImage(data: $0) }
++            if let revision = latest.currentRevision {
+                 await photoLibrary.registerDocumentExport(identifier, recipe: revision.recipe,
+-                                                          capturedAt: document.capturedAt, thumbnail: preview)
++                                                          capturedAt: latest.capturedAt, thumbnail: thumbnail)
+             }
+             await load()
+             message = "Saved to Photos with original resources and reversible Filmy edits."
+diff --git a/FilmyCameraTests/ProCaptureTests.swift b/FilmyCameraTests/ProCaptureTests.swift
+index 127cff1..63ea38e 100644
+--- a/FilmyCameraTests/ProCaptureTests.swift
++++ b/FilmyCameraTests/ProCaptureTests.swift
+@@ -202,7 +202,7 @@ final class ProCaptureTests: XCTestCase {
+         let decoded = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+         XCTAssertEqual(decoded.width, 64)
+         XCTAssertEqual(decoded.height, 48)
+-        XCTAssertEqual(decoded.colorSpace?.name, CGColorSpace.displayP3)
++        XCTAssertEqual(decoded.colorSpace?.name as String?, CGColorSpace.displayP3 as String)
+         let metadata = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any])
+         XCTAssertNil(metadata[kCGImagePropertyGPSDictionary as String])
+     }
+@@ -218,6 +218,29 @@ final class ProCaptureTests: XCTestCase {
+         XCTAssertEqual(try firstChannel(standard), 0.9, accuracy: 0.02)
+     }
+ 
++    func testHEIFAndHDRFilesContainTheirDeclaredPixelFormat() throws {
++        let image = CIImage(color: CIColor(red: 0.8, green: 0.2, blue: 0.1))
++            .cropped(to: CGRect(x: 0, y: 0, width: 64, height: 48))
++        for dynamicRange in ProCaptureSettings.DynamicRange.allCases {
++            var settings = ProCaptureSettings()
++            settings.dynamicRange = dynamicRange
++            let result = ProPhotoOutput.encode(image, sourceData: Data(), capturedAt: .distantPast,
++                recipe: FilmRecipe.builtIns[0], settings: settings)
++#if targetEnvironment(simulator)
++            guard let data = result else { throw XCTSkip("The simulator does not provide this HEIF encoder; verify on device") }
++#else
++            let data = try XCTUnwrap(result)
++#endif
++            let source = try XCTUnwrap(CGImageSourceCreateWithData(data as CFData, nil))
++            let type = try XCTUnwrap(CGImageSourceGetType(source) as String?)
++            XCTAssertTrue(UTType(type)?.conforms(to: .heic) == true || UTType(type)?.conforms(to: .heif) == true)
++            let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any])
++            XCTAssertEqual(properties[kCGImagePropertyPixelWidth as String] as? Int, 64)
++            XCTAssertEqual(properties[kCGImagePropertyPixelHeight as String] as? Int, 48)
++            if dynamicRange == .hdr { XCTAssertEqual(properties[kCGImagePropertyDepth as String] as? Int, 10) }
++        }
++    }
++
+     private var geometry: FilmyRenderGeometry {
+         .init(viewportWidth: 300, viewportHeight: 400, previewWidth: 600, previewHeight: 800, grainSeed: 7, flashFired: false)
+     }
+diff --git a/FilmyCameraUITests/FilmyCameraUITests.swift b/FilmyCameraUITests/FilmyCameraUITests.swift
+index 647b875..0981ecc 100644
+--- a/FilmyCameraUITests/FilmyCameraUITests.swift
++++ b/FilmyCameraUITests/FilmyCameraUITests.swift
+@@ -95,6 +95,9 @@ final class FilmyCameraUITests: XCTestCase {
+                       "The presented Pro controls must settle at a hittable 44pt target")
+         assertMinimumHitTarget(done, named: "Done with Pro controls")
+ 
++        XCTAssertTrue(app.descendants(matching: .any)["pro-resolution"].exists)
++        XCTAssertTrue(app.descendants(matching: .any)["pro-format"].exists)
++
+         #if targetEnvironment(simulator)
+         XCTAssertTrue(app.descendants(matching: .any)["manual-controls-unavailable"].exists)
+         XCTAssertFalse(app.sliders["manual-iso-slider"].exists,
