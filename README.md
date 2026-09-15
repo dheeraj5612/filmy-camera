@@ -58,3 +58,17 @@ The recipe controls intentionally model the public vocabulary used by Fujifilm c
 ## Research
 
 See [docs/research.md](docs/research.md) for the open-source architecture review and the rendering decisions used here.
+
+## Smart looks
+
+The Smart looks control above the viewfinder offers on-device, scene-aware recipe suggestions.
+Tap **Apply** for the leading recommendation, or open it to compare three renders of the same
+frame, choose Natural, Vivid, Cinema, or B&W, and apply a look with one tap. Undo restores the
+previous look unless you have since chosen another manually. Suggestions never select a recipe
+or save a photo automatically. Toggle analysis off in the Smart looks sheet.
+
+The engine combines Apple Vision scene/face detection with light, contrast, and color measurements
+and ranks the actual available recipes, including edited controls. It uses bounded, throttled
+background work, pauses for capture and heat, and never uploads image data. These are aesthetic
+starting points, not a guarantee of the best filter. See [the implementation and device-validation
+notes](docs/smart-recipes.md).
