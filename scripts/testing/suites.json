@@ -48,7 +48,10 @@
     "FilmyCameraUITests/NormalRollManagementTests": "photos-e2e",
     "FilmyCameraUITests/PhysicalReviewFlowTests": "device",
     "FilmyCameraTests/ReviewComparisonStateTests": "unit",
-    "FilmyCameraUITests/SignalFrameUITests": "e2e"
+    "FilmyCameraUITests/SignalFrameUITests": "e2e",
+    "FilmyCameraTests/ImageSizePolicyTests": "unit",
+    "FilmyCameraTests/ImageDecodeQueueTests": "unit",
+    "FilmyCameraTests/RuntimeHardeningTests": "integration"
   },
   "overrides": {
     "FilmyCameraUITests/FilmyCameraUITests/testSimulatorFallbackExposesReadableStateWithoutPreviewAction": "simulator-e2e",
