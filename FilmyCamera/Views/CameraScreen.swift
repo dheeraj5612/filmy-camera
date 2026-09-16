@@ -153,6 +153,9 @@ struct CameraScreen: View {
     @AppStorage("showGrid") private var showGrid = true
     @StateObject private var countdown = CaptureCountdown()
     @StateObject private var assists = CompositionAssistStore()
+    @StateObject private var smartRecipes = SmartRecipeStore()
+    @State private var isShowingSmartRecipes = false
+    @State private var smartPresentation: SmartRecipeSnapshot?
     @State private var isShowingCaptureSetup = false
     @AppStorage("captureDelay") private var captureDelay = CaptureDelay.off
     @AppStorage("captureAspect") private var captureAspect = CaptureAspect.viewfinder
@@ -296,6 +299,22 @@ struct CameraScreen: View {
         } message: {
             Text("This photo has not been saved to Photos. Discarding cannot be undone.")
         }
+        .onChange(of: isSmartRecipeAnalysisActive, initial: true) { _, _ in updateSmartRecipeAnalysis() }
+        .onChange(of: viewModel.recipes) { _, _ in updateSmartRecipeAnalysis() }
+        .onChange(of: favoriteData) { _, _ in updateSmartRecipeAnalysis() }
+        .onChange(of: smartRecipeFrameKey) { _, _ in smartRecipes.invalidateScene() }
+        .onChange(of: viewModel.selectedRecipeID) { _, selected in
+            smartRecipes.reconcileSelection(currentID: selected, availableIDs: Set(viewModel.recipes.map(\.id)))
+        }
+        .sheet(isPresented: $isShowingSmartRecipes, onDismiss: { smartPresentation = nil }) {
+            SmartRecipeSheet(
+                store: smartRecipes, snapshot: smartPresentation,
+                selectedID: viewModel.selectedRecipeID, canApply: canApplySmartRecipe,
+                onApply: applySmartRecipe, onClose: { isShowingSmartRecipes = false }
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
         .onChange(of: assistOptions, initial: true) { _, _ in updateCompositionAssists() }
         .onChange(of: isCameraVisibleForAssists, initial: true) { _, visible in
             if !visible { countdown.cancel() }
@@ -378,6 +397,7 @@ struct CameraScreen: View {
         .onDisappear {
             countdown.cancel()
             assists.stop()
+            smartRecipes.stop()
             camera.stop(after: CameraActivityPolicy.inactiveGracePeriod)
             UIApplication.shared.isIdleTimerDisabled = false
         }
@@ -817,15 +837,21 @@ struct CameraScreen: View {
             }
         } indicators: {
             HStack(spacing: 8) {
+                SmartRecipeEntryPoint(
+                    store: smartRecipes, selectedID: viewModel.selectedRecipeID,
+                    canApply: canApplySmartRecipe, onOpen: openSmartRecipes,
+                    onApply: applySmartRecipe, onUndo: undoSmartRecipe
+                )
+                Spacer(minLength: 0)
                 activeCaptureIndicators
 
-                CameraStatusPill(
+                if !isLive {
+                    CameraStatusPill(
                     isRunning: camera.isRunning,
                     availability: camera.availability,
                     message: camera.statusMessage
                 )
-                .opacity(isLive ? 0 : 1)
-                .accessibilityHidden(isLive)
+                }
             }
         }
     }
@@ -1532,6 +1558,55 @@ struct CameraScreen: View {
         }
     }
 
+    // MARK: - Smart recipe suggestions
+
+    private var canApplySmartRecipe: Bool {
+        scenePhase == .active && isCameraTabActive && camera.isRunning
+            && camera.availability == .running && !isChromeDisabled && !isReviewing
+            && viewModel.reviewImage == nil && !countdown.state.isActive && !camera.manualControls.isApplying
+    }
+
+    private var isSmartRecipeAnalysisActive: Bool {
+        smartRecipes.isEnabled && canTriggerShutter && !isShowingLookDrawer
+            && !isShowingLiveAdjustments && !isShowingTools
+    }
+
+    private var smartRecipeFrameKey: [String] {
+        [camera.cameraPosition.rawValue, camera.selectedLensID ?? "", String(describing: camera.zoomFactor),
+         String(describing: camera.previewViewportSize), String(describing: camera.previewRotationAngle),
+         String(camera.previewMirrored)]
+    }
+
+    private func updateSmartRecipeAnalysis() {
+        let favorites = (try? JSONDecoder().decode(Set<String>.self, from: favoriteData)) ?? []
+        smartRecipes.configure(camera: camera, active: isSmartRecipeAnalysisActive,
+                               recipes: viewModel.recipes, favoriteIDs: favorites)
+    }
+
+    private func openSmartRecipes() {
+        guard !isChromeDisabled, !countdown.state.isActive else { return }
+        smartPresentation = smartRecipes.snapshot
+        closeControlDrawers()
+        isShowingSmartRecipes = true
+    }
+
+    private func applySmartRecipe(_ id: String) {
+        guard smartRecipes.isEnabled, canApplySmartRecipe,
+              let recipe = viewModel.recipes.first(where: { $0.id == id }) else { return }
+        smartRecipes.recordSelection(previousID: viewModel.selectedRecipeID, appliedID: recipe.id)
+        viewModel.select(recipe: recipe)
+        isShowingSmartRecipes = false
+    }
+
+    private func undoSmartRecipe() {
+        guard canApplySmartRecipe,
+              let id = smartRecipes.undo?.target(currentID: viewModel.selectedRecipeID,
+                                                 availableIDs: Set(viewModel.recipes.map(\.id))),
+              let recipe = viewModel.recipes.first(where: { $0.id == id }) else { return }
+        smartRecipes.clearUndo()
+        viewModel.select(recipe: recipe)
+    }
+
     // MARK: - Actions
 
     private func capture() {
@@ -1785,7 +1860,7 @@ extension CameraScreen {
     private var isCameraVisibleForAssists: Bool {
         scenePhase == .active && isCameraTabActive && camera.isRunning && camera.availability == .running && !isReviewing && !isImporting
             && !viewModel.isCapturing && recipeForDetail == nil && !isShowingLookLibrary
-            && !isShowingManualControls && !isShowingCaptureSetup
+            && !isShowingManualControls && !isShowingCaptureSetup && !isShowingSmartRecipes
     }
     private var canTriggerShutter: Bool {
         isCameraVisibleForAssists && viewModel.reviewImage == nil && !viewModel.isSaving && !camera.manualControls.isApplying && !countdown.state.isActive && framingIsReady
