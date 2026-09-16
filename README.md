@@ -2,6 +2,14 @@
 
 Filmy Camera is a native iPhone and iPad camera built around the feeling of choosing a film recipe before you shoot. It combines a low-friction SwiftUI camera UI with a Core Image/Metal-ready rendering pipeline for live preview and full-resolution exports.
 
+## Start here
+
+[Download on the App Store](https://apps.apple.com/us/app/filmy-camera-film-filters/id6801404866) · [Rendering decisions](docs/research.md) · [Testing guide](docs/testing.md)
+
+**Engineering focus:** balancing a responsive live camera preview with full-resolution processing, keeping preview and capture visually consistent, and recovering from camera-session interruptions. Built with SwiftUI, AVFoundation, and Core Image.
+
+For a code walkthrough, begin with [`FilmyCamera/ContentView.swift`](FilmyCamera/ContentView.swift), then explore [`FilmyCamera/Services`](FilmyCamera/Services) and [`FilmyCamera/Models`](FilmyCamera/Models). The feature and validation notes below distinguish implemented behavior from performance targets and roadmap work.
+
 ## Current product slice
 
 - Live camera session through `AVCaptureVideoDataOutput` and `AVCapturePhotoOutput`.
