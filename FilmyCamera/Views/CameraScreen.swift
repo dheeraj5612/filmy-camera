@@ -153,6 +153,11 @@ struct CameraScreen: View {
     @AppStorage("showGrid") private var showGrid = true
     @StateObject private var countdown = CaptureCountdown()
     @StateObject private var assists = CompositionAssistStore()
+    @StateObject private var focusAssists = FocusAssistStore()
+    @AppStorage("proFocusLoupe") private var proFocusLoupe = false
+    @AppStorage("proFocusTracking") private var proFocusTracking = false
+    @AppStorage("proFocusLoupeMagnification") private var proFocusMagnification = 2.0
+    @State private var isConfirmingOriginalDiscard = false
     @State private var isShowingCaptureSetup = false
     @AppStorage("captureDelay") private var captureDelay = CaptureDelay.off
     @AppStorage("captureAspect") private var captureAspect = CaptureAspect.viewfinder
@@ -234,7 +239,16 @@ struct CameraScreen: View {
             .background(FilmyTheme.viewfinderBand.ignoresSafeArea())
             .overlay(alignment: .top) {
                 VStack(spacing: 8) {
-                    if viewModel.hasPendingCapture, let error = viewModel.saveErrorMessage {
+                    if viewModel.originalRecoveryRequired {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Original not saved").font(.headline)
+                            Text(viewModel.originalRecoveryMessage ?? "Keep Filmy open and retry after freeing storage.")
+                            HStack {
+                                Button("Retry original") { viewModel.retryOriginalRetention() }
+                                Button("Discard", role: .destructive) { isConfirmingOriginalDiscard = true }
+                            }.buttonStyle(.bordered).disabled(viewModel.isSaving)
+                        }.padding(14).viewfinderChrome(RoundedRectangle(cornerRadius: 16))
+                    } else if viewModel.hasPendingCapture, let error = viewModel.saveErrorMessage {
                         captureSaveRecovery(error)
                     } else if viewModel.hasPendingCapture && viewModel.isSaving {
                         Label("Saving photo", systemImage: "photo.badge.arrow.down")
@@ -295,6 +309,19 @@ struct CameraScreen: View {
             Button("Keep photo", role: .cancel) { }
         } message: {
             Text("This photo has not been saved to Photos. Discarding cannot be undone.")
+        }
+        .confirmationDialog("Permanently discard the unsaved original?", isPresented: $isConfirmingOriginalDiscard) {
+            Button("Discard original", role: .destructive) { viewModel.discardUnsavedOriginal() }
+        } message: { Text("This capture could not be written to storage and cannot be recovered after discarding it.") }
+        .onChange(of: focusAssistOptions, initial: true) { _, _ in updateFocusAssists() }
+        .onChange(of: camera.selectedLensID) { _, _ in focusAssists.reset(); updateFocusAssists() }
+        .onChange(of: camera.zoomFactor) { _, _ in focusAssists.reset() }
+        .onChange(of: camera.previewRotationAngle) { _, _ in focusAssists.reset() }
+        .onChange(of: camera.previewMirrored) { _, _ in focusAssists.reset() }
+        .onChange(of: focusAssists.trackedPoint) { _, point in
+            guard let point, isCameraVisibleForAssists, proFocusTracking else { return }
+            let size = camera.previewViewportSize
+            camera.trackFocus(at: normalizedFocusPoint(for: CGPoint(x: point.x * size.width, y: point.y * size.height), in: size))
         }
         .onChange(of: assistOptions, initial: true) { _, _ in updateCompositionAssists() }
         .onChange(of: isCameraVisibleForAssists, initial: true) { _, visible in
@@ -378,6 +405,7 @@ struct CameraScreen: View {
         .onDisappear {
             countdown.cancel()
             assists.stop()
+            focusAssists.stop()
             camera.stop(after: CameraActivityPolicy.inactiveGracePeriod)
             UIApplication.shared.isIdleTimerDisabled = false
         }
@@ -563,6 +591,10 @@ struct CameraScreen: View {
                 .allowsHitTesting(canTriggerShutter)
             }
 
+            if camera.isRunning && !isReviewing {
+                FocusAssistOverlay(store: focusAssists, size: size, magnification: proFocusMagnification)
+            }
+
             if let focusPoint {
                 // The tap gesture reports locations in the frame's own space,
                 // so the reticle lands exactly where the user touched. It stays
@@ -695,6 +727,7 @@ struct CameraScreen: View {
         HapticFeedback.play(.focus)
         let normalizedPoint = normalizedFocusPoint(for: location, in: size)
         camera.focus(at: normalizedPoint)
+        focusAssists.select(at: CGPoint(x: location.x / max(size.width, 1), y: location.y / max(size.height, 1)))
         focusNormalizedPoint = normalizedPoint
         withAnimation(reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.72)) {
             focusPoint = location
@@ -1788,7 +1821,7 @@ extension CameraScreen {
             && !isShowingManualControls && !isShowingCaptureSetup
     }
     private var canTriggerShutter: Bool {
-        isCameraVisibleForAssists && viewModel.reviewImage == nil && !viewModel.isSaving && !camera.manualControls.isApplying && !countdown.state.isActive && framingIsReady
+        isCameraVisibleForAssists && !viewModel.originalRecoveryRequired && viewModel.reviewImage == nil && !viewModel.isSaving && !camera.manualControls.isApplying && !countdown.state.isActive && framingIsReady
     }
     private var framingIsReady: Bool {
         guard captureAspect != .viewfinder else { return true }
@@ -1802,6 +1835,14 @@ extension CameraScreen {
     }
     private func updateCompositionAssists() {
         assists.configure(camera: camera, options: assistOptions, active: isCameraVisibleForAssists)
+        updateFocusAssists()
+    }
+    private var focusAssistOptions: FocusAssistStore.Options {
+        .init(tracking: proFocusTracking && !camera.isFocusExposureLocked && camera.manualControls.focusMode == .auto,
+              loupe: proFocusLoupe, magnification: proFocusMagnification)
+    }
+    private func updateFocusAssists() {
+        focusAssists.configure(camera: camera, options: focusAssistOptions, active: isCameraVisibleForAssists)
     }
     private var captureSetupButton: some View {
         Button {
