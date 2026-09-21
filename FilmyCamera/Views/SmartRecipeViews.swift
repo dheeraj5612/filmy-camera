@@ -67,11 +67,17 @@ struct SmartRecipeSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Toggle("Suggest looks as I frame", isOn: Binding(get: { store.isEnabled }, set: store.setEnabled))
+                    Toggle("Suggest looks as I frame", isOn: Binding(
+                        get: { store.isEnabled },
+                        set: { isEnabled in store.setEnabled(isEnabled) }
+                    ))
                         .accessibilityIdentifier("smart-recipes-enabled")
                     if store.isEnabled {
                         heading
-                        Picker("Your direction", selection: Binding(get: { store.intent }, set: store.setIntent)) {
+                        Picker("Your direction", selection: Binding(
+                            get: { store.intent },
+                            set: { intent in store.setIntent(intent) }
+                        )) {
                             ForEach(SmartRecipeIntent.allCases, id: \.self) { intent in Text(intent.title).tag(intent) }
                         }
                         .pickerStyle(.menu)
