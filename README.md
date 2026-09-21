@@ -35,6 +35,12 @@ For a code walkthrough, begin with [`FilmyCamera/ContentView.swift`](FilmyCamera
 - Simulator-safe empty state: the full interface runs without camera hardware and clearly asks for a physical iPhone or iPad for capture.
 - iPad support: readable-width pages, an adaptive Roll contact sheet, and the same viewfinder chrome verified on an iPad Pro and on iPhone-size layouts.
 
+## Fuji-style shooting controls
+
+The camera's **Q** button opens persistent C1–C7 banks, customizable quick controls, three Auto ISO programs, digital prime cropping/lens lock, electronic/OVF-style/hybrid finders, Natural Live View, contrast-based split/microprism focus aids, and the Drive/BKT system. Capture tools include same-shot film/ISO/WB brackets, real exposure/RAW dynamic-range brackets, focus bracketing/stacking, computational ND, multiple exposures, preview-resolution pre-shot, and foreground interval shooting. The RAW library keeps untouched originals and editable development sidecars; failed Photos exports remain recoverable.
+
+See [the shooting-system guide](docs/fuji-shooting-system.md) for setup, supported behavior, resolution limits, hardware requirements, and device acceptance tests. OVF-style and focusing aids are electronic interpretations, ND is temporal averaging rather than an optical filter, and sensor DR200/400 requires RAW plus real underexposure. Physical-device validation remains necessary before release.
+
 ## Build
 
 ```sh
@@ -57,7 +63,7 @@ The app requires iOS 17 or later. Camera and Photos permissions are requested on
 
 The current launch is fully free: all shipped looks, camera tools, import, review, Save to Photos, and the optional Instant Print finish are available without a paywall, subscription trial, or export watermark. Existing images remain usable regardless of any future access model.
 
-The product target is an exceptional film-simulation and G7X-inspired camera with additional capture and editing tools in a premium monthly subscription. Price, trial duration, and the exact feature split remain open. See the [premium camera vision](docs/premium-camera-vision.md) for the staged feature and quality targets and the [monetization roadmap](docs/monetization-roadmap.md) for future access and export proposals. Subscription restrictions and watermarking are not enabled in the current launch; RAW and HDR work described in those documents remains roadmap work.
+The product target is an exceptional film-simulation and G7X-inspired camera with additional capture and editing tools in a premium monthly subscription. Price, trial duration, and the exact feature split remain open. See the [premium camera vision](docs/premium-camera-vision.md) for the staged feature and quality targets and the [monetization roadmap](docs/monetization-roadmap.md) for future access and export proposals. Subscription restrictions and watermarking are not enabled in the current launch; RAW capture/development is now implemented in the Q shooting system with hardware validation pending; general HDR output remains roadmap work.
 
 ## Rendering note
 
