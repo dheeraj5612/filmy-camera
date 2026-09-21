@@ -1,14 +1,14 @@
 import SwiftUI
 import UIKit
 
-/// Enforce the same portrait contract for presented UIKit controllers as for
-/// SwiftUI, including the system share and photo-picker presentations.
+/// Keep UIKit presentations aligned with the camera's device-specific
+/// orientation contract, including sharing and photo selection.
 final class FilmyAppDelegate: NSObject, UIApplicationDelegate {
     func application(
         _ application: UIApplication,
         supportedInterfaceOrientationsFor window: UIWindow?
     ) -> UIInterfaceOrientationMask {
-        .portrait
+        UIDevice.current.userInterfaceIdiom == .pad ? .all : .portrait
     }
 }
 

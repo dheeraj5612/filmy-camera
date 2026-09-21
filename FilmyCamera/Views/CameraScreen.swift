@@ -132,8 +132,7 @@ private struct ViewfinderChromeHeightKey: PreferenceKey {
 /// primary controls in an edge column; compact layouts keep them below the
 /// frame within thumb reach.
 struct CameraScreen: View {
-    // The portrait-only iPad window scales to 75% in landscape. Preserve
-    // a physical target above 44 points for compact camera controls.
+    // Keep edge controls comfortably reachable with a two-handed iPad grip.
     private var cameraHitTarget: CGFloat {
         UIDevice.current.userInterfaceIdiom == .pad ? 64 : FilmyTheme.minimumHitTarget
     }
@@ -178,6 +177,15 @@ struct CameraScreen: View {
     @State private var isConfirmingCaptureDiscard = false
     @State private var favoritesOnly = false
     @AppStorage("favoriteRecipeIDs.v1") private var favoriteData = Data()
+    @AppStorage("cameraGripUseLeftHanded.v1") private var useLeftHandedGrip = false
+    @State private var hardwareShutterCaptureRequest = 0
+#if DEBUG
+    @State private var hardwareShutterEventCount = 0
+    @State private var hardwareShutterLastPhase = "none"
+    @State private var hardwareShutterActionCount = 0
+    @State private var hardwareShutterEventReadiness = "unset"
+    @State private var hardwareShutterCaptureReadiness = "unset"
+#endif
 
     init(
         camera: CameraService,
@@ -218,7 +226,8 @@ struct CameraScreen: View {
                     if usesEdgeControlColumn {
                         edgeControlShell(
                             isLandscape: isLandscape,
-                            availableHeight: proxy.size.height
+                            availableHeight: proxy.size.height,
+                            availableWidth: proxy.size.width
                         )
                     } else {
                         portraitShell(availableHeight: proxy.size.height)
@@ -287,8 +296,23 @@ struct CameraScreen: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .zIndex(1)
             }
+
+#if DEBUG
+            if hardwareShutterDiagnosticsEnabled {
+                hardwareShutterDiagnostics
+            }
+#endif
         }
-        .modifier(CameraHardwareShutterModifier(enabled: canTriggerShutter, action: capture))
+#if DEBUG
+        .modifier(CameraHardwareShutterModifier(enabled: canTriggerShutter, action: { hardwareShutterCaptureRequest &+= 1 }) { phase in
+            guard hardwareShutterDiagnosticsEnabled else { return }
+            hardwareShutterEventCount += 1
+            hardwareShutterLastPhase = phase
+            hardwareShutterEventReadiness = "ready=\(canTriggerShutter);blocker=\(hardwareShutterBlockingReason)"
+        })
+#else
+        .modifier(CameraHardwareShutterModifier(enabled: canTriggerShutter, action: { hardwareShutterCaptureRequest &+= 1 }))
+#endif
         .confirmationDialog("Discard this unsaved photo?", isPresented: $isConfirmingCaptureDiscard, titleVisibility: .visible) {
             Button("Discard photo", role: .destructive) { viewModel.discardReview() }
                 .accessibilityIdentifier("capture-save-confirm-discard")
@@ -308,6 +332,9 @@ struct CameraScreen: View {
                 previewDragMaySelectLook = nil
             }
         }
+        // Re-enter through current SwiftUI state after the system callback,
+        // avoiding a retained callback snapshot with stale scene values.
+        .onChange(of: hardwareShutterCaptureRequest) { _, _ in capture() }
         .onChange(of: camera.previewViewportSize) { _, _ in
             // A mask from the previous crop must not stretch over a newly
             // rotated or resized viewfinder while its replacement renders.
@@ -486,26 +513,47 @@ struct CameraScreen: View {
         }
     }
 
-    private func edgeControlShell(isLandscape: Bool, availableHeight: CGFloat) -> some View {
-        HStack(spacing: 12) {
+    private func edgeControlShell(
+        isLandscape: Bool,
+        availableHeight: CGFloat,
+        availableWidth: CGFloat
+    ) -> some View {
+        let isPad = UIDevice.current.userInterfaceIdiom == .pad
+        let railOnLeading = useLeftHandedGrip
+        let railWidth: CGFloat = isPad ? 152 : 136
+        let drawerOnLeading = !railOnLeading
+
+        return HStack(spacing: isPad ? 16 : 12) {
+            if railOnLeading {
+                edgeControlColumn
+                    .frame(width: railWidth)
+                    .disabled(isChromeDisabled)
+            }
+
             viewfinderStage(isLandscape: isLandscape, overlaysTopBar: true)
 
-            edgeControlColumn
-                .frame(width: 136)
-                .disabled(isChromeDisabled)
+            if !railOnLeading {
+                edgeControlColumn
+                    .frame(width: railWidth)
+                    .disabled(isChromeDisabled)
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .overlay(alignment: .bottomLeading) {
+        .padding(.horizontal, isPad ? 20 : 12)
+        .padding(.vertical, isPad ? 12 : 6)
+        .overlay(alignment: drawerOnLeading ? .bottomLeading : .bottomTrailing) {
             if isShowingLookDrawer {
                 lookDrawer(
                     maxHeight: isLandscape
                         ? max(160, min(UIDevice.current.userInterfaceIdiom == .pad ? 460 : 240, availableHeight - 130))
                         : max(180, min(UIDevice.current.userInterfaceIdiom == .pad ? 460 : 360, availableHeight - 190))
                 )
-                    .padding(.leading, 12)
-                    .padding(.trailing, 160)
-                    .padding(.bottom, 78)
+                    .frame(
+                        maxWidth: min(560, max(280, availableWidth - railWidth - 52)),
+                        alignment: drawerOnLeading ? .leading : .trailing
+                    )
+                    .padding(.leading, drawerOnLeading ? 12 : 160)
+                    .padding(.trailing, drawerOnLeading ? 160 : 12)
+                    .padding(.bottom, isPad ? 86 : 78)
                     .disabled(isChromeDisabled)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
@@ -1027,30 +1075,61 @@ struct CameraScreen: View {
         .accessibilityHint("Favorites are shared with the look library. This does not change your look.")
     }
 
-    /// Wide iPad layouts use the edge column even in portrait so the picture
-    /// remains visually centered and the primary controls read like a camera
-    /// grip. It also fits an iPhone's compact landscape height.
+    /// Wide layouts use the edge column so the picture remains visually
+    /// centered and the primary controls read like a camera grip.
     private var edgeControlColumn: some View {
-        VStack(spacing: 10) {
+        let isPad = UIDevice.current.userInterfaceIdiom == .pad
+
+        return VStack(spacing: isPad ? 14 : 10) {
             Spacer(minLength: 0)
 
-            currentRecipeButton(compact: true)
-            captureControl
+            VStack(spacing: 8) {
+                currentRecipeButton(compact: true)
+                captureControl
+            }
+            .padding(.vertical, 4)
 
-            HStack(spacing: 8) {
-                rollButton
-                cameraSwitchButton
-                    .disabled(camera.availableCameraPositions.count < 2)
+            VStack(spacing: 8) {
+                HStack(spacing: 8) {
+                    rollButton
+                    cameraSwitchButton
+                        .disabled(camera.availableCameraPositions.count < 2)
+                }
+                HStack(spacing: 8) {
+                    favoriteCurrentLookButton
+                    toolsToggle
+                        .disabled(!camera.isRunning && !isViewfinderChromePreview)
+                }
             }
-            HStack(spacing: 8) {
-                favoriteCurrentLookButton
-                toolsToggle
-                    .disabled(!camera.isRunning && !isViewfinderChromePreview)
-            }
+
+            cameraGripToggle
 
             Spacer(minLength: 0)
         }
         .frame(maxHeight: .infinity)
+    }
+
+    private var cameraGripToggle: some View {
+        Button {
+            useLeftHandedGrip.toggle()
+            HapticFeedback.play(.selection)
+        } label: {
+            Image(systemName: useLeftHandedGrip ? "hand.point.left.fill" : "hand.point.right.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(FilmyTheme.primary)
+                .frame(width: cameraHitTarget, height: cameraHitTarget)
+                .background { ChromeShapeBackground(shape: Circle()) }
+                .contentShape(Circle())
+        }
+        .buttonStyle(.pressable)
+        .accessibilityIdentifier("camera-grip-toggle")
+        .accessibilityLabel("Camera controls position")
+        .accessibilityValue(useLeftHandedGrip ? "Left handed" : "Right handed")
+        .accessibilityHint(
+            useLeftHandedGrip
+                ? "Move the camera controls to the right edge"
+                : "Move the camera controls to the left edge"
+        )
     }
 
     private func currentRecipeButton(compact: Bool = false) -> some View {
@@ -1105,9 +1184,6 @@ struct CameraScreen: View {
                         .font(.system(size: 12, weight: .bold, design: .rounded))
                         .foregroundStyle(FilmyTheme.primary)
                         .padding(.horizontal, 12)
-                        // In the iPad portrait compatibility window, the
-                        // drawer scales down in landscape. Keep the real
-                        // button target at 44pt after that transform.
                         .frame(minHeight: 64)
                         .background(FilmyTheme.panel, in: Capsule())
                         .contentShape(Rectangle())
@@ -1535,6 +1611,12 @@ struct CameraScreen: View {
     // MARK: - Actions
 
     private func capture() {
+#if DEBUG
+        if hardwareShutterDiagnosticsEnabled {
+            hardwareShutterActionCount += 1
+            hardwareShutterCaptureReadiness = "ready=\(canTriggerShutter);blocker=\(hardwareShutterBlockingReason)"
+        }
+#endif
         guard canTriggerShutter else { return }
         closeControlDrawers()
         if captureDelay == .off {
@@ -1790,6 +1872,46 @@ extension CameraScreen {
     private var canTriggerShutter: Bool {
         isCameraVisibleForAssists && viewModel.reviewImage == nil && !viewModel.isSaving && !camera.manualControls.isApplying && !countdown.state.isActive && framingIsReady
     }
+#if DEBUG
+    private var hardwareShutterDiagnosticsEnabled: Bool {
+        ProcessInfo.processInfo.arguments.contains("-ui-testing")
+    }
+
+    private var hardwareShutterBlockingReason: String {
+        if scenePhase != .active { return "scene-inactive" }
+        if !isCameraTabActive { return "camera-tab-inactive" }
+        if !camera.isRunning { return "camera-not-running" }
+        if camera.availability != .running { return "availability-\(camera.availability.rawValue)" }
+        if isReviewing { return "reviewing" }
+        if isImporting { return "importing" }
+        if viewModel.isCapturing { return "capturing" }
+        if recipeForDetail != nil { return "recipe-detail" }
+        if isShowingLookLibrary { return "look-library" }
+        if isShowingManualControls { return "manual-controls" }
+        if isShowingCaptureSetup { return "capture-setup" }
+        if viewModel.reviewImage != nil { return "review-image" }
+        if viewModel.isSaving { return "saving" }
+        if camera.manualControls.isApplying { return "manual-controls-applying" }
+        if countdown.state.isActive { return "countdown-active" }
+        if !framingIsReady { return "framing-not-ready" }
+        return "none"
+    }
+
+    private var hardwareShutterDiagnosticsValue: String {
+        "ready=\(canTriggerShutter);blocker=\(hardwareShutterBlockingReason);events=\(hardwareShutterEventCount);lastPhase=\(hardwareShutterLastPhase);actions=\(hardwareShutterActionCount);eventReady=\(hardwareShutterEventReadiness);captureReady=\(hardwareShutterCaptureReadiness);capture=\(viewModel.captureTimingStatus)"
+    }
+
+    private var hardwareShutterDiagnostics: some View {
+        Text(hardwareShutterDiagnosticsValue)
+            .accessibilityElement()
+            .accessibilityIdentifier("camera-hardware-shutter-status")
+            .accessibilityLabel("Hardware shutter status")
+            .accessibilityValue(hardwareShutterDiagnosticsValue)
+            .frame(width: 1, height: 1)
+            .opacity(0.001)
+            .allowsHitTesting(false)
+    }
+#endif
     private var framingIsReady: Bool {
         guard captureAspect != .viewfinder else { return true }
         let viewport = camera.previewViewportSize
@@ -1850,9 +1972,15 @@ extension CameraScreen {
 private struct CameraHardwareShutterModifier: ViewModifier {
     let enabled: Bool
     let action: () -> Void
+#if DEBUG
+    let onEventPhase: (String) -> Void
+#endif
     @ViewBuilder func body(content: Content) -> some View {
         if #available(iOS 18.0, *) {
             content.onCameraCaptureEvent(isEnabled: enabled) { event in
+#if DEBUG
+                onEventPhase(String(describing: event.phase))
+#endif
                 if event.phase == .ended { action() }
             }
         } else {
