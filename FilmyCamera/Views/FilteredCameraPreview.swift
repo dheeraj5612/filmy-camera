@@ -22,31 +22,41 @@ public struct FilteredCameraPreview: UIViewRepresentable {
     @ObservedObject private var cameraService: CameraService
     private let recipe: FilmRecipe
     private let quality: FilmRenderer.Quality
+    private let naturalLiveView: Bool
+    private let cropFactor: Double
 
     public init(
         cameraService: CameraService,
         recipe: FilmRecipe,
-        quality: FilmRenderer.Quality = .preview
+        quality: FilmRenderer.Quality = .preview,
+        naturalLiveView: Bool = false,
+        cropFactor: Double = 1
     ) {
         _cameraService = ObservedObject(wrappedValue: cameraService)
         self.recipe = recipe
         self.quality = quality
+        self.naturalLiveView = naturalLiveView
+        self.cropFactor = cropFactor
     }
 
     public init(
         service: CameraService,
         recipe: FilmRecipe,
-        quality: FilmRenderer.Quality = .preview
+        quality: FilmRenderer.Quality = .preview,
+        naturalLiveView: Bool = false,
+        cropFactor: Double = 1
     ) {
-        self.init(cameraService: service, recipe: recipe, quality: quality)
+        self.init(cameraService: service, recipe: recipe, quality: quality, naturalLiveView: naturalLiveView, cropFactor: cropFactor)
     }
 
     public init(
         camera: CameraService,
         recipe: FilmRecipe,
-        quality: FilmRenderer.Quality = .preview
+        quality: FilmRenderer.Quality = .preview,
+        naturalLiveView: Bool = false,
+        cropFactor: Double = 1
     ) {
-        self.init(cameraService: camera, recipe: recipe, quality: quality)
+        self.init(cameraService: camera, recipe: recipe, quality: quality, naturalLiveView: naturalLiveView, cropFactor: cropFactor)
     }
 
     public func makeCoordinator() -> Coordinator {
@@ -61,7 +71,9 @@ public struct FilteredCameraPreview: UIViewRepresentable {
         view.update(
             recipe: recipe,
             quality: quality,
-            grainSeed: cameraService.previewGrainSeed
+            grainSeed: cameraService.previewGrainSeed,
+            naturalLiveView: naturalLiveView,
+            cropFactor: cropFactor
         )
         coordinator.installFrameHandlerIfNeeded()
         view.isAccessibilityElement = Self.exposesRenderStatusForUITesting && cameraService.isRunning
@@ -84,7 +96,9 @@ public struct FilteredCameraPreview: UIViewRepresentable {
         uiView.update(
             recipe: recipe,
             quality: quality,
-            grainSeed: cameraService.previewGrainSeed
+            grainSeed: cameraService.previewGrainSeed,
+            naturalLiveView: naturalLiveView,
+            cropFactor: cropFactor
         )
 
         // The coordinator owns one callback for the lifetime of the UIKit
@@ -169,6 +183,8 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
     private let sRGBColorSpace = CGColorSpace(name: CGColorSpace.sRGB)
 
     private var latestImage: CIImage?
+    private var naturalLiveView = false
+    private var cropFactor: Double = 1
     private var recipe = FilmRecipe.builtIns[0]
     private var quality: FilmRenderer.Quality = .preview
     private var grainSeed = FilmRenderer.canonicalGrainSeed
@@ -326,9 +342,14 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
     func update(
         recipe: FilmRecipe,
         quality: FilmRenderer.Quality,
-        grainSeed: UInt32
+        grainSeed: UInt32,
+        naturalLiveView: Bool = false,
+        cropFactor: Double = 1
     ) {
-        guard self.recipe != recipe || self.quality != quality || self.grainSeed != grainSeed else { return }
+        guard self.recipe != recipe || self.quality != quality || self.grainSeed != grainSeed
+            || self.naturalLiveView != naturalLiveView || self.cropFactor != cropFactor else { return }
+        self.naturalLiveView = naturalLiveView
+        self.cropFactor = cropFactor
         if self.recipe.id != recipe.id {
             resetRenderReadiness()
         }
@@ -373,13 +394,14 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
         // same visible composition as the still path. Rendering the resized
         // frame also keeps preview work proportional to the drawable rather
         // than to the camera sensor's full video dimensions.
-        let framed = CameraFrameLayout.aspectFill(image, in: targetRect)
-        let filtered = FilmRenderer.render(
+        let cropped = FujiDevelopmentPipeline.centerCrop(image, factor: cropFactor)
+        let framed = CameraFrameLayout.aspectFill(cropped, in: targetRect)
+        let filtered = (naturalLiveView ? framed : FilmRenderer.render(
             framed,
             recipe: recipe,
             quality: quality,
             grainSeed: grainSeed
-        )
+        ))
             .cropped(to: targetRect)
         ciContext.render(
             filtered,
