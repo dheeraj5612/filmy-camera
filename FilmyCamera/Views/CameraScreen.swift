@@ -342,6 +342,10 @@ struct CameraScreen: View {
     }
 
     var body: some View {
+        cameraLifecycleView
+    }
+
+    private var cameraHardwareView: some View {
         cameraLayers
 #if DEBUG
         .modifier(CameraHardwareShutterModifier(enabled: canTriggerShutter, action: { hardwareShutterCaptureRequest &+= 1 }) { phase in
@@ -360,6 +364,10 @@ struct CameraScreen: View {
         } message: {
             Text("This photo has not been saved to Photos. Discarding cannot be undone.")
         }
+    }
+
+    private var smartRecipeLifecycleView: some View {
+        cameraHardwareView
         .onChange(of: isSmartRecipeAnalysisActive, initial: true) { _, _ in updateSmartRecipeAnalysis() }
         .onChange(of: viewModel.recipes) { _, _ in updateSmartRecipeAnalysis() }
         .onChange(of: favoriteData) { _, _ in updateSmartRecipeAnalysis() }
@@ -376,6 +384,10 @@ struct CameraScreen: View {
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
+    }
+
+    private var shootingStateView: some View {
+        smartRecipeLifecycleView
         .onChange(of: isShootingSessionActive, initial: true) { _, active in
             shooting.attach(camera: camera, viewModel: viewModel, active: active)
         }
@@ -422,6 +434,10 @@ struct CameraScreen: View {
             shooting.invalidatePreview()
             updateCompositionAssists()
         }
+    }
+
+    private var cameraPresentationsView: some View {
+        shootingStateView
         .sheet(isPresented: $isShowingFujiMenu) {
             FujiQuickMenuView(controller: shooting, camera: camera, viewModel: viewModel, photoLibrary: photoLibrary)
                 .presentationDetents([.large])
@@ -496,6 +512,10 @@ struct CameraScreen: View {
                 .presentationDragIndicator(.visible)
                 .presentationBackground(FilmyTheme.background)
         }
+    }
+
+    private var cameraLifecycleView: some View {
+        cameraPresentationsView
         .onAppear {
             shooting.attach(camera: camera, viewModel: viewModel, active: isShootingSessionActive)
             updateCameraActivity()
