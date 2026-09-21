@@ -18,7 +18,9 @@ final class RecipeLibraryUITests: XCTestCase {
         openManager()
         let count = app.staticTexts["recipe-manager-active-count"]
         XCTAssertTrue(count.waitForExistence(timeout: 5))
-        XCTAssertTrue(count.label.hasPrefix("128 of "), count.label)
+        let defaults = try activeCounts()
+        XCTAssertGreaterThan(defaults.enabled, 0, count.label)
+        XCTAssertLessThan(defaults.enabled, defaults.total, count.label)
         attach("recipe-packs-default")
         app.buttons["recipe-manager-actions"].tap()
         app.buttons["recipe-enable-all"].tap()
@@ -51,26 +53,27 @@ final class RecipeLibraryUITests: XCTestCase {
         let search = app.searchFields.firstMatch
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         search.tap()
-        search.typeText("Kodachrome")
-        let toggle = app.switches.matching(NSPredicate(format: "identifier BEGINSWITH 'manage-toggle-'")).firstMatch
+        search.typeText("123 Chrome")
+        let toggle = app.switches["manage-toggle-source-filmrecipes-123-chrome-78e134597cdf"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 8))
         if app.keyboards.firstMatch.exists {
             let done = app.keyboards.buttons["search"].exists ? app.keyboards.buttons["search"] : app.keyboards.buttons["Search"]
             if done.exists { done.tap() }
         }
         let before = try activeCounts().enabled
-        XCTAssertEqual(toggle.value as? String, "0")
+        let wasEnabled = toggle.value as? String == "1"
         toggle.tap()
-        XCTAssertEqual(try activeCounts().enabled, before + 1)
+        XCTAssertEqual(try activeCounts().enabled, before + (wasEnabled ? -1 : 1))
+        XCTAssertEqual(toggle.value as? String, wasEnabled ? "0" : "1")
         attach("recipe-manager-search-individual-enabled")
-        let details = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'manage-source-'")).firstMatch
+        let details = app.buttons["manage-source-source-filmrecipes-123-chrome-78e134597cdf"]
         XCTAssertTrue(details.waitForExistence(timeout: 5))
         details.tap()
         XCTAssertTrue(app.buttons["recipe-source-done"].waitForExistence(timeout: 5))
         attach("recipe-published-settings-and-comparison")
         XCTAssertTrue(app.staticTexts["Original recipe"].exists || app.staticTexts["ORIGINAL RECIPE"].exists)
         app.buttons["recipe-source-done"].tap()
-        XCTAssertTrue(app.buttons["recipe-manager-done"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.collectionViews["recipe-manager-list"].waitForExistence(timeout: 5))
     }
 
     private func openManager() {

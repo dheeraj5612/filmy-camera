@@ -41,6 +41,7 @@ struct SettingsView: View {
                     .padding(.bottom, 40)
                 }
                 .scrollBounceBehavior(.basedOnSize)
+                .accessibilityIdentifier("settings-scroll")
             }
             .safeAreaInset(edge: .top, spacing: 0) {
                 CameraReturnBar(accessibilityIdentifier: "settings-back-to-camera", action: onBackToCamera)

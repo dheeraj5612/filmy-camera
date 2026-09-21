@@ -8,12 +8,7 @@ import XCTest
 @MainActor
 final class MembershipStoreKitTests: XCTestCase {
     private func session() throws -> SKTestSession {
-        let bundledURL = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "Filmy", withExtension: "storekit"))
-        let writableURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("Filmy-\(UUID().uuidString)", isDirectory: false)
-            .appendingPathExtension("storekit")
-        try FileManager.default.copyItem(at: bundledURL, to: writableURL)
-        let session = try SKTestSession(contentsOf: writableURL)
+        let session = try SKTestSession(configurationFileNamed: "Filmy")
         session.resetToDefaultState()
         session.clearTransactions()
         session.disableDialogs = true

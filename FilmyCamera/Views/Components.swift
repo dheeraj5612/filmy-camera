@@ -1049,6 +1049,15 @@ struct RecipeSwatch: View {
 actor RecipeSwatchRenderer {
     static let shared = RecipeSwatchRenderer()
 
+    #if targetEnvironment(simulator)
+    // The simulator's Metal/Core Image completion queue can fail under the
+    // burst of thumbnail work created by accessibility traversal. Software
+    // rendering is deterministic and remains bounded to 384 x 512 here.
+    private let context = CIContext(options: FilmRenderer.testContextOptions)
+    #else
+    private let context = FilmRenderer.makeOutputContext()
+    #endif
+
     private final class SampleKey: NSObject {
         let recipe: FilmRecipe
         init(_ recipe: FilmRecipe) { self.recipe = recipe }
@@ -1072,7 +1081,7 @@ actor RecipeSwatchRenderer {
         guard let original = UIImage(named: "LookPreviewCafe")?.cgImage else { return nil }
         let bounds = CGRect(x: 0, y: 0, width: 384, height: 512)
         let framed = CameraFrameLayout.aspectFill(CIImage(cgImage: original), in: bounds)
-        guard let small = FilmRenderer.outputCGImage(framed, from: bounds) else { return nil }
+        guard let small = FilmRenderer.outputCGImage(framed, from: bounds, using: context) else { return nil }
         return CIImage(cgImage: small)
     }()
 
@@ -1090,7 +1099,7 @@ actor RecipeSwatchRenderer {
             let key = SampleKey(recipe)
             if let cached = sampleCache.object(forKey: key) { return cached }
             guard let sampleScene else { return FilmRenderer.thumbnail(for: recipe) }
-            guard let image = FilmRenderer.previewThumbnail(for: recipe, over: sampleScene),
+            guard let image = FilmRenderer.previewThumbnail(for: recipe, over: sampleScene, using: context),
                   !Task.isCancelled else { return nil }
             let cost = (image.cgImage?.bytesPerRow ?? 0) * (image.cgImage?.height ?? 0)
             sampleCache.setObject(image, forKey: key, cost: cost)

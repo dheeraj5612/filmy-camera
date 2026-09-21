@@ -89,26 +89,29 @@ final class SignalFrameUITests: XCTestCase {
         XCTAssertEqual(compare.value as? String, "Look")
         snapshot("signal-frame-onboarding-compare-largest-text")
         app.buttons["onboarding-continue"].tap()
-        XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 15))
-        XCTAssertTrue(app.buttons["recipe-menu"].label.contains("Classic Chrome"))
+        let menu = app.buttons["recipe-menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 15))
+        let selectedLook = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            menu.label.contains("Muted Color")
+        }, object: nil)
+        let result = XCTWaiter.wait(for: [selectedLook], timeout: 5)
+        if result != .completed { failureEvidence("onboarding-look-not-applied", app: app) }
+        XCTAssertEqual(result, .completed, "Onboarding must apply Muted Color; found: \(menu.label)")
     }
 
     private func revealInPage(_ control: XCUIElement, in app: XCUIApplication) {
-        let scroll = app.scrollViews.firstMatch
+        let settingsScroll = app.scrollViews["settings-scroll"]
+        let scroll = settingsScroll.exists ? settingsScroll : app.scrollViews.firstMatch
         XCTAssertTrue(scroll.waitForExistence(timeout: 5))
         for _ in 0..<24 {
             let viewport = scroll.frame.intersection(app.frame).insetBy(dx: 0, dy: 8)
             if control.exists && viewport.contains(control.frame) { return }
             let downward = control.exists && control.frame.midY < viewport.midY
-            let overflow = control.exists
-                ? (downward ? viewport.minY - control.frame.minY : control.frame.maxY - viewport.maxY)
-                : viewport.height * 0.3
-            let distance = min(max(overflow + 24, 60), viewport.height * 0.35)
-            let start = CGPoint(x: viewport.minX + 8, y: downward ? viewport.minY + 30 : viewport.maxY - 30)
-            let end = CGPoint(x: start.x, y: start.y + (downward ? distance : -distance))
-            let origin = app.coordinate(withNormalizedOffset: .zero)
-            origin.withOffset(CGVector(dx: start.x - app.frame.minX, dy: start.y - app.frame.minY))
-                .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: end.x - app.frame.minX, dy: end.y - app.frame.minY)))
+            // Use the middle of the view rather than its bottom edge, which is
+            // covered by the tab bar at the largest accessibility text size.
+            let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: downward ? 0.30 : 0.72))
+            let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: downward ? 0.72 : 0.30))
+            start.press(forDuration: 0.05, thenDragTo: end)
         }
         snapshot("signal-frame-unreachable-page-control")
         XCTFail("Could not fully reveal \(control.identifier)")
@@ -383,8 +386,11 @@ final class SignalFrameUITests: XCTestCase {
                                  file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertTrue(control.waitForExistence(timeout: 5), file: file, line: line)
         XCTAssertTrue(control.isHittable, file: file, line: line)
-        XCTAssertGreaterThanOrEqual(control.frame.width, 44, file: file, line: line)
-        XCTAssertGreaterThanOrEqual(control.frame.height, 44, file: file, line: line)
+        // XCTest can deserialize an exact 44pt SwiftUI frame as
+        // 43.99999999999997. Keep the accessibility contract exact while
+        // allowing only sub-pixel floating-point noise.
+        XCTAssertGreaterThanOrEqual(control.frame.width, 43.99, file: file, line: line)
+        XCTAssertGreaterThanOrEqual(control.frame.height, 43.99, file: file, line: line)
         XCTAssertTrue(app.frame.contains(control.frame), "Control must not be partially clipped", file: file, line: line)
     }
 

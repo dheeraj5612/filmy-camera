@@ -441,8 +441,17 @@ final class LookLibraryUITests: XCTestCase {
         openLibrary(app)
         assertControl(app.buttons["look-library-close"], in: app)
         assertControl(app.buttons["look-filter-all"], in: app)
-        XCTAssertTrue(app.textFields["look-library-search"].isHittable)
+        let search = app.textFields["look-library-search"]
+        XCTAssertTrue(search.isHittable)
+        search.tap()
+        search.typeText("G7 X Compact")
+        if app.keyboards.buttons["search"].exists { app.keyboards.buttons["search"].tap() }
         let favorite = app.buttons["look-favorite-g7x-compact"]
+        let results = app.scrollViews["look-library-results"]
+        XCTAssertTrue(results.waitForExistence(timeout: 5))
+        for _ in 0..<6 where favorite.exists && !favorite.isHittable {
+            results.swipeUp()
+        }
         assertControl(favorite, in: app)
         favorite.tap()
         XCTAssertEqual(favorite.value as? String, "Favorite")

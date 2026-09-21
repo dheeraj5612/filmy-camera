@@ -73,7 +73,12 @@ public final class FilmRenderer {
     /// A reusable GPU-backed context for callers that need to materialize the
     /// rendered CIImage. It falls back to Core Image's software renderer on a
     /// simulator or Mac without a Metal device.
-    public nonisolated(unsafe) static let sharedContext: CIContext = {
+    public nonisolated(unsafe) static let sharedContext: CIContext = makeOutputContext()
+
+    /// Creates an independent context for bounded background work such as
+    /// recipe swatches. Keeping that work off the live-preview context avoids
+    /// coupling camera rendering to a sheet that can create many thumbnails.
+    static func makeOutputContext() -> CIContext {
         if let metalDevice {
             return CIContext(
                 mtlDevice: metalDevice,
@@ -84,7 +89,7 @@ public final class FilmRenderer {
         return CIContext(options: contextOptions.merging([
             .useSoftwareRenderer: true
         ]) { _, new in new })
-    }()
+    }
 
     /// Builds the shared context, the grain texture, and the compiled kernels
     /// ahead of the first camera frame, so the viewfinder's first draw does
@@ -340,13 +345,13 @@ public final class FilmRenderer {
 
     private init() {}
 
-    /// Discard reproducible GPU/CPU caches, never saved photos or recipe state.
-    /// CIContext and NSCache support concurrent callers; active graphs retain
-    /// their immutable cube data independently of cache ownership.
+    /// Discard reproducible CPU caches, never saved photos or recipe state.
+    /// Do not clear the shared CIContext here: a memory warning can arrive while
+    /// its asynchronous Metal completion queue is still materializing a frame.
+    /// Core Image owns and evicts those transient resources itself.
     static func purgeTransientCaches() {
         cubeCache.removeAll()
         thumbnailCache.removeAll()
-        sharedContext.clearCaches()
     }
 
     static func boundedThumbnailSize(_ size: CGSize) -> CGSize? {
@@ -417,13 +422,21 @@ public final class FilmRenderer {
     /// Renders a recipe over an arbitrary scene, e.g. a live viewfinder
     /// snapshot, at that scene's size. Not cached: callers debounce.
     public static func previewThumbnail(for recipe: FilmRecipe, over scene: CIImage) -> UIImage? {
+        previewThumbnail(for: recipe, over: scene, using: sharedContext)
+    }
+
+    static func previewThumbnail(
+        for recipe: FilmRecipe,
+        over scene: CIImage,
+        using context: CIContext
+    ) -> UIImage? {
         let extent = scene.extent
         guard extent.origin.x.isFinite, extent.origin.y.isFinite,
               let size = boundedThumbnailSize(extent.size) else { return nil }
         let target = CGRect(origin: .zero, size: size)
         let bounded = CameraFrameLayout.aspectFill(scene, in: target)
         let rendered = render(bounded, recipe: recipe, quality: .preview)
-        guard let image = outputCGImage(rendered, from: target) else { return nil }
+        guard let image = outputCGImage(rendered, from: target, using: context) else { return nil }
         return UIImage(cgImage: image)
     }
 
@@ -612,10 +625,18 @@ public final class FilmRenderer {
         _ image: CIImage,
         from extent: CGRect? = nil
     ) -> CGImage? {
+        outputCGImage(image, from: extent, using: sharedContext)
+    }
+
+    static func outputCGImage(
+        _ image: CIImage,
+        from extent: CGRect? = nil,
+        using context: CIContext
+    ) -> CGImage? {
         let bounds = extent ?? image.extent
         guard let sRGBColorSpace, ImageSizePolicy.isFinitePositive(bounds.size),
               bounds.origin.x.isFinite, bounds.origin.y.isFinite else { return nil }
-        return sharedContext.createCGImage(
+        return context.createCGImage(
             image,
             from: bounds,
             format: .RGBA8,

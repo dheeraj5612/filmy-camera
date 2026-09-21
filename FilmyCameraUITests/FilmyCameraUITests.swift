@@ -272,10 +272,13 @@ final class FilmyCameraUITests: XCTestCase {
         let selectedRecipe = compactApp.buttons["recipe-g7x-compact"]
         assertMinimumAccessibilityFrame(selectedRecipe, named: "G7 X recipe")
         assertContained(selectedRecipe, in: compactApp, named: "G7 X recipe")
-        let film = compactApp.buttons["recipe-classic-chrome"]
-        assertMinimumHitTarget(film, named: "Muted Color recipe")
-        film.tap()
-        XCTAssertTrue(compactApp.buttons["Tune Muted Color"].waitForExistence(timeout: 5))
+        // Stay within the compact-profile rail. Reaching into another nested
+        // horizontal rail makes XCTest try to scroll the outer drawer instead.
+        let alternate = compactApp.buttons["recipe-digital-ccd-daylight"]
+        scrollToHittable(alternate, in: compactApp)
+        assertMinimumHitTarget(alternate, named: "CCD Daylight recipe")
+        alternate.tap()
+        XCTAssertTrue(compactApp.buttons["Tune CCD Daylight"].waitForExistence(timeout: 5))
         #if targetEnvironment(simulator)
         // iPadOS 26 Simulator can report the first tile of a nested row as
         // non-hittable despite correct visible bounds and working taps.
