@@ -24,6 +24,8 @@
 	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>Filmy Camera uses the camera to preview and capture photos with your selected film recipe.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Filmy records sound only when you enable audio for Live Photos.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>Filmy Camera uses device orientation only to display the optional horizon level. Motion data is not saved or uploaded.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

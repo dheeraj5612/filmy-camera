@@ -278,13 +278,22 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         /// Auto flash and thermal fallback make that distinction important to
         /// downstream rendering.
         public let flashFired: Bool
+        public let rawFileData: Data?
+        public let livePhotoMovieURL: URL?
+        public let outputSettings: ProCaptureSettings
 
         public init(
             fileData: Data,
             capturedAt: Date,
             dimensions: CMVideoDimensions,
-            flashFired: Bool = false
+            flashFired: Bool = false,
+            rawFileData: Data? = nil,
+            livePhotoMovieURL: URL? = nil,
+            outputSettings: ProCaptureSettings = .legacy
         ) {
+            self.rawFileData = rawFileData
+            self.livePhotoMovieURL = livePhotoMovieURL
+            self.outputSettings = outputSettings
             self.fileData = fileData
             self.capturedAt = capturedAt
             self.dimensions = dimensions
@@ -363,6 +372,14 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     @Published public private(set) var selectedLensID: String?
     @Published public private(set) var exposureBias: Float = 0
     @Published public private(set) var isFocusExposureLocked = false
+    @Published public private(set) var proCaptureSettings = ProCaptureSettings()
+    @Published public private(set) var proCaptureCapabilities = ProCaptureCapabilities()
+    @Published public private(set) var exposureProgram: CameraExposureProgram = .automatic
+    @Published public private(set) var focusLoupeEnabled = false
+    @Published public private(set) var subjectTrackingEnabled = false
+    @Published public private(set) var focusLoupeImage: CGImage?
+    @Published public private(set) var trackedSubjectRectangle: CGRect?
+    @Published public private(set) var subjectTrackingStatus = "Tap a subject to track"
     @Published public private(set) var manualControls: CameraManualControls = .unavailable
     @Published public private(set) var previewFrameSize: CGSize = .zero
     @Published public private(set) var previewViewportSize: CGSize = .zero
@@ -413,6 +430,24 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private var pendingPhotoCapturedAt: Date?
     private var pendingPhotoUniqueID: Int64?
     private var configuredPhotoDimensions = CMVideoDimensions(width: 0, height: 0)
+    private var capturePreferences = ProCaptureSettings.restored(from: UserDefaults.standard.data(forKey: "proCaptureSettings.v1"))
+    private var captureCapabilities = ProCaptureCapabilities()
+    private var photoAssembly: PhotoCaptureAssembly?
+    private var pendingMovieDestination: URL?
+    private var captureSettingsGeneration: UInt64 = 0
+    private var priorityExposureRequest: NativeCameraControls.ExposureRequest?
+    private var audioInput: AVCaptureDeviceInput?
+    private var trackingRequested = false
+    private var trackingGeneration: UInt64 = 0
+    private var lastTrackedFocusPoint: CGPoint?
+    // Everything below through focusAssistLastTime is confined to videoQueue.
+    private let subjectTracker = SubjectFocusTracker()
+    private var videoTrackingEnabled = false
+    private var videoLoupeEnabled = false
+    private var videoNativeTracking = false
+    private var videoFocusPoint = CGPoint(x: 0.5, y: 0.5)
+    private var videoAssistGeneration: UInt64 = 0
+    private var focusAssistLastTime: TimeInterval = 0
     private var focusExposureLocked = false
     private var latestFocusPointUpdateUptime: UInt64 = 0
     private var requestedCameraPosition: CameraPosition = .back
@@ -506,6 +541,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         self.session = AVCaptureSession()
         self.previewGrainSeed = UInt32.random(in: UInt32.min...UInt32.max)
         super.init()
+        proCaptureSettings = capturePreferences
 
         sessionQueue.setSpecific(key: sessionQueueKey, value: ())
         frameDeliveryGate.owner = self
@@ -544,6 +580,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             self.pendingPhotoCapturedAt = nil
             self.pendingPhotoUniqueID = nil
             self.pendingPhotoFlashFallback = false
+            self.cleanupPendingMovieOnQueue()
+            self.photoAssembly = nil
         }
         if DispatchQueue.getSpecific(key: sessionQueueKey) == nil {
             sessionQueue.sync(execute: stopSession)
@@ -691,13 +729,13 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// consumers share the stream (the Metal viewfinder and the live recipe
     /// swatches), so handlers fan out rather than replace one another, and a
     /// stale SwiftUI representable can only remove its own callback.
-    @discardableResult
     private func updateFrameConsumersOnMain(hasOnFrame: Bool) {
         frameHandlersLock.lock()
         hasOnFrameConsumer = hasOnFrame
         frameHandlersLock.unlock()
     }
 
+    @discardableResult
     public func installFrameHandler(_ handler: @escaping FrameHandler) -> UUID {
         let id = UUID()
         frameHandlersLock.lock()
@@ -922,12 +960,14 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
         sessionQueue.async { [weak self] in
             guard let self, let device = self.activeDevice() else { return }
+            self.selectFocusAssistPointOnQueue(point)
             do {
                 try device.lockForConfiguration()
                 defer { device.unlockForConfiguration() }
 
                 if self.usesAutoFocusOnQueue(for: device) {
                     self.applyAutoFocusOnQueue(to: device, at: point, isUserInitiated: true)
+                    NativeCameraControls.setSubjectTracking(self.trackingRequested, on: device)
                 }
 
                 if self.desiredManualExposure == .auto {
@@ -952,7 +992,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         let point = clampedNormalizedPoint(normalizedPoint)
         sessionQueue.async { [weak self] in
             guard let self, let device = self.activeDevice() else { return }
-
+            self.setSubjectTrackingOnQueue(false)
             do {
                 try device.lockForConfiguration()
                 defer { device.unlockForConfiguration() }
@@ -1117,6 +1157,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
     public func setManualFocus(lensPosition: Float) {
         sessionQueue.async { [weak self] in
+            self?.setSubjectTrackingOnQueue(false)
             self?.setManualFocusOnQueue(lensPosition: lensPosition)
         }
     }
@@ -1131,6 +1172,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     public func lockCurrentFocus() {
         sessionQueue.async { [weak self] in
             guard let self, let device = self.activeDevice() else { return }
+            self.setSubjectTrackingOnQueue(false)
             self.setManualFocusOnQueue(lensPosition: device.lensPosition)
         }
     }
@@ -1206,6 +1248,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             let requestGeneration = manualExposureGeneration
             let deviceGeneration = manualDeviceGeneration
             let deviceID = device.uniqueID
+            priorityExposureRequest = nil
+            publishOnMain { [weak self] in self?.exposureProgram = .manual }
             desiredManualExposure = .manual(
                 iso: request.iso,
                 durationSeconds: request.durationSeconds
@@ -1253,6 +1297,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private func setAutoExposureOnQueue() {
         guard let device = activeDevice() else {
             desiredManualExposure = .auto
+            priorityExposureRequest = nil
+            publishOnMain { [weak self] in self?.exposureProgram = .automatic }
             publishManualControlsUnavailable()
             return
         }
@@ -1268,6 +1314,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             }
             manualExposureGeneration &+= 1
             isApplyingManualExposure = false
+            priorityExposureRequest = nil
+            publishOnMain { [weak self] in self?.exposureProgram = .automatic }
             desiredManualExposure = .auto
             let center = CGPoint(x: 0.5, y: 0.5)
             if device.isExposurePointOfInterestSupported {
@@ -2051,12 +2099,23 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func reapplyDesiredManualControlsOnQueue(for device: AVCaptureDevice) {
-        switch desiredManualExposure {
-        case .auto:
-            setAutoExposureOnQueue()
-        case let .manual(iso, durationSeconds):
-            setManualExposureOnQueue(iso: iso, durationSeconds: durationSeconds)
+        if let request = priorityExposureRequest {
+            refreshProCapabilitiesOnQueue(for: device)
+            if captureCapabilities.exposurePrograms.contains(request.program) {
+                applyPriorityExposureOnQueue(request)
+            } else {
+                setAutoExposureOnQueue()
+                publishStatus("The previous priority program is unavailable on this lens. Auto exposure restored.")
+            }
+        } else {
+            switch desiredManualExposure {
+            case .auto:
+                setAutoExposureOnQueue()
+            case let .manual(iso, durationSeconds):
+                setManualExposureOnQueue(iso: iso, durationSeconds: durationSeconds)
+            }
         }
+        configureSubjectTrackingOnQueue()
         switch desiredManualWhiteBalance {
         case .auto:
             setAutoWhiteBalanceOnQueue()
@@ -2697,7 +2756,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private func activeDevice() -> AVCaptureDevice? {
         session.inputs
             .compactMap { ($0 as? AVCaptureDeviceInput)?.device }
-            .first
+            .first(where: { $0.hasMediaType(.video) })
     }
 
     private func setCameraPositionOnQueue(_ position: CameraPosition) {
@@ -2824,6 +2883,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             try device.lockForConfiguration()
             device.videoZoomFactor = nextFactor
             device.unlockForConfiguration()
+            if trackingRequested { selectFocusAssistPointOnQueue(CGPoint(x: 0.5, y: 0.5)) }
             let userFacingFactor = userFacingZoomFactorOnQueue(
                 for: device,
                 hardwareFactor: nextFactor
@@ -2906,7 +2966,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             return false
         }
 
-        let oldInput = session.inputs.compactMap { $0 as? AVCaptureDeviceInput }.first
+        let oldInput = session.inputs.compactMap { $0 as? AVCaptureDeviceInput }.first { $0.device.hasMediaType(.video) }
         session.beginConfiguration()
         if let oldInput {
             session.removeInput(oldInput)
@@ -2933,6 +2993,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
 
         cancelPendingPhotoOnQueue(status: "Capture canceled while changing lenses.")
+        lastTrackedFocusPoint = nil
         session.addInput(newInput)
         manualDeviceGeneration &+= 1
         isApplyingManualExposure = false
@@ -3266,6 +3327,13 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
         photoOutput.maxPhotoDimensions = maximum
         configuredPhotoDimensions = maximum
+        photoOutput.isAppleProRAWEnabled = photoOutput.isAppleProRAWSupported
+        photoOutput.isLivePhotoCaptureEnabled = photoOutput.isLivePhotoCaptureSupported
+        // Never treat a deferred 24 MP proxy as an ordinary finished image.
+        if photoOutput.isAutoDeferredPhotoDeliverySupported { photoOutput.isAutoDeferredPhotoDeliveryEnabled = false }
+        configureProColorOnQueue(for: device)
+        refreshProCapabilitiesOnQueue(for: device)
+        updateLivePhotoAudioOnQueue()
     }
 
     /// Resolves flash support from the two independent AVFoundation signals:
@@ -3652,7 +3720,30 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             effectiveFlashMode = .off
         }
 
-        let settings = AVCapturePhotoSettings()
+        refreshProCapabilitiesOnQueue(for: device)
+        if let reason = captureCapabilities.unavailableReason(for: capturePreferences) {
+            publishStatus(reason)
+            publishPhoto(nil, completion: completion)
+            return
+        }
+        let codec: AVVideoCodecType = capturePreferences.format == .jpeg ? .jpeg : .hevc
+        let processedFormat: [String: Any] = [AVVideoCodecKey: codec]
+        let settings: AVCapturePhotoSettings
+        if capturePreferences.format.retainsRAW {
+            let rawType = photoOutput.availableRawPhotoPixelFormatTypes.first {
+                capturePreferences.format == .proRAW
+                    ? AVCapturePhotoOutput.isAppleProRAWPixelFormat($0)
+                    : AVCapturePhotoOutput.isBayerRAWPixelFormat($0)
+            }
+            guard let rawType else {
+                publishStatus("RAW is no longer available on this lens. Select HEIF or another lens.")
+                publishPhoto(nil, completion: completion)
+                return
+            }
+            settings = AVCapturePhotoSettings(rawPixelFormatType: rawType, processedFormat: processedFormat)
+        } else {
+            settings = AVCapturePhotoSettings(format: processedFormat)
+        }
         switch effectiveFlashMode {
         case .off:
             settings.flashMode = .off
@@ -3661,17 +3752,47 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         case .on:
             settings.flashMode = .on
         }
+        guard device.exposureMode != .custom || capturePreferences.resolution == .mp12 else {
+            publishStatus("Manual and priority exposure use 12 MP to preserve the selected controls. Choose 12 MP or Auto exposure.")
+            publishPhoto(nil, completion: completion)
+            return
+        }
         settings.photoQualityPrioritization = Self.photoQualityPrioritization(
             manualExposureEnabled: device.exposureMode == .custom
         )
-        if configuredPhotoDimensions.width > 0, configuredPhotoDimensions.height > 0 {
-            settings.maxPhotoDimensions = configuredPhotoDimensions
+        let availableDimensions = device.activeFormat.supportedMaxPhotoDimensions.map {
+            PhotoResolutionPolicy.Dimensions(width: $0.width, height: $0.height)
         }
+        guard let dimensions = PhotoResolutionPolicy.captureDimensions(for: capturePreferences.resolution, supported: availableDimensions) else {
+            publishStatus("The selected resolution is unavailable on this lens.")
+            publishPhoto(nil, completion: completion)
+            return
+        }
+        settings.maxPhotoDimensions = CMVideoDimensions(width: dimensions.width, height: dimensions.height)
+        if capturePreferences.livePhoto {
+            do {
+                let directory = Self.livePhotoTemporaryDirectory
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                let url = directory.appendingPathComponent("\(UUID().uuidString).mov")
+                settings.livePhotoMovieFileURL = url
+                pendingMovieDestination = url
+            } catch {
+                publishStatus("Not enough storage to record this Live Photo.")
+                publishPhoto(nil, completion: completion)
+                return
+            }
+        }
+        photoAssembly = PhotoCaptureAssembly(uniqueID: settings.uniqueID, settings: capturePreferences)
         pendingPhotoCompletion = completion
         pendingPhotoCapturedAt = Date()
         pendingPhotoUniqueID = settings.uniqueID
         pendingPhotoFlashFallback = requestedFlashMode != .off && effectiveFlashMode == .off
         photoOutput.capturePhoto(with: settings, delegate: self)
+        let captureID = settings.uniqueID
+        sessionQueue.asyncAfter(deadline: .now() + 45) { [weak self] in
+            guard let self, self.pendingPhotoUniqueID == captureID else { return }
+            self.cancelPendingPhotoOnQueue(status: "Capture timed out. Please try again.")
+        }
     }
 
     private func finishPhotoOnQueue(_ photo: CapturedPhoto?, uniqueID: Int64) {
@@ -3687,6 +3808,9 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
         let completion = pendingPhotoCompletion
         let flashFallback = pendingPhotoFlashFallback
+        if photo == nil { cleanupPendingMovieOnQueue() }
+        pendingMovieDestination = nil
+        photoAssembly = nil
         pendingPhotoCompletion = nil
         pendingPhotoCapturedAt = nil
         pendingPhotoUniqueID = nil
@@ -3704,6 +3828,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     private func cancelPendingPhotoOnQueue(status: String) {
+        cleanupPendingMovieOnQueue()
+        photoAssembly = nil
         let completion = pendingPhotoCompletion ?? pendingManualControlsPhotoCompletion
         guard let completion else { return }
         pendingPhotoCompletion = nil
@@ -3952,6 +4078,7 @@ extension CameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
         }
 
         let image = Self.previewImage(from: pixelBuffer)
+        processFocusAssistsOnVideoQueue(image, connection: connection)
 
         // CIImage is immutable and the callback is intentionally delivered on
         // main, where SwiftUI/Metal preview views can consume it safely. The
@@ -3968,35 +4095,34 @@ extension CameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
 }
 
 extension CameraService: AVCapturePhotoCaptureDelegate {
+    public func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+        guard output === photoOutput else { return }
+        let data = error == nil ? photo.fileDataRepresentation() : nil
+        let isRAW = photo.isRawPhoto
+        let id = photo.resolvedSettings.uniqueID
+        sessionQueue.async { [weak self] in
+            guard let self, self.photoAssembly?.uniqueID == id else { return }
+            if data?.isEmpty != false { self.photoAssembly?.failed = true }
+            if isRAW { self.photoAssembly?.raw = data } else { self.photoAssembly?.processed = data }
+        }
+    }
+
     public func photoOutput(
         _ output: AVCapturePhotoOutput,
-        didFinishProcessingPhoto photo: AVCapturePhoto,
-        error: Error?
+        didFinishProcessingLivePhotoToMovieFileAt outputFileURL: URL,
+        duration: CMTime, photoDisplayTime: CMTime,
+        resolvedSettings: AVCaptureResolvedPhotoSettings, error: Error?
     ) {
-        let data: Data?
-        if error == nil,
-           let fileData = photo.fileDataRepresentation() {
-            data = fileData
-        } else {
-            data = nil
-        }
-        let dimensions = photo.resolvedSettings.photoDimensions
-        let flashFired = photo.resolvedSettings.isFlashEnabled
-        let uniqueID = photo.resolvedSettings.uniqueID
-
-        // Photo delegate callbacks are not required to arrive on our session
-        // queue, so serialize completion state before hopping to main.
+        guard output === photoOutput else { return }
+        let id = resolvedSettings.uniqueID
+        let failed = error != nil
         sessionQueue.async { [weak self] in
-            guard let self else { return }
-            let capturedPhoto = data.flatMap { fileData in
-                CapturedPhoto(
-                    fileData: fileData,
-                    capturedAt: self.pendingPhotoCapturedAt ?? Date(),
-                    dimensions: dimensions,
-                    flashFired: flashFired
-                )
+            guard let self, self.photoAssembly?.uniqueID == id else {
+                Self.removeOwnedTemporaryMovie(outputFileURL)
+                return
             }
-            self.finishPhotoOnQueue(capturedPhoto, uniqueID: uniqueID)
+            if failed { self.photoAssembly?.failed = true }
+            else { self.photoAssembly?.liveMovieURL = outputFileURL }
         }
     }
 
@@ -4005,18 +4131,345 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
         didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings,
         error: Error?
     ) {
-        guard output === photoOutput, error != nil else { return }
-        let uniqueID = resolvedSettings.uniqueID
+        guard output === photoOutput else { return }
+        let id = resolvedSettings.uniqueID
+        let dimensions = resolvedSettings.photoDimensions
+        let flashFired = resolvedSettings.isFlashEnabled
+        let failed = error != nil
         sessionQueue.async { [weak self] in
-            guard let self,
-                  Self.acceptsPhotoCallback(
-                    pendingUniqueID: self.pendingPhotoUniqueID,
-                    callbackUniqueID: uniqueID
-                  ) else { return }
-            // A terminal capture error is not guaranteed to be accompanied by
-            // a usable processing callback. Complete the matching request so
-            // the shutter cannot remain busy indefinitely.
-            self.finishPhotoOnQueue(nil, uniqueID: uniqueID)
+            guard let self, let assembly = self.photoAssembly, assembly.uniqueID == id else { return }
+            let photo: CapturedPhoto?
+            if !failed, assembly.isComplete, let data = assembly.processed {
+                photo = CapturedPhoto(
+                    fileData: data, capturedAt: self.pendingPhotoCapturedAt ?? Date(),
+                    dimensions: dimensions, flashFired: flashFired,
+                    rawFileData: assembly.raw, livePhotoMovieURL: assembly.liveMovieURL,
+                    outputSettings: assembly.settings
+                )
+            } else { photo = nil }
+            self.finishPhotoOnQueue(photo, uniqueID: id)
         }
+    }
+}
+
+// MARK: - Pro capture and focus-assist transactions
+extension CameraService {
+    public func setProCaptureSettings(_ settings: ProCaptureSettings) {
+        sessionQueue.async { [weak self] in
+            guard let self, self.pendingPhotoCompletion == nil, self.pendingManualControlsPhotoCompletion == nil else { return }
+            self.captureSettingsGeneration &+= 1
+            let generation = self.captureSettingsGeneration
+            if let reason = settings.incompatibility { self.publishStatus(reason); return }
+            if settings.livePhoto && settings.livePhotoAudio,
+               AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+                // The permission prompt follows an explicit audio opt-in, not
+                // opening Pro controls or merely starting the camera.
+                AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
+                    self?.sessionQueue.async { [weak self] in
+                        guard let self, self.pendingPhotoCompletion == nil, self.pendingManualControlsPhotoCompletion == nil,
+                              self.captureSettingsGeneration == generation else { return }
+                        var resolved = settings
+                        resolved.livePhotoAudio = granted
+                        self.applyCapturePreferencesOnQueue(resolved)
+                        if !granted { self.publishStatus("Microphone access was not granted. Live Photos will be silent.") }
+                    }
+                }
+                return
+            }
+            self.applyCapturePreferencesOnQueue(settings)
+        }
+    }
+
+    private func applyCapturePreferencesOnQueue(_ requested: ProCaptureSettings) {
+        var settings = requested
+        if settings.livePhotoAudio && AVCaptureDevice.authorizationStatus(for: .audio) != .authorized {
+            settings.livePhotoAudio = false
+            publishStatus("Microphone access is disabled. Live Photos will be silent.")
+        }
+        capturePreferences = settings
+        if isConfigured, let device = activeDevice() {
+            session.beginConfiguration()
+            configureProColorOnQueue(for: device)
+            updateLivePhotoAudioOnQueue()
+            session.commitConfiguration()
+            refreshProCapabilitiesOnQueue(for: device)
+        }
+        let applied = capturePreferences
+        if let data = try? JSONEncoder().encode(applied) { UserDefaults.standard.set(data, forKey: "proCaptureSettings.v1") }
+        publishOnMain { [weak self] in self?.proCaptureSettings = applied }
+    }
+
+    private func configureProColorOnQueue(for device: AVCaptureDevice) {
+        let desired: AVCaptureColorSpace = capturePreferences.colorGamut == .displayP3 ? .P3_D65 : .sRGB
+        guard device.activeFormat.supportedColorSpaces.contains(desired) else { return }
+        do {
+            try device.lockForConfiguration()
+            device.activeColorSpace = desired
+            device.unlockForConfiguration()
+        } catch { publishStatus("The camera could not change its color space. Output is color managed from the captured source.") }
+    }
+
+    private func refreshProCapabilitiesOnQueue(for device: AVCaptureDevice) {
+        var capabilities = ProCaptureCapabilities()
+        capabilities.resolutions = PhotoResolutionPolicy.availableResolutions(supported: device.activeFormat.supportedMaxPhotoDimensions.map {
+            .init(width: $0.width, height: $0.height)
+        })
+        let codecs = photoOutput.availablePhotoCodecTypes
+        if codecs.contains(.jpeg) { capabilities.formats.append(.jpeg) }
+        if codecs.contains(.hevc) {
+            capabilities.formats.append(.heif)
+            if photoOutput.availableRawPhotoPixelFormatTypes.contains(where: AVCapturePhotoOutput.isBayerRAWPixelFormat) {
+                capabilities.formats.append(.bayerRAW)
+            }
+            if photoOutput.isAppleProRAWEnabled,
+               photoOutput.availableRawPhotoPixelFormatTypes.contains(where: AVCapturePhotoOutput.isAppleProRAWPixelFormat) {
+                capabilities.formats.append(.proRAW)
+            }
+        }
+        capabilities.livePhotoSupported = photoOutput.isLivePhotoCaptureSupported && photoOutput.isLivePhotoCaptureEnabled
+        capabilities.wideColorSupported = device.activeFormat.supportedColorSpaces.contains(.P3_D65)
+        NativeCameraControls.populateCapabilities(for: device, in: &capabilities)
+        captureCapabilities = capabilities
+        publishOnMain { [weak self] in self?.proCaptureCapabilities = capabilities }
+    }
+
+    /// Called only inside an AVCaptureSession configuration transaction.
+    private func updateLivePhotoAudioOnQueue() {
+        let shouldRecord = capturePreferences.livePhoto && capturePreferences.livePhotoAudio
+            && AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+        if let audioInput, !session.inputs.contains(where: { $0 === audioInput }) { self.audioInput = nil }
+        if !shouldRecord {
+            if let audioInput { session.removeInput(audioInput); self.audioInput = nil }
+            return
+        }
+        guard audioInput == nil else { return }
+        guard let microphone = AVCaptureDevice.default(for: .audio),
+              let input = try? AVCaptureDeviceInput(device: microphone), session.canAddInput(input) else {
+            capturePreferences.livePhotoAudio = false
+            publishOnMain { [weak self] in self?.proCaptureSettings.livePhotoAudio = false }
+            publishStatus("The microphone could not be added. Live Photos will be silent.")
+            return
+        }
+        session.addInput(input)
+        audioInput = input
+    }
+
+    public func setExposureProgram(
+        _ program: CameraExposureProgram,
+        iso: Float? = nil, durationSeconds: Double? = nil, aperture: Float? = nil
+    ) {
+        sessionQueue.async { [weak self] in
+            guard let self, self.pendingPhotoCompletion == nil, let device = self.activeDevice() else { return }
+            if program == .automatic { self.setAutoExposureOnQueue(); return }
+            if program == .manual && aperture == nil {
+                self.setManualExposureOnQueue(iso: iso ?? device.iso, durationSeconds: durationSeconds ?? CMTimeGetSeconds(device.exposureDuration))
+                return
+            }
+            let request = NativeCameraControls.ExposureRequest(
+                program: program, iso: iso ?? device.iso,
+                durationSeconds: durationSeconds ?? CMTimeGetSeconds(device.exposureDuration), aperture: aperture ?? device.lensAperture
+            )
+            self.applyPriorityExposureOnQueue(request)
+        }
+    }
+
+    private func applyPriorityExposureOnQueue(_ request: NativeCameraControls.ExposureRequest) {
+        guard let device = activeDevice(), request.iso.isFinite, request.durationSeconds.isFinite, request.aperture.isFinite else { return }
+        refreshProCapabilitiesOnQueue(for: device)
+        guard captureCapabilities.exposurePrograms.contains(request.program) else {
+            publishStatus("This priority mode needs a compatible lens and an iOS 27 build. Exposure is unchanged.")
+            return
+        }
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+            let generation = manualExposureGeneration &+ 1
+            let deviceGeneration = manualDeviceGeneration
+            let deviceID = device.uniqueID
+            let accepted = NativeCameraControls.apply(request, to: device) { [weak self] _ in
+                self?.sessionQueue.async { [weak self] in
+                    guard let self, self.manualExposureGeneration == generation,
+                          self.manualDeviceGeneration == deviceGeneration, self.activeDevice()?.uniqueID == deviceID else { return }
+                    self.isApplyingManualExposure = false
+                    self.publishManualControlsOnQueue(for: device)
+                    self.refreshProCapabilitiesOnQueue(for: device)
+                    self.publishOnMain { [weak self] in self?.exposureProgram = request.program }
+                    self.publishStatus("\(request.program.title) applied")
+                    self.captureDeferredPhotoWhenManualControlsSettleOnQueue()
+                }
+            }
+            guard accepted else { publishStatus("This combination of exposure controls is unavailable on the active format."); return }
+            manualExposureGeneration = generation
+            priorityExposureRequest = request
+            // Existing AE/AF and flash code treats all custom exposure programs
+            // as custom, rather than resetting auto ISO during tap-to-focus.
+            desiredManualExposure = .manual(iso: request.iso, durationSeconds: request.durationSeconds)
+            isApplyingManualExposure = true
+            if selectedFlashMode != .off {
+                flashModeBeforeManualExposure = selectedFlashMode
+                selectedFlashMode = .off
+                publishFlashMode(.off)
+            }
+            focusExposureLocked = false
+            publishFocusExposureLocked(false)
+            publishManualControlsOnQueue(for: device)
+        } catch { publishStatus("Exposure controls are unavailable right now.") }
+    }
+
+    public func setFocusLoupeEnabled(_ enabled: Bool) {
+        publishOnMain { [weak self] in self?.focusLoupeEnabled = enabled; if !enabled { self?.focusLoupeImage = nil } }
+        videoQueue.async { [weak self] in self?.videoLoupeEnabled = enabled }
+    }
+
+    public func setSubjectTrackingEnabled(_ enabled: Bool) {
+        sessionQueue.async { [weak self] in self?.setSubjectTrackingOnQueue(enabled) }
+    }
+
+    private func setSubjectTrackingOnQueue(_ enabled: Bool) {
+        trackingRequested = enabled
+        if enabled { setAutoFocusOnQueue() }
+        configureSubjectTrackingOnQueue()
+        publishOnMain { [weak self] in
+            self?.subjectTrackingEnabled = enabled
+            self?.trackedSubjectRectangle = nil
+            self?.subjectTrackingStatus = enabled ? "Tap a subject to track" : "Tracking off"
+        }
+    }
+
+    private func configureSubjectTrackingOnQueue() {
+        let enabled = trackingRequested && desiredManualFocus == .auto && !focusExposureLocked
+        var native = false
+        if let device = activeDevice() {
+            native = enabled && NativeCameraControls.supportsSubjectTracking(device)
+            do {
+                try device.lockForConfiguration()
+                NativeCameraControls.setSubjectTracking(enabled, on: device)
+                device.unlockForConfiguration()
+            } catch { native = false }
+        }
+        trackingGeneration &+= 1
+        let generation = trackingGeneration
+        let useNative = native
+        lastTrackedFocusPoint = nil
+        videoQueue.async { [weak self] in
+            guard let self else { return }
+            self.videoAssistGeneration = generation
+            self.videoTrackingEnabled = enabled
+            self.videoNativeTracking = useNative
+            self.subjectTracker.reset()
+            // Tracking starts at the selected point; explicit retap reacquires
+            // after loss rather than automatically switching people.
+            if enabled && !useNative { self.subjectTracker.select(topLeftPoint: self.videoFocusPoint) }
+        }
+    }
+
+    private func selectFocusAssistPointOnQueue(_ devicePoint: CGPoint) {
+        let point = Self.rotatedPreviewPoint(fromDevicePoint: devicePoint, rotationAngle: previewRotationAngleState, mirrored: activeDevice()?.position == .front)
+        videoQueue.async { [weak self] in
+            guard let self else { return }
+            self.videoFocusPoint = point
+            if self.videoTrackingEnabled && !self.videoNativeTracking { self.subjectTracker.select(topLeftPoint: point) }
+        }
+    }
+
+    /// The inverse of captureDevicePoint, used for loupe placement and tests.
+    static func rotatedPreviewPoint(fromDevicePoint point: CGPoint, rotationAngle: CGFloat, mirrored: Bool) -> CGPoint {
+        guard point.x.isFinite, point.y.isFinite, rotationAngle.isFinite else { return CGPoint(x: 0.5, y: 0.5) }
+        let turns = Int((((rotationAngle.truncatingRemainder(dividingBy: 360)) + 360).truncatingRemainder(dividingBy: 360) / 90).rounded()) % 4
+        var result: CGPoint
+        switch turns {
+        case 1: result = CGPoint(x: 1 - point.y, y: point.x)
+        case 2: result = CGPoint(x: 1 - point.x, y: 1 - point.y)
+        case 3: result = CGPoint(x: point.y, y: 1 - point.x)
+        default: result = point
+        }
+        if mirrored { result.x = 1 - result.x }
+        return CGPoint(x: min(max(result.x, 0), 1), y: min(max(result.y, 0), 1))
+    }
+
+    private func processFocusAssistsOnVideoQueue(_ image: CIImage, connection: AVCaptureConnection) {
+        guard videoTrackingEnabled || videoLoupeEnabled else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - focusAssistLastTime >= 0.12 else { return }
+        focusAssistLastTime = now
+        let generation = videoAssistGeneration
+        let rotation = connection.videoRotationAngle
+        let mirrored = connection.isVideoMirrored
+        if videoTrackingEnabled && !videoNativeTracking {
+            let scale = min(1, 960 / max(image.extent.width, image.extent.height))
+            if let update = subjectTracker.process(image.transformed(by: CGAffineTransform(scaleX: scale, y: scale)), at: now) {
+                if let rect = update.rectangle { videoFocusPoint = CGPoint(x: rect.midX, y: 1 - rect.midY) }
+                sessionQueue.async { [weak self] in
+                    guard let self, self.trackingGeneration == generation, self.trackingRequested else { return }
+                    if let rect = update.rectangle {
+                        let point = Self.captureDevicePoint(fromRotatedPreviewPoint: CGPoint(x: rect.midX, y: 1 - rect.midY), rotationAngle: rotation, mirrored: mirrored)
+                        self.applyTrackedFocusOnQueue(point)
+                    }
+                    self.publishOnMain { [weak self] in
+                        self?.trackedSubjectRectangle = update.rectangle
+                        self?.subjectTrackingStatus = update.state == .lost ? "Subject lost. Tap to reacquire." : "Tracking subject"
+                    }
+                }
+            }
+        } else if videoTrackingEnabled {
+            sessionQueue.async { [weak self] in
+                guard let self, self.trackingGeneration == generation, self.trackingRequested, let device = self.activeDevice() else { return }
+                let acquired = NativeCameraControls.subjectAcquired(device)
+                self.publishOnMain { [weak self] in
+                    self?.subjectTrackingStatus = acquired ? "Native subject tracking" : "Searching for subject. Tap to select."
+                }
+            }
+        }
+        if videoLoupeEnabled {
+            let crop = Self.loupeCrop(extent: image.extent, topLeftPoint: videoFocusPoint)
+            guard !crop.isEmpty else { return }
+            let cropped = image.cropped(to: crop).transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
+            let scale = min(1, 320 / max(crop.width, crop.height))
+            let loupe = cropped.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+            let cgImage = FilmRenderer.sharedContext.createCGImage(loupe, from: loupe.extent)
+            publishOnMain { [weak self] in
+                guard let self, self.focusLoupeEnabled else { return }
+                self.focusLoupeImage = cgImage
+            }
+        }
+    }
+
+    static func loupeCrop(extent: CGRect, topLeftPoint: CGPoint) -> CGRect {
+        let size = min(extent.width, extent.height) / 4
+        guard size.isFinite, size > 0, !extent.isInfinite, !extent.isNull,
+              topLeftPoint.x.isFinite, topLeftPoint.y.isFinite else { return .zero }
+        let x = extent.minX + min(max(topLeftPoint.x, 0), 1) * extent.width
+        let y = extent.minY + (1 - min(max(topLeftPoint.y, 0), 1)) * extent.height
+        return CGRect(x: min(max(x - size / 2, extent.minX), extent.maxX - size),
+                      y: min(max(y - size / 2, extent.minY), extent.maxY - size), width: size, height: size).integral.intersection(extent)
+    }
+
+    private func applyTrackedFocusOnQueue(_ point: CGPoint) {
+        guard desiredManualFocus == .auto, !focusExposureLocked, let device = activeDevice(),
+              device.isFocusPointOfInterestSupported, device.isFocusModeSupported(.continuousAutoFocus) else { return }
+        if let previous = lastTrackedFocusPoint, hypot(point.x - previous.x, point.y - previous.y) < 0.02 { return }
+        do {
+            try device.lockForConfiguration()
+            device.focusPointOfInterest = point
+            device.focusMode = .continuousAutoFocus
+            device.unlockForConfiguration()
+            lastTrackedFocusPoint = point
+        } catch { /* A transient lock failure keeps the last valid target. */ }
+    }
+
+    static var livePhotoTemporaryDirectory: URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("FilmyLiveCapture", isDirectory: true)
+    }
+
+    static func removeOwnedTemporaryMovie(_ url: URL) {
+        guard url.deletingLastPathComponent().standardizedFileURL == livePhotoTemporaryDirectory.standardizedFileURL,
+              url.pathExtension == "mov", UUID(uuidString: url.deletingPathExtension().lastPathComponent) != nil else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    private func cleanupPendingMovieOnQueue() {
+        if let url = pendingMovieDestination { Self.removeOwnedTemporaryMovie(url) }
+        if let url = photoAssembly?.liveMovieURL { Self.removeOwnedTemporaryMovie(url) }
+        pendingMovieDestination = nil
     }
 }

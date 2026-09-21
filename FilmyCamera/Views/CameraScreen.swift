@@ -563,6 +563,10 @@ struct CameraScreen: View {
                 .allowsHitTesting(canTriggerShutter)
             }
 
+            if camera.isRunning && !isReviewing {
+                FocusAssistOverlay(camera: camera, size: size,
+                                   topClearance: overlaysTopBar ? (viewfinderChromeHeights[.top] ?? 54) + 8 : 8)
+            }
             if let focusPoint {
                 // The tap gesture reports locations in the frame's own space,
                 // so the reticle lands exactly where the user touched. It stays

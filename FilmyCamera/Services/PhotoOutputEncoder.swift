@@ -113,15 +113,41 @@ enum PhotoOutputEncoder {
             return nil
         }
 
+        let properties = exportProperties(
+            width: outputImage.width, height: outputImage.height,
+            sourceData: sourceData, capturedAt: capturedAt, recipe: recipe,
+            appVersion: appVersion, appBuild: appBuild
+        )
+
+        let outputData = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            outputData,
+            UTType.jpeg.identifier as CFString,
+            1,
+            nil
+        ) else {
+            return nil
+        }
+
+        CGImageDestinationAddImage(destination, outputImage, properties as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return outputData as Data
+    }
+
+    static func exportProperties(
+        width: Int, height: Int, sourceData: Data, capturedAt: Date, recipe: FilmRecipe,
+        appVersion: String = currentApplicationVersion, appBuild: String = currentApplicationBuild,
+        profileName: String = outputProfileName, isSRGB: Bool = true
+    ) -> [String: Any] {
         // Build export metadata from an explicit allowlist. Source TIFF,
         // MakerApple, GPS, and other camera/device metadata must never cross
         // this boundary into an app-created JPEG. Capture facts such as
         // exposure, ISO, and lens are useful provenance and are copied below.
         var properties: [String: Any] = [
             kCGImagePropertyColorModel as String: kCGImagePropertyColorModelRGB,
-            kCGImagePropertyProfileName as String: Self.outputProfileName,
-            kCGImagePropertyPixelWidth as String: outputImage.width,
-            kCGImagePropertyPixelHeight as String: outputImage.height,
+            kCGImagePropertyProfileName as String: profileName,
+            kCGImagePropertyPixelWidth as String: width,
+            kCGImagePropertyPixelHeight as String: height,
             kCGImagePropertyOrientation as String: 1,
             kCGImageDestinationLossyCompressionQuality as String: Self.jpegCompressionQuality
         ]
@@ -158,12 +184,12 @@ enum PhotoOutputEncoder {
            let originalOffset = exif[originalOffsetKey] as? String {
             exif[digitizedOffsetKey] = originalOffset
         }
-        exif[kCGImagePropertyExifPixelXDimension as String] = outputImage.width
-        exif[kCGImagePropertyExifPixelYDimension as String] = outputImage.height
+        exif[kCGImagePropertyExifPixelXDimension as String] = width
+        exif[kCGImagePropertyExifPixelYDimension as String] = height
         // EXIF 2.3: 1 means sRGB. This complements the embedded ICC
         // profile for readers that inspect EXIF but do not parse ICC
         // resources.
-        exif[kCGImagePropertyExifColorSpace as String] = 1
+        exif[kCGImagePropertyExifColorSpace as String] = isSRGB ? 1 : 65_535
         if let provenance = provenanceJSON(
             for: recipe,
             appVersion: appVersion,
@@ -173,19 +199,7 @@ enum PhotoOutputEncoder {
         }
         properties[kCGImagePropertyExifDictionary as String] = exif
 
-        let outputData = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(
-            outputData,
-            UTType.jpeg.identifier as CFString,
-            1,
-            nil
-        ) else {
-            return nil
-        }
-
-        CGImageDestinationAddImage(destination, outputImage, properties as CFDictionary)
-        guard CGImageDestinationFinalize(destination) else { return nil }
-        return outputData as Data
+        return properties
     }
 
     private static func captureExif(from sourceData: Data) -> [String: Any] {
