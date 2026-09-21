@@ -1,0 +1,120 @@
+name: Capture modes validation
+
+on:
+  push:
+    branches: [feature/advanced-capture-modes]
+    paths:
+      - scripts/integrate_capture_modes.py
+      - .github/workflows/capture-modes-validation.yml
+  pull_request:
+    paths:
+      - FilmyCamera/CaptureModes/**
+      - FilmyCamera/FilmyCameraApp.swift
+      - FilmyCamera/Services/CameraService.swift
+      - FilmyCameraTests/CaptureModes*Tests.swift
+      - project.yml
+      - .github/workflows/capture-modes-validation.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: capture-modes-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integrate-project:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feature/advanced-capture-modes'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the Xcode project parser
+        run: sudo gem install xcodeproj -v 1.27.0 --no-document
+      - name: Integrate the app and checked-in project source membership
+        run: |
+          set -euo pipefail
+          python3 scripts/integrate_capture_modes.py
+          ruby <<'RUBY'
+          require 'xcodeproj'
+          project = Xcodeproj::Project.open('FilmyCamera.xcodeproj')
+          app = project.targets.find { |target| target.name == 'FilmyCamera' }
+          tests = project.targets.find { |target| target.name == 'FilmyCameraTests' }
+          app_group = project.main_group.groups.find { |group| group.display_name == 'FilmyCamera' }
+          test_group = project.main_group.groups.find { |group| group.display_name == 'FilmyCameraTests' }
+          abort 'Missing original app/test target or group' unless app && tests && app_group && test_group
+          modes = app_group.groups.find { |group| group.display_name == 'CaptureModes' } || app_group.new_group('CaptureModes', 'CaptureModes')
+          entries = [[app, modes, Dir['FilmyCamera/CaptureModes/*.swift']],
+                     [tests, test_group, Dir['FilmyCameraTests/CaptureModes*Tests.swift']]]
+          entries.each do |target, group, paths|
+            abort 'Expected capture sources are missing' if paths.empty?
+            paths.sort.each do |path|
+              name = File.basename(path)
+              reference = group.files.find { |file| file.path == name } || group.new_file(name)
+              target.source_build_phase.add_file_reference(reference, true)
+              abort "Unresolved source: #{path}" unless File.file?(reference.real_path)
+            end
+          end
+          project.save
+          puts 'Capture sources and tests are members of their native targets.'
+          RUBY
+          git add FilmyCamera/FilmyCameraApp.swift FilmyCamera/Services/CameraService.swift FilmyCamera/Info.plist project.yml FilmyCamera.xcodeproj
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'build: integrate capture workspace and Xcode source membership'
+            git push origin HEAD:feature/advanced-capture-modes
+          fi
+
+  ios-validation:
+    needs: integrate-project
+    if: always() && (github.event_name == 'pull_request' || needs.integrate-project.result == 'success')
+    runs-on: macos-15
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
+      - name: Select the latest installed Xcode
+        run: |
+          set -euo pipefail
+          XCODE=$(find /Applications -maxdepth 1 -name 'Xcode_*.app' | sort -V | tail -1)
+          if [ -n "$XCODE" ]; then sudo xcode-select -s "$XCODE/Contents/Developer"; fi
+          xcodebuild -version
+          xcodebuild -showsdks
+      - name: Integrate checkout and validate portable policies
+        run: |
+          set -euo pipefail
+          python3 scripts/integrate_capture_modes.py
+          command -v xcodegen >/dev/null || brew install xcodegen
+          xcodegen generate
+          bash scripts/test-capture-modes-policy.sh
+      - name: Build app and test targets
+        run: |
+          set -euo pipefail
+          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/FilmyCaptureBuild \
+            CODE_SIGNING_ALLOWED=NO build-for-testing 2>&1 | tee /tmp/capture-build.log
+      - name: Test capture policies and image processing
+        run: |
+          set -euo pipefail
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(v["udid"] for a in d["devices"].values() for v in a if "iPhone" in v["name"]))')
+          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera \
+            -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath /tmp/FilmyCaptureBuild \
+            -resultBundlePath /tmp/CaptureModes.xcresult CODE_SIGNING_ALLOWED=NO \
+            -only-testing:FilmyCameraTests/CaptureModesPolicyTests \
+            -only-testing:FilmyCameraTests/CaptureModesProcessingTests \
+            test-without-building 2>&1 | tee /tmp/capture-tests.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: capture-modes-validation-${{ github.run_id }}
+          path: |
+            /tmp/capture-build.log
+            /tmp/capture-tests.log
+            /tmp/CaptureModes.xcresult
+          retention-days: 14
