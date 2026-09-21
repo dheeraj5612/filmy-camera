@@ -1,0 +1,5 @@
+// Public identifiers only. Provider private keys belong in provider consoles.
+FILMY_MONTHLY_PRODUCT_ID = com.dheeraj.filmycamera.pro.monthly
+FILMY_TERMS_URL = https:/$()/www.apple.com/legal/internet-services/itunes/dev/stdeula/
+FILMY_PRIVACY_POLICY_URL = https:/$()/dheeraj5612.github.io/filmycam-legal/privacy-policy.html
+FILMY_GOOGLE_REVERSED_CLIENT_ID = com.googleusercontent.apps.configure-before-enabling-sign-in

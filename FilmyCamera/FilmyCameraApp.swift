@@ -73,7 +73,7 @@ struct FilmyCameraApp: App {
                     )
                 } else {
                     OnboardingView(
-                        recipes: cameraViewModel.recipes,
+                        recipes: cameraViewModel.recipes.filter { MembershipStore.shared.allowsRecipe($0.id) },
                         initialRecipeID: cameraViewModel.selectedRecipeID,
                         onSelectRecipe: { cameraViewModel.select(recipe: $0) }
                     ) {
@@ -83,6 +83,7 @@ struct FilmyCameraApp: App {
                 }
             }
             .defaultAppStorage(preferences)
+            .modifier(MonetizationRootModifier(camera: camera, viewModel: cameraViewModel))
         }
     }
 }

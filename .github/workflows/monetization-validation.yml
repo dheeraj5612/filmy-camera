@@ -1,0 +1,96 @@
+name: Monetization validation
+on:
+  push:
+    branches: [main, codex/monetization-auth-subscriptions]
+    paths:
+      - '.github/workflows/monetization-validation.yml'
+      - 'Config/**'
+      - 'FilmyCamera/**'
+      - 'FilmyCameraTests/Membership*'
+      - 'FilmyCameraUITests/Monetization*'
+      - 'FilmyCamera.xcodeproj/**'
+      - 'StoreKit/**'
+      - 'scripts/monetization/**'
+      - 'project.yml'
+  pull_request:
+    paths:
+      - 'FilmyCamera/Monetization/**'
+      - 'FilmyCameraTests/Membership*'
+      - 'FilmyCameraUITests/Monetization*'
+      - '.github/workflows/monetization-validation.yml'
+      - 'Config/Monetization*'
+      - 'StoreKit/**'
+      - 'scripts/monetization/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: monetization-validation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  validate:
+    # The feature branch's push lane already tests the same code as its PR.
+    if: github.event_name != 'pull_request' || github.head_ref != 'codex/monetization-auth-subscriptions'
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Select Xcode and verify generated project
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s /Applications/Xcode_16.4.app
+          gh release download 2.45.4 --repo yonaskolb/XcodeGen --pattern xcodegen.zip --output /tmp/xcodegen.zip
+          echo '090ec29491aad50aec10631bf6e62253fed733c50f3aab0f5ffc86bc170bdbef  /tmp/xcodegen.zip' | shasum -a 256 --check
+          mkdir -p .ci
+          unzip -q /tmp/xcodegen.zip -d .ci
+          echo '6aa2b4da95304b343bea12890c59f9655aa428c08b351d57d592cfab4e88a9f1  .ci/xcodegen/bin/xcodegen' | shasum -a 256 --check
+          .ci/xcodegen/bin/xcodegen generate
+          git diff --exit-code -- FilmyCamera.xcodeproj
+      - name: Cache pinned SDK packages
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            .spm-cache
+            ~/Library/Caches/org.swift.swiftpm
+          key: ${{ runner.os }}-spm-xcode16.4-${{ hashFiles('FilmyCamera.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+          restore-keys: ${{ runner.os }}-spm-xcode16.4-
+      - name: Validate source policies and test inventory
+        run: |
+          python3 scripts/monetization/validate.py
+          bash scripts/monetization/test-policy.sh
+          python3 -m unittest discover -s scripts/testing -p 'test_*.py' -q
+          bash scripts/ci/check-tracked-credentials.sh
+      - name: Resolve pinned SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -resolvePackageDependencies -project FilmyCamera.xcodeproj -scheme FilmyCamera -clonedSourcePackagesDirPath .spm-cache -onlyUsePackageVersionsFromResolvedFile 2>&1 | tee /tmp/monetization-resolve.log
+          git diff --exit-code -- FilmyCamera.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+      - name: Build and test StoreKit, quota and free-tier UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.5' -derivedDataPath /tmp/FilmyMonetization -clonedSourcePackagesDirPath .spm-cache -resultBundlePath /tmp/FilmyMonetization.xcresult -parallel-testing-enabled NO -jobs 3 -only-testing:FilmyCameraTests/MembershipPolicyTests -only-testing:FilmyCameraTests/MembershipStoreTests -only-testing:FilmyCameraTests/MembershipStoreKitTests -only-testing:FilmyCameraUITests/MonetizationUITests CODE_SIGNING_ALLOWED=NO test 2>&1 | tee /tmp/monetization-tests.log
+      - name: Compile Release without debug entitlement fixtures
+        if: success() || failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera -configuration Release -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/FilmyMonetization -clonedSourcePackagesDirPath .spm-cache -jobs 3 CODE_SIGNING_ALLOWED=NO build 2>&1 | tee /tmp/monetization-release.log
+      - name: Archive exact source for review
+        if: always()
+        run: git archive --format=zip HEAD -o /tmp/filmy-monetization-source.zip
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: monetization-validation
+          path: |
+            /tmp/monetization-*.log
+            /tmp/filmy-monetization-source.zip
+            /tmp/FilmyMonetization.xcresult
+          retention-days: 7

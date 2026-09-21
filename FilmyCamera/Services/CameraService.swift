@@ -384,6 +384,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
     private let frameHandlersLock = NSLock()
 
+    private var premiumControlsEnabled = MonetizationConfiguration.isAutomatedTest
+
     private let sessionQueue = DispatchQueue(
         label: "com.dheeraj.filmycamera.camera-session",
         qos: .userInitiated
@@ -1062,8 +1064,18 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// Locks sensor ISO and shutter duration as one exposure mode. Both values
     /// are sanitized against the active format and the applied hardware
     /// readback is published from AVFoundation's completion callback.
+    /// Entitlement changes and manual operations are serialized with capture.
+    public func setPremiumControlsEnabled(_ enabled: Bool) {
+        sessionQueue.async { [weak self] in
+            guard let self, self.premiumControlsEnabled != enabled else { return }
+            self.premiumControlsEnabled = enabled
+            if !enabled { self.resetManualControlsToAutoOnQueue() }
+        }
+    }
+
     public func setManualExposure(iso: Float, durationSeconds: Double) {
         sessionQueue.async { [weak self] in
+            guard self?.premiumControlsEnabled == true else { return }
             self?.setManualExposureOnQueue(iso: iso, durationSeconds: durationSeconds)
         }
     }
@@ -1078,6 +1090,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// current metered ISO and shutter duration on the session queue.
     public func lockCurrentExposure() {
         sessionQueue.async { [weak self] in
+            guard self?.premiumControlsEnabled == true else { return }
             guard let self, let device = self.activeDevice() else { return }
             self.setManualExposureOnQueue(
                 iso: device.iso,
@@ -1088,6 +1101,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
     public func setManualWhiteBalance(kelvin: Float, tint: Float) {
         sessionQueue.async { [weak self] in
+            guard self?.premiumControlsEnabled == true else { return }
             self?.setManualWhiteBalanceOnQueue(kelvin: kelvin, tint: tint)
         }
     }
@@ -1101,6 +1115,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// Enters manual white balance at the sensor's current neutral point.
     public func lockCurrentWhiteBalance() {
         sessionQueue.async { [weak self] in
+            guard self?.premiumControlsEnabled == true else { return }
             guard let self, let device = self.activeDevice() else { return }
             let gains = device.deviceWhiteBalanceGains
             guard let current = Self.whiteBalanceTemperatureAndTint(for: gains, device: device) else {
@@ -1117,6 +1132,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
     public func setManualFocus(lensPosition: Float) {
         sessionQueue.async { [weak self] in
+            guard self?.premiumControlsEnabled == true else { return }
             self?.setManualFocusOnQueue(lensPosition: lensPosition)
         }
     }
@@ -1130,6 +1146,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// Enters manual focus at the current physical lens position.
     public func lockCurrentFocus() {
         sessionQueue.async { [weak self] in
+            guard self?.premiumControlsEnabled == true else { return }
             guard let self, let device = self.activeDevice() else { return }
             self.setManualFocusOnQueue(lensPosition: device.lensPosition)
         }
@@ -1147,6 +1164,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     /// choosing a constituent there intentionally keeps seamless zoom active.
     public func setManualControlLens(id: String) {
         sessionQueue.async { [weak self] in
+            guard self?.premiumControlsEnabled == true else { return }
             self?.setManualControlLensOnQueue(id: id)
         }
     }
