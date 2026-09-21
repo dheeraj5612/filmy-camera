@@ -19,6 +19,17 @@ final class MembershipStoreKitTests: XCTestCase {
         MembershipStore(persistence: MemoryPhotoQuotaPersistence(), useStoreKitForTesting: true)
     }
 
+    private func waitForPremium(_ expected: Bool, in store: MembershipStore) async throws {
+        // StoreKit Test publishes externally initiated purchases, refunds and
+        // renewals asynchronously. Keep reconciling Apple's signed state until
+        // the requested transition arrives, with a bounded CI-safe timeout.
+        for _ in 0..<100 {
+            await store.refresh()
+            if store.isPremium == expected { return }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+    }
+
     func testLocalizedMonthlyProductHasExactlyOneMonthFreeTrial() async throws {
         let session = try session()
         defer { session.clearTransactions() }
@@ -55,11 +66,7 @@ final class MembershipStoreKitTests: XCTestCase {
         _ = try await session.buyProduct(identifier: MonetizationConfiguration.monthlyProductID)
         let store = store()
         await store.restore()
-        for _ in 0..<20 {
-            if store.isPremium { break }
-            await store.refresh()
-            try await Task.sleep(for: .milliseconds(100))
-        }
+        try await waitForPremium(true, in: store)
         XCTAssertTrue(store.isPremium, store.purchaseMessage ?? "Restore did not find purchase")
     }
 
@@ -71,7 +78,7 @@ final class MembershipStoreKitTests: XCTestCase {
         await store.refresh()
         XCTAssertTrue(store.isPremium)
         try session.refundTransaction(identifier: XCTUnwrap(UInt(exactly: transaction.id)))
-        await store.refresh()
+        try await waitForPremium(false, in: store)
         XCTAssertFalse(store.isPremium)
         XCTAssertFalse(store.allowsRecipe("classic-chrome"))
     }
