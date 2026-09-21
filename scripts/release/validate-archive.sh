@@ -3,7 +3,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root_dir="$(cd "${script_dir}/../.." && pwd)"
-# shellcheck source=app-config.sh
+# shellcheck source=scripts/release/app-config.sh
 source "${root_dir}/scripts/release/app-config.sh"
 archive_path="${1:-${FILMY_ARCHIVE_PATH:-${release_app_archive_default}}}"
 if [[ -z "${archive_path}" ]]; then

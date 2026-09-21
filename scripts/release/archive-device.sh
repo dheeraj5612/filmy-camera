@@ -3,7 +3,7 @@ set -euo pipefail
 
 script_dir="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 root_dir="$(cd -P "${script_dir}/../.." && pwd -P)"
-# shellcheck source=app-config.sh
+# shellcheck source=scripts/release/app-config.sh
 source "${root_dir}/scripts/release/app-config.sh"
 archive_path="${FILMY_ARCHIVE_PATH:-${release_app_archive_default}}"
 derived_data_path="${FILMY_DERIVED_DATA_PATH:-${release_app_derived_data_default}}"

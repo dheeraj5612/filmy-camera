@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Shared release configuration for the supported app targets.
 # Callers must define root_dir before sourcing this file.
+# shellcheck disable=SC2034,SC2154
 
 release_app_variant="${FILMY_APP_VARIANT:-filmy}"
 case "${release_app_variant}" in
