@@ -9,6 +9,7 @@ on:
       - 'FilmyCameraTests/**'
       - 'FilmyCameraUITests/**'
       - 'scripts/testing/**'
+      - 'scripts/recipes/**'
       - '.github/workflows/catalog-acceptance.yml'
   workflow_dispatch:
 
@@ -34,6 +35,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/catalog-evidence"
           git rev-parse HEAD > "$RUNNER_TEMP/catalog-evidence/source-sha.txt"
           git archive --format=zip HEAD FilmyCamera FilmyCameraTests FilmyCameraUITests FilmyCamera.xcodeproj scripts project.yml .github/workflows README.md docs/testing.md > "$RUNNER_TEMP/catalog-evidence/source.zip"
+          python3 -m unittest discover -s scripts/recipes -p 'test_*.py' -v
           python3 -m unittest discover -s scripts/testing -p 'test_*.py' -v 2>&1 | tee "$RUNNER_TEMP/catalog-evidence/portable-tests.log"
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         if: always()
@@ -45,7 +47,7 @@ jobs:
 
   render-every-recipe:
     runs-on: macos-15
-    timeout-minutes: 25
+    timeout-minutes: 35
     env:
       SIMULATOR_DEVICE_NAME: iPhone 16 Pro
       SIMULATOR_RUNTIME: com.apple.CoreSimulator.SimRuntime.iOS-26-2
@@ -88,6 +90,9 @@ jobs:
             -only-testing:FilmyCameraTests/CatalogRenderAcceptanceTests \
             -only-testing:FilmyCameraTests/CaptureWorkflowPolicyTests \
             -only-testing:FilmyCameraTests/ExpandedCreativeCatalogTests \
+            -only-testing:FilmyCameraTests/RecipeLibraryTests \
+            -only-testing:FilmyCameraTests/RecipeLibraryPersistenceTests \
+            -only-testing:FilmyCameraTests/RecipeControlEffectTests \
             test > "$RUNNER_TEMP/render-evidence/xcodebuild.log" 2>&1
       - name: Export per-recipe contact sheets and require complete execution
         if: always()
@@ -97,7 +102,7 @@ jobs:
           if [[ -d "$RUNNER_TEMP/FilmyCatalog.xcresult" ]]; then
             xcrun xcresulttool export attachments --path "$RUNNER_TEMP/FilmyCatalog.xcresult" --output-path "$RUNNER_TEMP/render-evidence/contact-sheets"
             xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/FilmyCatalog.xcresult" > "$RUNNER_TEMP/render-evidence/summary.json"
-            python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert s["passedTests"] == 149 and s["failedTests"] == 0 and s["skippedTests"] == 0, s' "$RUNNER_TEMP/render-evidence/summary.json"
+            python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert s["passedTests"] == 167 and s["failedTests"] == 0 and s["skippedTests"] == 0, s' "$RUNNER_TEMP/render-evidence/summary.json"
           else
             echo "Catalog result bundle is required" >&2
             exit 1
