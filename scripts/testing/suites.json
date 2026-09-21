@@ -43,6 +43,7 @@
     "FilmyCameraUITests/GalleryPagingUITests": "device",
     "FilmyCameraUITests/ComprehensiveSettingsTests": "e2e",
     "FilmyCameraTests/CameraPreviewGesturePolicyTests": "unit",
+    "FilmyCameraTests/FilmyControlInteractionTests": "unit",
     "FilmyCameraUITests/AdditionalInteractionTests": "device",
     "FilmyCameraTests/PhotoLibraryLargeRollTests": "fixtures",
     "FilmyCameraUITests/NormalRollManagementTests": "photos-e2e",

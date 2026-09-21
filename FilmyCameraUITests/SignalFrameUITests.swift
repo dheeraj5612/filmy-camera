@@ -55,6 +55,63 @@ final class SignalFrameUITests: XCTestCase {
             assertReachable(app.buttons[id], in: app)
         }
         snapshot("signal-frame-drawer-largest-text")
+        app.buttons["recipe-drawer-close"].tap()
+
+        // Secondary destinations must honor the full text size, rather than
+        // inheriting the camera shell's intentionally bounded chrome scale.
+        app.buttons["settings-tab"].tap()
+        assertReachable(app.buttons["settings-back-to-camera"], in: app)
+        let clearCache = app.buttons["clear-local-cache"]
+        revealInPage(clearCache, in: app)
+        XCTAssertGreaterThan(clearCache.frame.width, 180)
+        XCTAssertFalse(app.staticTexts["250 MB"].exists, "Do not present the cache budget as measured usage")
+        snapshot("signal-frame-settings-storage-largest-text")
+        app.buttons["settings-back-to-camera"].tap()
+        XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 10))
+
+        app.terminate()
+        app.launchArguments += ["-ui-testing-onboarding"]
+        app.launch()
+        assertReachable(app.buttons["onboarding-continue"], in: app)
+        let recipe = app.buttons["onboarding-recipe-classic-chrome"]
+        revealInPage(recipe, in: app)
+        assertReachable(recipe, in: app)
+        XCTAssertGreaterThan(recipe.frame.width, 180, "Accessibility choices should be readable rows, not narrow tiles")
+        recipe.tap()
+        XCTAssertEqual(recipe.value as? String, "Selected")
+        snapshot("signal-frame-onboarding-choices-largest-text")
+        let compare = app.buttons["onboarding-compare"]
+        revealInPage(compare, in: app)
+        assertReachable(compare, in: app)
+        compare.tap()
+        XCTAssertEqual(compare.value as? String, "Original")
+        compare.tap()
+        XCTAssertEqual(compare.value as? String, "Look")
+        snapshot("signal-frame-onboarding-compare-largest-text")
+        app.buttons["onboarding-continue"].tap()
+        XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["recipe-menu"].label.contains("Classic Chrome"))
+    }
+
+    private func revealInPage(_ control: XCUIElement, in app: XCUIApplication) {
+        let scroll = app.scrollViews.firstMatch
+        XCTAssertTrue(scroll.waitForExistence(timeout: 5))
+        for _ in 0..<24 {
+            let viewport = scroll.frame.intersection(app.frame).insetBy(dx: 0, dy: 8)
+            if control.exists && viewport.contains(control.frame) { return }
+            let downward = control.exists && control.frame.midY < viewport.midY
+            let overflow = control.exists
+                ? (downward ? viewport.minY - control.frame.minY : control.frame.maxY - viewport.maxY)
+                : viewport.height * 0.3
+            let distance = min(max(overflow + 24, 60), viewport.height * 0.35)
+            let start = CGPoint(x: viewport.minX + 8, y: downward ? viewport.minY + 30 : viewport.maxY - 30)
+            let end = CGPoint(x: start.x, y: start.y + (downward ? distance : -distance))
+            let origin = app.coordinate(withNormalizedOffset: .zero)
+            origin.withOffset(CGVector(dx: start.x - app.frame.minX, dy: start.y - app.frame.minY))
+                .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: end.x - app.frame.minX, dy: end.y - app.frame.minY)))
+        }
+        snapshot("signal-frame-unreachable-page-control")
+        XCTFail("Could not fully reveal \(control.identifier)")
     }
 
     private func makeApp() -> XCUIApplication {
