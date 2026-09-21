@@ -1,4 +1,4 @@
-import CoreImage
+@preconcurrency import CoreImage
 import SwiftUI
 import UIKit
 

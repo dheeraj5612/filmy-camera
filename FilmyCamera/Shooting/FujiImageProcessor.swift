@@ -1,4 +1,4 @@
-import CoreImage
+@preconcurrency import CoreImage
 import CoreGraphics
 import Foundation
 import ImageIO

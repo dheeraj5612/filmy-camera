@@ -233,7 +233,7 @@ struct CameraScreen: View {
         _isShowingTools = State(initialValue: !(isUITesting && isViewfinderPreview))
     }
 
-    var body: some View {
+    private var cameraLayers: some View {
         ZStack {
             GeometryReader { proxy in
                 let isLandscape = proxy.size.width > proxy.size.height
@@ -339,6 +339,10 @@ struct CameraScreen: View {
             }
 #endif
         }
+    }
+
+    var body: some View {
+        cameraLayers
 #if DEBUG
         .modifier(CameraHardwareShutterModifier(enabled: canTriggerShutter, action: { hardwareShutterCaptureRequest &+= 1 }) { phase in
             guard hardwareShutterDiagnosticsEnabled else { return }

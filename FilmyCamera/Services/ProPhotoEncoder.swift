@@ -1,4 +1,4 @@
-import CoreImage
+@preconcurrency import CoreImage
 import ImageIO
 import UniformTypeIdentifiers
 
@@ -103,7 +103,10 @@ enum ProPhotoEncoder {
             if let gainMapKernel,
                let gainMap = gainMapKernel.apply(extent: primary.extent, arguments: [renderedSDR, renderedHDR, headroom]) {
                 encoding[.hdrGainMapImage] = gainMap
-                encoding[.hdrGainMapAsRGB] = true
+                // The typed option was added to the Swift overlay after the
+                // underlying iOS 18 API. Its raw key keeps Xcode 26 builds
+                // source-compatible while producing the same representation.
+                encoding[CIImageRepresentationOption(rawValue: "kCIImageRepresentationHDRGainMapAsRGB")] = true
             } else {
                 encoding[.hdrImage] = hdr
             }
