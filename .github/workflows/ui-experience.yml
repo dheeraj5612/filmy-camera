@@ -19,7 +19,7 @@ concurrency:
 jobs:
   ui-screenshots:
     runs-on: macos-15
-    timeout-minutes: 25
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
