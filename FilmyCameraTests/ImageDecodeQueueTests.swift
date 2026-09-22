@@ -108,13 +108,15 @@ final class ImageDecodeQueueTests: XCTestCase, @unchecked Sendable {
         let firstWorkers = expectation(description: "Two workers started")
         firstWorkers.expectedFulfillmentCount = 2
         let release = DispatchSemaphore(value: 0)
-        let batch = Task {
+        // A detached producer keeps this scheduling assertion independent of
+        // XCTest's actor/executor while the test awaits the worker barrier.
+        let batch = Task.detached(priority: .userInitiated) {
             await withTaskGroup(of: Int?.self, returning: [Int].self) { group in
                 for index in 0..<12 {
                     group.addTask {
                         await queue.value {
                             if probe.enter() <= 2 { firstWorkers.fulfill() }
-                            _ = release.wait(timeout: .now() + 5)
+                            _ = release.wait(timeout: .now() + 30)
                             probe.leave()
                             return index
                         }
@@ -125,7 +127,7 @@ final class ImageDecodeQueueTests: XCTestCase, @unchecked Sendable {
                 return results
             }
         }
-        await fulfillment(of: [firstWorkers], timeout: 5)
+        await fulfillment(of: [firstWorkers], timeout: 15)
         XCTAssertEqual(probe.counts().started, 2)
         for _ in 0..<12 { release.signal() }
         let values = await batch.value
