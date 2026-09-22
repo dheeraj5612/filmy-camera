@@ -718,7 +718,6 @@
 				TargetAttributes = {
 					3963BB26D55C8B026C4ECC93 = {
 						DevelopmentTeam = 6ALSCF5GBV;
-						ProvisioningStyle = Automatic;
 					};
 					64015BF6987C10DDD121B37C = {
 						DevelopmentTeam = 6ALSCF5GBV;
@@ -990,7 +989,11 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = FilmyCamera/FilmyCamera.entitlements;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_IDENTITY = "$(FILMY_APP_CODE_SIGN_IDENTITY)";
+				CODE_SIGN_STYLE = "$(FILMY_APP_CODE_SIGN_STYLE)";
+				FILMY_APP_CODE_SIGN_IDENTITY = "Apple Development";
+				FILMY_APP_CODE_SIGN_STYLE = Automatic;
+				FILMY_APP_PROVISIONING_PROFILE_SPECIFIER = "";
 				INFOPLIST_FILE = FilmyCamera/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1000,6 +1003,7 @@
 					"$(inherited)",
 					"-ObjC",
 				);
+				PROVISIONING_PROFILE_SPECIFIER = "$(FILMY_APP_PROVISIONING_PROFILE_SPECIFIER)";
 				SDKROOT = iphoneos;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OBJC_BRIDGING_HEADER = "FilmyCamera/FilmyCamera-Bridging-Header.h";

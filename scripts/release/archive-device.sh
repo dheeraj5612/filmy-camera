@@ -191,12 +191,13 @@ if [[ -n "${code_sign_style}${code_sign_identity}${provisioning_profile_specifie
     echo "FILMY_CODE_SIGN_STYLE, FILMY_CODE_SIGN_IDENTITY, and FILMY_PROVISIONING_PROFILE_SPECIFIER must be provided together" >&2
     exit 64
   }
+  # Only the application's Release settings consume these variables. Global
+  # provisioning overrides also reach Swift Package targets, which cannot use
+  # an app provisioning profile.
   signing_args+=(
-    "CODE_SIGN_STYLE=${code_sign_style}"
-    "CODE_SIGN_IDENTITY=${code_sign_identity}"
-    "PROVISIONING_PROFILE_SPECIFIER=${provisioning_profile_specifier}"
-    "CODE_SIGNING_REQUIRED=YES"
-    "CODE_SIGNING_ALLOWED=YES"
+    "FILMY_APP_CODE_SIGN_STYLE=${code_sign_style}"
+    "FILMY_APP_CODE_SIGN_IDENTITY=${code_sign_identity}"
+    "FILMY_APP_PROVISIONING_PROFILE_SPECIFIER=${provisioning_profile_specifier}"
   )
 fi
 if [[ "${allow_provisioning_updates}" == true ]]; then

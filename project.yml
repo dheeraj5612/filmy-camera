@@ -108,6 +108,14 @@ targets:
         SWIFT_EMIT_LOC_STRINGS: YES
         OTHER_LDFLAGS: ["$(inherited)", "-ObjC"]
         SWIFT_OBJC_BRIDGING_HEADER: FilmyCamera/FilmyCamera-Bridging-Header.h
+      configs:
+        Release:
+          FILMY_APP_CODE_SIGN_STYLE: Automatic
+          FILMY_APP_CODE_SIGN_IDENTITY: Apple Development
+          FILMY_APP_PROVISIONING_PROFILE_SPECIFIER: ""
+          CODE_SIGN_STYLE: "$(FILMY_APP_CODE_SIGN_STYLE)"
+          CODE_SIGN_IDENTITY: "$(FILMY_APP_CODE_SIGN_IDENTITY)"
+          PROVISIONING_PROFILE_SPECIFIER: "$(FILMY_APP_PROVISIONING_PROFILE_SPECIFIER)"
     info:
       path: FilmyCamera/Info.plist
       properties:
