@@ -1,8 +1,8 @@
 # App Store metadata — en-US
 
-Status: update candidate, not yet submitted
+Status: final
 
-Prepared for App Store Connect 1.0.2. Version 1.0.1 is publicly available. This candidate requires matching build, screenshots, and release acceptance before submission; the text below has not yet been saved in App Store Connect.
+Final listing text for App Store Connect 1.0.2, saved in the version draft. Version 1.0.1 remains publicly available. Build upload, matching screenshots, release acceptance, and submission are still pending; final metadata status does not mean the update has been submitted.
 
 ## Listing fields
 
