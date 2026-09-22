@@ -420,10 +420,13 @@ final class NormalPhotoFlowTests: XCTestCase {
         app?.terminate()
         XCUIDevice.shared.orientation = .portrait
         app = XCUIApplication()
-        // Deliberately omit -ui-testing so PhotosPicker and the real save path
-        // are exercised against the disposable seeded library.
+        // Deliberately omit the exact -ui-testing flag so PhotosPicker and the
+        // real save path are exercised against the disposable seeded library.
+        // This narrower prefix keeps premium entitlement deterministic without
+        // replacing PhotoKit or the camera services used by this lane.
+        app.launchArguments = ["-ui-testing-photos-e2e"]
         if let contentSizeCategory {
-            app.launchArguments = ["-UIPreferredContentSizeCategoryName", contentSizeCategory]
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", contentSizeCategory]
         }
         app.launch()
 
@@ -797,11 +800,12 @@ final class NormalPhotoFlowTests: XCTestCase {
     }
 
     private func rollFrameCount() -> Int? {
-        for label in app.staticTexts.allElementsBoundByIndex.map(\.label)
-            where label.hasSuffix(" frames") {
-            if let count = Int(label.dropLast(" frames".count)) {
-                return count
-            }
+        let countLabel = app.staticTexts.matching(
+            NSPredicate(format: "label ENDSWITH %@", " frames")
+        ).firstMatch
+        if countLabel.exists,
+           let count = Int(countLabel.label.dropLast(" frames".count)) {
+            return count
         }
         if app.staticTexts["Your frames will live here"].exists
             || app.staticTexts["Your selected roll is empty"].exists {

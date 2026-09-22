@@ -133,7 +133,9 @@ final class NormalRollManagementTests: XCTestCase {
         app?.terminate()
         XCUIDevice.shared.orientation = .portrait
         app = XCUIApplication()
-        // No -ui-testing: exercise actual PhotosPicker, PhotoKit and cache.
+        // Avoid the exact -ui-testing flag so PhotosPicker, PhotoKit and cache
+        // remain real while premium entitlement is deterministic for this lane.
+        app.launchArguments = ["-ui-testing-photos-e2e"]
         app.launch()
         let skip = app.buttons["Skip"]
         if skip.waitForExistence(timeout: 2) { skip.tap() }
@@ -299,8 +301,12 @@ final class NormalRollManagementTests: XCTestCase {
     }
 
     private func rollCount() -> Int? {
-        for label in app.staticTexts.allElementsBoundByIndex.map(\.label) where label.hasSuffix(" frames") {
-            if let count = Int(label.dropLast(" frames".count)) { return count }
+        let countLabel = app.staticTexts.matching(
+            NSPredicate(format: "label ENDSWITH %@", " frames")
+        ).firstMatch
+        if countLabel.exists,
+           let count = Int(countLabel.label.dropLast(" frames".count)) {
+            return count
         }
         if app.staticTexts["Your frames will live here"].exists || app.staticTexts["Your selected roll is empty"].exists {
             return 0
