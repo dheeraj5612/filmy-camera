@@ -153,10 +153,21 @@ final class StoreScreenshotTests: XCTestCase {
         // gesture area. PhotosPicker dismissal must settle before review is
         // accepted; existence alone can capture a full-screen transition.
         let topClearance: CGFloat = app.frame.width < 600 ? 44 : 20
-        XCTAssertTrue(waitUntil(timeout: 10) {
+        let reviewLayoutSettled = waitUntil(timeout: 10) {
             heading.frame.minY >= app.frame.minY + topClearance
                 && save.frame.maxY <= app.frame.maxY - 20
-        }, "Review controls must clear the status bar and bottom gesture area")
+                && photo.frame.width > app.frame.width * 0.60
+                && photo.frame.height > app.frame.height * 0.40
+        }
+        if !reviewLayoutSettled {
+            attachScreenshot(named: "review-layout-diagnostic")
+            let geometry = XCTAttachment(string: "App: \(app.frame); photo: \(photo.frame); heading: \(heading.frame); save: \(save.frame)")
+            geometry.name = "review-layout-frames"
+            geometry.lifetime = .keepAlways
+            add(geometry)
+        }
+        XCTAssertTrue(reviewLayoutSettled,
+                      "Review must settle with a substantial photo and controls clear of system areas")
         XCTAssertGreaterThanOrEqual(review.frame.width, app.frame.width * 0.95)
         // The portrait photo shares the screen with Look, Compare and Finish.
         // Keep it substantial and entirely visible without cropping its source.
