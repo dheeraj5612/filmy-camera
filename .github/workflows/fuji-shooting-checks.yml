@@ -4,87 +4,87 @@ on:
   push:
     branches: [feature/fuji-shooting-system]
     paths:
-      - 'scripts/ci/fuji-followup.patch'
+      - 'FilmyCamera/**'
+      - 'FilmyCameraTests/**'
+      - 'FilmyCamera.xcodeproj/**'
+      - 'project.yml'
+      - 'scripts/testing/**'
       - '.github/workflows/fuji-shooting-checks.yml'
+  pull_request:
+    paths:
+      - 'FilmyCamera/**'
+      - 'FilmyCameraTests/**'
+      - 'FilmyCamera.xcodeproj/**'
+      - 'project.yml'
+      - 'scripts/testing/**'
+      - '.github/workflows/fuji-shooting-checks.yml'
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: fuji-shooting-${{ github.ref }}
+  group: fuji-shooting-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  source-followup:
+  test-routing:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
-          ref: feature/fuji-shooting-system
-      - name: Apply pending source follow-up
-        run: |
-          set -euo pipefail
-          if [ -f scripts/ci/fuji-followup.patch ]; then
-            git apply --check scripts/ci/fuji-followup.patch
-            git apply scripts/ci/fuji-followup.patch
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add FilmyCamera FilmyCameraTests
-            git rm scripts/ci/fuji-followup.patch
-            git commit -m 'fix: cancel RAW development on lifecycle interruptions'
-            git push origin HEAD:refs/heads/feature/fuji-shooting-system
-          fi
-      - name: Validate test routing
+          persist-credentials: false
+      - name: Validate suite routing and result parsing
         run: python3 -m unittest discover -s scripts/testing -p 'test_*.py' -v
 
   native-validation:
-    needs: source-followup
-    runs-on: macos-15-intel
+    runs-on: macos-latest
     timeout-minutes: 30
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
-          ref: feature/fuji-shooting-system
-      - name: Install verified XcodeGen
-        env:
-          GH_TOKEN: ${{ github.token }}
+          persist-credentials: false
+      - name: Select an installed iPhone simulator
         run: |
           set -euo pipefail
-          gh release download 2.45.4 --repo yonaskolb/XcodeGen --pattern xcodegen.zip --output "$RUNNER_TEMP/xcodegen.zip"
-          echo "090ec29491aad50aec10631bf6e62253fed733c50f3aab0f5ffc86bc170bdbef  $RUNNER_TEMP/xcodegen.zip" | shasum -a 256 --check
-          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP/fuji-tools"
-          echo "6aa2b4da95304b343bea12890c59f9655aa428c08b351d57d592cfab4e88a9f1  $RUNNER_TEMP/fuji-tools/xcodegen/bin/xcodegen" | shasum -a 256 --check
-          echo "$RUNNER_TEMP/fuji-tools/xcodegen/bin" >> "$GITHUB_PATH"
-      - name: Regenerate and commit Xcode project
-        run: |
-          set -euo pipefail
-          xcodegen generate --spec project.yml
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add FilmyCamera.xcodeproj
-          if ! git diff --cached --quiet; then
-            git commit -m 'build: regenerate Xcode project for Fuji shooting system'
-            git push origin HEAD:refs/heads/feature/fuji-shooting-system
-          fi
-      - name: Build and run shooting regression tests
+          xcodebuild -version
+          xcrun simctl list devices available --json > "$RUNNER_TEMP/fuji-simulators.json"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          data = json.loads((Path(os.environ['RUNNER_TEMP']) / 'fuji-simulators.json').read_text())
+          phones = [device for runtime, devices in data['devices'].items() if '.iOS-' in runtime
+                    for device in devices if device.get('isAvailable') and device['name'].startswith('iPhone')]
+          if not phones:
+              raise SystemExit('No available iPhone simulator on this runner')
+          preferred = next((device for device in phones if device['name'] == 'iPhone 16 Pro'), phones[0])
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write(f"FUJI_SIMULATOR_ID={preferred['udid']}\n")
+          print(f"Testing on {preferred['name']} ({preferred['udid']})")
+          PY
+      - name: Build and run Fuji shooting regression tests
         run: |
           set -o pipefail
-          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.5' -parallel-testing-enabled NO -maximum-parallel-testing-workers 1 -only-testing:FilmyCameraTests/FujiShootingTests -resultBundlePath "$RUNNER_TEMP/FujiTests.xcresult" test CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/fuji-build.log"
+          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera \
+            -destination "platform=iOS Simulator,id=$FUJI_SIMULATOR_ID" \
+            -parallel-testing-enabled NO -maximum-parallel-testing-workers 1 \
+            -only-testing:FilmyCameraTests/FujiShootingTests \
+            -resultBundlePath "$RUNNER_TEMP/FujiTests.xcresult" \
+            test CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$RUNNER_TEMP/fuji-build.log"
       - name: Summarize diagnostics
         if: always()
         run: |
-          grep -E 'error:|warning:|Test Case|Executed |TEST SUCCEEDED|TEST FAILED' "$RUNNER_TEMP/fuji-build.log" > "$RUNNER_TEMP/fuji-diagnostics.txt" || true
+          grep -E 'error:|warning:|Test Case|Executed |TEST SUCCEEDED|TEST FAILED' \
+            "$RUNNER_TEMP/fuji-build.log" > "$RUNNER_TEMP/fuji-diagnostics.txt" || true
           cat "$RUNNER_TEMP/fuji-diagnostics.txt"
-          git archive --format=tar.gz HEAD > "$RUNNER_TEMP/filmy-tested-source.tar.gz"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         if: always()
         with:
-          name: fuji-native-validation
+          name: fuji-native-validation-${{ github.run_id }}
           path: |
             ${{ runner.temp }}/fuji-build.log
             ${{ runner.temp }}/fuji-diagnostics.txt
             ${{ runner.temp }}/FujiTests.xcresult
-            ${{ runner.temp }}/filmy-tested-source.tar.gz
           retention-days: 7
