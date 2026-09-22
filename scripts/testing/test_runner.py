@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from unittest.mock import patch
 
 import run
@@ -115,6 +116,34 @@ class SuiteRoutingTests(unittest.TestCase):
             },
         )
 
+    def test_store_media_defaults_to_release_but_other_lanes_keep_debug(self):
+        self.assertEqual(run.configuration_for_lane("store-media"), "Release")
+        self.assertEqual(run.configuration_for_lane("core"), "Debug")
+        self.assertEqual(run.configuration_for_lane("store-media", "Debug"), "Debug")
+        with self.assertRaisesRegex(ValueError, "Unsupported build configuration"):
+            run.configuration_for_lane("store-media", "Profile")
+
+    def test_store_media_uses_ui_only_release_scheme(self):
+        self.assertEqual(run.scheme_for_lane("store-media"), "FilmyCameraStoreMedia")
+        self.assertEqual(run.scheme_for_lane("core"), "FilmyCamera")
+        with self.assertRaisesRegex(ValueError, "Unsupported Xcode scheme"):
+            run.scheme_for_lane("store-media", "FilmyCameraTests")
+
+        scheme_path = run.ROOT / "FilmyCamera.xcodeproj/xcshareddata/xcschemes/FilmyCameraStoreMedia.xcscheme"
+        scheme = ET.parse(scheme_path).getroot()
+        build_references = {
+            reference.attrib["BlueprintName"]
+            for reference in scheme.findall("./BuildAction/BuildActionEntries/BuildActionEntry/BuildableReference")
+        }
+        test_action = scheme.find("./TestAction")
+        test_references = {
+            reference.attrib["BlueprintName"]
+            for reference in test_action.findall("./Testables/TestableReference/BuildableReference")
+        }
+        self.assertEqual(build_references, {"FilmyCamera"})
+        self.assertEqual(test_action.attrib["buildConfiguration"], "Release")
+        self.assertEqual(test_references, {"FilmyCameraUITests"})
+
     def test_device_writes_fail_before_any_process_without_opt_in(self):
         with patch.object(run.subprocess, "Popen") as process:
             with self.assertRaisesRegex(ValueError, "allow-photos-writes"):
@@ -137,6 +166,57 @@ class SuiteRoutingTests(unittest.TestCase):
             self.assertEqual(len(json.loads(output.getvalue())["phases"]), 3)
             process.assert_not_called()
             simctl.assert_not_called()
+
+    def test_store_media_main_uses_release_build_and_stamp_by_default(self):
+        test_id = "FilmyCameraUITests/StoreScreenshotTests/testCaptureCurrentStoreScreens"
+
+        def command_output(command, **_):
+            if command[:2] == ["xcodebuild", "-version"]:
+                return "Xcode test"
+            if command[:3] == ["git", "rev-parse", "HEAD"]:
+                return "head\n"
+            if command[:3] == ["git", "status", "--porcelain"]:
+                return ""
+            self.fail(f"Unexpected command: {command}")
+
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(run, "inventory", return_value={test_id: "store-media"}), \
+                patch.object(run, "build_input_digest", return_value="digest"), \
+                patch.object(run, "validate_build_stamp") as validate_stamp, \
+                patch.object(run, "create_photos_simulator", return_value="owned") as create, \
+                patch.object(run, "destroy_simulator") as destroy, \
+                patch.object(run, "run_logged", return_value=0) as execute, \
+                patch.object(run, "summarize_result", return_value={
+                    "status": "passed", "passed": 1, "failed": 0, "skipped": 0,
+                }), \
+                patch.object(run.subprocess, "check_output", side_effect=command_output), \
+                contextlib.redirect_stdout(io.StringIO()):
+            derived_data = Path(directory) / "derived"
+            output = Path(directory) / "results"
+            code = run.main([
+                "store-media",
+                "--destination", "platform=iOS Simulator,id=reference",
+                "--derived-data", str(derived_data),
+                "--output-dir", str(output),
+                "--skip-build",
+            ])
+            summary = json.loads((output / "filmycamera-store-media-summary.json").read_text())
+
+        self.assertEqual(code, 0)
+        command = execute.call_args.args[0]
+        scheme_index = command.index("-scheme")
+        self.assertEqual(command[scheme_index + 1], "FilmyCameraStoreMedia")
+        configuration_index = command.index("-configuration")
+        self.assertEqual(command[configuration_index + 1], "Release")
+        self.assertIn("ENABLE_TESTABILITY=YES", command)
+        validate_stamp.assert_called_once_with(
+            derived_data.resolve() / ".filmy-test-build-simulator-FilmyCameraStoreMedia-Release.json",
+            "digest", False, "Xcode test", "Release", "FilmyCameraStoreMedia",
+        )
+        create.assert_called_once_with("platform=iOS Simulator,id=reference")
+        destroy.assert_called_once_with("owned")
+        self.assertEqual(summary["configuration"], "Release")
+        self.assertEqual(summary["scheme"], "FilmyCameraStoreMedia")
 
     def test_photos_setup_failure_deletes_only_its_own_simulator(self):
         def fake_simctl(*args, timeout=run.SIMCTL_DEFAULT_TIMEOUT_SECONDS):
@@ -521,6 +601,85 @@ class SuiteRoutingTests(unittest.TestCase):
 
 
 class EvidenceTests(unittest.TestCase):
+    def test_configuration_is_carried_into_xcode_command_and_product_paths(self):
+        command = run.xcode_command(
+            "platform=iOS Simulator,id=owned", Path("/tmp/FilmyDerivedData"),
+            configuration="Release",
+        )
+        scheme_index = command.index("-scheme")
+        self.assertEqual(command[scheme_index + 1], "FilmyCamera")
+        configuration_index = command.index("-configuration")
+        self.assertEqual(command[configuration_index + 1], "Release")
+        self.assertIn("ENABLE_TESTABILITY=YES", command)
+        store_command = run.xcode_command(
+            "platform=iOS Simulator,id=owned", Path("/tmp/FilmyDerivedData"),
+            configuration="Release", scheme="FilmyCameraStoreMedia",
+        )
+        store_scheme_index = store_command.index("-scheme")
+        self.assertEqual(store_command[store_scheme_index + 1], "FilmyCameraStoreMedia")
+        self.assertNotIn(
+            "-configuration",
+            run.xcode_command("platform=iOS Simulator,id=owned", Path("/tmp/FilmyDerivedData")),
+        )
+
+        derived_data = Path("/tmp/FilmyDerivedData")
+        self.assertEqual(
+            run.build_stamp_path(derived_data, "platform=iOS Simulator,id=owned", "Debug").name,
+            ".filmy-test-build-simulator.json",
+        )
+        self.assertEqual(
+            run.build_stamp_path(derived_data, "platform=iOS Simulator,id=owned", "Release").name,
+            ".filmy-test-build-simulator-Release.json",
+        )
+        self.assertEqual(
+            run.build_stamp_path(
+                derived_data, "platform=iOS Simulator,id=owned", "Release",
+                "FilmyCameraStoreMedia",
+            ).name,
+            ".filmy-test-build-simulator-FilmyCameraStoreMedia-Release.json",
+        )
+        self.assertNotEqual(
+            run.build_stamp_path(
+                derived_data, "platform=iOS Simulator,id=owned", "Release",
+                "FilmyCameraStoreMedia",
+            ),
+            run.build_stamp_path(derived_data, "platform=iOS Simulator,id=owned", "Release"),
+        )
+        self.assertEqual(
+            run.simulator_app_path(derived_data, "Release"),
+            derived_data / "Build/Products/Release-iphonesimulator/FilmyCamera.app",
+        )
+
+    def test_build_stamp_configuration_mismatch_cannot_reuse_products(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "stamp.json"
+            path.write_text(json.dumps({
+                "inputDigest": "current",
+                "coverage": False,
+                "toolchain": "Xcode",
+                "configuration": "Release",
+                "scheme": "FilmyCameraStoreMedia",
+            }))
+            run.validate_build_stamp(
+                path, "current", False, "Xcode", "Release", "FilmyCameraStoreMedia"
+            )
+            with self.assertRaisesRegex(ValueError, "stale"):
+                run.validate_build_stamp(path, "current", False, "Xcode", "Release", "FilmyCamera")
+            with self.assertRaisesRegex(ValueError, "stale"):
+                run.validate_build_stamp(path, "current", False, "Xcode", "Debug")
+
+            # Debug stamps written before configuration tracking remain safe to
+            # reuse; they cannot satisfy a Release validation.
+            path.write_text(json.dumps({
+                "inputDigest": "current", "coverage": False, "toolchain": "Xcode"
+            }))
+            run.validate_build_stamp(path, "current", False, "Xcode", "Debug")
+            run.validate_build_stamp(path, "current", False, "Xcode", "Debug", "FilmyCamera")
+            with self.assertRaisesRegex(ValueError, "stale"):
+                run.validate_build_stamp(path, "current", False, "Xcode", "Debug", "FilmyCameraStoreMedia")
+            with self.assertRaisesRegex(ValueError, "stale"):
+                run.validate_build_stamp(path, "current", False, "Xcode", "Release")
+
     def test_stale_source_or_toolchain_cannot_reuse_test_products(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "stamp.json"

@@ -73,6 +73,17 @@ schemes:
         FILMY_RUN_ROLL_QA: "1"
       targets:
         - FilmyCameraUITests
+  FilmyCameraStoreMedia:
+    build:
+      targets:
+        FilmyCamera: all
+    run:
+      config: Release
+    test:
+      config: Release
+      gatherCoverageData: false
+      targets:
+        - FilmyCameraUITests
 
 targets:
   FilmyCamera:

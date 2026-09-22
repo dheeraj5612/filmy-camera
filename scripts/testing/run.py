@@ -33,6 +33,12 @@ LANES = {
 GROUPS = {group for groups in LANES.values() for group in groups}
 PHYSICAL = {"device", "lens", "add-only", "capture-sheet", "performance"}
 PHOTOS_WRITES = {"device", "add-only", "capture-sheet"}
+CONFIGURATIONS = ("Debug", "Release")
+DEFAULT_CONFIGURATION = "Debug"
+LANE_DEFAULT_CONFIGURATIONS = {"store-media": "Release"}
+SCHEMES = ("FilmyCamera", "FilmyCameraStoreMedia")
+DEFAULT_SCHEME = "FilmyCamera"
+LANE_DEFAULT_SCHEMES = {"store-media": "FilmyCameraStoreMedia"}
 ENVIRONMENT = {
     "fixtures": {"FILMY_RUN_LARGE_ROLL_QA": "1"},
     "photos-e2e": {"FILMY_RUN_SEEDED_PHOTOS_E2E": "1"},
@@ -147,11 +153,43 @@ def validate_destination(lane, destination, allow_photos_writes):
         raise ValueError("Use platform=iOS Simulator,id=... or platform=iOS,id=...")
 
 
-def xcode_command(destination, derived_data, coverage=False):
-    command = ["xcodebuild", "-project", "FilmyCamera.xcodeproj", "-scheme", "FilmyCamera",
+def validate_configuration(configuration):
+    if configuration not in CONFIGURATIONS:
+        choices = ", ".join(CONFIGURATIONS)
+        raise ValueError(f"Unsupported build configuration {configuration!r}; choose {choices}")
+    return configuration
+
+
+def configuration_for_lane(lane, requested=None):
+    configuration = requested or LANE_DEFAULT_CONFIGURATIONS.get(lane, DEFAULT_CONFIGURATION)
+    return validate_configuration(configuration)
+
+
+def validate_scheme(scheme):
+    if scheme not in SCHEMES:
+        choices = ", ".join(SCHEMES)
+        raise ValueError(f"Unsupported Xcode scheme {scheme!r}; choose {choices}")
+    return scheme
+
+
+def scheme_for_lane(lane, requested=None):
+    scheme = requested or LANE_DEFAULT_SCHEMES.get(lane, DEFAULT_SCHEME)
+    return validate_scheme(scheme)
+
+
+def xcode_command(destination, derived_data, coverage=False, configuration=None,
+                  scheme=DEFAULT_SCHEME):
+    validate_scheme(scheme)
+    command = ["xcodebuild", "-project", "FilmyCamera.xcodeproj", "-scheme", scheme,
                "-destination", destination, "-derivedDataPath", str(derived_data),
                "-parallel-testing-enabled", "NO", "-maximum-parallel-testing-workers", "1",
                "-enableCodeCoverage", "YES" if coverage else "NO"]
+    if configuration is not None:
+        validate_configuration(configuration)
+        command += ["-configuration", configuration]
+        if configuration == "Release":
+            # XCTest targets import the app with @testable in Release builds.
+            command += ["ENABLE_TESTABILITY=YES"]
     if "Simulator" in destination or destination == "generic/platform=iOS":
         command += ["CODE_SIGNING_ALLOWED=NO", "CODE_SIGNING_REQUIRED=NO"]
     return command
@@ -191,17 +229,55 @@ def build_input_digest(root=ROOT):
     return digest.hexdigest()
 
 
-def build_stamp_path(derived_data, destination):
+def build_stamp_path(derived_data, destination, configuration=None, scheme=None):
     platform = "simulator" if "Simulator" in destination else "device"
-    return derived_data / f".filmy-test-build-{platform}.json"
+    if scheme is not None:
+        validate_scheme(scheme)
+    if configuration is None:
+        suffix = ""
+    else:
+        validate_configuration(configuration)
+        # Keep the established Debug stamp name so existing Debug lanes remain
+        # reusable. Release gets a distinct stamp and can never reuse Debug.
+        suffix = "" if configuration == DEFAULT_CONFIGURATION else f"-{configuration}"
+    if scheme is not None and scheme != DEFAULT_SCHEME:
+        # A UI-only scheme has different target membership and products even
+        # when it uses the same configuration as the main scheme.
+        suffix = f"-{scheme}" + suffix
+    return derived_data / f".filmy-test-build-{platform}{suffix}.json"
 
 
-def validate_build_stamp(path, input_digest, coverage, toolchain):
+def validate_build_stamp(path, input_digest, coverage, toolchain, configuration=None,
+                        scheme=None):
     if not path.exists():
         raise ValueError("No verified test build exists; run this runner without --skip-build first")
     stamp = json.loads(path.read_text())
-    if stamp != {"inputDigest": input_digest, "coverage": coverage, "toolchain": toolchain}:
-        raise ValueError("Test build is stale or uses different coverage/Xcode settings; rebuild without --skip-build")
+    expected = {"inputDigest": input_digest, "coverage": coverage, "toolchain": toolchain}
+    if configuration is not None:
+        validate_configuration(configuration)
+        expected["configuration"] = configuration
+        # Stamps written before configuration was tracked are known Debug
+        # products. Preserve their safe Debug reuse while rejecting them for
+        # Release, whose products use a separate stamp path.
+        if "configuration" not in stamp and configuration == DEFAULT_CONFIGURATION:
+            stamp = dict(stamp)
+            stamp["configuration"] = DEFAULT_CONFIGURATION
+    if scheme is not None:
+        validate_scheme(scheme)
+        expected["scheme"] = scheme
+        # Stamps written before scheme tracking belong to the established main
+        # Debug lane. Preserve that safe reuse, but never accept them for the
+        # dedicated UI-only scheme.
+        if "scheme" not in stamp and scheme == DEFAULT_SCHEME:
+            stamp = dict(stamp)
+            stamp["scheme"] = DEFAULT_SCHEME
+    if stamp != expected:
+        raise ValueError("Test build is stale or uses different scheme/configuration/coverage/Xcode settings; rebuild without --skip-build")
+
+
+def simulator_app_path(derived_data, configuration):
+    validate_configuration(configuration)
+    return derived_data / f"Build/Products/{configuration}-iphonesimulator/FilmyCamera.app"
 
 
 def run_logged(command, path, env=None):
@@ -545,6 +621,8 @@ def main(argv=None):
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--coverage", action="store_true", help="Collect coverage explicitly; off in routine CI")
+    parser.add_argument("--configuration", choices=CONFIGURATIONS,
+                        help="Xcode build configuration (store-media defaults to Release; other lanes to Debug)")
     parser.add_argument("--allow-photos-writes", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
@@ -553,21 +631,25 @@ def main(argv=None):
         print(json.dumps({"declaredTests": len(tests), "groups": dict(sorted(Counter(tests.values()).items())),
                           "tests": tests}, indent=2))
         return 0
+    configuration = configuration_for_lane(args.lane, args.configuration)
+    scheme = scheme_for_lane(args.lane)
     destination = "generic/platform=iOS" if args.lane == "device-build" else args.destination
     validate_destination(args.lane, destination, args.allow_photos_writes)
     selected_phases = phases(args.lane, tests)
     if args.dry_run:
         print(json.dumps({"lane": args.lane, "destination": destination,
-                          "build": not args.skip_build, "phases": selected_phases}, indent=2))
+                          "configuration": configuration, "scheme": scheme,
+                          "build": not args.skip_build,
+                          "phases": selected_phases}, indent=2))
         return 0
     output = (args.output_dir or ROOT / "build/test-runs" /
               (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + uuid.uuid4().hex[:6])).resolve()
     output.mkdir(parents=True, exist_ok=True)
     args.derived_data = args.derived_data.resolve()
-    base = xcode_command(destination, args.derived_data, args.coverage)
+    base = xcode_command(destination, args.derived_data, args.coverage, configuration, scheme)
     input_digest = build_input_digest()
     toolchain = subprocess.check_output(["xcodebuild", "-version"], text=True).strip()
-    stamp_path = build_stamp_path(args.derived_data, destination)
+    stamp_path = build_stamp_path(args.derived_data, destination, configuration, scheme)
     if not args.skip_build:
         # A failed replacement build must invalidate the previous verification.
         stamp_path.unlink(missing_ok=True)
@@ -578,9 +660,12 @@ def main(argv=None):
         if build_input_digest() != input_digest:
             raise ValueError("Source changed while building; rebuild before testing")
         stamp_path.write_text(json.dumps({"inputDigest": input_digest,
-                                         "coverage": args.coverage, "toolchain": toolchain}) + "\n")
+                                         "coverage": args.coverage, "toolchain": toolchain,
+                                         "configuration": configuration,
+                                         "scheme": scheme}) + "\n")
     else:
-        validate_build_stamp(stamp_path, input_digest, args.coverage, toolchain)
+        validate_build_stamp(stamp_path, input_digest, args.coverage, toolchain,
+                             configuration, scheme)
     for phase, selectors in selected_phases:
         if not selectors:
             raise ValueError(f"No tests selected for {phase}")
@@ -591,9 +676,10 @@ def main(argv=None):
             raise ValueError(f"Refusing to overwrite evidence: {result}; choose another --output-dir")
         started = time.monotonic()
         try:
-            app_path = (args.derived_data / "Build/Products/Debug-iphonesimulator/FilmyCamera.app")
+            app_path = simulator_app_path(args.derived_data, configuration)
             with isolated_photos_destination(phase, destination, app_path) as phase_destination:
-                command = xcode_command(phase_destination, args.derived_data, args.coverage)
+                command = xcode_command(phase_destination, args.derived_data, args.coverage,
+                                        configuration, scheme)
                 phase_environment = (fixture_test_environment()
                                      if phase == "fixtures" else test_environment(phase))
                 permission_bootstrap = None
@@ -624,7 +710,8 @@ def main(argv=None):
                                 "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
                                 "worktreeDirty": bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip()),
                                 "buildInputDigest": input_digest, "toolchain": toolchain,
-                                "coverageEnabled": args.coverage})
+                                "coverageEnabled": args.coverage, "configuration": configuration,
+                                "scheme": scheme})
                 if permission_bootstrap is not None:
                     summary["photosPermissionBootstrap"] = {
                         "selector": PHOTOS_PERMISSION_BOOTSTRAP_SELECTOR,
