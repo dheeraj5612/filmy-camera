@@ -519,29 +519,78 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertTrue(waitForLiveShutter(in: app), "The rotated preview must render fresh frames")
         #endif
 
-        guard let visibleWindow = app.windows.allElementsBoundByIndex.first(where: { $0.exists && $0.isHittable }) else {
-            XCTFail("The portrait camera shell must expose a visible app window after rotation")
+        let isPad = UIDevice.current.userInterfaceIdiom == .pad
+        var previousWindowFrame: CGRect?
+        var stableWindowSamples = 0
+        let windowReachedExpectedOrientation = waitUntil(timeout: 10) {
+            guard let window = app.windows.allElementsBoundByIndex.first(where: {
+                $0.exists && $0.isHittable
+            }) else { return false }
+            let frame = window.frame
+            let reachedOrientation = isPad
+                ? frame.width > frame.height && abs(frame.minX) < 1 && abs(frame.minY) < 1
+                : frame.height > frame.width
+            guard reachedOrientation else {
+                previousWindowFrame = nil
+                stableWindowSamples = 0
+                return false
+            }
+            if let previousWindowFrame,
+               abs(frame.minX - previousWindowFrame.minX) < 0.25,
+               abs(frame.minY - previousWindowFrame.minY) < 0.25,
+               abs(frame.width - previousWindowFrame.width) < 0.25,
+               abs(frame.height - previousWindowFrame.height) < 0.25 {
+                stableWindowSamples += 1
+            } else {
+                stableWindowSamples = 1
+            }
+            previousWindowFrame = frame
+            return stableWindowSamples >= 3
+        }
+        XCTAssertTrue(
+            windowReachedExpectedOrientation,
+            isPad
+                ? "The visible iPad app window must finish rotating to landscape"
+                : "The visible iPhone app window must remain portrait after device rotation"
+        )
+        guard windowReachedExpectedOrientation,
+              let visibleWindow = app.windows.allElementsBoundByIndex.first(where: {
+                  $0.exists && $0.isHittable
+              }) else {
             return
         }
         let windowFrame = visibleWindow.frame
-        XCTAssertTrue(
-            UIDevice.current.userInterfaceIdiom == .pad
-                ? windowFrame.width > windowFrame.height : windowFrame.height > windowFrame.width,
-            "The visible app window must remain portrait after device rotation on iPhone"
-        )
-        if UIDevice.current.userInterfaceIdiom == .pad {
+        if isPad {
             let grip = app.buttons["camera-grip-toggle"]
             XCTAssertTrue(waitForStableHittableFrame(grip, timeout: 8, within: visibleWindow))
             let initialValue = grip.value as? String
             let initialX = grip.frame.midX
             grip.tap()
-            XCTAssertTrue(waitUntil(timeout: 8) {
-                grip.value as? String != initialValue
-                    && abs(grip.frame.midX - initialX) > windowFrame.width / 2
-            }, "Changing grip must move the capture controls to the opposite edge")
+            let gripMoved = {
+                let candidate = self.app.buttons["camera-grip-toggle"]
+                return candidate.exists
+                    && candidate.value as? String != initialValue
+                    && abs(candidate.frame.midX - initialX) > windowFrame.width / 2
+            }
+            var changedGrip = waitUntil(timeout: 8, condition: gripMoved)
+            // XCTest can lose the first synthesized tap while the simulator is
+            // settling from rotation. Retry only when app state did not change;
+            // never double-toggle a control that moved incompletely.
+            if !changedGrip,
+               app.buttons["camera-grip-toggle"].value as? String == initialValue {
+                let retryGrip = app.buttons["camera-grip-toggle"]
+                if waitForStableHittableFrame(retryGrip, timeout: 4, within: visibleWindow) {
+                    retryGrip.tap()
+                    changedGrip = waitUntil(timeout: 8, condition: gripMoved)
+                }
+            }
+            XCTAssertTrue(changedGrip, "Changing grip must move the capture controls to the opposite edge")
             attachScreenshot(named: "camera-landscape-mirrored-grip")
-            grip.tap()
-            XCTAssertTrue(waitUntil(timeout: 8) { grip.value as? String == initialValue })
+            let mirroredGrip = app.buttons["camera-grip-toggle"]
+            mirroredGrip.tap()
+            XCTAssertTrue(waitUntil(timeout: 8) {
+                self.app.buttons["camera-grip-toggle"].value as? String == initialValue
+            })
         }
         let currentLook = app.buttons["recipe-menu"]
         let roll = app.buttons["roll-tab"]
