@@ -92,7 +92,7 @@ final class MembershipStoreKitTests: XCTestCase {
         XCTAssertTrue(store.isPremium)
         try session.disableAutoRenewForTransaction(identifier: XCTUnwrap(UInt(exactly: transaction.id)))
         try session.expireSubscription(productIdentifier: MonetizationConfiguration.monthlyProductID)
-        await store.refresh()
+        try await waitForPremium(false, in: store)
         XCTAssertFalse(store.isPremium)
         XCTAssertEqual(store.remainingPhotos, 10)
     }
