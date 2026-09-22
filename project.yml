@@ -36,7 +36,7 @@ settings:
     TARGETED_DEVICE_FAMILY: "1,2"
     PRODUCT_BUNDLE_IDENTIFIER: com.dheeraj.filmycamera
     CURRENT_PROJECT_VERSION: "28"
-    MARKETING_VERSION: "1.0.1"
+    MARKETING_VERSION: "1.0.2"
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: 6ALSCF5GBV
     SUPPORTS_MACCATALYST: NO
@@ -116,6 +116,7 @@ targets:
         FilmyPrivacyPolicyURL: "$(FILMY_PRIVACY_POLICY_URL)"
         FilmyTermsURL: "$(FILMY_TERMS_URL)"
         FilmyLegalReady: "$(FILMY_LEGAL_READY)"
+        FilmyMonetizationEnabled: "$(FILMY_MONETIZATION_ENABLED)"
         FilmyAdsEnabled: "$(FILMY_ADS_ENABLED)"
         FilmyAdMobBannerID: "$(FILMY_ADMOB_BANNER_ID)"
         GADApplicationIdentifier: "$(FILMY_ADMOB_APP_ID)"

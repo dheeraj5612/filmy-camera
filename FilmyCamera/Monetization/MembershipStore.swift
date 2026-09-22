@@ -27,6 +27,7 @@ final class MembershipStore: ObservableObject {
     @Published var notice: String?
 
     private let persistence: any PhotoQuotaPersistence
+    let monetizationEnabled: Bool
     private var quota: DailyPhotoQuota?
     private var permits: [UUID: CapturePermit] = [:]
     private var updates: Task<Void, Never>?
@@ -36,7 +37,9 @@ final class MembershipStore: ObservableObject {
     private var testing = false
     private var started = false
 
-    init(persistence: (any PhotoQuotaPersistence)? = nil, useStoreKitForTesting: Bool = false) {
+    init(persistence: (any PhotoQuotaPersistence)? = nil, useStoreKitForTesting: Bool = false,
+         monetizationEnabled: Bool = MonetizationConfiguration.isEnabled) {
+        self.monetizationEnabled = monetizationEnabled
         self.persistence = persistence ?? (MonetizationConfiguration.isAutomatedTest
             ? MemoryPhotoQuotaPersistence() : KeychainPhotoQuotaPersistence())
         #if DEBUG
@@ -54,12 +57,16 @@ final class MembershipStore: ObservableObject {
         return false
     }
 
+    // Free releases grant features without inventing a paid entitlement.
+    var hasFullAccess: Bool { !monetizationEnabled || isPremium }
+
     var isTrial: Bool {
         if case .premium(_, let trial) = access { return isPremium && trial }
         return false
     }
 
     var entitlementsResolved: Bool {
+        if !monetizationEnabled { return true }
         switch access {
         case .free: return true
         case .premium(let expiry, _): return expiry > Date()
@@ -67,13 +74,13 @@ final class MembershipStore: ObservableObject {
         }
     }
 
-    var mayShowAds: Bool { access == .free && !testing }
-    var canPurchase: Bool { product != nil && entitlementsResolved && !isLoadingProduct && !isWorking && !isPremium && MonetizationConfiguration.legalLinksConfigured }
+    var mayShowAds: Bool { monetizationEnabled && access == .free && !testing }
+    var canPurchase: Bool { monetizationEnabled && product != nil && entitlementsResolved && !isLoadingProduct && !isWorking && !isPremium && MonetizationConfiguration.legalLinksConfigured }
 
     func start() async {
         guard !started else { return }
         started = true
-        guard !testing else { return }
+        guard monetizationEnabled, !testing else { return }
         updates = Task { [weak self] in
             for await result in Transaction.updates {
                 guard !Task.isCancelled, let self else { return }
@@ -95,6 +102,7 @@ final class MembershipStore: ObservableObject {
     }
 
     func refresh() async {
+        guard monetizationEnabled else { return }
         refreshQuota()
         guard !testing else { return }
         if let refreshTask { await refreshTask.value; return }
@@ -168,7 +176,7 @@ final class MembershipStore: ObservableObject {
     }
 
     func loadProduct() async {
-        guard !testing else { return }
+        guard monetizationEnabled, !testing else { return }
         if let productTask { await productTask.value; return }
         let task = Task<Void, Never> { [weak self] in await self?.fetchProduct() }
         productTask = task
@@ -203,7 +211,7 @@ final class MembershipStore: ObservableObject {
     }
 
     func purchase() async {
-        guard !isWorking, !isPremium else { return }
+        guard monetizationEnabled, !isWorking, !isPremium else { return }
         guard MonetizationConfiguration.legalLinksConfigured else {
             purchaseMessage = "Subscription terms are not available yet. Please try again later."
             return
@@ -237,7 +245,7 @@ final class MembershipStore: ObservableObject {
     }
 
     func restore() async {
-        guard !isWorking, !testing else { return }
+        guard monetizationEnabled, !isWorking, !testing else { return }
         isWorking = true
         purchaseMessage = nil
         defer { isWorking = false }
@@ -248,11 +256,11 @@ final class MembershipStore: ObservableObject {
         } catch { purchaseMessage = "Purchases could not be restored. Check your Apple Account and connection, then try again." }
     }
 
-    func allowsRecipe(_ id: String) -> Bool { MembershipPolicy.allowsRecipe(id, premium: isPremium) }
+    func allowsRecipe(_ id: String) -> Bool { MembershipPolicy.allowsRecipe(id, premium: hasFullAccess) }
 
     @discardableResult
     func require(_ feature: PremiumFeature) -> Bool {
-        guard !isPremium else { return true }
+        guard !hasFullAccess else { return true }
         if !entitlementsResolved {
             notice = "Your App Store access is being checked. Try again shortly or use Restore Purchases in Account."
         } else {
@@ -271,7 +279,7 @@ final class MembershipStore: ObservableObject {
             notice = "Your App Store access is being checked. Please try again shortly."
             return nil
         }
-        if isPremium {
+        if hasFullAccess {
             let permit = CapturePermit(id: UUID(), chargedDay: nil)
             permits[permit.id] = permit
             return permit

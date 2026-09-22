@@ -1,4 +1,6 @@
 #include "Monetization.xcconfig"
+// Preserve the free app until the paid release has completed provider setup.
+FILMY_MONETIZATION_ENABLED = NO
 // Shipping remains fail-closed until the owner supplies real publisher IDs and
 // publishes/reviews the updated privacy disclosures. See docs/monetization.md.
 FILMY_ADS_ENABLED = NO

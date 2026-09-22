@@ -33,7 +33,7 @@ enum MembershipPresentation {
         // unrelated test cases. The UI-test app has no XCTest host variable.
         guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
         #endif
-        guard paywall == nil, let presenter = topController, !presenter.isBeingDismissed else { return }
+        guard MonetizationConfiguration.isEnabled, paywall == nil, let presenter = topController, !presenter.isBeingDismissed else { return }
         // Present from the topmost sheet, not a competing root SwiftUI sheet.
         // A recipe editor can therefore explain its lock without disappearing.
         let host = UIHostingController(rootView: MembershipPaywall(feature: feature))
@@ -191,7 +191,7 @@ struct PremiumFeatureGate<Content: View>: View {
     @ObservedObject private var membership = MembershipStore.shared
 
     var body: some View {
-        if membership.isPremium { content() }
+        if membership.hasFullAccess { content() }
         else {
             VStack(spacing: 20) {
                 Text(feature.rawValue).font(.title2.bold())
@@ -209,7 +209,7 @@ struct MembershipStatusBar: View {
     @ObservedObject private var membership = MembershipStore.shared
 
     var body: some View {
-        if !membership.isPremium {
+        if !membership.hasFullAccess {
             HStack(spacing: 12) {
                 Text(membership.entitlementsResolved ? "\(membership.remainingPhotos) of 10 photos left today" : "Checking App Store access")
                     .font(.caption.weight(.medium)).accessibilityIdentifier("membership-photo-allowance")
@@ -342,7 +342,7 @@ struct MonetizationRootModifier: ViewModifier {
     }
 
     private func synchronizeAccess() {
-        camera.setPremiumControlsEnabled(membership.isPremium)
+        camera.setPremiumControlsEnabled(membership.hasFullAccess)
         viewModel.objectWillChange.send()
         AdvertisingStore.shared.accessChanged()
     }

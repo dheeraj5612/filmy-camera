@@ -1,4 +1,5 @@
 #include "Monetization.xcconfig"
+FILMY_MONETIZATION_ENABLED = YES
 // Google's dedicated test inventory. Never substitute live ad units for testing.
 FILMY_ADS_ENABLED = YES
 FILMY_ADMOB_APP_ID = ca-app-pub-3940256099942544~1458002511

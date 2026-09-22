@@ -26,7 +26,7 @@ final class AuthenticationStore: ObservableObject {
     private var reauthorization: AppleReauthorization?
 
     init() {
-        guard !MonetizationConfiguration.isAutomatedTest,
+        guard MonetizationConfiguration.isEnabled, !MonetizationConfiguration.isAutomatedTest,
               let path = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist"),
               let options = FirebaseOptions(contentsOfFile: path),
               options.bundleID == Bundle.main.bundleIdentifier else { return }

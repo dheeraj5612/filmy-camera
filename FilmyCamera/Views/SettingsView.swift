@@ -27,7 +27,9 @@ struct SettingsView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 26) {
                         settingsHeader
-                        AccountSettingsSection()
+                        if MonetizationConfiguration.isEnabled {
+                            AccountSettingsSection()
+                        }
 
                         captureSettings
                         permissions

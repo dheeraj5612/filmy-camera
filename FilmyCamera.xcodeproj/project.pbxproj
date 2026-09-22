@@ -95,6 +95,7 @@
 		8C7CB45FC3BFE9E2C786ACCF /* PhotoOutputEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AD7C3AEFA8B673A5F790009 /* PhotoOutputEncoderTests.swift */; };
 		8E91CEFD6D898EFB969567DD /* FilmyIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AF17D88FBFA77FB56E7868B /* FilmyIdentity.swift */; };
 		900770BE617ECEBCA446BE79 /* FilmyOriginalExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB05F44112E7DB834337F4A4 /* FilmyOriginalExporter.swift */; };
+		91B63BB315D79C4899D45B14 /* ReleaseAccessPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B2F9CE5F700700663D9C7C7 /* ReleaseAccessPolicyTests.swift */; };
 		93091BC247CCEB91BE9EEAD1 /* CaptureReference.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CA5F87D395DEB563582BB85 /* CaptureReference.swift */; };
 		96625C5D9B641248AC46F516 /* NormalRollManagementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82B8CDEF0CFFC1C7810C1E66 /* NormalRollManagementTests.swift */; };
 		98DC3681ECF52462F7633E13 /* PhotoQuotaStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45D9A30B0B7C0CC2271A3D95 /* PhotoQuotaStore.swift */; };
@@ -275,6 +276,7 @@
 		979D033B221CDD724A21C7EE /* CameraManualHardwareTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraManualHardwareTests.swift; sourceTree = "<group>"; };
 		99D74C27D238C00120CAABB3 /* RecipeRenderGalleryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeRenderGalleryTests.swift; sourceTree = "<group>"; };
 		99E28DFBB94E495FBDCE48DB /* ReviewComparisonState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewComparisonState.swift; sourceTree = "<group>"; };
+		9B2F9CE5F700700663D9C7C7 /* ReleaseAccessPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReleaseAccessPolicyTests.swift; sourceTree = "<group>"; };
 		9C2B9A5974AC25A4FE32A515 /* FilmyCamera-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "FilmyCamera-Bridging-Header.h"; sourceTree = "<group>"; };
 		9C858D0FA523781D85EC5AFC /* RecipeLibraryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeLibraryTests.swift; sourceTree = "<group>"; };
 		9CA4FD629B8D09AB6ACAFB1B /* ProCaptureOptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProCaptureOptions.swift; sourceTree = "<group>"; };
@@ -422,6 +424,7 @@
 				9C858D0FA523781D85EC5AFC /* RecipeLibraryTests.swift */,
 				348CFAEC84B4CF9E4F843E66 /* RecipeReferenceCatalogTests.swift */,
 				99D74C27D238C00120CAABB3 /* RecipeRenderGalleryTests.swift */,
+				9B2F9CE5F700700663D9C7C7 /* ReleaseAccessPolicyTests.swift */,
 				C2F0913587D09FEB4D0E8E14 /* RendererOutputBoundsTests.swift */,
 				39AFAD26579DD804EBC3552B /* RendererPerformanceTests.swift */,
 				A9F1F58788021769171897C0 /* RendererRedCreaseRegressionTests.swift */,
@@ -817,6 +820,7 @@
 				1B7C06E7ACC1A60A31B4F267 /* RecipeLibraryTests.swift in Sources */,
 				3E434087A6331965A83F900D /* RecipeReferenceCatalogTests.swift in Sources */,
 				5E489D4CE06907D59F790896 /* RecipeRenderGalleryTests.swift in Sources */,
+				91B63BB315D79C4899D45B14 /* ReleaseAccessPolicyTests.swift in Sources */,
 				589A5A125A91DA3228E84E06 /* RendererOutputBoundsTests.swift in Sources */,
 				BD0D8B563C87B105A44850C1 /* RendererPerformanceTests.swift in Sources */,
 				2445E3AD0B06312916D6EE89 /* RendererRedCreaseRegressionTests.swift in Sources */,
@@ -1089,7 +1093,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.0.2;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.dheeraj.filmycamera;
@@ -1163,7 +1167,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.0.2;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;

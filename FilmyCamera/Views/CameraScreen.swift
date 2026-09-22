@@ -160,19 +160,19 @@ struct CameraScreen: View {
     @State private var isShowingFujiMenu = false
     @State private var isShowingCaptureSetup = false
     @AppStorage("captureDelay") private var storedCaptureDelay = CaptureDelay.off
-    private var captureDelay: CaptureDelay { membership.isPremium ? storedCaptureDelay : .off }
+    private var captureDelay: CaptureDelay { membership.hasFullAccess ? storedCaptureDelay : .off }
     @AppStorage("captureAspect") private var storedCaptureAspect = CaptureAspect.viewfinder
-    private var captureAspect: CaptureAspect { membership.isPremium ? storedCaptureAspect : .viewfinder }
+    private var captureAspect: CaptureAspect { membership.hasFullAccess ? storedCaptureAspect : .viewfinder }
     @AppStorage("compositionGuide") private var storedCompositionGuide = CompositionGuide.thirds
-    private var compositionGuide: CompositionGuide { membership.isPremium ? storedCompositionGuide : .thirds }
+    private var compositionGuide: CompositionGuide { membership.hasFullAccess ? storedCompositionGuide : .thirds }
     @AppStorage("showHistogram") private var storedShowHistogram = false
-    private var showHistogram: Bool { membership.isPremium && storedShowHistogram }
+    private var showHistogram: Bool { membership.hasFullAccess && storedShowHistogram }
     @AppStorage("showZebras") private var storedShowZebras = false
-    private var showZebras: Bool { membership.isPremium && storedShowZebras }
+    private var showZebras: Bool { membership.hasFullAccess && storedShowZebras }
     @AppStorage("showFocusPeaking") private var storedShowFocusPeaking = false
-    private var showFocusPeaking: Bool { membership.isPremium && storedShowFocusPeaking }
+    private var showFocusPeaking: Bool { membership.hasFullAccess && storedShowFocusPeaking }
     @AppStorage("showHorizonLevel") private var storedShowHorizonLevel = false
-    private var showHorizonLevel: Bool { membership.isPremium && storedShowHorizonLevel }
+    private var showHorizonLevel: Bool { membership.hasFullAccess && storedShowHorizonLevel }
     @State private var recipeForDetail: FilmRecipe?
     @State private var isShowingTools: Bool
     @State private var isShowingManualControls = false
@@ -396,7 +396,7 @@ struct CameraScreen: View {
         .onChange(of: camera.zoomFactor) { _, _ in shooting.invalidatePreview() }
         .onChange(of: viewModel.selectedRecipe) { _, _ in shooting.invalidatePreview() }
         .onChange(of: shooting.isBusy) { _, busy in if busy { countdown.cancel(); blinkShutter() } }
-        .onChange(of: membership.isPremium) { _, premium in
+        .onChange(of: membership.hasFullAccess) { _, premium in
             if !premium {
                 isShowingLiveAdjustments = false
                 recipeForDetail = nil

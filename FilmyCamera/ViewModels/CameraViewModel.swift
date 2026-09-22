@@ -506,7 +506,7 @@ final class CameraViewModel: ObservableObject {
     func recipe(for id: String) -> FilmRecipe {
         guard Self.validRecipeIDs.contains(id) else { return Self.defaultRecipe }
         // Preserve paid customizations on disk, but never apply them while free.
-        if !MembershipStore.shared.isPremium { return Self.builtInRecipesByID[id] ?? Self.defaultRecipe }
+        if !MembershipStore.shared.hasFullAccess { return Self.builtInRecipesByID[id] ?? Self.defaultRecipe }
         return recipeOverrides[id]
             ?? Self.builtInRecipesByID[id]
             ?? Self.defaultRecipe
@@ -585,7 +585,7 @@ final class CameraViewModel: ObservableObject {
         let membership = MembershipStore.shared
         guard let permit = membership.reserveCapture() else { return }
         // This update is ordered before capture on the camera's session queue.
-        camera.setPremiumControlsEnabled(membership.isPremium)
+        camera.setPremiumControlsEnabled(membership.hasFullAccess)
         isCapturing = true
         toastTask?.cancel()
         toastMessage = nil
@@ -595,7 +595,7 @@ final class CameraViewModel: ObservableObject {
         // in the viewfinder. Async rendering never reads mutable Auto state.
         camera.setSceneAutoCapturePaused(true)
         let recipe = camera.sceneAuto.development.applying(to: selectedRecipe)
-        let finish = membership.isPremium
+        let finish = membership.hasFullAccess
             ? (PhotoFinish(rawValue: defaults.string(forKey: "captureFinish") ?? "") ?? .photo)
             : .photo
         if camera.proCaptureSettings.livePhoto && finish != .photo {

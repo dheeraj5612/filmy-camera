@@ -2,6 +2,10 @@
 
 Implemented for the September 15, 2026 monetized candidate. Earlier release records describe their actual free builds and are not changed retroactively. This branch does not activate products, publish legal pages, or change App Store Connect / Firebase / AdMob accounts.
 
+The 1.0.2 update preserves the free app. Release sets `FILMY_MONETIZATION_ENABLED = NO`: all camera features and unlimited captures remain available, account/paywall UI is hidden, and StoreKit, authentication and ads are not started. Feature access is separate from a verified paid entitlement; free access never reports an active subscription. Debug enables monetization so its existing policy and StoreKit suites continue to exercise the future paid release.
+
+For a future paid release, complete the provider, legal and physical-device checks below before setting `FILMY_MONETIZATION_ENABLED = YES` in the ignored local Release configuration. Do not enable it merely to make a build pass.
+
 ## Access model
 
 | Capability | Free | Apple-confirmed trial / paid Pro |

@@ -3,6 +3,8 @@ import Foundation
 // Public client identifiers only. Never ship provider private keys or service
 // accounts. Prices and introductory offers come from StoreKit, not these files.
 enum MonetizationConfiguration {
+    static var isEnabled: Bool { value("FilmyMonetizationEnabled").uppercased() == "YES" }
+
     static func value(_ key: String) -> String {
         let value = (Bundle.main.object(forInfoDictionaryKey: key) as? String ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -21,7 +23,7 @@ enum MonetizationConfiguration {
     }
     static var bannerID: String { value("FilmyAdMobBannerID") }
     static var adsConfigured: Bool {
-        guard legalLinksConfigured, value("FilmyAdsEnabled").uppercased() == "YES",
+        guard isEnabled, legalLinksConfigured, value("FilmyAdsEnabled").uppercased() == "YES",
               value("GADApplicationIdentifier").hasPrefix("ca-app-pub-"),
               bannerID.hasPrefix("ca-app-pub-") else { return false }
         #if !DEBUG

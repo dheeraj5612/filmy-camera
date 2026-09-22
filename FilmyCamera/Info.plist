@@ -37,6 +37,8 @@
 	<string>$(FILMY_ADS_ENABLED)</string>
 	<key>FilmyLegalReady</key>
 	<string>$(FILMY_LEGAL_READY)</string>
+	<key>FilmyMonetizationEnabled</key>
+	<string>$(FILMY_MONETIZATION_ENABLED)</string>
 	<key>FilmyMonthlyProductID</key>
 	<string>$(FILMY_MONTHLY_PRODUCT_ID)</string>
 	<key>FilmyPrivacyPolicyURL</key>
