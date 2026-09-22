@@ -271,7 +271,7 @@ final class NormalRollManagementTests: XCTestCase {
         XCTAssertEqual(clear.value as? String, "Available", "A just-saved fixture must have a persistent local fallback")
         XCTAssertTrue(clear.isEnabled && clear.isHittable)
         clear.tap()
-        let confirm = app.buttons["confirm-clear-local-cache"]
+        let confirm = app.buttons.matching(identifier: "confirm-clear-local-cache").firstMatch
         XCTAssertTrue(confirm.waitForExistence(timeout: 5))
         screenshot("clear-cache-confirmation-keeps-photos")
         let keepCache = app.buttons["Keep cache"]
