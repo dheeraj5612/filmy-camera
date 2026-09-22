@@ -438,6 +438,65 @@ class SuiteRoutingTests(unittest.TestCase):
             ],
         )
 
+    def test_isolated_photos_method_retries_only_simulator_install_launch_race(self):
+        selector = "FilmyCameraTests/RecipeRenderGalleryTests/testG7XRenderGallery"
+
+        def execute(_, log, __):
+            if "retry-1" not in log.name:
+                log.write_text(
+                    "FBSOpenApplicationErrorDomain Code=6: Application "
+                    "is installing or uninstalling, and cannot be launched\n"
+                )
+                return 65
+            log.write_text("Test Suite Passed\n")
+            return 0
+
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(run, "run_logged", side_effect=execute) as execute_mock, \
+                patch.object(run, "wait_for_simulator_app") as wait, \
+                patch.object(run, "summarize_result", return_value={
+                    "status": "passed", "passed": 1, "failed": 0, "skipped": 0,
+                }), \
+                patch.object(run.subprocess, "check_call"):
+            output = Path(directory)
+            summary, code = run.run_isolated_photos_methods(
+                ["xcodebuild", "-destination", "platform=iOS Simulator,id=owned"],
+                [selector], output / "FilmyCameraFixtures.xcresult", output, {}, "fixtures",
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(execute_mock.call_count, 2)
+        wait.assert_called_once()
+        case = summary["caseResults"][0]
+        self.assertEqual(case["status"], "passed")
+        self.assertEqual(len(case["attempts"]), 2)
+        self.assertIn("retry-1", case["resultBundle"])
+
+    def test_non_busy_isolated_photos_failure_is_not_retried(self):
+        selector = "FilmyCameraTests/RecipeRenderGalleryTests/testG7XRenderGallery"
+
+        def execute(_, log, __):
+            log.write_text("Assertion failed\n")
+            return 65
+
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(run, "run_logged", side_effect=execute) as execute_mock, \
+                patch.object(run, "wait_for_simulator_app") as wait, \
+                patch.object(run, "summarize_result", return_value={
+                    "status": "failed", "passed": 0, "failed": 1, "skipped": 0,
+                }), \
+                patch.object(run.subprocess, "check_call"):
+            output = Path(directory)
+            summary, code = run.run_isolated_photos_methods(
+                ["xcodebuild", "-destination", "platform=iOS Simulator,id=owned"],
+                [selector], output / "FilmyCameraFixtures.xcresult", output, {}, "fixtures",
+            )
+
+        self.assertEqual(code, 65)
+        self.assertEqual(execute_mock.call_count, 1)
+        wait.assert_not_called()
+        self.assertEqual(len(summary["caseResults"][0]["attempts"]), 1)
+
 
     def test_photos_and_store_media_destroy_their_owned_simulator_on_exit(self):
         for phase in ("photos-e2e", "store-media"):

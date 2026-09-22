@@ -49,6 +49,8 @@ SIMULATOR_BOOT_TIMEOUT_SECONDS = 300
 SIMULATOR_MEDIA_TIMEOUT_SECONDS = 300
 SIMULATOR_SHUTDOWN_TIMEOUT_SECONDS = 60
 SIMULATOR_DELETE_TIMEOUT_SECONDS = 60
+SIMULATOR_APP_READY_TIMEOUT_SECONDS = 30
+APP_BUNDLE_IDENTIFIER = "com.dheeraj.filmycamera"
 REQUIRED_FIXTURE_SELECTOR = (
     "FilmyCameraTests/PhotoLibraryLargeRollTests/"
     "testActualPhotoKitRollIncludesAll160OwnedFramesAcrossServiceReload"
@@ -234,6 +236,51 @@ def simctl(*arguments, timeout=SIMCTL_DEFAULT_TIMEOUT_SECONDS):
         ) from error
 
 
+def simulator_launch_was_busy(log):
+    """Recognize only the transient install/launch race reported by CoreSimulator."""
+    if not log.exists():
+        return False
+    contents = log.read_text(errors="replace")
+    return (
+        "FBSOpenApplicationErrorDomain Code=6" in contents
+        and "is installing or uninstalling, and cannot be launched" in contents
+    )
+
+
+def wait_for_simulator_app(command):
+    """Wait until the tested app is fully installed before one bounded retry."""
+    try:
+        destination = command[command.index("-destination") + 1]
+    except (ValueError, IndexError) as error:
+        raise ValueError("Cannot resolve simulator destination for launch retry") from error
+    match = re.search(r"(?:^|,)id=([^,]+)", destination)
+    if not match:
+        raise ValueError("Cannot resolve simulator id for launch retry")
+    simulator = match.group(1)
+    deadline = time.monotonic() + SIMULATOR_APP_READY_TIMEOUT_SECONDS
+    consecutive_ready_probes = 0
+    while time.monotonic() < deadline:
+        probe = subprocess.run(
+            ["xcrun", "simctl", "get_app_container", simulator, APP_BUNDLE_IDENTIFIER],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=min(
+                SIMCTL_DEFAULT_TIMEOUT_SECONDS,
+                max(1, deadline - time.monotonic()),
+            ),
+        )
+        if probe.returncode == 0:
+            consecutive_ready_probes += 1
+            if consecutive_ready_probes == 2:
+                return
+        else:
+            consecutive_ready_probes = 0
+        time.sleep(1)
+    raise ValueError(
+        f"Simulator app installation did not settle within {SIMULATOR_APP_READY_TIMEOUT_SECONDS} seconds"
+    )
+
+
 def create_photos_simulator(destination, app_path=None):
     match = re.search(r"(?:^|,)id=([^,]+)", destination)
     if not match:
@@ -380,7 +427,35 @@ def run_isolated_photos_methods(command, selectors, result, output, environment,
         case_command = command + ["-resultBundlePath", str(case_result)]
         case_command += ["-only-testing:" + selector, "test-without-building"]
         code = run_logged(case_command, case_log, environment)
-        case_summary = summarize_result(case_result, code)
+        attempts = [{
+            "exitCode": code,
+            "resultBundle": case_result.name,
+            "log": case_log.name,
+        }]
+        effective_result = case_result
+        effective_log = case_log
+        logs = [case_log]
+        if code != 0 and simulator_launch_was_busy(case_log):
+            print(
+                f"Simulator was still installing the app for {selector}; retrying once",
+                file=sys.stderr,
+                flush=True,
+            )
+            wait_for_simulator_app(case_command)
+            retry_result = output / f"{result_prefix}-{index:02d}-{method}-retry-1.xcresult"
+            retry_log = output / f"filmycamera-{artifact_stem}-retry-1-test.log"
+            retry_command = list(case_command)
+            retry_command[retry_command.index("-resultBundlePath") + 1] = str(retry_result)
+            code = run_logged(retry_command, retry_log, environment)
+            attempts.append({
+                "exitCode": code,
+                "resultBundle": retry_result.name,
+                "log": retry_log.name,
+            })
+            effective_result = retry_result
+            effective_log = retry_log
+            logs.append(retry_log)
+        case_summary = summarize_result(effective_result, code)
         require_complete_run(phase, [selector], case_summary)
         if case_summary["status"] != "passed" and aggregate_exit_code == 0:
             aggregate_exit_code = code or 1
@@ -391,23 +466,26 @@ def run_isolated_photos_methods(command, selectors, result, output, environment,
             "failed": case_summary.get("failed", 0),
             "skipped": case_summary.get("skipped", 0),
             "exitCode": code,
-            "resultBundle": case_result.name,
-            "log": case_log.name,
+            "resultBundle": effective_result.name,
+            "log": effective_log.name,
+            "attempts": attempts,
             "reason": case_summary.get("reason"),
             "testFailures": case_summary.get("testFailures", []),
             "devicesAndConfigurations": case_summary.get("devicesAndConfigurations", []),
         })
-        case_logs.append(case_log)
+        case_logs.append(logs)
 
     aggregate_log = output / f"filmycamera-{phase}-test.log"
     with aggregate_log.open("w") as combined:
-        for case, case_log in zip(case_results, case_logs):
+        for case, logs in zip(case_results, case_logs):
             combined.write(f"===== {case['test']} =====\n")
-            if case_log.exists():
-                contents = case_log.read_text(errors="replace")
-                combined.write(contents)
-                if contents and not contents.endswith("\n"):
-                    combined.write("\n")
+            for case_log in logs:
+                if case_log.exists():
+                    combined.write(f"----- {case_log.name} -----\n")
+                    contents = case_log.read_text(errors="replace")
+                    combined.write(contents)
+                    if contents and not contents.endswith("\n"):
+                        combined.write("\n")
 
     merge_error = None
     try:
