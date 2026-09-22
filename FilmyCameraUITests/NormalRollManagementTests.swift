@@ -274,7 +274,28 @@ final class NormalRollManagementTests: XCTestCase {
         let confirm = app.buttons["confirm-clear-local-cache"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 5))
         screenshot("clear-cache-confirmation-keeps-photos")
-        app.buttons["Keep cache"].tap()
+        let keepCache = app.buttons["Keep cache"]
+        let dismissRegion = app.otherElements["PopoverDismissRegion"].firstMatch
+        XCTAssertTrue(waitUntil { keepCache.exists || dismissRegion.exists })
+        if keepCache.exists {
+            keepCache.tap()
+        } else {
+            // Native popover presentations omit the cancel button. Dismiss
+            // outside the popover, then verify the same cache-preserving result.
+            let popover = app.popovers.firstMatch
+            XCTAssertTrue(popover.waitForExistence(timeout: 5))
+            let bounds = dismissRegion.frame
+            let excluded = popover.frame.insetBy(dx: -8, dy: -8)
+            let candidates = [
+                CGPoint(x: bounds.minX + 8, y: bounds.midY),
+                CGPoint(x: bounds.maxX - 8, y: bounds.midY),
+                CGPoint(x: bounds.midX, y: bounds.minY + 48)
+            ]
+            let point = try XCTUnwrap(candidates.first { bounds.contains($0) && !excluded.contains($0) },
+                                      "The native popover must expose a safe outside dismissal region")
+            dismissRegion.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: point.x - bounds.minX, dy: point.y - bounds.minY)).tap()
+        }
         XCTAssertTrue(waitUntil { !confirm.exists })
         XCTAssertEqual(clear.value as? String, "Available", "Cancel must retain the local fallback")
         XCTAssertTrue(clear.isEnabled)

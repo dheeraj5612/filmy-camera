@@ -1528,42 +1528,82 @@ struct LookLibraryView: View {
     }
 
     private func libraryHeader(compact: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .top, spacing: 16) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Looks")
-                        .font(.system(compact ? .title2 : .largeTitle).weight(.bold))
-                        .foregroundStyle(FilmyTheme.primary)
-                        .accessibilityAddTraits(.isHeader)
-                }
-                Spacer(minLength: 0)
-                if libraryPreferences != nil {
-                    Button { showingManager = true } label: {
-                        Label("Packs", systemImage: "square.stack.3d.up")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(minWidth: 44, minHeight: libraryButtonTarget)
+        let accessibilityHeader = dynamicTypeSize.isAccessibilitySize
+        return VStack(alignment: .leading, spacing: accessibilityHeader ? 10 : 6) {
+            if accessibilityHeader {
+                libraryTitle(compact: compact)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) {
+                        if libraryPreferences != nil {
+                            libraryManageButton(expanded: false)
+                        }
+                        libraryCloseButton(expanded: false)
                     }
-                    .accessibilityIdentifier("look-library-manage")
+                    VStack(alignment: .leading, spacing: 8) {
+                        if libraryPreferences != nil {
+                            libraryManageButton(expanded: true)
+                        }
+                        libraryCloseButton(expanded: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                Button(action: onClose) {
-                    Text("Done")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(FilmyTheme.primary)
-                        .padding(.horizontal, 16)
-                        .frame(
-                            minWidth: UIDevice.current.userInterfaceIdiom == .pad ? 64 : 52,
-                            minHeight: libraryButtonTarget
-                        )
-                        .background(FilmyTheme.panel, in: Capsule())
-                        .contentShape(Capsule())
+            } else {
+                HStack(alignment: .top, spacing: 16) {
+                    libraryTitle(compact: compact)
+                    Spacer(minLength: 0)
+                    if libraryPreferences != nil {
+                        libraryManageButton(expanded: false)
+                    }
+                    libraryCloseButton(expanded: false)
                 }
-                .buttonStyle(.pressable)
-                .accessibilityIdentifier("look-library-close")
-                .accessibilityHint("Closes the library without changing your look")
             }
         }
         .padding(.horizontal, 22)
         .padding(.top, compact ? 12 : 26)
+    }
+
+    private func libraryTitle(compact: Bool) -> some View {
+        Text("Looks")
+            .font(.system(compact ? .title2 : .largeTitle).weight(.bold))
+            .foregroundStyle(FilmyTheme.primary)
+            .lineLimit(1)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    private func libraryManageButton(expanded: Bool) -> some View {
+        Button { showingManager = true } label: {
+            Label("Packs", systemImage: "square.stack.3d.up")
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+                .fixedSize(horizontal: !expanded, vertical: false)
+                .frame(
+                    minWidth: 44,
+                    maxWidth: expanded ? .infinity : nil,
+                    minHeight: libraryButtonTarget
+                )
+        }
+        .accessibilityIdentifier("look-library-manage")
+    }
+
+    private func libraryCloseButton(expanded: Bool) -> some View {
+        Button(action: onClose) {
+            Text("Done")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(FilmyTheme.primary)
+                .lineLimit(1)
+                .fixedSize(horizontal: !expanded, vertical: false)
+                .padding(.horizontal, 16)
+                .frame(
+                    minWidth: UIDevice.current.userInterfaceIdiom == .pad ? 64 : 52,
+                    maxWidth: expanded ? .infinity : nil,
+                    minHeight: libraryButtonTarget
+                )
+                .background(FilmyTheme.panel, in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.pressable)
+        .accessibilityIdentifier("look-library-close")
+        .accessibilityHint("Closes the library without changing your look")
     }
 
     private var searchField: some View {
