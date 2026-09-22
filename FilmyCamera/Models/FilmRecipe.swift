@@ -33,6 +33,12 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     public static let g7XApproximationDisclaimer =
         "G7 X Compact is an independent, original approximation inspired by public Canon PowerShot G7 X Mark III specifications. It cannot reproduce that camera's one-inch sensor, lens, DIGIC processing, or depth of field, is not pixel-identical Canon output, and is not affiliated with, endorsed by, or calibrated to Canon."
 
+    /// Product-specific disclosure for the first-generation iPhone camera
+    /// look. The recipe uses only public 2007 iPhone specifications as a
+    /// reference; it contains no Apple firmware, ISP, or calibration data.
+    public static let ogIPhoneApproximationDisclaimer =
+        "OG iPhone is an independent, original approximation inspired by public first-generation iPhone (2007) camera specifications. It cannot reproduce that camera's 2-megapixel sensor, fixed-focus lens, or on-device JPEG processing, is not pixel-identical Apple output, and is not affiliated with, endorsed by, or calibrated to Apple."
+
     /// Disclosure for recipes decoded from the pre-provenance persistence
     /// format. The old record is retained for compatibility, but its origin
     /// cannot be reconstructed from the stored bytes alone.
@@ -62,6 +68,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         case monochromeRed
         case monochromeGreen
         case sepia
+        case firstPhone
 
         public var displayName: String {
             switch self {
@@ -81,6 +88,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             case .nostalgicNegative: return "Memory Negative"
             case .realaAce: return "Natural Negative"
             case .compactDigital: return "Premium Compact"
+            case .firstPhone: return "First Phone"
             case .monochrome: return "Fine Monochrome"
             case .monochromeYellow: return "Fine Monochrome + Yellow"
             case .monochromeRed: return "Fine Monochrome + Red"
@@ -106,6 +114,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             case .nostalgicNegative: return "NOSTALGIC Neg."
             case .realaAce: return "REALA ACE"
             case .compactDigital: return "STANDARD"
+            case .firstPhone: return "STANDARD"
             case .monochrome, .monochromeYellow, .monochromeRed, .monochromeGreen: return "MONOCHROME"
             case .sepia: return "SEPIA"
             }
@@ -432,6 +441,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         case filmRecipesLibrary
         case g7XMarkIIITechnicalSpecifications
         case g7XMarkIIICameraMuseum
+        case iPhone2GTechnicalSpecifications
 
         public var title: String {
             switch self {
@@ -451,6 +461,8 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
                 return "Canon PowerShot G7 X Mark III technical specifications"
             case .g7XMarkIIICameraMuseum:
                 return "Canon Camera Museum: PowerShot G7 X Mark III"
+            case .iPhone2GTechnicalSpecifications:
+                return "Apple original iPhone (2007) technical specifications"
             }
         }
 
@@ -472,6 +484,8 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
                 return "https://www.usa.canon.com/support/p/powershot-g7-x-mark-iii"
             case .g7XMarkIIICameraMuseum:
                 return "https://global.canon/en/c-museum/product/dcc884.html"
+            case .iPhone2GTechnicalSpecifications:
+                return "https://support.apple.com/kb/sp2"
             }
         }
 
@@ -491,6 +505,8 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
                 return "Public sensor, lens, white-balance, and Picture Style option specifications"
             case .g7XMarkIIICameraMuseum:
                 return "Public compact-camera imaging, low-light, and lens characteristics"
+            case .iPhone2GTechnicalSpecifications:
+                return "Public sensor resolution, aperture, and JPEG-only capture specifications"
             }
         }
     }
@@ -503,6 +519,10 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
     public static let g7XPublicReferences: [PublicReference] = [
         .g7XMarkIIITechnicalSpecifications,
         .g7XMarkIIICameraMuseum
+    ]
+
+    public static let ogIPhonePublicReferences: [PublicReference] = [
+        .iPhone2GTechnicalSpecifications
     ]
 
     public static let fujifilmCreatorRecipeReferences: [PublicReference] =
@@ -520,6 +540,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             case publicOfficialRecipe
             case publicCommunityRecipe
             case publicCanonDocumentation
+            case publicAppleDocumentation
             case originalCreativeDesign
             case userModified
             case legacyRecordWithoutProvenance
@@ -533,6 +554,7 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         public enum Calibration: String, CaseIterable, Codable, Hashable, Sendable {
             case notCalibratedToFujifilmHardware
             case notCalibratedToCanonHardware
+            case notCalibratedToAppleHardware
             case notCalibratedToCameraHardware
             case unknownLegacyRecord
         }
@@ -590,10 +612,12 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         public var disclaimer: String {
             switch implementation {
             case .originalParametricApproximation:
-                if calibration == .notCalibratedToCameraHardware { return FilmRecipe.creativeApproximationDisclaimer }
-                return calibration == .notCalibratedToCanonHardware
-                    ? FilmRecipe.g7XApproximationDisclaimer
-                    : FilmRecipe.independentApproximationDisclaimer
+                switch calibration {
+                case .notCalibratedToCameraHardware: return FilmRecipe.creativeApproximationDisclaimer
+                case .notCalibratedToCanonHardware: return FilmRecipe.g7XApproximationDisclaimer
+                case .notCalibratedToAppleHardware: return FilmRecipe.ogIPhoneApproximationDisclaimer
+                default: return FilmRecipe.independentApproximationDisclaimer
+                }
             case .unknownLegacyRecord:
                 return FilmRecipe.legacyProvenanceDisclaimer
             }
@@ -627,6 +651,9 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
             case (.publicCanonDocumentation, .notCalibratedToCanonHardware),
                  (.userModified, .notCalibratedToCanonHardware):
                 hasMatchingSourceAndReferences = references == FilmRecipe.g7XPublicReferences
+            case (.publicAppleDocumentation, .notCalibratedToAppleHardware),
+                 (.userModified, .notCalibratedToAppleHardware):
+                hasMatchingSourceAndReferences = references == FilmRecipe.ogIPhonePublicReferences
             default:
                 hasMatchingSourceAndReferences = false
             }
@@ -650,6 +677,13 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         implementation: .originalParametricApproximation,
         calibration: .notCalibratedToCanonHardware,
         references: g7XPublicReferences
+    )
+
+    public static let ogIPhoneProvenance = Provenance(
+        source: .publicAppleDocumentation,
+        implementation: .originalParametricApproximation,
+        calibration: .notCalibratedToAppleHardware,
+        references: ogIPhonePublicReferences
     )
 
     public static let fujifilmCreatorRecipeProvenance = Provenance(
@@ -1457,8 +1491,47 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
 
     /// The initial recipe library. Names refer to public film-camera
     /// conventions; the app is not affiliated with or calibrated by Fujifilm.
-    public static let builtIns: [FilmRecipe] = legacyBuiltIns + originalCreativeLooks
+    public static let builtIns: [FilmRecipe] = legacyBuiltIns + [ogIPhoneLook] + originalCreativeLooks
         + RecipeCatalog.cameraBaselines + RecipeCatalog.sourcedRecipes
+
+    /// First-generation iPhone (2007) camera emulation. Kept outside
+    /// `legacyBuiltIns` (whose count and order are pinned) and outside
+    /// `originalCreativeLooks` (whose entries all share the no-references
+    /// creative provenance); like G7 X Compact, it carries its own public
+    /// hardware provenance and disclaimer.
+    static let ogIPhoneLook = FilmRecipe(
+        id: "og-iphone",
+        name: "OG iPhone",
+        subtitle: "2007 2 MP phone / soft, cool, clipped highlights",
+        filmBase: .firstPhone,
+        exposure: 0,
+        // The renderer replaces this Tone with its own fixed highlight-clip
+        // curve (see FilmRenderer.applyFirstPhoneTone); these values only
+        // shape the shared exposure stage upstream of that curve.
+        tone: Tone(highlight: 0, shadow: 0),
+        saturation: 0.82,
+        contrast: 1.10,
+        dynamicRange: .dr100,
+        dRangePriority: .off,
+        whiteBalance: WhiteBalanceShift(
+            // A weak auto white balance under daylight reads slightly cool
+            // and slightly green next to a modern sensor.
+            temperature: -0.12,
+            tint: -0.02
+        ),
+        colorChrome: 0,
+        blueResponse: 0,
+        fxBlue: 0,
+        sharpness: -0.35,
+        noiseReduction: 0,
+        clarity: -0.10,
+        grain: 0.45,
+        grainSize: 0.55,
+        vignette: 0.20,
+        halation: 0,
+        palette: Palette(),
+        provenance: ogIPhoneProvenance
+    )
 
     /// The original 36 entries retain their identity, order, and exact controls.
     static let legacyBuiltIns: [FilmRecipe] = [

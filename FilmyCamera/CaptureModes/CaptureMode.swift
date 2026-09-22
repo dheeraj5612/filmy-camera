@@ -151,6 +151,7 @@ enum CaptureModesPolicy {
     static let maximumMovieSeconds: Double = 180
     static let maximumPanoramaPixels: Double = 24_000_000
     static let maximumPanoramaWidth: Double = 12_000
+    static let maximumPanoramaHeight: Double = 12_000
     static let registrationLongEdge: Double = 1_536
     static let minimumFreeBytes: Int64 = 1_000_000_000
 
@@ -165,7 +166,8 @@ enum CaptureModesPolicy {
 
     static func acceptablePanoramaBounds(width: Double, height: Double) -> Bool {
         width.isFinite && height.isFinite && width >= 1 && height >= 1
-            && width <= maximumPanoramaWidth && width * height <= maximumPanoramaPixels
+            && width <= maximumPanoramaWidth && height <= maximumPanoramaHeight
+            && width * height <= maximumPanoramaPixels
     }
 
     /// Never open executable/custom schemes, embedded credentials, or unparsed OCR text.

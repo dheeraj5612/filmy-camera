@@ -74,6 +74,7 @@
 		6BDE1EA5CA0A9354B51DFDFC /* CaptureSceneReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 746AE0F718F80CB150D77D2B /* CaptureSceneReader.swift */; };
 		6C60E0AC417BE6AEEB8C6FF4 /* GalleryPagingPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF42BA8A443489B0CB928D60 /* GalleryPagingPolicyTests.swift */; };
 		6D06FBEA0EC4C7BE25A00E41 /* RecipeLibraryManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFE8E7CB785F8A6FFA86EEDE /* RecipeLibraryManagerView.swift */; };
+		6D8BB2EEF221E38529BF0B02 /* OGiPhoneLookTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CFDE94535982843AE933010 /* OGiPhoneLookTests.swift */; };
 		6FACAD244A3DEBE9DBAC1002 /* ProPhotoEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3588E469B6096B1E148A8DA /* ProPhotoEncoder.swift */; };
 		6FE02A023A65F1C1A77D4DA8 /* GoogleUserMessagingPlatform in Frameworks */ = {isa = PBXBuildFile; productRef = 6156234BCE199EFE71255CFC /* GoogleUserMessagingPlatform */; };
 		72CCD86D39C28D0706E94CD9 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = A6CCB1924F6BC724DAD5E77E /* FirebaseAuth */; };
@@ -252,6 +253,7 @@
 		6940256A8100B915539E21CB /* FilmRecipeReferenceCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmRecipeReferenceCatalog.swift; sourceTree = "<group>"; };
 		6A9AFC52D1FB5ECED33CB2DA /* CameraViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraViewModel.swift; sourceTree = "<group>"; };
 		6AF17D88FBFA77FB56E7868B /* FilmyIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmyIdentity.swift; sourceTree = "<group>"; };
+		6CFDE94535982843AE933010 /* OGiPhoneLookTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OGiPhoneLookTests.swift; sourceTree = "<group>"; };
 		6DB97EEC1B884C4649556C1B /* MembershipPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MembershipPolicy.swift; sourceTree = "<group>"; };
 		6E79227F5594654480E6C981 /* NormalPhotoFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NormalPhotoFlowTests.swift; sourceTree = "<group>"; };
 		70320913FFB9DC4ACF82224A /* FilmyPhotoDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmyPhotoDocument.swift; sourceTree = "<group>"; };
@@ -411,6 +413,7 @@
 				3B8298B6776E9371A4D8BAE9 /* ImageSizePolicyTests.swift */,
 				AE7D2DB4BEABC6F2C54845D5 /* MembershipStoreKitTests.swift */,
 				4D08A045113E57380DF9DB84 /* MembershipTests.swift */,
+				6CFDE94535982843AE933010 /* OGiPhoneLookTests.swift */,
 				B2338DC25752A65D0169B8AC /* PhotoLibraryLargeRollTests.swift */,
 				EB68FCDDC4EB7CE97CF2AD4F /* PhotoLibraryMetadataTests.swift */,
 				2AD7C3AEFA8B673A5F790009 /* PhotoOutputEncoderTests.swift */,
@@ -806,6 +809,7 @@
 				AE3E45D80AC14DF7C80EE106 /* ImageSizePolicyTests.swift in Sources */,
 				2FA25395618B6160D13EE5B6 /* MembershipStoreKitTests.swift in Sources */,
 				CB40BD2B83389CA6F39A3F40 /* MembershipTests.swift in Sources */,
+				6D8BB2EEF221E38529BF0B02 /* OGiPhoneLookTests.swift in Sources */,
 				BEC8BB7A676F9707C7D50A57 /* PhotoLibraryLargeRollTests.swift in Sources */,
 				E9619C95C6EF4EC86F964D60 /* PhotoLibraryMetadataTests.swift in Sources */,
 				8C7CB45FC3BFE9E2C786ACCF /* PhotoOutputEncoderTests.swift in Sources */,

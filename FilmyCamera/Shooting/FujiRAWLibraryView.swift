@@ -1,5 +1,8 @@
+import ImageIO
 import SwiftUI
 import UniformTypeIdentifiers
+
+private struct FujiDecodedPreview: @unchecked Sendable { let image: UIImage }
 
 struct FujiRAWLibraryView: View {
     @ObservedObject var controller: FujiShootingController
@@ -172,8 +175,20 @@ struct FujiRAWDevelopView: View {
                 try await Task.sleep(for: .milliseconds(220))
                 let data = try await controller.developPreview(draft)
                 try Task.checkCancellation()
+                let decoded = await ImageDecodeQueue.shared.value { () -> FujiDecodedPreview? in
+                    guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+                          let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                            kCGImageSourceCreateThumbnailFromImageAlways: true,
+                            kCGImageSourceCreateThumbnailWithTransform: true,
+                            kCGImageSourceThumbnailMaxPixelSize: 1200,
+                            kCGImageSourceShouldCacheImmediately: true
+                          ] as CFDictionary) else { return nil }
+                    return FujiDecodedPreview(image: UIImage(cgImage: thumbnail))
+                }
+                try Task.checkCancellation()
                 guard generation == renderGeneration else { return }
-                image = UIImage(data: data); isRendering = false
+                guard let decoded else { throw FujiShootingError.processingFailed }
+                image = decoded.image; isRendering = false
             } catch is CancellationError {
                 if generation == renderGeneration { isRendering = false }
             } catch {

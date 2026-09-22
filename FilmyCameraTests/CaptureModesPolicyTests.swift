@@ -68,7 +68,7 @@ final class CaptureModesPolicyTests: XCTestCase {
         XCTAssertFalse(CaptureModesPolicy.acceptableNightTranslation(x: .nan, y: 0, width: 100, height: 100))
         XCTAssertFalse(CaptureModesPolicy.acceptableNightTranslation(x: 0, y: 0, width: 0, height: 100))
         XCTAssertTrue(CaptureModesPolicy.acceptablePanoramaBounds(width: 12_000, height: 2_000))
-        for (width, height) in [(12_001.0, 100.0), (12_000, 2_001), (.infinity, 100), (100, .nan), (-1, 100)] {
+        for (width, height) in [(12_001.0, 100.0), (12_000, 2_001), (1, 12_001), (.infinity, 100), (100, .nan), (-1, 100)] {
             XCTAssertFalse(CaptureModesPolicy.acceptablePanoramaBounds(width: width, height: height))
         }
     }

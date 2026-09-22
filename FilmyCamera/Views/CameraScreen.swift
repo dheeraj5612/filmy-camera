@@ -694,7 +694,12 @@ struct CameraScreen: View {
     }
 
     private var isChromeDisabled: Bool {
-        viewModel.isCapturing || viewModel.isSaving || viewModel.hasPendingCapture || isImporting || shooting.settingsLocked
+        // Prime-lens setup can remain active while the camera is unavailable
+        // (including Simulator), but it does not make local navigation unsafe.
+        // Keep the broader Fuji transaction locks in place while allowing the
+        // looks drawer to open during that setup-only phase.
+        viewModel.isCapturing || viewModel.isSaving || viewModel.hasPendingCapture || isImporting
+            || shooting.isBusy || shooting.isComposing
     }
 
     private var portraitControlClearance: CGFloat {

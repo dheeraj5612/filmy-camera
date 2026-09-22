@@ -72,7 +72,9 @@
     "FilmyCameraTests/FujiShootingTests": "integration",
     "FilmyCameraTests/ProCapturePolicyTests": "unit",
     "FilmyCameraTests/FilmyPhotoStoreTests": "integration",
-    "FilmyCameraTests/ProPhotoEncoderTests": "integration"
+    "FilmyCameraTests/ProPhotoEncoderTests": "integration",
+    "FilmyCameraTests/OGiPhoneLookTests": "integration",
+    "FilmyCameraTests/OGiPhoneLookPreviewTests": "fixtures"
   },
   "overrides": {
     "FilmyCameraUITests/FilmyCameraUITests/testSimulatorFallbackExposesReadableStateWithoutPreviewAction": "simulator-e2e",

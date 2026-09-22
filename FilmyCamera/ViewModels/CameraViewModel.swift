@@ -45,6 +45,7 @@ extension FilmRecipe {
         case .acros, .acrosYellow, .acrosRed, .acrosGreen, .monochrome, .monochromeYellow, .monochromeRed, .monochromeGreen: return "circle.lefthalf.filled"
         case .sepia: return "clock.arrow.circlepath"
         case .compactDigital: return "camera.fill"
+        case .firstPhone: return "camera"
         case .standard, .provia: return "camera.aperture"
         }
     }
@@ -599,6 +600,7 @@ final class CameraViewModel: ObservableObject {
             ? (PhotoFinish(rawValue: defaults.string(forKey: "captureFinish") ?? "") ?? .photo)
             : .photo
         if camera.proCaptureSettings.livePhoto && finish != .photo {
+            camera.setSceneAutoCapturePaused(false)
             membership.finishCapture(permit, succeeded: false)
             isCapturing = false
             showToast("Live Photos require Photo finish. Turn off Instant Print before capturing.", style: .error)

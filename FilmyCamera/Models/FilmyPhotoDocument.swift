@@ -37,6 +37,10 @@ struct FilmyPhotoDocument: Codable, Identifiable, Sendable {
     var photosAssetIdentifier: String?
 
     var currentRevision: FilmyPhotoRevision? { revisions.last }
+    func revisionForEditing(_ selectedID: UUID?) -> FilmyPhotoRevision? {
+        guard let selectedID else { return currentRevision }
+        return revisions.first(where: { $0.id == selectedID }) ?? currentRevision
+    }
     var originalFilename: String? {
         guard ["jpg", "heic"].contains(originalExtension) else { return nil }
         return "original.\(originalExtension)"
