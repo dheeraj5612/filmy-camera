@@ -278,7 +278,14 @@ enum FujiMath {
         switch order {
         case .ascending: return (-half...half).map { Double($0) * step }
         case .descending: return (-half...half).reversed().map { Double($0) * step }
-        case .centerFirst: return [0] + (1...half).flatMap { [-Double($0) * step, Double($0) * step] }
+        case .centerFirst:
+            var offsets: [Double] = [0]
+            for index in 1...half {
+                let offset = Double(index) * step
+                offsets.append(-offset)
+                offsets.append(offset)
+            }
+            return offsets
         }
     }
 
