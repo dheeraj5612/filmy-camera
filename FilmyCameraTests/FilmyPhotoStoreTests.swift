@@ -119,4 +119,35 @@ final class FilmyPhotoStoreTests: XCTestCase {
         }
         XCTAssertTrue(FilmyPhotoStore.isSafeFilename("original.heic"))
     }
+
+    func testLoadingOlderVersionRestoresItsOutputSettingsWithoutChangingLatestRevision() async throws {
+        let location = root()
+        defer { try? FileManager.default.removeItem(at: location) }
+        let store = FilmyPhotoStore(root: location)
+        let source = try fixture()
+        var firstSettings = ProCaptureSettings()
+        firstSettings.resolution = .mp12
+        firstSettings.format = .jpeg
+        firstSettings.colorGamut = .sRGB
+        let document = try await store.create(
+            processed: source, raw: nil, liveMovieURL: nil, capturedAt: Date(),
+            geometry: FilmyRenderGeometry(viewportWidth: 4, viewportHeight: 3,
+                                          previewWidth: 400, previewHeight: 300,
+                                          grainSeed: 1, flashFired: false),
+            recipe: FilmRecipe.builtIns[0], finish: .photo, settings: firstSettings
+        )
+        let firstID = try XCTUnwrap(document.currentRevision?.id)
+        var laterSettings = ProCaptureSettings()
+        laterSettings.resolution = .mp48
+        laterSettings.format = .jpeg
+        let updated = try await store.addRevision(
+            document.id, expectedRevisionID: firstID, recipe: FilmRecipe.builtIns[0],
+            finish: .photo, settings: laterSettings, renderedData: source
+        )
+
+        XCTAssertEqual(updated.revisionForEditing(firstID)?.output, firstSettings)
+        XCTAssertEqual(updated.revisionForEditing(nil)?.output, laterSettings)
+        XCTAssertEqual(updated.revisionForEditing(UUID())?.output, laterSettings)
+        XCTAssertEqual(updated.currentRevision?.id, updated.revisionForEditing(nil)?.id)
+    }
 }

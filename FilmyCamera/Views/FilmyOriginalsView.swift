@@ -4,6 +4,8 @@ import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
 
+private struct FilmyDecodedThumbnail: @unchecked Sendable { let image: UIImage }
+
 /// This library does not depend on Photos authorization or cache retention.
 @MainActor
 struct FilmyOriginalsView: View {
@@ -67,7 +69,20 @@ private struct FilmyDocumentThumbnail: View {
         }
         .frame(width: 64, height: 64).clipShape(RoundedRectangle(cornerRadius: 10))
         .task(id: revisionID) {
-            if let data = try? await FilmyPhotoStore.shared.thumbnailData(id) { image = UIImage(data: data) }
+            image = nil
+            guard let data = try? await FilmyPhotoStore.shared.thumbnailData(id) else { return }
+            let decoded = await ImageDecodeQueue.shared.value { () -> FilmyDecodedThumbnail? in
+                guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+                      let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                        kCGImageSourceCreateThumbnailFromImageAlways: true,
+                        kCGImageSourceCreateThumbnailWithTransform: true,
+                        kCGImageSourceThumbnailMaxPixelSize: 128,
+                        kCGImageSourceShouldCacheImmediately: true
+                      ] as CFDictionary) else { return nil }
+                return FilmyDecodedThumbnail(image: UIImage(cgImage: thumbnail))
+            }
+            guard !Task.isCancelled else { return }
+            image = decoded?.image
         }
     }
 }
@@ -77,10 +92,12 @@ struct FilmyPhotoEditorView: View {
     let documentID: UUID
     @ObservedObject var photoLibrary: PhotoLibraryService
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var document: FilmyPhotoDocument?
     @State private var recipe: FilmRecipe?
     @State private var finish: PhotoFinish = .photo
     @State private var preview: UIImage?
+    @State private var loadingRendition = false
     @State private var originalPreview: UIImage?
     @State private var originalURL: URL?
     @State private var rawURL: URL?
@@ -96,9 +113,9 @@ struct FilmyPhotoEditorView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 imagePreview
-                if let document, let current = document.currentRevision {
+                if let document, let editing = document.revisionForEditing(selectedRevisionID) {
                     Text(document.capturedAt, format: .dateTime.month().day().year().hour().minute()).foregroundStyle(.secondary)
-                    Text("\(current.output.format.title) · \(current.output.resolution.title) requested · \(current.output.dynamicRange == .hdr ? "HDR PQ" : "SDR")")
+                    Text("\(editing.output.format.title) · \(editing.output.resolution.title) requested · \(editing.output.dynamicRange == .hdr ? "HDR PQ" : "SDR")")
                         .font(.caption).monospacedDigit()
                     Toggle("Compare original", isOn: $showingOriginal).accessibilityIdentifier("filmy-compare-original")
                     if let recipe {
@@ -114,11 +131,7 @@ struct FilmyPhotoEditorView: View {
                         Text("Photo").tag(PhotoFinish.photo)
                         Text("Instant Print").tag(PhotoFinish.instantPrint).disabled(document.hasLivePhoto)
                     }.pickerStyle(.segmented)
-                    HStack {
-                        Button("Preview look") { Task { await develop(save: false) } }.buttonStyle(.bordered)
-                        Button("Save version") { Task { await develop(save: true) } }.buttonStyle(.borderedProminent)
-                            .accessibilityIdentifier("filmy-save-version")
-                    }
+                    developmentActions
                     Text("Editing previews are SDR and limited to 1800 pixels. HDR is preserved in the saved HEIF when selected. Save version renders from the retained original at the selected output resolution. Every save creates a new version.")
                         .font(.caption).foregroundStyle(.secondary)
                     revisionPicker(document)
@@ -153,8 +166,30 @@ struct FilmyPhotoEditorView: View {
             } else if let image = showingOriginal ? originalPreview : preview {
                 Image(uiImage: image).resizable().scaledToFit().allowedDynamicRange(.high)
                     .frame(maxHeight: 520).clipShape(RoundedRectangle(cornerRadius: 14))
+            } else if loadingRendition {
+                ProgressView("Loading version").frame(maxWidth: .infinity, minHeight: 180)
             } else { ContentUnavailableView("Develop the original", systemImage: "camera.filters") }
         }
+    }
+
+    @ViewBuilder
+    private var developmentActions: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(spacing: 12) { developmentButtons }
+        } else {
+            HStack(spacing: 12) { developmentButtons }
+        }
+    }
+
+    @ViewBuilder
+    private var developmentButtons: some View {
+        Button("Preview look") { Task { await develop(save: false) } }
+            .buttonStyle(.bordered)
+            .frame(maxWidth: .infinity, minHeight: 44)
+        Button("Save version") { Task { await develop(save: true) } }
+            .buttonStyle(.borderedProminent)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .accessibilityIdentifier("filmy-save-version")
     }
 
     private func revisionPicker(_ document: FilmyPhotoDocument) -> some View {
@@ -194,6 +229,7 @@ struct FilmyPhotoEditorView: View {
     }
 
     private func load() async {
+        loadingRendition = true
         do {
             let value = try await FilmyPhotoStore.shared.loadDocument(documentID)
             document = value
@@ -205,24 +241,32 @@ struct FilmyPhotoEditorView: View {
             liveURL = try await FilmyPhotoStore.shared.liveMovieURL(documentID)
             let source = try await FilmyPhotoStore.shared.originalData(documentID)
             originalPreview = await Task.detached(priority: .userInitiated) { Self.thumbnail(source) }.value
-            await showRendition(revisionID: value.currentRevision?.id)
-        } catch { message = error.localizedDescription }
+            await showRendition(revisionID: selectedRevisionID)
+        } catch {
+            loadingRendition = false
+            message = error.localizedDescription
+        }
     }
 
     private func showRendition(revisionID: UUID?) async {
         guard let revisionID else { return }
+        preview = nil
+        loadingRendition = true
+        let image: UIImage?
         if let url = try? await FilmyPhotoStore.shared.renditionURL(documentID, revisionID: revisionID) {
-            let image = await Task.detached(priority: .userInitiated) { () -> UIImage? in
+            image = await Task.detached(priority: .userInitiated) { () -> UIImage? in
                 guard let data = try? Data(contentsOf: url) else { return nil }
                 return Self.thumbnail(data)
             }.value
-            guard selectedRevisionID == revisionID else { return }
-            preview = image
-        } else { preview = originalPreview }
+        } else { image = originalPreview }
+        guard !Task.isCancelled, selectedRevisionID == revisionID else { return }
+        preview = image
+        loadingRendition = false
     }
 
     private func develop(save: Bool) async {
-        guard !busy, let document, let current = document.currentRevision, let recipe else { return }
+        guard !busy, let document, let current = document.currentRevision,
+              let editing = document.revisionForEditing(selectedRevisionID), let recipe else { return }
         busy = true
         defer { busy = false }
         do {
@@ -231,7 +275,7 @@ struct FilmyPhotoEditorView: View {
             let rendered = await Task.detached(priority: .userInitiated) {
                 autoreleasepool {
                     let source: Data
-                    var output = current.output
+                    var output = editing.output
                     if save { source = data }
                     else {
                         guard let thumbnail = Self.thumbnail(data), let previewData = thumbnail.jpegData(compressionQuality: 0.98) else {
@@ -258,7 +302,7 @@ struct FilmyPhotoEditorView: View {
             if save {
                 let updated = try await FilmyPhotoStore.shared.addRevision(
                     documentID, expectedRevisionID: current.id, recipe: recipe, finish: selectedFinish,
-                    settings: current.output, renderedData: rendered.data
+                    settings: editing.output, renderedData: rendered.data
                 )
                 self.document = updated
                 selectedRevisionID = updated.currentRevision?.id

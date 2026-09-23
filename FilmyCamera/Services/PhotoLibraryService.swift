@@ -1307,11 +1307,15 @@ final class PhotoLibraryService: ObservableObject {
     private func removeCachedFrame(identifier: String) {
         invalidateThumbnailCache()
         var resources = savedFrameResources
-        guard let resource = resources.removeValue(forKey: identifier) else { return }
-        if let resourceURL = localFrameURL(for: resource.filename) {
-            try? FileManager.default.removeItem(at: resourceURL)
+        if let resource = resources.removeValue(forKey: identifier) {
+            if let resourceURL = localFrameURL(for: resource.filename) {
+                try? FileManager.default.removeItem(at: resourceURL)
+            }
+            savedFrameResources = resources
         }
-        savedFrameResources = resources
+        // Ownership can be removed even when the resource index was already
+        // missing. Always rebuild the published fallback list so a deleted
+        // frame cannot remain visible until the next explicit refresh.
         refreshCachedFrames(excluding: Set(assets.map(\.localIdentifier)))
     }
 
