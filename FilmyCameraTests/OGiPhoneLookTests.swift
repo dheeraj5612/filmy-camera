@@ -66,6 +66,17 @@ final class OGiPhoneLookTests: XCTestCase {
         )
     }
 
+    func testOGiPhoneBrightensMidtonesWithoutWashingOut() throws {
+        let recipe = try recipe()
+        let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
+        let input = CIImage(color: CIColor(red: 0.46, green: 0.46, blue: 0.46, alpha: 1)).cropped(to: extent)
+        let context = CIContext(options: FilmRenderer.testContextOptions)
+        let pixels = try Self.pixels(FilmRenderer.render(input, recipe: recipe, quality: .photo), extent: extent, context: context)
+        let luma = 0.2126 * Double(pixels[0]) + 0.7152 * Double(pixels[1]) + 0.0722 * Double(pixels[2])
+        XCTAssertGreaterThan(luma, 0.46, "OG iPhone auto-exposure should lift midtones")
+        XCTAssertLessThan(luma, 0.62, "OG iPhone must not wash midtones out toward white")
+    }
+
     func testOGiPhoneClipsNearWhiteHighlights() throws {
         let recipe = try recipe()
         let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
@@ -160,6 +171,17 @@ final class OGiPhoneLookPreviewTests: XCTestCase {
         let afterURL = directory.appendingPathComponent("cafe-after-og-iphone.png")
         try UIImage(cgImage: beforeCG).pngData()?.write(to: beforeURL)
         try UIImage(cgImage: afterCG).pngData()?.write(to: afterURL)
+
+        // Reference renders for side-by-side tone comparison.
+        let references: [(String, FilmRecipe)] = [
+            ("cafe-neutral.png", FilmRecipe(id: "neutral-preview", name: "Neutral", subtitle: "Preview control", filmBase: .standard))
+        ] + FilmRecipe.builtIns.filter { $0.filmBase == .compactDigital }.prefix(1).map { ("cafe-compact-digital.png", $0) }
+        for (name, reference) in references {
+            let image = FilmRenderer.render(source, recipe: reference, quality: .export)
+            if let cgImage = FilmRenderer.outputCGImage(image, from: image.extent) {
+                try UIImage(cgImage: cgImage).pngData()?.write(to: directory.appendingPathComponent(name))
+            }
+        }
 
         print("OG iPhone before/after PNGs written to: \(directory.path)")
         XCTAssertTrue(FileManager.default.fileExists(atPath: beforeURL.path))

@@ -1198,34 +1198,29 @@ public final class FilmRenderer {
     }
 
     /// Original approximation of the fixed JPEG tone response on the
-    /// first-generation iPhone camera: lifted, compressed shadows, a bright
-    /// midtone push, and a hard highlight shoulder that clips to full white
-    /// well before the input reaches 1.0.
+    /// first-generation iPhone camera: a bright auto-exposure push with a
+    /// hard highlight clip. A linear gain plus clamp keeps the response
+    /// predictable; a spline tone curve here overshot badly on real images.
     private static func applyFirstPhoneTone(
         to image: CIImage,
         recipe: FilmRecipe
     ) -> CIImage {
-        guard recipe.filmBase == .firstPhone,
-              let toneCurve = CIFilter(name: "CIToneCurve") else {
-            return image
-        }
-
-        let points: [(CGFloat, CGFloat)] = [
-            (0.00, 0.03),
-            (0.20, 0.32),
-            (0.45, 0.62),
-            (0.88, 1.00),
-            (1.00, 1.00)
-        ]
-
-        toneCurve.setValue(image, forKey: kCIInputImageKey)
-        for (index, point) in points.enumerated() {
-            toneCurve.setValue(
-                CIVector(x: point.0, y: point.1),
-                forKey: "inputPoint\(index)"
-            )
-        }
-        return toneCurve.outputImage?.cropped(to: image.extent) ?? image
+        guard recipe.filmBase == .firstPhone else { return image }
+        let gain: CGFloat = 1.22
+        let shadowLift: CGFloat = 0.004
+        return image
+            .applyingFilter("CIColorMatrix", parameters: [
+                "inputRVector": CIVector(x: gain, y: 0, z: 0, w: 0),
+                "inputGVector": CIVector(x: 0, y: gain, z: 0, w: 0),
+                "inputBVector": CIVector(x: 0, y: 0, z: gain, w: 0),
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+                "inputBiasVector": CIVector(x: shadowLift, y: shadowLift, z: shadowLift, w: 0)
+            ])
+            .applyingFilter("CIColorClamp", parameters: [
+                "inputMinComponents": immutableResources.zeroComponents,
+                "inputMaxComponents": immutableResources.oneComponents
+            ])
+            .cropped(to: image.extent)
     }
 
     private static func applyWhiteBalance(
@@ -1736,7 +1731,7 @@ public final class FilmRenderer {
     }
 
     /// Simple lens color shading: a neutral-warm center fading to a slightly
-    /// darker, greenish-cyan corner, layered as an additive radial delta.
+    /// darker, greenish-cyan corner, applied as a multiplicative radial gain.
     private static func applyFirstPhoneLensShading(
         to image: CIImage,
         recipe: FilmRecipe
@@ -1754,13 +1749,13 @@ public final class FilmRenderer {
         gradient.setValue(CIVector(cgPoint: center), forKey: "inputCenter")
         gradient.setValue(0, forKey: "inputRadius0")
         gradient.setValue(radius * 1.05, forKey: "inputRadius1")
-        // Alpha is 1 throughout so CIAdditionCompositing below adds these
-        // RGB values directly as a delta rather than a premultiplied blend.
-        gradient.setValue(CIColor(red: 0.010, green: -0.004, blue: 0.006, alpha: 1), forKey: "inputColor0")
-        gradient.setValue(CIColor(red: -0.050, green: -0.020, blue: -0.015, alpha: 1), forKey: "inputColor1")
+        // Opaque gain map: multiplying keeps the image's alpha at 1, whereas
+        // additive compositing would sum alphas and halve unpremultiplied RGB.
+        gradient.setValue(CIColor(red: 1.0, green: 0.996, blue: 0.998, alpha: 1), forKey: "inputColor0")
+        gradient.setValue(CIColor(red: 0.95, green: 0.98, blue: 0.985, alpha: 1), forKey: "inputColor1")
         guard let shading = gradient.outputImage?.cropped(to: extent) else { return image }
 
-        return shading.applyingFilter("CIAdditionCompositing", parameters: [
+        return shading.applyingFilter("CIMultiplyCompositing", parameters: [
             kCIInputBackgroundImageKey: image
         ]).cropped(to: extent)
     }
