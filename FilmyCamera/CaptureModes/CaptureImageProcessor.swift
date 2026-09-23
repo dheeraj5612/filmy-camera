@@ -8,7 +8,7 @@ import simd
 /// Bounded, on-device processing. The film transform is the app's existing renderer,
 /// not a second approximation. Fusion happens before grain and finishing effects.
 enum CaptureImageProcessor {
-    private static let linearContext: CIContext = {
+    private nonisolated(unsafe) static let linearContext: CIContext = {
         CIContext(options: [.workingColorSpace: CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!,
                             .outputColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!, .cacheIntermediates: false])
     }()
