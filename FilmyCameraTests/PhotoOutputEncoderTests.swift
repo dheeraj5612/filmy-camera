@@ -1,3 +1,4 @@
+import CoreLocation
 import CoreGraphics
 import Foundation
 import ImageIO
@@ -6,6 +7,42 @@ import XCTest
 @testable import FilmyCamera
 
 final class PhotoOutputEncoderTests: XCTestCase {
+    func testGPSRoundTripUsesHemisphereAltitudeAndKilometersPerHour() throws {
+        let stamp = Date(timeIntervalSince1970: 1_700_000_000)
+        let location = CLLocation(coordinate: CLLocationCoordinate2D(latitude: -33.86, longitude: -151.21),
+                                  altitude: -12.5, horizontalAccuracy: 5, verticalAccuracy: 3,
+                                  course: 45, speed: 10, timestamp: stamp)
+        let image = try detailedFixture(width: 8, height: 8)
+        let data = try XCTUnwrap(PhotoOutputEncoder.jpegData(for: image, sourceData: Data(),
+                                 capturedAt: stamp, recipe: FilmRecipe.builtIns[0], location: location))
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(data as CFData, nil))
+        let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any])
+        let gps = try XCTUnwrap(properties[kCGImagePropertyGPSDictionary as String] as? [String: Any])
+        XCTAssertEqual(gps[kCGImagePropertyGPSLatitudeRef as String] as? String, "S")
+        XCTAssertEqual(gps[kCGImagePropertyGPSLongitudeRef as String] as? String, "W")
+        XCTAssertEqual((gps[kCGImagePropertyGPSAltitudeRef as String] as? NSNumber)?.intValue, 1)
+        XCTAssertEqual((gps[kCGImagePropertyGPSAltitude as String] as? NSNumber)?.doubleValue, 12.5)
+        XCTAssertEqual((gps[kCGImagePropertyGPSSpeed as String] as? NSNumber)?.doubleValue, 36)
+        XCTAssertEqual(gps[kCGImagePropertyGPSSpeedRef as String] as? String, "K")
+        XCTAssertEqual(gps[kCGImagePropertyGPSDateStamp as String] as? String, "2023:11:14")
+        XCTAssertNotNil(gps[kCGImagePropertyGPSTimeStamp as String])
+    }
+
+    @MainActor
+    func testLocationSnapshotRejectsDeniedStaleFutureAndInvalidFixes() {
+        let stamp = Date(timeIntervalSince1970: 1_700_000_000)
+        func fix(age: Double = 0, accuracy: Double = 5, latitude: Double = 40) -> CLLocation {
+            CLLocation(coordinate: CLLocationCoordinate2D(latitude: latitude, longitude: -73), altitude: 0,
+                       horizontalAccuracy: accuracy, verticalAccuracy: -1, timestamp: stamp.addingTimeInterval(-age))
+        }
+        XCTAssertNotNil(CameraCaptureLocationProvider.validLocation(fix(), authorization: .authorizedWhenInUse, at: stamp))
+        XCTAssertNil(CameraCaptureLocationProvider.validLocation(fix(), authorization: .denied, at: stamp))
+        XCTAssertNil(CameraCaptureLocationProvider.validLocation(fix(age: 61), authorization: .authorizedWhenInUse, at: stamp))
+        XCTAssertNil(CameraCaptureLocationProvider.validLocation(fix(age: -1), authorization: .authorizedWhenInUse, at: stamp))
+        XCTAssertNil(CameraCaptureLocationProvider.validLocation(fix(accuracy: -1), authorization: .authorizedWhenInUse, at: stamp))
+        XCTAssertNil(CameraCaptureLocationProvider.validLocation(fix(latitude: 91), authorization: .authorizedWhenInUse, at: stamp))
+    }
+
     func testJPEGUsesMeasuredHighQualityContractWithoutChangingDimensions() throws {
         let image = try detailedFixture(width: 320, height: 240)
         let output = try XCTUnwrap(PhotoOutputEncoder.jpegData(
@@ -56,7 +93,7 @@ final class PhotoOutputEncoderTests: XCTestCase {
         add(measurement)
     }
 
-    func testFilteredJPEGKeepsCaptureProvenanceAndStripsGPS() throws {
+    func testFilteredJPEGKeepsSafeCameraMetadataAndNormalizesLayout() throws {
         let recipe = FilmRecipe.builtIns[3]
         let colorSpace = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
         let context = try XCTUnwrap(CGContext(
@@ -82,10 +119,13 @@ final class PhotoOutputEncoderTests: XCTestCase {
         let sourceProperties: [String: Any] = [
             kCGImagePropertyGPSDictionary as String: [
                 kCGImagePropertyGPSLatitude as String: 41.88,
-                kCGImagePropertyGPSLongitude as String: -87.63
+                kCGImagePropertyGPSLatitudeRef as String: "N",
+                kCGImagePropertyGPSLongitudeRef as String: "W",
+                kCGImagePropertyGPSLongitude as String: 87.63
             ],
             kCGImagePropertyTIFFDictionary as String: [
-                kCGImagePropertyTIFFArtist as String: "source-artist-should-not-leak"
+                kCGImagePropertyTIFFMake as String: "Apple",
+                kCGImagePropertyTIFFModel as String: "iPhone camera fixture"
             ],
             kCGImagePropertyExifDictionary as String: [
                 kCGImagePropertyExifExposureTime as String: 0.008,
@@ -168,7 +208,8 @@ final class PhotoOutputEncoderTests: XCTestCase {
         XCTAssertEqual(properties[kCGImagePropertyColorModel as String] as? String, kCGImagePropertyColorModelRGB as String)
         XCTAssertEqual(properties[kCGImagePropertyProfileName as String] as? String, PhotoOutputEncoder.outputProfileName)
         XCTAssertNil(properties[kCGImagePropertyGPSDictionary as String])
-        XCTAssertNil(tiff[kCGImagePropertyTIFFArtist as String])
+        XCTAssertNil(tiff[kCGImagePropertyTIFFMake as String])
+        XCTAssertNil(tiff[kCGImagePropertyTIFFModel as String])
         XCTAssertNil(exif[kCGImagePropertyExifCameraOwnerName as String])
         XCTAssertNil(properties[kCGImagePropertyMakerAppleDictionary as String])
         XCTAssertEqual(CGImageSourceGetType(outputSource) as String?, UTType.jpeg.identifier)

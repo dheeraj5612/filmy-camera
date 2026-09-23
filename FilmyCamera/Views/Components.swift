@@ -1,4 +1,4 @@
-import CoreImage
+@preconcurrency import CoreImage
 import SwiftUI
 import UIKit
 
@@ -102,11 +102,19 @@ enum FilmyTheme {
     static let tertiary = Color(white: 0.65)
 
     // Signal colors
+    #if G7_APP
+    static let accent = Color(red: 0.388, green: 1.0, blue: 0.604) // #63FF9A
+    static let comparison = Color(red: 0.388, green: 1.0, blue: 0.604)
+    static let accentWarm = Color(red: 0.388, green: 1.0, blue: 0.604)
+    static let filmAccent = Color(red: 0.839, green: 1.0, blue: 0.886) // #D6FFE2
+    static let mint = Color(red: 0.839, green: 1.0, blue: 0.886)
+    #else
     static let accent = Color(red: 1, green: 0.471, blue: 0.329)
     static let comparison = Color(red: 0.416, green: 0.863, blue: 1)
     static let accentWarm = Color(red: 1, green: 0.471, blue: 0.329)
     static let filmAccent = Color(red: 0.855, green: 0.953, blue: 0.396)
     static let mint = Color(red: 0.54, green: 0.92, blue: 0.69)
+    #endif
     static let danger = Color(red: 1, green: 0.43, blue: 0.47)
 
     // Chrome that floats over the live viewfinder
@@ -115,7 +123,9 @@ enum FilmyTheme {
     /// The letterbox bands around the viewfinder. Pure black, like a camera
     /// body, so the frame reads as the only picture on screen.
     static let viewfinderBand = Color.black
-    static let viewfinderCornerRadius: CGFloat = 2
+    // A restrained radius keeps the live frame camera-like while softening
+    // the hard rectangular edge on the main camera screen.
+    static let viewfinderCornerRadius: CGFloat = 14
 
     static let cornerRadius: CGFloat = 18
     static let controlRadius: CGFloat = 12
@@ -181,7 +191,7 @@ struct BackToCameraButton: View {
                 .font(.system(.subheadline, design: .rounded).weight(.bold))
                 .foregroundStyle(FilmyTheme.primary)
                 .padding(.horizontal, 12)
-                .frame(minHeight: FilmyTheme.minimumHitTarget)
+                .frame(minHeight: FilmyTheme.toolControlHeight)
                 .background(FilmyTheme.panel.opacity(0.94), in: Capsule())
                 .overlay {
                     Capsule().stroke(FilmyTheme.lineStrong, lineWidth: 1)
@@ -295,15 +305,35 @@ struct ChromeShapeBackground<S: InsettableShape>: View {
 
 // MARK: - Button styles
 
+/// Pure interaction rules shared by camera, editor, and onboarding buttons.
+/// Keep feedback outside layout so pressing a control never reflows its neighbors.
+enum FilmyInteractionPolicy {
+    static func pressScale(isPressed: Bool, isEnabled: Bool, reduceMotion: Bool, requestedScale: CGFloat) -> CGFloat {
+        guard isPressed, isEnabled, !reduceMotion, requestedScale.isFinite else { return 1 }
+        return min(1, max(0.85, requestedScale))
+    }
+
+    static func zoomPresets(minZoom: CGFloat, maxZoom: CGFloat) -> [CGFloat] {
+        guard minZoom.isFinite, maxZoom.isFinite, minZoom > 0, maxZoom >= minZoom else { return [1] }
+        let available: [CGFloat] = [0.5, 1, 2, 3, 5].filter { $0 >= minZoom && $0 <= maxZoom }
+        // Some physical lenses expose a narrow range without a standard preset.
+        // Never offer an out-of-range 1x action for those lenses.
+        return available.isEmpty ? [minZoom] : available
+    }
+}
+
 struct PressableButtonStyle: ButtonStyle {
-    var scale: CGFloat = 0.94
+    var scale: CGFloat = 0.97
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? scale : 1)
-            .opacity(configuration.isPressed ? 0.86 : 1)
+            .scaleEffect(FilmyInteractionPolicy.pressScale(
+                isPressed: configuration.isPressed, isEnabled: isEnabled, reduceMotion: reduceMotion, requestedScale: scale
+            ))
+            .opacity(isEnabled ? (configuration.isPressed ? 0.82 : 1) : 0.5)
             .animation(
                 reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.72),
                 value: configuration.isPressed
@@ -319,11 +349,17 @@ struct FilmyPrimaryButtonStyle: ButtonStyle {
         configuration.label
             .font(.system(.headline, design: .default).weight(.semibold))
             .foregroundStyle(FilmyTheme.background)
-            .frame(maxWidth: .infinity, minHeight: 54)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 54)
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .background(FilmyTheme.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .opacity(isEnabled ? 1 : 0.5)
-            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .scaleEffect(FilmyInteractionPolicy.pressScale(
+                isPressed: configuration.isPressed, isEnabled: isEnabled, reduceMotion: reduceMotion, requestedScale: 0.98
+            ))
             .animation(
                 reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.72),
                 value: configuration.isPressed
@@ -339,15 +375,21 @@ struct FilmySecondaryButtonStyle: ButtonStyle {
         configuration.label
             .font(.system(.headline, design: .default).weight(.semibold))
             .foregroundStyle(FilmyTheme.primary)
-            .frame(maxWidth: .infinity, minHeight: 54)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 54)
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .background(FilmyTheme.panelRaised, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .strokeBorder(FilmyTheme.lineStrong, lineWidth: 1)
             }
             .opacity(isEnabled ? 1 : 0.5)
-            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .scaleEffect(FilmyInteractionPolicy.pressScale(
+                isPressed: configuration.isPressed, isEnabled: isEnabled, reduceMotion: reduceMotion, requestedScale: 0.98
+            ))
             .animation(
                 reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.72),
                 value: configuration.isPressed
@@ -378,11 +420,10 @@ struct Eyebrow: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 11, weight: .semibold, design: .default))
-            .tracking(1.2)
+            .font(.caption2.weight(.semibold))
+            .tracking(1)
             .foregroundStyle(color)
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -393,8 +434,9 @@ struct FilmyTag: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 10, weight: .bold, design: .default))
-            .tracking(0.8)
+            .font(.caption2.weight(.bold))
+            .tracking(0.6)
+            .fixedSize(horizontal: false, vertical: true)
             .foregroundStyle(filled ? FilmyTheme.background : tint)
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
@@ -406,14 +448,16 @@ struct MetricLabel: View {
     let title: String
     let value: String
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Eyebrow(text: title)
             Text(value)
                 .font(.system(.subheadline, design: .rounded).weight(.bold))
                 .foregroundStyle(FilmyTheme.primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
@@ -425,23 +469,32 @@ struct SectionHeading: View {
     let title: String
     var trailing: String?
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var layout: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .lastTextBaseline, spacing: 12))
+    }
+
     var body: some View {
-        HStack(alignment: .lastTextBaseline, spacing: 12) {
+        layout {
             VStack(alignment: .leading, spacing: 6) {
                 Eyebrow(text: eyebrow, color: FilmyTheme.accent)
-
                 Text(title)
-                    .font(.system(.largeTitle, design: .default).weight(.medium))
+                    .font(.system(.largeTitle, design: .default).weight(.semibold))
+                    .tracking(-0.6)
                     .foregroundStyle(FilmyTheme.primary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-
-            Spacer(minLength: 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             if let trailing {
                 Text(trailing)
-                    .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                    .font(.subheadline.weight(.medium))
                     .foregroundStyle(FilmyTheme.secondary)
                     .monospacedDigit()
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .accessibilityElement(children: .ignore)
@@ -456,6 +509,7 @@ struct SectionHeading: View {
 struct GlassCard<Content: View>: View {
     private let content: Content
     private let padding: CGFloat
+    @Environment(\.colorSchemeContrast) private var contrast
 
     init(padding: CGFloat = 16, @ViewBuilder content: () -> Content) {
         self.padding = padding
@@ -468,7 +522,8 @@ struct GlassCard<Content: View>: View {
             .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous)
-                    .strokeBorder(FilmyTheme.line, lineWidth: 1)
+                    .strokeBorder(contrast == .increased ? FilmyTheme.lineStrong : FilmyTheme.line, lineWidth: 1)
+                    .allowsHitTesting(false)
             }
     }
 }
@@ -660,9 +715,9 @@ struct CameraStatusPill: View {
     }
 }
 
-/// Apple Camera-style zoom presets: a glass capsule of small circles, with
-/// the active factor drawn larger and in the accent. It sits over the bottom
-/// edge of the viewfinder while the camera is live.
+/// Camera-style zoom presets with equal, stable touch targets. The active
+/// factor gains an outline and accent, not a different size. The capsule
+/// sits over the bottom edge of the viewfinder while the camera is live.
 struct ZoomPresetBar: View {
     let value: CGFloat
     let minZoom: CGFloat
@@ -672,11 +727,14 @@ struct ZoomPresetBar: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private static let candidates: [CGFloat] = [0.5, 1, 2, 3, 5]
+    @ScaledMetric(relativeTo: .caption) private var labelSize: CGFloat = 12
+
+    private var targetSize: CGFloat {
+        UIDevice.current.userInterfaceIdiom == .pad ? 64 : FilmyTheme.toolControlHeight
+    }
 
     static func presets(minZoom: CGFloat, maxZoom: CGFloat) -> [CGFloat] {
-        let available = candidates.filter { $0 >= minZoom - 0.01 && $0 <= maxZoom + 0.01 }
-        return available.isEmpty ? [1] : available
+        FilmyInteractionPolicy.zoomPresets(minZoom: minZoom, maxZoom: maxZoom)
     }
 
     private var presets: [CGFloat] {
@@ -690,7 +748,37 @@ struct ZoomPresetBar: View {
     }
 
     var body: some View {
-        HStack(spacing: 4) {
+        ViewThatFits(in: .horizontal) {
+            presetButtons.fixedSize(horizontal: true, vertical: false)
+            ScrollView(.horizontal, showsIndicators: false) {
+                presetButtons
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(height: targetSize)
+        }
+        .padding(4)
+        .viewfinderCapsule()
+        .accessibilityElement(children: .ignore)
+        .accessibilityIdentifier("zoom-control")
+        .accessibilityLabel("Zoom")
+        .accessibilityValue("\(value, specifier: "%.1f") times")
+        .accessibilityHint("Swipe up or down to adjust, or use the preset actions.")
+        .accessibilityAdjustableAction { direction in
+            HapticFeedback.play(.controlStep)
+            onAdjust(direction)
+        }
+        .accessibilityActions {
+            ForEach(presets, id: \.self) { preset in
+                Button("Set zoom to \(Self.zoomTitle(preset))") {
+                    HapticFeedback.play(.controlStep)
+                    onSelect(preset)
+                }
+            }
+        }
+    }
+
+    private var presetButtons: some View {
+        HStack(spacing: 0) {
             ForEach(presets, id: \.self) { preset in
                 let isActive = preset == activePreset
                 Button {
@@ -698,33 +786,28 @@ struct ZoomPresetBar: View {
                     onSelect(preset)
                 } label: {
                     Text(isActive ? Self.zoomTitle(value) : Self.presetTitle(preset))
-                        .font(.system(size: isActive ? 12 : 11, weight: .bold, design: .rounded))
+                        .font(.system(size: labelSize, weight: .bold, design: .rounded))
                         .monospacedDigit()
-                        .foregroundStyle(isActive ? FilmyTheme.accent : .white.opacity(0.92))
+                        .foregroundStyle(isActive ? FilmyTheme.accent : FilmyTheme.primary)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                        .frame(width: isActive ? 40 : 32, height: isActive ? 40 : 32)
-                        .background {
-                            Circle().fill(Color.black.opacity(isActive ? 0.62 : 0.28))
+                        .minimumScaleFactor(0.75)
+                        .frame(width: targetSize - 8, height: targetSize - 8)
+                        .background(Color.black.opacity(isActive ? 0.7 : 0.28), in: Circle())
+                        .overlay {
+                            Circle()
+                                .strokeBorder(isActive ? FilmyTheme.accent : .clear, lineWidth: 1.5)
+                                .allowsHitTesting(false)
                         }
-                        .contentShape(Circle())
+                        .frame(width: targetSize, height: targetSize)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.pressable)
+                // No scaling: the whole reserved target remains tappable.
+                .buttonStyle(PressableButtonStyle(scale: 1))
                 .accessibilityHidden(true)
+                .accessibilityIdentifier("zoom-preset-\(Self.presetTitle(preset))")
             }
         }
-        .padding(4)
-        .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: activePreset)
-        .viewfinderCapsule()
-        .accessibilityElement(children: .ignore)
-        .accessibilityIdentifier("zoom-control")
-        .accessibilityLabel("Zoom")
-        .accessibilityValue("\(value, specifier: "%.1f") times")
-        .accessibilityHint("Swipe up or down to adjust, or pinch the preview.")
-        .accessibilityAdjustableAction { direction in
-            HapticFeedback.play(.controlStep)
-            onAdjust(direction)
-        }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: activePreset)
     }
 
     static func zoomTitle(_ value: CGFloat) -> String {
@@ -848,7 +931,9 @@ struct FocusLockControl: View {
         }
         .buttonStyle(.pressable)
         .accessibilityLabel(isLocked ? "Unlock focus and exposure" : "Lock focus and exposure")
-        .accessibilityHint("Keeps focus and exposure at the selected point")
+        .accessibilityValue(isLocked ? "Locked" : "Unlocked")
+        .accessibilityAddTraits(isLocked ? .isSelected : [])
+        .accessibilityHint(isLocked ? "Releases the focus and exposure lock" : "Keeps focus and exposure at the selected point")
     }
 }
 
@@ -864,6 +949,8 @@ struct RecipeSwatch: View {
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var thumbnailImage: UIImage?
+    @State private var thumbnailRecipe: FilmRecipe?
+    @State private var thumbnailFailed = false
 
     private var cornerRadius: CGFloat {
         2
@@ -873,13 +960,22 @@ struct RecipeSwatch: View {
         // Let the caller's tile bounds size the labels and border; an
         // aspect-filled image can otherwise expand them outside the tile.
         Color.clear.overlay {
-            if let thumbnailImage {
+            if thumbnailRecipe == recipe, let thumbnailImage {
                 Image(uiImage: thumbnailImage)
                     .resizable()
                     .scaledToFill()
             } else {
                 FilmyTheme.panel
-                    .overlay { ProgressView().tint(FilmyTheme.secondary) }
+                    .overlay {
+                        if thumbnailFailed && thumbnailRecipe == recipe {
+                            Image(systemName: "photo")
+                                .foregroundStyle(FilmyTheme.tertiary)
+                                .accessibilityLabel("Preview unavailable")
+                        } else {
+                            ProgressView().tint(FilmyTheme.secondary)
+                                .accessibilityLabel("Loading look preview")
+                        }
+                    }
             }
         }
         .overlay {
@@ -924,18 +1020,25 @@ struct RecipeSwatch: View {
                 )
         }
         .task(id: recipe, priority: .utility) {
-            // Clear a prior recipe's image immediately, so a slider change
-            // never presents stale settings while the replacement is rendered.
             thumbnailImage = nil
-            // Editor sliders mutate the draft many times per second, and each
-            // change re-runs this task. Debounce first so a drag cannot queue
-            // one full renderer pass per tick; .task(id:) cancels the sleeping
-            // predecessor whenever the recipe changes again.
-            try? await Task.sleep(for: .milliseconds(150))
+            thumbnailRecipe = recipe
+            thumbnailFailed = false
+            // Reopening a cached collection should not blank every photograph
+            // for the editor's debounce interval.
+            if let cached = await RecipeSwatchRenderer.shared.cachedThumbnail(for: recipe) {
+                guard !Task.isCancelled else { return }
+                thumbnailImage = cached
+                return
+            }
+            // Only uncached slider revisions wait. Cancellation still prevents
+            // obsolete settings from queuing GPU work or replacing a newer tile.
+            do { try await Task.sleep(for: .milliseconds(150)) }
+            catch { return }
             guard !Task.isCancelled else { return }
             let renderedImage = await RecipeSwatchRenderer.shared.render(recipe: recipe)
             guard !Task.isCancelled else { return }
             thumbnailImage = renderedImage
+            thumbnailFailed = renderedImage == nil
         }
     }
 }
@@ -945,6 +1048,15 @@ struct RecipeSwatch: View {
 /// are discarded before they render, instead of launching N detached jobs.
 actor RecipeSwatchRenderer {
     static let shared = RecipeSwatchRenderer()
+
+    #if targetEnvironment(simulator)
+    // The simulator's Metal/Core Image completion queue can fail under the
+    // burst of thumbnail work created by accessibility traversal. Software
+    // rendering is deterministic and remains bounded to 384 x 512 here.
+    private let context = CIContext(options: FilmRenderer.testContextOptions)
+    #else
+    private let context = FilmRenderer.makeOutputContext()
+    #endif
 
     private final class SampleKey: NSObject {
         let recipe: FilmRecipe
@@ -969,17 +1081,25 @@ actor RecipeSwatchRenderer {
         guard let original = UIImage(named: "LookPreviewCafe")?.cgImage else { return nil }
         let bounds = CGRect(x: 0, y: 0, width: 384, height: 512)
         let framed = CameraFrameLayout.aspectFill(CIImage(cgImage: original), in: bounds)
-        guard let small = FilmRenderer.outputCGImage(framed, from: bounds) else { return nil }
+        guard let small = FilmRenderer.outputCGImage(framed, from: bounds, using: context) else { return nil }
         return CIImage(cgImage: small)
     }()
 
+    func purgeCache() {
+        sampleCache.removeAllObjects()
+    }
+
+    func cachedThumbnail(for recipe: FilmRecipe) -> UIImage? {
+        guard !Task.isCancelled else { return nil }
+        return sampleCache.object(forKey: SampleKey(recipe))
+    }
     func render(recipe: FilmRecipe) -> UIImage? {
         guard !Task.isCancelled else { return nil }
         return autoreleasepool {
             let key = SampleKey(recipe)
             if let cached = sampleCache.object(forKey: key) { return cached }
             guard let sampleScene else { return FilmRenderer.thumbnail(for: recipe) }
-            guard let image = FilmRenderer.previewThumbnail(for: recipe, over: sampleScene),
+            guard let image = FilmRenderer.previewThumbnail(for: recipe, over: sampleScene, using: context),
                   !Task.isCancelled else { return nil }
             let cost = (image.cgImage?.bytesPerRow ?? 0) * (image.cgImage?.height ?? 0)
             sampleCache.setObject(image, forKey: key, cost: cost)
@@ -1072,10 +1192,14 @@ struct CaptureButton: View {
 
 private struct ShutterButtonStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.88 : 1)
+            .scaleEffect(FilmyInteractionPolicy.pressScale(
+                isPressed: configuration.isPressed, isEnabled: isEnabled, reduceMotion: reduceMotion, requestedScale: 0.94
+            ))
+            .opacity(configuration.isPressed && isEnabled ? 0.82 : 1)
             .animation(
                 reduceMotion ? nil : .spring(response: 0.2, dampingFraction: 0.65),
                 value: configuration.isPressed
@@ -1157,9 +1281,9 @@ struct ToastView: View {
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(symbolColor)
             Text(message)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white)
-                .lineLimit(3)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(FilmyTheme.primary)
+                .lineLimit(nil)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 16)
@@ -1168,8 +1292,9 @@ struct ToastView: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous),
             fill: Color.black.opacity(style == .error ? 0.62 : 0.5)
         )
-        .shadow(color: .black.opacity(0.3), radius: 16, y: 8)
-        .padding(.horizontal, 24)
+        .frame(maxWidth: 480)
+        .shadow(color: .black.opacity(0.24), radius: 10, y: 4)
+        .padding(.horizontal, 16)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityAddTraits(.isStaticText)
@@ -1184,6 +1309,7 @@ struct EmptyStateCard: View {
     let message: String
     var actionTitle: String?
     var action: (() -> Void)?
+    var actionHint: String = ""
 
     var body: some View {
         GlassCard(padding: 22) {
@@ -1210,7 +1336,7 @@ struct EmptyStateCard: View {
                 if let actionTitle, let action {
                     Button(actionTitle, action: action)
                         .buttonStyle(.filmyPrimary)
-                        .accessibilityHint("Opens the relevant permission settings")
+                        .accessibilityHint(actionHint)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -1224,6 +1350,8 @@ struct SettingRow<Accessory: View>: View {
     let detail: String
     @ViewBuilder let accessory: Accessory
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     init(systemName: String, title: String, detail: String, @ViewBuilder accessory: () -> Accessory) {
         self.systemName = systemName
         self.title = title
@@ -1231,27 +1359,33 @@ struct SettingRow<Accessory: View>: View {
         self.accessory = accessory()
     }
 
+    private var contentLayout: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 13) {
             SettingIcon(systemName: systemName)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(.subheadline, design: .default).weight(.semibold))
-                    .foregroundStyle(FilmyTheme.primary)
-                    .fixedSize(horizontal: false, vertical: true)
-                // Permission guidance can run several lines at accessibility
-                // sizes; the screen scrolls, so let the detail wrap fully.
-                Text(detail)
-                    .font(.system(.caption, design: .default).weight(.medium))
-                    .foregroundStyle(FilmyTheme.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            contentLayout {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(FilmyTheme.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(FilmyTheme.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
+                accessory
+                    .fixedSize(horizontal: !dynamicTypeSize.isAccessibilitySize, vertical: true)
             }
-            .layoutPriority(1)
-
-            Spacer(minLength: 10)
-            accessory
         }
+        .frame(maxWidth: .infinity, minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
         .accessibilityElement(children: .contain)
     }
 }
@@ -1261,19 +1395,15 @@ struct PermissionBadge: View {
     let isEnabled: Bool
 
     var body: some View {
-        HStack(spacing: 5) {
-            Circle()
-                .fill(isEnabled ? FilmyTheme.mint : FilmyTheme.accent)
-                .frame(width: 5, height: 5)
-            Text(title)
-                .font(.system(size: 10, weight: .bold, design: .rounded))
-                .tracking(0.6)
-        }
-        .foregroundStyle(isEnabled ? FilmyTheme.mint : FilmyTheme.accent)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 6)
-        .fixedSize(horizontal: true, vertical: false)
-        .background((isEnabled ? FilmyTheme.mint : FilmyTheme.accent).opacity(0.12), in: Capsule())
+        Label(title, systemImage: isEnabled ? "checkmark.circle.fill" : "exclamationmark.circle")
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(isEnabled ? FilmyTheme.mint : FilmyTheme.accent)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .fixedSize(horizontal: false, vertical: true)
+            .background((isEnabled ? FilmyTheme.mint : FilmyTheme.accent).opacity(0.12), in: Capsule())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(title)
     }
 }
 

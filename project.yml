@@ -7,19 +7,56 @@ options:
   createIntermediateGroups: true
   groupSortPosition: top
 
+packages:
+  Firebase:
+    url: https://github.com/firebase/firebase-ios-sdk.git
+    exactVersion: 12.0.0
+  GoogleSignIn:
+    url: https://github.com/google/GoogleSignIn-iOS.git
+    exactVersion: 9.0.0
+  GoogleMobileAds:
+    url: https://github.com/googleads/swift-package-manager-google-mobile-ads.git
+    exactVersion: 12.14.0
+  GoogleUserMessagingPlatform:
+    url: https://github.com/googleads/swift-package-manager-google-user-messaging-platform.git
+    exactVersion: 3.0.0
+
+fileGroups:
+  - Config
+  - StoreKit
+
 settings:
   base:
     SWIFT_VERSION: "6.0"
+    FILMY_SDK_CONDITIONS: ""
+    "FILMY_SDK_CONDITIONS[sdk=iphoneos27.*]": FILMY_IOS27_SDK
+    "FILMY_SDK_CONDITIONS[sdk=iphonesimulator27.*]": FILMY_IOS27_SDK
+    SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) $(FILMY_SDK_CONDITIONS)"
     SWIFT_STRICT_CONCURRENCY: minimal
     TARGETED_DEVICE_FAMILY: "1,2"
     PRODUCT_BUNDLE_IDENTIFIER: com.dheeraj.filmycamera
-    CURRENT_PROJECT_VERSION: "26"
-    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "28"
+    MARKETING_VERSION: "1.0.2"
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: 6ALSCF5GBV
     SUPPORTS_MACCATALYST: NO
+  configs:
+    Debug:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) DEBUG $(FILMY_SDK_CONDITIONS)"
 
 schemes:
+  FilmyCameraStoreKit:
+    build:
+      targets:
+        FilmyCamera: all
+    run:
+      config: Debug
+      storeKitConfiguration: StoreKit/Filmy.storekit
+    test:
+      config: Debug
+      storeKitConfiguration: StoreKit/Filmy.storekit
+      targets:
+        - FilmyCameraTests
   FilmyCameraReview:
     build:
       targets:
@@ -36,6 +73,17 @@ schemes:
         FILMY_RUN_ROLL_QA: "1"
       targets:
         - FilmyCameraUITests
+  FilmyCameraStoreMedia:
+    build:
+      targets:
+        FilmyCamera: all
+    run:
+      config: Release
+    test:
+      config: Release
+      gatherCoverageData: false
+      targets:
+        - FilmyCameraUITests
 
 targets:
   FilmyCamera:
@@ -43,20 +91,70 @@ targets:
     platform: iOS
     sources:
       - path: FilmyCamera
+    configFiles:
+      Debug: Config/Monetization.Debug.xcconfig
+      Release: Config/Monetization.Release.xcconfig
+    entitlements:
+      path: FilmyCamera/FilmyCamera.entitlements
+      properties:
+        com.apple.developer.applesignin:
+          - Default
+    dependencies:
+      - package: Firebase
+        product: FirebaseCore
+      - package: Firebase
+        product: FirebaseAuth
+      - package: GoogleSignIn
+        product: GoogleSignIn
+      - package: GoogleSignIn
+        product: GoogleSignInSwift
+      - package: GoogleMobileAds
+        product: GoogleMobileAds
+      - package: GoogleUserMessagingPlatform
+        product: GoogleUserMessagingPlatform
     settings:
       base:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1,2"
         SWIFT_EMIT_LOC_STRINGS: YES
+        OTHER_LDFLAGS: ["$(inherited)", "-ObjC"]
+        SWIFT_OBJC_BRIDGING_HEADER: FilmyCamera/FilmyCamera-Bridging-Header.h
+      configs:
+        Release:
+          FILMY_APP_CODE_SIGN_STYLE: Automatic
+          FILMY_APP_CODE_SIGN_IDENTITY: Apple Development
+          FILMY_APP_PROVISIONING_PROFILE_SPECIFIER: ""
+          CODE_SIGN_STYLE: "$(FILMY_APP_CODE_SIGN_STYLE)"
+          CODE_SIGN_IDENTITY: "$(FILMY_APP_CODE_SIGN_IDENTITY)"
+          PROVISIONING_PROFILE_SPECIFIER: "$(FILMY_APP_PROVISIONING_PROFILE_SPECIFIER)"
     info:
       path: FilmyCamera/Info.plist
       properties:
         CFBundleDisplayName: Filmy Camera
+        FilmyMonthlyProductID: "$(FILMY_MONTHLY_PRODUCT_ID)"
+        FilmyPrivacyPolicyURL: "$(FILMY_PRIVACY_POLICY_URL)"
+        FilmyTermsURL: "$(FILMY_TERMS_URL)"
+        FilmyLegalReady: "$(FILMY_LEGAL_READY)"
+        FilmyMonetizationEnabled: "$(FILMY_MONETIZATION_ENABLED)"
+        FilmyAdsEnabled: "$(FILMY_ADS_ENABLED)"
+        FilmyAdMobBannerID: "$(FILMY_ADMOB_BANNER_ID)"
+        GADApplicationIdentifier: "$(FILMY_ADMOB_APP_ID)"
+        GADDelayAppMeasurementInit: true
+        FirebaseAnalyticsCollectionEnabled: false
+        GOOGLE_ANALYTICS_DEFAULT_ALLOW_AD_PERSONALIZATION_SIGNALS: false
+        CFBundleURLTypes:
+          - CFBundleTypeRole: Editor
+            CFBundleURLSchemes:
+              - "$(FILMY_GOOGLE_REVERSED_CLIENT_ID)"
+        SKAdNetworkItems:
+          - SKAdNetworkIdentifier: cstr6suwn9.skadnetwork
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         NSMotionUsageDescription: Filmy Camera uses device orientation only to display the optional horizon level. Motion data is not saved or uploaded.
-        NSCameraUsageDescription: Filmy Camera uses the camera to preview and capture photos with your selected film recipe.
-        NSPhotoLibraryAddUsageDescription: Filmy Camera saves finished photos to your Photos library automatically when you take a picture, or when you save an edited import.
+        NSLocationWhenInUseUsageDescription: Filmy Camera adds your location to photos you capture so you can see where they were taken.
+        NSCameraUsageDescription: Filmy Camera uses the camera to preview and capture photos and videos, and to read text or codes when requested.
+        NSMicrophoneUsageDescription: Filmy Camera records microphone audio only when you enable audio for a video or Live Photo.
+        NSPhotoLibraryAddUsageDescription: Filmy Camera saves finished photos and videos to your photo library.
         NSPhotoLibraryUsageDescription: Filmy Camera lets you choose existing photos to apply film recipes and reads frames saved by Filmy Camera for the in-app Roll.
         ITSAppUsesNonExemptEncryption: false
         UILaunchScreen:
@@ -66,6 +164,9 @@ targets:
           - UIInterfaceOrientationPortrait
         UISupportedInterfaceOrientations~ipad:
           - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
     scheme:
       gatherCoverageData: false
       testTargets:
@@ -77,6 +178,8 @@ targets:
     platform: iOS
     sources:
       - path: FilmyCameraTests
+      - path: StoreKit/Filmy.storekit
+        buildPhase: resources
     dependencies:
       - target: FilmyCamera
     settings:

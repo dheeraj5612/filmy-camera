@@ -102,7 +102,8 @@ final class GalleryPagingUITests: XCTestCase {
         app.buttons["gallery-previous-frame"].tap()
         assertFrame(2, recipe: "Fine Monochrome")
 
-        // The product locks this flow to portrait; verify geometry remains stable.
+        // This test starts in portrait on both idioms; verify the selected
+        // frame remains inside the settled portrait app geometry.
         XCTAssertTrue(waitUntil(timeout: 10) { self.app.frame.height >= self.app.frame.width })
         XCTAssertTrue(app.frame.insetBy(dx: -1, dy: -1).contains(position.frame))
 
@@ -161,6 +162,74 @@ final class GalleryPagingUITests: XCTestCase {
         return condition()
     }
 
+    private func waitForStableButton(_ identifier: String, timeout: TimeInterval) -> XCUIElement? {
+        var previousFrame: CGRect?
+        var stableSamples = 0
+        var stableElement: XCUIElement?
+        let windowFrame = app.frame
+        let found = waitUntil(timeout: timeout) {
+            // SwiftUI can replace a button while a sheet or recipe is applied;
+            // resolve the current node on each sample instead of retaining a stale AX node.
+            let element = app.buttons[identifier]
+            guard element.exists, element.isHittable else {
+                previousFrame = nil
+                stableSamples = 0
+                return false
+            }
+            let frame = element.frame
+            guard frame.width > 0, frame.height > 0,
+                  frame.intersects(windowFrame),
+                  windowFrame.contains(CGPoint(x: frame.midX, y: frame.midY)) else {
+                previousFrame = nil
+                stableSamples = 0
+                return false
+            }
+            if let previousFrame,
+               abs(previousFrame.minX - frame.minX) < 0.5,
+               abs(previousFrame.minY - frame.minY) < 0.5,
+               abs(previousFrame.width - frame.width) < 0.5,
+               abs(previousFrame.height - frame.height) < 0.5 {
+                stableSamples += 1
+            } else {
+                stableSamples = 0
+            }
+            previousFrame = frame
+            guard stableSamples >= 2 else { return false }
+            stableElement = element
+            return true
+        }
+        return found ? stableElement : nil
+    }
+
+    private func dismissLookLibraryIfPresented() -> Bool {
+        let library = app.descendants(matching: .any)["look-library"]
+        guard library.exists else { return true }
+
+        guard app.buttons["look-library-close"].waitForExistence(timeout: 5),
+              let done = waitForStableButton("look-library-close", timeout: 5) else {
+            attachRecipeCloseFailure("look-library-close-unhittable")
+            XCTFail("Looks library must expose a stable Done control before the drawer can be closed")
+            return false
+        }
+        done.tap()
+        let dismissed = waitUntil(timeout: 5) { !library.exists }
+        XCTAssertTrue(dismissed, "Looks library must dismiss before interacting with the underlying look drawer")
+        return dismissed
+    }
+
+    private func recipeTileIsSafelyTappable(_ tile: XCUIElement, picker: XCUIElement) -> Bool {
+        guard tile.exists, tile.isHittable else { return false }
+        let frame = tile.frame
+        let pickerFrame = picker.frame
+        guard frame.width > 0, frame.height > 0,
+              pickerFrame.width > 0, pickerFrame.height > 0,
+              pickerFrame.contains(CGPoint(x: frame.midX, y: frame.midY)) else {
+            return false
+        }
+        let libraryButton = app.buttons["look-library-open"]
+        return !libraryButton.exists || !frame.intersects(libraryButton.frame)
+    }
+
     private func attach(_ name: String) {
         // UIKit reports the new frame before the orientation animation ends.
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.7))
@@ -171,6 +240,7 @@ final class GalleryPagingUITests: XCTestCase {
     }
 
     private func ensureRecipe(id: String, name: String) throws {
+        guard dismissLookLibraryIfPresented() else { return }
         let menu = app.buttons["recipe-menu"]
         XCTAssertTrue(menu.waitForExistence(timeout: 10))
         guard !menu.label.contains(name) else { return }
@@ -179,9 +249,39 @@ final class GalleryPagingUITests: XCTestCase {
         XCTAssertTrue(tile.waitForExistence(timeout: 10))
         let picker = app.scrollViews["recipe-picker"]
         let deadline = Date(timeIntervalSinceNow: 8)
-        while !tile.isHittable && Date() < deadline { picker.swipeUp() }
-        XCTAssertTrue(tile.isHittable, "Recipe \(name) must be selectable")
+        while !recipeTileIsSafelyTappable(tile, picker: picker) && Date() < deadline {
+            picker.swipeUp()
+        }
+        XCTAssertTrue(recipeTileIsSafelyTappable(tile, picker: picker),
+                      "Recipe \(name) must be selectable inside the recipe picker")
         tile.tap()
+        guard dismissLookLibraryIfPresented() else { return }
+        let close = app.buttons["recipe-drawer-close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5), "Recipe picker must expose its close control")
+        guard let close = waitForStableButton("recipe-drawer-close", timeout: 5) else {
+            attachRecipeCloseFailure("recipe-drawer-close-unhittable-\(id)")
+            XCTFail("Recipe picker close control must have a stable on-screen hit target")
+            return
+        }
+        close.tap()
+        XCTAssertTrue(waitUntil(timeout: 5) {
+            !app.descendants(matching: .any)["recipe-drawer"].exists
+                && menu.label.contains(name)
+                && app.buttons["Capture photo"].isEnabled
+                && app.buttons["Capture photo"].isHittable
+        }, "Selecting \(name) must dismiss the picker and restore the shutter")
+    }
+
+    private func attachRecipeCloseFailure(_ name: String) {
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = name
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+
+        let hierarchy = XCTAttachment(string: app.debugDescription)
+        hierarchy.name = "\(name)-hierarchy"
+        hierarchy.lifetime = .keepAlways
+        add(hierarchy)
     }
 
 }

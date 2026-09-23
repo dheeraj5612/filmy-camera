@@ -465,6 +465,7 @@ struct RecipeDetailView: View {
     @State private var draft: FilmRecipe
     @State private var expandedSections: Set<EditorSection> = [.tone, .color]
     @State private var isShowingLookInfo = false
+    @State private var showingSourceSettings = false
 
     init(
         recipe: FilmRecipe,
@@ -549,6 +550,11 @@ struct RecipeDetailView: View {
                                     publicReferenceCard
                                 }
 
+                                if recipe.provenance.cameraSource != nil {
+                                    Button("Published settings and source") { showingSourceSettings = true }
+                                        .frame(minHeight: 48)
+                                        .accessibilityIdentifier("recipe-source-open")
+                                }
                                 provenanceNote
                             }
                             .padding(.top, 10)
@@ -586,6 +592,7 @@ struct RecipeDetailView: View {
                 }
         }
         .accessibilityElement(children: .contain)
+        .sheet(isPresented: $showingSourceSettings) { RecipeSourceSheet(recipe: draft) }
     }
 
     private var primaryAction: some View {
@@ -1374,13 +1381,13 @@ enum LookLibraryFilter: String, CaseIterable, Identifiable {
 
 enum LookLibraryIndex {
     static func favorites(from data: Data) -> Set<String> {
-        guard data.count <= 262_144,
+        guard data.count <= 2_097_152,
               let ids = try? JSONDecoder().decode([String].self, from: data) else { return [] }
-        return Set(ids.prefix(512).filter { !$0.isEmpty && $0.utf8.count <= 256 })
+        return Set(ids.prefix(4096).filter { !$0.isEmpty && $0.utf8.count <= 256 })
     }
 
     static func encodeFavorites(_ ids: Set<String>) -> Data {
-        let normalized = ids.filter { !$0.isEmpty && $0.utf8.count <= 256 }.sorted().prefix(512)
+        let normalized = ids.filter { !$0.isEmpty && $0.utf8.count <= 256 }.sorted().prefix(4096)
         return (try? JSONEncoder().encode(Array(normalized))) ?? Data()
     }
 
@@ -1402,14 +1409,16 @@ enum LookLibraryIndex {
             case .compact: included = recipe.isDigitalCameraStyle
             case .film: included = !recipe.isDigitalCameraStyle && !monochrome
             case .monochrome: included = monochrome
-            case .negative: included = recipe.creativeCollection == .negative
-            case .slide: included = recipe.creativeCollection == .slide
-            case .cinema: included = recipe.creativeCollection == .cinema
+            case .negative: included = recipe.creativeCollection == .negative || (recipe.provenance.cameraSource != nil && RecipeCatalog.family(for: recipe.filmBase) == "negative")
+            case .slide: included = recipe.creativeCollection == .slide || (recipe.provenance.cameraSource != nil && RecipeCatalog.family(for: recipe.filmBase) == "slide")
+            case .cinema: included = recipe.creativeCollection == .cinema || (recipe.provenance.cameraSource != nil && RecipeCatalog.family(for: recipe.filmBase) == "cinema")
             case .instant: included = recipe.creativeCollection == .instant
             case .experimental: included = recipe.creativeCollection == .experimental
             }
-            let searchable = "\(recipe.name) \(recipe.descriptor) \(recipe.creativeCollection?.title ?? "")"
-            return included && words.allSatisfy { searchable.localizedStandardContains($0) }
+            guard included else { return false }
+            guard !words.isEmpty else { return true }
+            let searchable = RecipeCatalog.searchText(for: recipe)
+            return words.allSatisfy { searchable.localizedStandardContains($0) }
         }
     }
 }
@@ -1422,6 +1431,7 @@ struct LookLibraryView: View {
     let selectedRecipeID: String
     var selectionIdentifierPrefix = "library-recipe"
     var subtitle = "Find a feeling. Make it your own."
+    var libraryPreferences: Binding<RecipeLibraryPreferences>? = nil
     let onSelect: (FilmRecipe) -> Void
     let onClose: () -> Void
 
@@ -1429,6 +1439,8 @@ struct LookLibraryView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var query = ""
     @State private var filter: LookLibraryFilter = .all
+    @State private var showingManager = false
+    @State private var sourceRecipe: FilmRecipe?
     @FocusState private var searchIsFocused: Bool
 
     // The hosted iPad review runs with a 0.75 compatibility scale, so a
@@ -1506,37 +1518,92 @@ struct LookLibraryView: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("look-library")
         .accessibilityAction(.escape, onClose)
+        .sheet(isPresented: $showingManager) {
+            if let libraryPreferences {
+                RecipeLibraryManagerView(preferences: libraryPreferences, recipes: recipes,
+                                         selectedRecipeID: selectedRecipeID, onSelect: onSelect)
+            }
+        }
+        .sheet(item: $sourceRecipe) { recipe in RecipeSourceSheet(recipe: recipe) }
     }
 
     private func libraryHeader(compact: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .top, spacing: 16) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Looks")
-                        .font(.system(compact ? .title2 : .largeTitle).weight(.bold))
-                        .foregroundStyle(FilmyTheme.primary)
-                        .accessibilityAddTraits(.isHeader)
+        let accessibilityHeader = dynamicTypeSize.isAccessibilitySize
+        return VStack(alignment: .leading, spacing: accessibilityHeader ? 10 : 6) {
+            if accessibilityHeader {
+                libraryTitle(compact: compact)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) {
+                        if libraryPreferences != nil {
+                            libraryManageButton(expanded: false)
+                        }
+                        libraryCloseButton(expanded: false)
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        if libraryPreferences != nil {
+                            libraryManageButton(expanded: true)
+                        }
+                        libraryCloseButton(expanded: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                Spacer(minLength: 0)
-                Button(action: onClose) {
-                    Text("Done")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(FilmyTheme.primary)
-                        .padding(.horizontal, 16)
-                        .frame(
-                            minWidth: UIDevice.current.userInterfaceIdiom == .pad ? 64 : 52,
-                            minHeight: libraryButtonTarget
-                        )
-                        .background(FilmyTheme.panel, in: Capsule())
-                        .contentShape(Capsule())
+            } else {
+                HStack(alignment: .top, spacing: 16) {
+                    libraryTitle(compact: compact)
+                    Spacer(minLength: 0)
+                    if libraryPreferences != nil {
+                        libraryManageButton(expanded: false)
+                    }
+                    libraryCloseButton(expanded: false)
                 }
-                .buttonStyle(.pressable)
-                .accessibilityIdentifier("look-library-close")
-                .accessibilityHint("Closes the library without changing your look")
             }
         }
         .padding(.horizontal, 22)
         .padding(.top, compact ? 12 : 26)
+    }
+
+    private func libraryTitle(compact: Bool) -> some View {
+        Text("Looks")
+            .font(.system(compact ? .title2 : .largeTitle).weight(.bold))
+            .foregroundStyle(FilmyTheme.primary)
+            .lineLimit(1)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    private func libraryManageButton(expanded: Bool) -> some View {
+        Button { showingManager = true } label: {
+            Label("Packs", systemImage: "square.stack.3d.up")
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+                .fixedSize(horizontal: !expanded, vertical: false)
+                .frame(
+                    minWidth: 44,
+                    maxWidth: expanded ? .infinity : nil,
+                    minHeight: libraryButtonTarget
+                )
+        }
+        .accessibilityIdentifier("look-library-manage")
+    }
+
+    private func libraryCloseButton(expanded: Bool) -> some View {
+        Button(action: onClose) {
+            Text("Done")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(FilmyTheme.primary)
+                .lineLimit(1)
+                .fixedSize(horizontal: !expanded, vertical: false)
+                .padding(.horizontal, 16)
+                .frame(
+                    minWidth: UIDevice.current.userInterfaceIdiom == .pad ? 64 : 52,
+                    maxWidth: expanded ? .infinity : nil,
+                    minHeight: libraryButtonTarget
+                )
+                .background(FilmyTheme.panel, in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.pressable)
+        .accessibilityIdentifier("look-library-close")
+        .accessibilityHint("Closes the library without changing your look")
     }
 
     private var searchField: some View {
@@ -1652,6 +1719,10 @@ struct LookLibraryView: View {
             .accessibilityValue(selected ? "Selected" : "Not selected")
             .accessibilityAddTraits(selected ? .isSelected : [])
             .accessibilityHint("Applies this look and closes the library")
+            .contextMenu {
+                Button("Details and source", systemImage: "info.circle") { sourceRecipe = recipe }
+            }
+            .accessibilityAction(named: Text("Details and source")) { sourceRecipe = recipe }
 
             HStack(alignment: .center, spacing: 4) {
                 Text(recipe.descriptor)
@@ -1678,6 +1749,23 @@ struct LookLibraryView: View {
             }
             .overlay(alignment: .bottomLeading) {
                 if selected { FilmRegistration() }
+            }
+            if let libraryPreferences {
+                Button {
+                    var updated = libraryPreferences.wrappedValue
+                    updated.setRecipe(recipe.id, enabled: !updated.isEnabled(recipe.id))
+                    libraryPreferences.wrappedValue = updated
+                } label: {
+                    Label("Quick menu", systemImage: libraryPreferences.wrappedValue.isEnabled(recipe.id)
+                          ? "checkmark.circle.fill" : "circle")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(libraryPreferences.wrappedValue.isEnabled(recipe.id) ? FilmyTheme.accent : FilmyTheme.secondary)
+                        .frame(maxWidth: .infinity, minHeight: libraryButtonTarget, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("library-quick-toggle-\(recipe.id)")
+                .accessibilityLabel("\(recipe.name) in quick menu")
+                .accessibilityValue(libraryPreferences.wrappedValue.isEnabled(recipe.id) ? "Enabled" : "Hidden")
             }
         }
         .accessibilityElement(children: .contain)

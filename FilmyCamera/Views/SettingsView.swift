@@ -9,6 +9,9 @@ struct SettingsView: View {
     let onBackToCamera: () -> Void
 
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var isConfirmingCacheClear = false
+    @State private var cameraAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
 
     private let privacyPolicyURL = URL(string: "https://dheeraj5612.github.io/filmycam-legal/privacy-policy.html")!
     private let supportURL = URL(string: "https://dheeraj5612.github.io/filmycam-legal/support.html")!
@@ -24,6 +27,9 @@ struct SettingsView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 26) {
                         settingsHeader
+                        if MonetizationConfiguration.isEnabled {
+                            AccountSettingsSection()
+                        }
 
                         captureSettings
                         permissions
@@ -36,12 +42,26 @@ struct SettingsView: View {
                     .padding(.top, 18)
                     .padding(.bottom, 40)
                 }
+                .scrollBounceBehavior(.basedOnSize)
+                .accessibilityIdentifier("settings-scroll")
             }
             .safeAreaInset(edge: .top, spacing: 0) {
                 CameraReturnBar(accessibilityIdentifier: "settings-back-to-camera", action: onBackToCamera)
             }
             .toolbar(.hidden, for: .navigationBar)
         }
+        .confirmationDialog("Clear the local frame cache?", isPresented: $isConfirmingCacheClear, titleVisibility: .visible) {
+            Button("Clear cache", role: .destructive) {
+                guard photoLibrary.hasLocalCache else { return }
+                HapticFeedback.play(.discard)
+                photoLibrary.clearLocalRollCache()
+            }
+            .accessibilityIdentifier("confirm-clear-local-cache")
+            Button("Keep cache", role: .cancel) { }
+        } message: {
+            Text("Only temporary copies on this device are removed. Photos originals are not deleted. Cached frames may disappear from the Roll while Photos access is limited or off.")
+        }
+        .accessibilityAction(.escape, onBackToCamera)
         .onAppear { refreshPermissionState() }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
@@ -51,7 +71,7 @@ struct SettingsView: View {
 
     private var settingsHeader: some View {
         SectionHeading(eyebrow: "FILMY CAMERA \(appVersion)", title: "Settings")
-            .accessibilityLabel("Filmy Camera settings, version \(appVersion)")
+            .accessibilityLabel("\(AppConfiguration.displayName) settings, version \(appVersion)")
     }
 
     private var flashSettingDetail: String {
@@ -79,6 +99,17 @@ struct SettingsView: View {
 
     private var captureSettings: some View {
         settingsSection(title: "CAPTURE") {
+            if #available(iOS 26.0, *) {
+                SettingRow(
+                    systemName: "airpodspro",
+                    title: "AirPods camera remote",
+                    detail: "With supported AirPods connected, choose Camera Remote in their system settings. Use your chosen stem gesture to take a photo while Filmy Camera is open. The capture timer applies too."
+                ) {
+                    EmptyView()
+                }
+                settingsDivider
+            }
+
             VStack(alignment: .leading, spacing: 12) {
                 SettingRow(
                     systemName: "bolt.fill",
@@ -87,20 +118,7 @@ struct SettingsView: View {
                 ) {
                     EmptyView()
                 }
-                // Give each choice usable space even when the explanation
-                // wraps or Dynamic Type enlarges it.
-                Picker("Flash", selection: flashModeBinding) {
-                    ForEach(CameraService.FlashMode.allCases, id: \.self) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: .infinity, minHeight: 44)
-                // Off is always selectable, including while the hardware is
-                // temporarily unavailable. The service rejects On/Auto until
-                // the camera reports that it can honor them.
-                .disabled(camera.flashAvailability == .unsupported)
-                .accessibilityIdentifier("flash-setting")
+                flashPicker
             }
 
             settingsDivider
@@ -127,6 +145,31 @@ struct SettingsView: View {
                     .tint(FilmyTheme.accent)
             }
         }
+    }
+
+    private var flashPicker: some View {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                Picker("Flash", selection: flashModeBinding) {
+                    ForEach(CameraService.FlashMode.allCases, id: \.self) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.menu)
+            } else {
+                Picker("Flash", selection: flashModeBinding) {
+                    ForEach(CameraService.FlashMode.allCases, id: \.self) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+        // Off remains selectable during thermal unavailability. The service
+        // owns validation of On/Auto and unsupported cameras.
+        .disabled(camera.flashAvailability == .unsupported)
+        .accessibilityIdentifier("flash-setting")
     }
 
     private var permissions: some View {
@@ -237,7 +280,7 @@ struct SettingsView: View {
                 title: "Frame cache",
                 detail: photoLibrary.hasLocalCache ? "Temporary frames are stored on this device." : "No temporary frames right now."
             ) {
-                Text("250 MB")
+                Text(photoLibrary.hasLocalCache ? "On device" : "Empty")
                     .font(.system(.caption, design: .rounded).weight(.bold))
                     .foregroundStyle(FilmyTheme.tertiary)
             }
@@ -246,40 +289,35 @@ struct SettingsView: View {
 
             Button {
                 guard photoLibrary.hasLocalCache else { return }
-                photoLibrary.clearLocalRollCache()
+                HapticFeedback.play(.selection)
+                isConfirmingCacheClear = true
             } label: {
-                HStack(spacing: 13) {
+                HStack(alignment: .center, spacing: 13) {
                     SettingIcon(
                         systemName: "trash",
                         tint: photoLibrary.hasLocalCache ? FilmyTheme.danger : FilmyTheme.tertiary
                     )
-
-                    VStack(alignment: .leading, spacing: 3) {
+                    VStack(alignment: .leading, spacing: 4) {
                         Text("Clear local cache")
-                            .font(.system(.subheadline, design: .default).weight(.semibold))
-                        Text(photoLibrary.hasLocalCache ? "Remove temporary frames" : "Nothing to remove")
-                            .font(.system(.caption, design: .default).weight(.medium))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(photoLibrary.hasLocalCache ? FilmyTheme.danger : FilmyTheme.tertiary)
+                        Text(photoLibrary.hasLocalCache ? "Photos originals are kept" : "Nothing to remove")
+                            .font(.caption)
                             .foregroundStyle(FilmyTheme.secondary)
                     }
-
-                    Spacer(minLength: 8)
-
-                    Text(photoLibrary.hasLocalCache ? "Available" : "Empty")
-                        .font(.system(.caption2, design: .rounded).weight(.bold))
-                        .foregroundStyle(FilmyTheme.tertiary)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 6)
-                        .background(Color.white.opacity(0.05), in: Capsule())
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .padding(.vertical, 4)
                 .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
                 .contentShape(Rectangle())
             }
-            .foregroundStyle(photoLibrary.hasLocalCache ? FilmyTheme.primary : FilmyTheme.tertiary)
             .buttonStyle(.plain)
             .disabled(!photoLibrary.hasLocalCache)
             .accessibilityIdentifier("clear-local-cache")
+            .accessibilityLabel("Clear local cache")
             .accessibilityValue(photoLibrary.hasLocalCache ? "Available" : "Empty")
-            .accessibilityHint(photoLibrary.hasLocalCache ? "Removes temporary camera frames" : "There are no temporary camera frames to clear")
+            .accessibilityHint(photoLibrary.hasLocalCache ? "Asks before removing temporary copies. Photos originals are kept." : "There are no temporary camera frames to clear")
         }
     }
 
@@ -289,7 +327,7 @@ struct SettingsView: View {
                 SettingIcon(systemName: "camera.aperture")
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Filmy Camera")
+                    Text(AppConfiguration.displayName)
                         .font(.system(.subheadline, design: .default).weight(.semibold))
                         .foregroundStyle(FilmyTheme.primary)
                     Text("Version \(appVersion)")
@@ -303,7 +341,7 @@ struct SettingsView: View {
 
             settingsDivider
 
-            Text("Recipe names are original, camera-inspired descriptions. Filmy Camera is an independent experience; it does not include camera firmware, proprietary LUTs, or calibration data. Your frames save to Photos; local copies are temporary and removable.")
+            Text(AppConfiguration.isG7X ? "G7X Camera is an independent experience. Your frames save to Photos; local copies are temporary and removable." : "Recipe names are original, camera-inspired descriptions. Filmy Camera is an independent experience; it does not include camera firmware, proprietary LUTs, or calibration data. Your frames save to Photos; local copies are temporary and removable.")
                 .font(.system(.footnote, design: .default).weight(.medium))
                 .foregroundStyle(FilmyTheme.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -445,19 +483,19 @@ struct SettingsView: View {
     }
 
     private var cameraPermissionNeedsSettings: Bool {
-        let status = AVCaptureDevice.authorizationStatus(for: .video)
+        let status = cameraAuthorizationStatus
         return status == .denied || status == .restricted
     }
 
     private var cameraPermissionNeedsRequest: Bool {
-        AVCaptureDevice.authorizationStatus(for: .video) == .notDetermined
+        cameraAuthorizationStatus == .notDetermined
             && camera.availability != .simulator
             && camera.availability != .requestingPermission
     }
 
     private var cameraStatusTitle: String {
         if camera.availability == .simulator { return "SIMULATOR" }
-        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        switch cameraAuthorizationStatus {
         case .authorized:
             return camera.availability == .running ? "LIVE" : "ALLOWED"
         case .notDetermined:
@@ -470,12 +508,12 @@ struct SettingsView: View {
     }
 
     private var cameraStatusIsEnabled: Bool {
-        camera.availability == .running
+        camera.availability != .simulator && cameraAuthorizationStatus == .authorized
     }
 
     private var cameraStatusDetail: String {
         if camera.availability == .simulator { return "Simulator-safe preview mode" }
-        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        switch cameraAuthorizationStatus {
         case .authorized:
             switch camera.availability {
             case .running: return "Live preview is ready to capture."
@@ -520,6 +558,7 @@ struct SettingsView: View {
     // MARK: - Actions
 
     private func refreshPermissionState() {
+        cameraAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
         photoLibrary.refresh()
     }
 
@@ -544,6 +583,7 @@ struct SettingsView: View {
         // running after the user stays on Settings or moves to another tab.
         AVCaptureDevice.requestAccess(for: .video) { _ in
             Task { @MainActor [cameraService] in
+                cameraAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
                 cameraService.stop()
             }
         }

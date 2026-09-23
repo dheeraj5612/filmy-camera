@@ -22,31 +22,41 @@ public struct FilteredCameraPreview: UIViewRepresentable {
     @ObservedObject private var cameraService: CameraService
     private let recipe: FilmRecipe
     private let quality: FilmRenderer.Quality
+    private let naturalLiveView: Bool
+    private let digitalCrop: Double
 
     public init(
         cameraService: CameraService,
         recipe: FilmRecipe,
-        quality: FilmRenderer.Quality = .preview
+        quality: FilmRenderer.Quality = .preview,
+        naturalLiveView: Bool = false,
+        digitalCrop: Double = 1
     ) {
         _cameraService = ObservedObject(wrappedValue: cameraService)
         self.recipe = recipe
         self.quality = quality
+        self.naturalLiveView = naturalLiveView
+        self.digitalCrop = digitalCrop
     }
 
     public init(
         service: CameraService,
         recipe: FilmRecipe,
-        quality: FilmRenderer.Quality = .preview
+        quality: FilmRenderer.Quality = .preview,
+        naturalLiveView: Bool = false,
+        digitalCrop: Double = 1
     ) {
-        self.init(cameraService: service, recipe: recipe, quality: quality)
+        self.init(cameraService: service, recipe: recipe, quality: quality, naturalLiveView: naturalLiveView, digitalCrop: digitalCrop)
     }
 
     public init(
         camera: CameraService,
         recipe: FilmRecipe,
-        quality: FilmRenderer.Quality = .preview
+        quality: FilmRenderer.Quality = .preview,
+        naturalLiveView: Bool = false,
+        digitalCrop: Double = 1
     ) {
-        self.init(cameraService: camera, recipe: recipe, quality: quality)
+        self.init(cameraService: camera, recipe: recipe, quality: quality, naturalLiveView: naturalLiveView, digitalCrop: digitalCrop)
     }
 
     public func makeCoordinator() -> Coordinator {
@@ -61,7 +71,9 @@ public struct FilteredCameraPreview: UIViewRepresentable {
         view.update(
             recipe: recipe,
             quality: quality,
-            grainSeed: cameraService.previewGrainSeed
+            grainSeed: cameraService.previewGrainSeed,
+            naturalLiveView: naturalLiveView,
+            digitalCrop: digitalCrop
         )
         coordinator.installFrameHandlerIfNeeded()
         view.isAccessibilityElement = Self.exposesRenderStatusForUITesting && cameraService.isRunning
@@ -84,7 +96,9 @@ public struct FilteredCameraPreview: UIViewRepresentable {
         uiView.update(
             recipe: recipe,
             quality: quality,
-            grainSeed: cameraService.previewGrainSeed
+            grainSeed: cameraService.previewGrainSeed,
+            naturalLiveView: naturalLiveView,
+            digitalCrop: digitalCrop
         )
 
         // The coordinator owns one callback for the lifetime of the UIKit
@@ -107,6 +121,7 @@ public struct FilteredCameraPreview: UIViewRepresentable {
         coordinator.previewLayerID = nil
         coordinator.previewView = nil
         uiView.clearImage()
+        uiView.releaseDrawables()
     }
 
     public final class Coordinator: @unchecked Sendable {
@@ -137,6 +152,7 @@ public struct FilteredCameraPreview: UIViewRepresentable {
         fileprivate func receive(_ image: CIImage) {
             // CameraService documents onFrame as main-queue delivery. Avoid
             // adding another async hop to every captured frame.
+            // Xcode 16.4 does not yet mark immutable CIImage as Sendable.
             let imageBox = CIImageBox(image)
             if Thread.isMainThread {
                 MainActor.assumeIsolated { [weak self] in
@@ -169,8 +185,13 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
     private let sRGBColorSpace = CGColorSpace(name: CGColorSpace.sRGB)
 
     private var latestImage: CIImage?
+    private var applicationIsActive = UIApplication.shared.applicationState == .active
+    var hasRetainedFrame: Bool { latestImage != nil }
+    private var canRender: Bool { applicationIsActive && window != nil }
+    private var naturalLiveView = false
     private var recipe = FilmRecipe.builtIns[0]
     private var quality: FilmRenderer.Quality = .preview
+    private var digitalCrop: Double = 1
     private var grainSeed = FilmRenderer.canonicalGrainSeed
     /// Monotonically identifies the newest frame, recipe, or drawable shape.
     /// If one of these changes while Metal is busy, completion schedules
@@ -242,10 +263,15 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
     static let previewPixelBudget: CGFloat = 1_300_000
 
     static func drawableScale(for bounds: CGSize, screenScale: CGFloat) -> CGFloat {
-        let points = bounds.width * bounds.height
-        guard points > 0, screenScale > 0 else { return max(screenScale, 1) }
-        let budgetScale = (previewPixelBudget / points).squareRoot()
-        return min(max(screenScale, 1), max(budgetScale, 1))
+        guard let size = boundedDrawableSize(for: bounds, screenScale: screenScale) else { return 0 }
+        return min(size.width / bounds.width, size.height / bounds.height)
+    }
+
+    static func boundedDrawableSize(for bounds: CGSize, screenScale: CGFloat) -> CGSize? {
+        ImageSizePolicy.boundedSize(
+            bounds, maximumPixels: previewPixelBudget, maximumDimension: 4_096,
+            maximumScale: screenScale.isFinite && screenScale > 0 ? screenScale : 1
+        )
     }
 
     private func configureView() {
@@ -266,19 +292,24 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
         if FilteredCameraPreview.exposesRenderStatusForUITesting {
             isAccessibilityElement = true
             accessibilityIdentifier = "camera-preview-render-status"
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(resetRenderReadinessForApplicationStateChange),
-                name: UIApplication.didEnterBackgroundNotification,
-                object: nil
-            )
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(resetRenderReadinessForApplicationStateChange),
-                name: UIApplication.didBecomeActiveNotification,
-                object: nil
-            )
         }
+        // These observers are production resource management, not UI-test hooks.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(suspendRendering),
+            name: UIApplication.willResignActiveNotification, object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(suspendRendering),
+            name: UIApplication.didEnterBackgroundNotification, object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(resumeRendering),
+            name: UIApplication.didBecomeActiveNotification, object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(discardTransientResources),
+            name: UIApplication.didReceiveMemoryWarningNotification, object: nil
+        )
     }
 
     deinit {
@@ -302,6 +333,7 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
     public override func didMoveToWindow() {
         super.didMoveToWindow()
         resetRenderReadiness()
+        if window == nil { discardTransientResources() }
     }
 
     /// Reports the drawable size the view really renders into, so captures
@@ -311,12 +343,11 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
     public override func layoutSubviews() {
         super.layoutSubviews()
         let screenScale = window?.screen.scale ?? traitCollection.displayScale
-        let scale = Self.drawableScale(for: bounds.size, screenScale: screenScale)
-        let target = CGSize(
-            width: (bounds.width * scale).rounded(),
-            height: (bounds.height * scale).rounded()
-        )
-        if target != drawableSize, target.width > 0, target.height > 0 {
+        guard let target = Self.boundedDrawableSize(for: bounds.size, screenScale: screenScale) else {
+            discardTransientResources()
+            return
+        }
+        if target != drawableSize {
             resetRenderReadiness()
             drawableSize = target
             onDrawableSizeChange?(target)
@@ -326,19 +357,25 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
     func update(
         recipe: FilmRecipe,
         quality: FilmRenderer.Quality,
-        grainSeed: UInt32
+        grainSeed: UInt32,
+        naturalLiveView: Bool = false,
+        digitalCrop: Double = 1
     ) {
-        guard self.recipe != recipe || self.quality != quality || self.grainSeed != grainSeed else { return }
+        guard self.recipe != recipe || self.quality != quality || self.grainSeed != grainSeed
+            || self.naturalLiveView != naturalLiveView || self.digitalCrop != digitalCrop else { return }
         if self.recipe.id != recipe.id {
             resetRenderReadiness()
         }
         self.recipe = recipe
         self.quality = quality
         self.grainSeed = grainSeed
+        self.naturalLiveView = naturalLiveView
+        self.digitalCrop = digitalCrop
         requestDisplay()
     }
 
     func display(image: CIImage) {
+        guard canRender else { return }
         latestImage = image
         requestDisplay()
     }
@@ -351,12 +388,17 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
     }
 
     public func draw(in view: MTKView) {
-        guard !isRenderInFlight,
-              let drawable = currentDrawable,
+        autoreleasepool { renderLatestFrame() }
+    }
+
+    private func renderLatestFrame() {
+        // Acquire a drawable last: it can wait on the display's drawable pool.
+        // Hidden, inactive, or empty previews must never enter that wait.
+        guard canRender, !isRenderInFlight,
               let image = latestImage,
               let sRGBColorSpace,
-              drawableSize.width > 0,
-              drawableSize.height > 0 else {
+              ImageSizePolicy.isFinitePositive(drawableSize),
+              let drawable = currentDrawable else {
             return
         }
 
@@ -373,13 +415,14 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
         // same visible composition as the still path. Rendering the resized
         // frame also keeps preview work proportional to the drawable rather
         // than to the camera sensor's full video dimensions.
-        let framed = CameraFrameLayout.aspectFill(image, in: targetRect)
-        let filtered = FilmRenderer.render(
+        let crop = FujiImageProcessor.crop(image, factor: digitalCrop)
+        let framed = CameraFrameLayout.aspectFill(crop, in: targetRect)
+        let filtered = (naturalLiveView ? framed : FilmRenderer.render(
             framed,
             recipe: recipe,
             quality: quality,
             grainSeed: grainSeed
-        )
+        ))
             .cropped(to: targetRect)
         ciContext.render(
             filtered,
@@ -418,7 +461,7 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
 
     private func requestDisplay() {
         contentRevision &+= 1
-        guard latestImage != nil, !isRenderInFlight else { return }
+        guard canRender, latestImage != nil, !isRenderInFlight else { return }
         setNeedsDisplay()
     }
 
@@ -436,7 +479,7 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
             renderedRecipeID = recipeID
             isWaitingForSuccessfulRender = false
         }
-        guard latestImage != nil, contentRevision != revision else { return }
+        guard canRender, latestImage != nil, contentRevision != revision else { return }
         setNeedsDisplay()
     }
 
@@ -447,8 +490,23 @@ public final class FilteredCameraPreviewView: MTKView, MTKViewDelegate {
         isWaitingForSuccessfulRender = true
     }
 
-    @objc private func resetRenderReadinessForApplicationStateChange() {
+    @objc private func suspendRendering() {
+        applicationIsActive = false
+        discardTransientResources()
+    }
+
+    @objc private func resumeRendering() {
+        applicationIsActive = true
         resetRenderReadiness()
+        setNeedsLayout()
+        // Wait for a fresh camera frame rather than redisplaying a stale buffer.
+    }
+
+    @objc private func discardTransientResources() {
+        clearImage()
+        releaseDrawables()
+        // In-flight command buffers retain their own resources until completion.
+        // Do not reset isRenderInFlight here and accidentally admit a second draw.
     }
 
 }

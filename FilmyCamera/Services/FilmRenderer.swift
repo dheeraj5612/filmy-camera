@@ -2,6 +2,7 @@ import CoreGraphics
 import CoreImage
 import CryptoKit
 import Foundation
+import ImageIO
 import Metal
 import MetalKit
 import UIKit
@@ -72,7 +73,12 @@ public final class FilmRenderer {
     /// A reusable GPU-backed context for callers that need to materialize the
     /// rendered CIImage. It falls back to Core Image's software renderer on a
     /// simulator or Mac without a Metal device.
-    public nonisolated(unsafe) static let sharedContext: CIContext = {
+    public nonisolated(unsafe) static let sharedContext: CIContext = makeOutputContext()
+
+    /// Creates an independent context for bounded background work such as
+    /// recipe swatches. Keeping that work off the live-preview context avoids
+    /// coupling camera rendering to a sheet that can create many thumbnails.
+    static func makeOutputContext() -> CIContext {
         if let metalDevice {
             return CIContext(
                 mtlDevice: metalDevice,
@@ -83,7 +89,7 @@ public final class FilmRenderer {
         return CIContext(options: contextOptions.merging([
             .useSoftwareRenderer: true
         ]) { _, new in new })
-    }()
+    }
 
     /// Builds the shared context, the grain texture, and the compiled kernels
     /// ahead of the first camera frame, so the viewfinder's first draw does
@@ -150,6 +156,8 @@ public final class FilmRenderer {
             storage.totalCostLimit = 28 * 1024 * 1024
         }
 
+        func removeAll() { storage.removeAllObjects() }
+
         func data(for key: CubeCacheKey, make: () -> NSData) -> NSData {
             let wrappedKey = Key(key)
             if let cached = storage.object(forKey: wrappedKey) {
@@ -201,6 +209,8 @@ public final class FilmRenderer {
             storage.totalCostLimit = 12 * 1024 * 1024
         }
 
+        func removeAll() { storage.removeAllObjects() }
+
         func image(for key: ThumbnailCacheKey) -> UIImage? {
             storage.object(forKey: Key(key))
         }
@@ -220,6 +230,7 @@ public final class FilmRenderer {
         let grainTexture: CIImage?
         let grainKernel: CIColorKernel?
         let skinColorKernel: CIColorKernel?
+        let firstPhoneNoiseKernel: CIColorKernel?
         let clearImage: CIImage
         let zeroComponents: CIVector
         let oneComponents: CIVector
@@ -296,6 +307,30 @@ public final class FilmRenderer {
                     return vec4(mix(rendered.rgb, reference, amount), rendered.a);
                 }
                 """)
+            // Three independently phase-shifted samples of the same
+            // deterministic noise field stand in for luma and two chroma
+            // noise channels, stronger in shadows, without adding a second
+            // random source.
+            firstPhoneNoiseKernel = CIColorKernel(source: """
+                kernel vec4 firstPhoneNoise(
+                    __sample image,
+                    __sample lumaNoise,
+                    __sample rgNoise,
+                    __sample bNoise
+                ) {
+                    float luminance = dot(image.rgb, vec3(0.2126, 0.7152, 0.0722));
+                    float shadowBoost = clamp(1.6 - luminance * 1.6, 0.15, 1.6);
+                    float lumaDelta = (lumaNoise.r - 0.5) * 0.05 * shadowBoost;
+                    float rgDelta = (rgNoise.r - 0.5) * 0.035 * shadowBoost;
+                    float bDelta = (bNoise.r - 0.5) * 0.035 * shadowBoost;
+                    vec3 result = image.rgb + vec3(
+                        lumaDelta + rgDelta,
+                        lumaDelta - rgDelta * 0.4,
+                        lumaDelta + bDelta
+                    );
+                    return vec4(clamp(result, 0.0, 1.0), image.a);
+                }
+                """)
             clearImage = CIImage(color: .clear)
             zeroComponents = CIVector(x: 0, y: 0, z: 0, w: 0)
             oneComponents = CIVector(x: 1, y: 1, z: 1, w: 1)
@@ -335,6 +370,22 @@ public final class FilmRenderer {
 
     private init() {}
 
+    /// Discard reproducible CPU caches, never saved photos or recipe state.
+    /// Do not clear the shared CIContext here: a memory warning can arrive while
+    /// its asynchronous Metal completion queue is still materializing a frame.
+    /// Core Image owns and evicts those transient resources itself.
+    static func purgeTransientCaches() {
+        cubeCache.removeAll()
+        thumbnailCache.removeAll()
+    }
+
+    static func boundedThumbnailSize(_ size: CGSize) -> CGSize? {
+        guard ImageSizePolicy.isFinitePositive(size) else { return nil }
+        // Keep the historical rounding/cache identity for ordinary swatches.
+        let rounded = CGSize(width: max(size.width.rounded(), 1), height: max(size.height.rounded(), 1))
+        return ImageSizePolicy.boundedSize(rounded, maximumPixels: 1_048_576, maximumDimension: 1_024)
+    }
+
     /// Builds a tiny deterministic reference scene for recipe selection UI.
     /// It is deliberately synthetic rather than a bundled photograph, so the
     /// picker previews the real renderer without introducing an unlicensed
@@ -343,8 +394,9 @@ public final class FilmRenderer {
         for recipe: FilmRecipe,
         size: CGSize = CGSize(width: 264, height: 160)
     ) -> UIImage? {
-        let width = max(size.width.rounded(), 1)
-        let height = max(size.height.rounded(), 1)
+        guard let size = boundedThumbnailSize(size) else { return nil }
+        let width = size.width
+        let height = size.height
         let cacheKey = ThumbnailCacheKey(
             recipe: recipe,
             width: Int(width),
@@ -378,6 +430,7 @@ public final class FilmRenderer {
         for recipe: FilmRecipe,
         size: CGSize
     ) -> String? {
+        guard let size = boundedThumbnailSize(size) else { return nil }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         guard let recipeData = try? encoder.encode(recipe) else { return nil }
@@ -394,10 +447,21 @@ public final class FilmRenderer {
     /// Renders a recipe over an arbitrary scene, e.g. a live viewfinder
     /// snapshot, at that scene's size. Not cached: callers debounce.
     public static func previewThumbnail(for recipe: FilmRecipe, over scene: CIImage) -> UIImage? {
+        previewThumbnail(for: recipe, over: scene, using: sharedContext)
+    }
+
+    static func previewThumbnail(
+        for recipe: FilmRecipe,
+        over scene: CIImage,
+        using context: CIContext
+    ) -> UIImage? {
         let extent = scene.extent
-        guard extent.width >= 1, extent.height >= 1 else { return nil }
-        let rendered = render(scene, recipe: recipe, quality: .preview)
-        guard let image = outputCGImage(rendered, from: extent) else { return nil }
+        guard extent.origin.x.isFinite, extent.origin.y.isFinite,
+              let size = boundedThumbnailSize(extent.size) else { return nil }
+        let target = CGRect(origin: .zero, size: size)
+        let bounded = CameraFrameLayout.aspectFill(scene, in: target)
+        let rendered = render(bounded, recipe: recipe, quality: .preview)
+        guard let image = outputCGImage(rendered, from: target, using: context) else { return nil }
         return UIImage(cgImage: image)
     }
 
@@ -490,26 +554,9 @@ public final class FilmRenderer {
         /// The directory itself is capped by count, oldest first, so slider
         /// drafts that pause long enough to persist cannot grow it unbounded.
         private static let entryLimit = 240
-        private static let pruneCounter = PruneCounter(every: 40)
-
-        private final class PruneCounter: @unchecked Sendable {
-            private let lock = NSLock()
-            private let interval: Int
-            private var count = 0
-
-            init(every interval: Int) {
-                self.interval = interval
-            }
-
-            func recordStore() -> Bool {
-                lock.lock()
-                defer { lock.unlock() }
-                count += 1
-                guard count >= interval else { return false }
-                count = 0
-                return true
-            }
-        }
+        private static let byteLimit = 32 * 1024 * 1024
+        private static let maximumEntryBytes = 5 * 1024 * 1024
+        private static let mutationLock = NSLock()
 
         private static let directoryURL: URL? = {
             guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
@@ -530,22 +577,24 @@ public final class FilmRenderer {
         }()
 
         private static func prune(in directory: URL) {
-            let fileManager = FileManager.default
-            guard let files = try? fileManager.contentsOfDirectory(
-                at: directory,
-                includingPropertiesForKeys: [.contentModificationDateKey],
-                options: .skipsHiddenFiles
-            ), files.count > entryLimit else {
-                return
-            }
-            let dated = files.map { url -> (URL, Date) in
-                let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
-                    .contentModificationDate ?? .distantPast
-                return (url, date)
-            }
-            .sorted { $0.1 < $1.1 }
-            for (url, _) in dated.prefix(files.count - entryLimit) {
-                try? fileManager.removeItem(at: url)
+            let manager = FileManager.default
+            let keys: Set<URLResourceKey> = [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey]
+            guard let files = try? manager.contentsOfDirectory(
+                at: directory, includingPropertiesForKeys: Array(keys), options: .skipsHiddenFiles
+            ) else { return }
+            let entries = files.compactMap { url -> (URL, Date, Int)? in
+                guard let values = try? url.resourceValues(forKeys: keys), values.isRegularFile == true else { return nil }
+                return (url, values.contentModificationDate ?? .distantPast, max(values.fileSize ?? 0, 0))
+            }.sorted { $0.1 > $1.1 }
+            var bytes = 0
+            var count = 0
+            for (url, _, size) in entries {
+                if count >= entryLimit || size > byteLimit - bytes {
+                    try? manager.removeItem(at: url)
+                } else {
+                    bytes += size
+                    count += 1
+                }
             }
         }
 
@@ -562,21 +611,34 @@ public final class FilmRenderer {
 
         static func image(for key: ThumbnailCacheKey) -> UIImage? {
             guard let url = fileURL(for: key),
-                  let data = try? Data(contentsOf: url) else {
-                return nil
-            }
-            return UIImage(data: data)
+                  let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey]),
+                  values.isRegularFile == true, values.isSymbolicLink != true,
+                  let bytes = values.fileSize, bytes > 0, bytes <= maximumEntryBytes,
+                  let source = CGImageSourceCreateWithURL(
+                    url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary
+                  ),
+                  let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any],
+                  (properties[kCGImagePropertyPixelWidth as String] as? NSNumber)?.intValue == key.width,
+                  (properties[kCGImagePropertyPixelHeight as String] as? NSNumber)?.intValue == key.height,
+                  let image = CGImageSourceCreateImageAtIndex(
+                    source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary
+                  ) else { return nil }
+            return UIImage(cgImage: image)
         }
 
         static func store(_ image: UIImage, for key: ThumbnailCacheKey) {
-            guard let url = fileURL(for: key),
-                  let directoryURL,
-                  let data = image.pngData() else {
-                return
-            }
-            try? data.write(to: url, options: .atomic)
-            if pruneCounter.recordStore() {
+            guard let url = fileURL(for: key), let directoryURL,
+                  let data = image.pngData(), data.count <= maximumEntryBytes else { return }
+            // Cache directories may be purged by iOS after static initialization.
+            // Serialize only mutations; cache hits and film rendering remain parallel.
+            mutationLock.lock()
+            defer { mutationLock.unlock() }
+            do {
+                try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+                try data.write(to: url, options: .atomic)
                 prune(in: directoryURL)
+            } catch {
+                // A cache miss must never make the live renderer fail.
             }
         }
     }
@@ -588,10 +650,20 @@ public final class FilmRenderer {
         _ image: CIImage,
         from extent: CGRect? = nil
     ) -> CGImage? {
-        guard let sRGBColorSpace else { return nil }
-        return sharedContext.createCGImage(
+        outputCGImage(image, from: extent, using: sharedContext)
+    }
+
+    static func outputCGImage(
+        _ image: CIImage,
+        from extent: CGRect? = nil,
+        using context: CIContext
+    ) -> CGImage? {
+        let bounds = extent ?? image.extent
+        guard let sRGBColorSpace, ImageSizePolicy.isFinitePositive(bounds.size),
+              bounds.origin.x.isFinite, bounds.origin.y.isFinite else { return nil }
+        return context.createCGImage(
             image,
-            from: extent ?? image.extent,
+            from: bounds,
             format: .RGBA8,
             colorSpace: sRGBColorSpace
         )
@@ -709,6 +781,11 @@ public final class FilmRenderer {
         let processingImage = opaqueImage(from: image)
         diagnostics?[.source] = processingImage
         var output = processingImage
+        // First-generation iPhone: emulate the fixed 2 MP sensor before any
+        // tone or color stage runs, so the rest of the pipeline works from
+        // the same softened base a real 2007 iPhone JPEG would have started
+        // from.
+        output = applyFirstPhoneResolutionLoss(to: output, recipe: safeRecipe)
         output = applyDynamicRange(to: output, recipe: safeRecipe)
         output = applyExposureAndTone(to: output, recipe: safeRecipe)
         diagnostics?[.preSignature] = output
@@ -719,6 +796,7 @@ public final class FilmRenderer {
             recipe: safeRecipe,
             captureContext: captureContext
         )
+        output = applyFirstPhoneTone(to: output, recipe: safeRecipe)
         output = applyWhiteBalance(to: output, recipe: safeRecipe)
         diagnostics?[.postWhiteBalance] = output
         output = applyMonochromeFilter(to: output, recipe: safeRecipe)
@@ -753,7 +831,10 @@ public final class FilmRenderer {
             seed: grainSeed,
             phase: grainPhase
         )
+        output = applyFirstPhoneNoise(to: output, recipe: safeRecipe)
+        output = applyFirstPhoneLensShading(to: output, recipe: safeRecipe)
         output = applyVignette(to: output, recipe: safeRecipe)
+        output = applyFirstPhoneHighlightClip(to: output, source: processingImage, recipe: safeRecipe)
         output = clampOutput(toNormalizedRange: output)
         output = restoreAlpha(of: output, from: image)
 
@@ -1007,6 +1088,7 @@ public final class FilmRenderer {
     /// tonal and saturation shaping.
     private static func applyRecipeCharacter(to image: CIImage, recipe: FilmRecipe) -> CIImage {
         guard recipe.filmBase != .compactDigital,
+              recipe.filmBase != .firstPhone,
               recipe.filmBase != .standard || recipe.creativeCollection != nil else { return image }
 
         let signatureLevels: [CGFloat]
@@ -1017,9 +1099,15 @@ public final class FilmRenderer {
             signatureSaturation = 0.95
         } else {
             switch recipe.filmBase {
-            case .standard, .provia, .realaAce, .proNegative:
+            case .standard, .provia, .proNegative:
                 signatureLevels = [0.0, 0.13, 0.49, 0.85, 0.99]
                 signatureSaturation = 1.08
+            case .realaAce:
+                // Public REALA ACE intent: gentler shadow separation but a
+                // steeper upper-mid/highlight response, not Provia's curve.
+                // Original estimate, not a measured Fujifilm transfer curve.
+                signatureLevels = [0.0, 0.18, 0.50, 0.87, 1.0]
+                signatureSaturation = 1
             case .classicChrome:
                 signatureLevels = [0.014, 0.14, 0.49, 0.80, 0.95]
                 signatureSaturation = 0.94
@@ -1041,13 +1129,13 @@ public final class FilmRenderer {
             case .nostalgicNegative:
                 signatureLevels = [0.025, 0.16, 0.53, 0.84, 0.97]
                 signatureSaturation = 1.06
-            case .acros, .acrosYellow, .acrosRed, .acrosGreen, .monochrome:
+            case .acros, .acrosYellow, .acrosRed, .acrosGreen, .monochrome, .monochromeYellow, .monochromeRed, .monochromeGreen:
                 signatureLevels = [0.0, 0.10, 0.46, 0.86, 1.0]
                 signatureSaturation = 1
             case .sepia:
                 signatureLevels = [0.025, 0.14, 0.49, 0.81, 0.955]
                 signatureSaturation = 1
-            case .compactDigital:
+            case .compactDigital, .firstPhone:
                 return image
             }
         }
@@ -1110,6 +1198,32 @@ public final class FilmRenderer {
         return toneCurve.outputImage?.cropped(to: image.extent) ?? image
     }
 
+    /// Original approximation of the fixed JPEG tone response on the
+    /// first-generation iPhone camera: a bright auto-exposure push with a
+    /// hard highlight clip. A linear gain plus clamp keeps the response
+    /// predictable; a spline tone curve here overshot badly on real images.
+    private static func applyFirstPhoneTone(
+        to image: CIImage,
+        recipe: FilmRecipe
+    ) -> CIImage {
+        guard recipe.filmBase == .firstPhone else { return image }
+        let gain: CGFloat = 1.22
+        let shadowLift: CGFloat = 0.004
+        return image
+            .applyingFilter("CIColorMatrix", parameters: [
+                "inputRVector": CIVector(x: gain, y: 0, z: 0, w: 0),
+                "inputGVector": CIVector(x: 0, y: gain, z: 0, w: 0),
+                "inputBVector": CIVector(x: 0, y: 0, z: gain, w: 0),
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+                "inputBiasVector": CIVector(x: shadowLift, y: shadowLift, z: shadowLift, w: 0)
+            ])
+            .applyingFilter("CIColorClamp", parameters: [
+                "inputMinComponents": immutableResources.zeroComponents,
+                "inputMaxComponents": immutableResources.oneComponents
+            ])
+            .cropped(to: image.extent)
+    }
+
     private static func applyWhiteBalance(
         to image: CIImage,
         recipe: FilmRecipe
@@ -1117,10 +1231,10 @@ public final class FilmRenderer {
         let temperatureShift = recipe.temperatureShift + recipe.whiteBalance.mode.temperatureBias
         let tintShift = recipe.tintShift + recipe.whiteBalance.mode.tintBias
         // Camera semantics: the Kelvin value is the illuminant the camera is
-        // told to neutralize. Phone frames arrive already balanced for the
-        // scene (about daylight), so a setting above the as-shot reference
-        // renders warmer and one below renders cooler, exactly as it would on
-        // the camera body and in desktop RAW editors.
+        // told to neutralize. Processed phone pixels do not identify the
+        // original illuminant; 5600K is an explicit display-referred reference,
+        // not a recovered sensor white balance. Higher settings render warmer
+        // and lower settings cooler, but are not a camera RAW reconstruction.
         let baseKelvin = recipe.whiteBalance.mode == .colorTemperature
             ? 6500 - (clamp(recipe.whiteBalance.kelvin, lower: 2500, upper: 10000) - FilmRecipe.asShotKelvin)
             : 6500
@@ -1538,6 +1652,152 @@ public final class FilmRenderer {
         max(0.01, referencePixels * resolutionScale(for: extent))
     }
 
+    /// Emulates the original iPhone's fixed 1600x1200 (2 MP) sensor. Frames
+    /// larger than that long edge are downsampled with a Lanczos filter, then
+    /// scaled back up with a plain affine transform (no resampling quality),
+    /// which is what produces the soft, slightly mushy detail loss of an
+    /// upscaled low-resolution capture. Frames already at or under that
+    /// resolution (e.g. the live preview) instead take an equivalent small
+    /// blur so the preview roughly matches the captured still.
+    private static func applyFirstPhoneResolutionLoss(
+        to image: CIImage,
+        recipe: FilmRecipe
+    ) -> CIImage {
+        guard recipe.filmBase == .firstPhone else { return image }
+        let extent = image.extent
+        guard extent.width.isFinite, extent.height.isFinite,
+              extent.width > 0, extent.height > 0 else { return image }
+
+        let sensorLongEdge: CGFloat = 1600
+        let longEdge = max(extent.width, extent.height)
+
+        guard longEdge > sensorLongEdge else {
+            guard let blur = CIFilter(name: "CIGaussianBlur") else { return image }
+            blur.setValue(image.clampedToExtent(), forKey: kCIInputImageKey)
+            blur.setValue(spatialRadius(0.9, for: extent), forKey: kCIInputRadiusKey)
+            return blur.outputImage?.cropped(to: extent) ?? image
+        }
+
+        guard let downscale = CIFilter(name: "CILanczosScaleTransform") else { return image }
+        let scale = sensorLongEdge / longEdge
+        downscale.setValue(image, forKey: kCIInputImageKey)
+        downscale.setValue(scale, forKey: kCIInputScaleKey)
+        downscale.setValue(1.0, forKey: kCIInputAspectRatioKey)
+        guard let downsized = downscale.outputImage else { return image }
+
+        let normalized = downsized.transformed(by: CGAffineTransform(
+            translationX: -downsized.extent.minX,
+            y: -downsized.extent.minY
+        ))
+        let upscale = 1 / scale
+        let upsized = normalized
+            .transformed(by: CGAffineTransform(scaleX: upscale, y: upscale))
+            .transformed(by: CGAffineTransform(translationX: extent.minX, y: extent.minY))
+        return upsized.clampedToExtent().cropped(to: extent)
+    }
+
+    /// Low-amplitude colored sensor noise, stronger in shadows, on top of the
+    /// separate grain texture stage. Deterministic: it reuses the shared grain
+    /// field at fixed phase offsets rather than a fresh random source.
+    private static func applyFirstPhoneNoise(
+        to image: CIImage,
+        recipe: FilmRecipe
+    ) -> CIImage {
+        guard recipe.filmBase == .firstPhone,
+              let texture = immutableResources.grainTexture,
+              let kernel = immutableResources.firstPhoneNoiseKernel else {
+            return image
+        }
+
+        let extent = image.extent
+        let scale = resolutionScale(for: extent)
+        let noiseSize = max(CGFloat(0.6) * scale, 0.3)
+
+        func noiseLayer(phase: CGPoint) -> CIImage {
+            texture
+                .transformed(by: CGAffineTransform(scaleX: noiseSize, y: noiseSize))
+                .transformed(by: CGAffineTransform(translationX: phase.x, y: phase.y))
+                .applyingFilter("CIAffineTile")
+                .cropped(to: extent)
+        }
+
+        let lumaNoise = noiseLayer(phase: CGPoint(x: 11, y: 47))
+        let rgNoise = noiseLayer(phase: CGPoint(x: 133, y: 271))
+        let bNoise = noiseLayer(phase: CGPoint(x: 389, y: 97))
+
+        return kernel.apply(
+            extent: extent,
+            arguments: [image, lumaNoise, rgNoise, bNoise]
+        )?.cropped(to: extent) ?? image
+    }
+
+    private static func applyFirstPhoneHighlightClip(
+        to image: CIImage,
+        source: CIImage,
+        recipe: FilmRecipe
+    ) -> CIImage {
+        guard recipe.filmBase == .firstPhone,
+              let lumaFilter = CIFilter(name: "CIColorMatrix"),
+              let toneCurve = CIFilter(name: "CIToneCurve"),
+              let blend = CIFilter(name: "CIBlendWithMask") else {
+            return image
+        }
+
+        let luma = CIVector(x: 0.2126, y: 0.7152, z: 0.0722, w: 0)
+        lumaFilter.setValue(source, forKey: kCIInputImageKey)
+        lumaFilter.setValue(luma, forKey: "inputRVector")
+        lumaFilter.setValue(luma, forKey: "inputGVector")
+        lumaFilter.setValue(luma, forKey: "inputBVector")
+        lumaFilter.setValue(immutableResources.alphaVector, forKey: "inputAVector")
+        guard let lumaImage = lumaFilter.outputImage?.cropped(to: image.extent) else { return image }
+
+        toneCurve.setValue(lumaImage, forKey: kCIInputImageKey)
+        toneCurve.setValue(CIVector(x: 0.00, y: 0.00), forKey: "inputPoint0")
+        toneCurve.setValue(CIVector(x: 0.82, y: 0.00), forKey: "inputPoint1")
+        toneCurve.setValue(CIVector(x: 0.90, y: 1.00), forKey: "inputPoint2")
+        toneCurve.setValue(CIVector(x: 0.96, y: 1.00), forKey: "inputPoint3")
+        toneCurve.setValue(CIVector(x: 1.00, y: 1.00), forKey: "inputPoint4")
+        guard let mask = toneCurve.outputImage?.cropped(to: image.extent) else { return image }
+
+        blend.setValue(
+            CIImage(color: CIColor(red: 1, green: 1, blue: 1, alpha: 1)).cropped(to: image.extent),
+            forKey: kCIInputImageKey
+        )
+        blend.setValue(image, forKey: kCIInputBackgroundImageKey)
+        blend.setValue(mask, forKey: "inputMaskImage")
+        return blend.outputImage?.cropped(to: image.extent) ?? image
+    }
+
+    /// Simple lens color shading: a neutral-warm center fading to a slightly
+    /// darker, greenish-cyan corner, applied as a multiplicative radial gain.
+    private static func applyFirstPhoneLensShading(
+        to image: CIImage,
+        recipe: FilmRecipe
+    ) -> CIImage {
+        guard recipe.filmBase == .firstPhone,
+              let gradient = CIFilter(name: "CIRadialGradient") else {
+            return image
+        }
+        let extent = image.extent
+        guard extent.width.isFinite, extent.height.isFinite,
+              extent.width > 0, extent.height > 0 else { return image }
+
+        let center = CGPoint(x: extent.midX, y: extent.midY)
+        let radius = max(extent.width, extent.height) * 0.5
+        gradient.setValue(CIVector(cgPoint: center), forKey: "inputCenter")
+        gradient.setValue(0, forKey: "inputRadius0")
+        gradient.setValue(radius * 1.05, forKey: "inputRadius1")
+        // Opaque gain map: multiplying keeps the image's alpha at 1, whereas
+        // additive compositing would sum alphas and halve unpremultiplied RGB.
+        gradient.setValue(CIColor(red: 1.0, green: 0.996, blue: 0.998, alpha: 1), forKey: "inputColor0")
+        gradient.setValue(CIColor(red: 0.95, green: 0.98, blue: 0.985, alpha: 1), forKey: "inputColor1")
+        guard let shading = gradient.outputImage?.cropped(to: extent) else { return image }
+
+        return shading.applyingFilter("CIMultiplyCompositing", parameters: [
+            kCIInputBackgroundImageKey: image
+        ]).cropped(to: extent)
+    }
+
     private static func makeCubeData(
         dimension: Int,
         recipe: FilmRecipe
@@ -1762,21 +2022,22 @@ public final class FilmRenderer {
             mappedRed = luma * 1.06
             mappedGreen = luma * 0.91
             mappedBlue = luma * 0.72
-        case .acros, .acrosYellow, .acrosRed, .acrosGreen, .monochrome:
+        case .acros, .acrosYellow, .acrosRed, .acrosGreen, .monochrome, .monochromeYellow, .monochromeRed, .monochromeGreen:
             mappedRed = luma
             mappedGreen = luma
             mappedBlue = luma
         case .classicNegative:
-            // Hard tonality with its own palette: greens go "green-green"
-            // (less yellow), reds deeper and less bright, browns less
-            // yellow, cool cyan shadows against warm highlights.
+            // Fujifilm describes cyan-green shadows and magenta highlights:
+            // https://www.fujifilm-x.com/global/products/film-simulation/classic-neg/
+            // The old amber highlight shift belonged to Nostalgic Neg., not
+            // this mode. Gate color casts by chroma so neutral whites survive.
             saturate(0.94)
             nudge(-0.050, 0.004, 0.022, by: greenSector)
             nudge(-0.030, -0.004, 0.016, by: redSector)
             nudge(-0.004, -0.022, 0.010, by: skinSector)
             nudge(0.000, -0.020, -0.004, by: yellowSector)
-            nudge(-0.022, 0.030, 0.052, by: shadowWeight)
-            nudge(0.030, 0.012, -0.022, by: highlightWeight)
+            nudge(-0.022, 0.030, 0.052, by: shadowWeight * colorful)
+            nudge(0.018, -0.012, 0.014, by: highlightWeight * colorful)
         case .nostalgicNegative:
             // American New Color, per Fujifilm: rich colors in the shadows
             // with a soft tonality through midtones and highlights. Amber
@@ -1789,10 +2050,12 @@ public final class FilmRenderer {
             nudge(0.012, 0.006, -0.028, by: blueSector)
             nudge(0.014, 0.004, 0.000, by: shadowWeight)
         case .realaAce:
-            // Faithful color with hard tonality: between PRO Neg. Std and Hi
-            // in saturation, blues rendered slightly deeper, brighter
-            // midtones, a whisper of warmth in skin.
-            saturate(0.98)
+            // Public REALA ACE intent is saturation-dependent, not a fixed
+            // saturation reduction: protect already-rich colors while lifting
+            // restrained colors. Near-neutral pixels stay neutral.
+            // https://www.fujifilm-x.com/global/products/film-simulation/reala-ace/
+            let saturationResponse = 1.025 - 0.105 * smoothstep(0.18, 0.72, baseChroma)
+            saturate(saturationResponse)
             nudge(0.010, 0.002, -0.004, by: skinSector)
             nudge(-0.010, -0.010, 0.012, by: blueSector)
             nudge(0.004, 0.004, 0.004, by: midtoneWeight)
@@ -1864,6 +2127,16 @@ public final class FilmRenderer {
             mappedBlue += 0.060 * blueWeight
             mappedGreen += 0.004 * blueWeight
             mappedRed -= 0.016 * blueWeight
+        case .firstPhone:
+            // Original approximation of a weak, low-resolution phone-camera
+            // auto white balance: washed-out overall color, a cyan-green
+            // cast concentrated in shadows and midtones, and only a whisper
+            // of warmth in skin (no dedicated warm-portrait tuning like a
+            // modern sensor).
+            saturate(0.90)
+            nudge(-0.018, 0.010, 0.012, by: shadowWeight)
+            nudge(-0.010, 0.008, 0.008, by: midtoneWeight)
+            nudge(0.010, 0.000, -0.004, by: skinSector)
         }
 
         return (mappedRed, mappedGreen, mappedBlue)

@@ -124,18 +124,18 @@ final class NormalPhotoFlowTests: XCTestCase {
         XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }
         XCTAssertTrue(
-            waitUntil(timeout: 10) { app.frame.height > app.frame.width },
-            "Large-text review must stay portrait after device rotation before compact-layout checks"
+            waitForRotatedGeometry(timeout: 10),
+            "Large-text review must settle in the expected geometry after device rotation before compact-layout checks"
         )
         let landscapeFinish = app.buttons["review-finish-instantPrint"]
         let landscapeScroll = reviewScroll
         XCTAssertTrue(
             revealFully(landscapeFinish, in: landscapeScroll),
-            "Large-text portrait-locked Instant Print must scroll fully into view"
+            "Large-text rotated Instant Print must scroll fully into view"
         )
         assertReviewControl(
             landscapeFinish,
-            name: "Large-text portrait-locked Instant Print",
+            name: "Large-text rotated Instant Print",
             containedInApp: true
         )
         landscapeFinish.tap()
@@ -144,22 +144,22 @@ final class NormalPhotoFlowTests: XCTestCase {
                 app.descendants(matching: .any)["review-image"].label.contains("Instant Print")
                     && app.buttons["Save filtered photo"].isEnabled
             },
-            "Large-text portrait-locked review must finish rendering Instant Print"
+            "Large-text rotated review must finish rendering Instant Print"
         )
 
         let save = app.buttons["Save filtered photo"]
         XCTAssertTrue(
             revealFully(save, in: landscapeScroll),
-            "Large-text portrait-locked Save must scroll fully into view"
+            "Large-text rotated Save must scroll fully into view"
         )
-        assertReviewControl(save, name: "Large-text portrait-locked Save", containedInApp: true)
+        assertReviewControl(save, name: "Large-text rotated Save", containedInApp: true)
 
         let cancel = app.buttons["Cancel"]
         XCTAssertTrue(
             revealFully(cancel, in: landscapeScroll),
-            "Large-text portrait-locked Cancel must scroll fully into view"
+            "Large-text rotated Cancel must scroll fully into view"
         )
-        assertReviewControl(cancel, name: "Large-text portrait-locked Cancel", containedInApp: true)
+        assertReviewControl(cancel, name: "Large-text rotated Cancel", containedInApp: true)
         cancel.tap()
         let review = app.descendants(matching: .any)["review-screen"]
         XCTAssertTrue(waitForDisappearance(review, timeout: 10), "Cancel must dismiss imported review")
@@ -294,31 +294,31 @@ final class NormalPhotoFlowTests: XCTestCase {
         XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }
         XCTAssertTrue(
-            waitUntil(timeout: 10) { app.frame.height > app.frame.width },
-            "The review must stay portrait after device rotation before layout assertions"
+            waitForRotatedGeometry(timeout: 10),
+            "The review must settle in the expected geometry after device rotation before layout assertions"
         )
-        assertReviewControl(compare, name: "Portrait-locked Original comparison", containedInApp: true)
-        assertReviewControl(lookPicker, name: "Portrait-locked review look picker", containedInApp: true)
-        assertReviewControl(printFinish, name: "Portrait-locked Instant Print", containedInApp: true)
+        assertReviewControl(compare, name: "Rotated Original comparison", containedInApp: true)
+        assertReviewControl(lookPicker, name: "Rotated review look picker", containedInApp: true)
+        assertReviewControl(printFinish, name: "Rotated Instant Print", containedInApp: true)
         assertReviewControl(
             app.buttons["Save filtered photo"],
-            name: "Portrait-locked Save filtered photo",
+            name: "Rotated Save filtered photo",
             containedInApp: true
         )
         let landscapePhoto = app.descendants(matching: .any)["review-image"]
-        XCTAssertTrue(landscapePhoto.waitForExistence(timeout: 10), "Portrait-locked review must keep its photo visible")
+        XCTAssertTrue(landscapePhoto.waitForExistence(timeout: 10), "Rotated review must keep its photo visible")
         XCTAssertTrue(
             app.frame.insetBy(dx: -1, dy: -1).contains(landscapePhoto.frame),
-            "Portrait-locked review photo must remain inside the app frame"
+            "Rotated review photo must remain inside the app frame"
         )
         XCTAssertGreaterThan(
             landscapePhoto.frame.height,
             120,
-            "Portrait-locked review must reserve usable height for the fitted photo"
+            "Rotated review must reserve usable height for the fitted photo"
         )
         XCTAssertTrue(
             landscapePhoto.frame.intersection(app.buttons["Save filtered photo"].frame).isNull,
-            "Portrait-locked actions must not cover the fitted photo"
+            "Rotated actions must not cover the fitted photo"
         )
         attachScreenshot(named: "review-monochrome-landscape")
 
@@ -363,7 +363,7 @@ final class NormalPhotoFlowTests: XCTestCase {
         if containedInApp {
             XCTAssertTrue(
                 app.frame.insetBy(dx: -1, dy: -1).contains(element.frame),
-                "\(name) must remain entirely inside the landscape app frame"
+                "\(name) must remain entirely inside the settled app frame"
             )
         }
     }
@@ -420,10 +420,13 @@ final class NormalPhotoFlowTests: XCTestCase {
         app?.terminate()
         XCUIDevice.shared.orientation = .portrait
         app = XCUIApplication()
-        // Deliberately omit -ui-testing so PhotosPicker and the real save path
-        // are exercised against the disposable seeded library.
+        // Deliberately omit the exact -ui-testing flag so PhotosPicker and the
+        // real save path are exercised against the disposable seeded library.
+        // This narrower prefix keeps premium entitlement deterministic without
+        // replacing PhotoKit or the camera services used by this lane.
+        app.launchArguments = ["-ui-testing-photos-e2e"]
         if let contentSizeCategory {
-            app.launchArguments = ["-UIPreferredContentSizeCategoryName", contentSizeCategory]
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", contentSizeCategory]
         }
         app.launch()
 
@@ -434,7 +437,7 @@ final class NormalPhotoFlowTests: XCTestCase {
         app.tap()
         XCTAssertTrue(
             waitUntil(timeout: 10) { app.frame.height >= app.frame.width },
-            "The normal Photos flow must launch in settled portrait geometry"
+            "The normal Photos flow must settle in the explicitly requested portrait geometry"
         )
         XCTAssertTrue(app.buttons["Open roll"].waitForExistence(timeout: 15))
     }
@@ -471,6 +474,15 @@ final class NormalPhotoFlowTests: XCTestCase {
         XCTAssertTrue(close.waitForExistence(timeout: 5), "The look drawer must remain dismissible")
         close.tap()
         XCTAssertTrue(waitForDisappearance(close, timeout: 5), "Selecting a look must leave the camera controls available")
+    }
+
+    private func waitForRotatedGeometry(timeout: TimeInterval) -> Bool {
+        waitUntil(timeout: timeout) {
+            if UIDevice.current.userInterfaceIdiom == .pad {
+                return app.frame.width > app.frame.height
+            }
+            return app.frame.height >= app.frame.width
+        }
     }
 
     private func importSeededFixture(newerSavedFrameCount: Int? = nil) throws {
@@ -788,11 +800,12 @@ final class NormalPhotoFlowTests: XCTestCase {
     }
 
     private func rollFrameCount() -> Int? {
-        for label in app.staticTexts.allElementsBoundByIndex.map(\.label)
-            where label.hasSuffix(" frames") {
-            if let count = Int(label.dropLast(" frames".count)) {
-                return count
-            }
+        let countLabel = app.staticTexts.matching(
+            NSPredicate(format: "label ENDSWITH %@", " frames")
+        ).firstMatch
+        if countLabel.exists,
+           let count = Int(countLabel.label.dropLast(" frames".count)) {
+            return count
         }
         if app.staticTexts["Your frames will live here"].exists
             || app.staticTexts["Your selected roll is empty"].exists {

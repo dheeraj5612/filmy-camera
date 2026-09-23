@@ -1,4 +1,5 @@
 import Combine
+import CoreLocation
 import CoreImage
 import CoreMedia
 import ImageIO
@@ -41,9 +42,10 @@ extension FilmRecipe {
         case .velvia: return "sparkles"
         case .astia: return "person.crop.square.filled.and.at.rectangle"
         case .eterna, .eternaBleachBypass: return "film.stack"
-        case .acros, .acrosYellow, .acrosRed, .acrosGreen, .monochrome: return "circle.lefthalf.filled"
+        case .acros, .acrosYellow, .acrosRed, .acrosGreen, .monochrome, .monochromeYellow, .monochromeRed, .monochromeGreen: return "circle.lefthalf.filled"
         case .sepia: return "clock.arrow.circlepath"
         case .compactDigital: return "camera.fill"
+        case .firstPhone: return "camera"
         case .standard, .provia: return "camera.aperture"
         }
     }
@@ -104,7 +106,10 @@ extension FilmRecipe {
 
 @MainActor
 final class CameraViewModel: ObservableObject {
-    nonisolated static let defaultRecipeID = "g7x-compact"
+#if DEBUG
+    @Published private(set) var captureTimingStatus = "idle"
+#endif
+    nonisolated static let defaultRecipeID = AppConfiguration.defaultRecipeID
 
     private static let builtInRecipesByID = Dictionary(
         uniqueKeysWithValues: FilmRecipe.builtIns.map { ($0.id, $0) }
@@ -118,7 +123,7 @@ final class CameraViewModel: ObservableObject {
     /// the actual first look, including a customized color cube.
     nonisolated static func launchRecipe(defaults: UserDefaults = .standard) -> FilmRecipe {
         let storedID = defaults.string(forKey: selectedRecipeIDKey) ?? defaultRecipeID
-        let base = FilmRecipe.builtIns.first { $0.id == storedID }
+        let base = FilmRecipe.builtIns.first { $0.id == storedID && AppConfiguration.isRecipeAllowed($0.id) }
             ?? FilmRecipe.builtIns.first { $0.id == defaultRecipeID }
             ?? FilmRecipe.builtIns[0]
         guard let saved = decodeRecipeOverrides(from: defaults.data(forKey: recipeOverridesKey))
@@ -157,7 +162,9 @@ final class CameraViewModel: ObservableObject {
         let capturedAt: Date
         var isFullResolution = true
         var flashFired = false
+        var location: CLLocation? = nil
         var normalizedSubjectRegions: [CGRect]? = nil
+        var documentID: UUID? = nil
     }
 
     struct ReviewPreview: @unchecked Sendable {
@@ -182,13 +189,15 @@ final class CameraViewModel: ObservableObject {
         let capturedAt: Date
         let mode: Mode
         let normalizedSubjectRegions: [CGRect]?
+        var location: CLLocation? = nil
 
         func storing(normalizedSubjectRegions: [CGRect]?) -> Self {
             Self(
                 data: data,
                 capturedAt: capturedAt,
                 mode: mode,
-                normalizedSubjectRegions: normalizedSubjectRegions
+                normalizedSubjectRegions: normalizedSubjectRegions,
+                location: location
             )
         }
     }
@@ -263,13 +272,19 @@ final class CameraViewModel: ObservableObject {
 
     /// New installs and unknown persisted selections land on the G7 X profile.
     private static let fallbackRecipeID = CameraViewModel.defaultRecipeID
-    private static let validRecipeIDs = Set(FilmRecipe.builtIns.map(\.id))
+    private static let validRecipeIDs = Set(FilmRecipe.builtIns.map(\.id).filter(AppConfiguration.isRecipeAllowed))
 
     private let defaults: UserDefaults
 
     @Published var selectedRecipeID: String {
         didSet {
             guard selectedRecipeID != oldValue else { return }
+            guard MembershipStore.shared.allowsRecipe(selectedRecipeID) else {
+                let requestedID = selectedRecipeID
+                selectedRecipeID = oldValue
+                _ = MembershipStore.shared.requireRecipe(requestedID)
+                return
+            }
             guard Self.validRecipeIDs.contains(selectedRecipeID) else {
                 selectedRecipeID = Self.fallbackRecipeID
                 defaults.set(Self.fallbackRecipeID, forKey: Self.selectedRecipeIDKey)
@@ -301,6 +316,12 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var isPreparingReviewOriginal = false
     @Published private(set) var pendingReviewRecipeID: String?
     @Published private var recipeOverrides: [String: FilmRecipe] = [:]
+    @Published var libraryPreferences = RecipeLibraryPreferences() {
+        didSet {
+            guard libraryPreferences != oldValue else { return }
+            defaults.set(libraryPreferences.encoded(), forKey: RecipeLibraryPreferences.storageKey)
+        }
+    }
 
     private var toastTask: Task<Void, Never>?
     private var reviewImageData: Data?
@@ -326,6 +347,7 @@ final class CameraViewModel: ObservableObject {
         reviewOriginalRenderer: ReviewOriginalRenderer? = nil
     ) {
         self.defaults = defaults
+        libraryPreferences = .decode(defaults.data(forKey: RecipeLibraryPreferences.storageKey))
         self.reviewPreviewRenderer = reviewPreviewRenderer ?? { source, recipe, finish in
             Self.renderReviewPreview(source: source, recipe: recipe, finish: finish)
         }
@@ -455,25 +477,44 @@ final class CameraViewModel: ObservableObject {
         return (recoveredRecipes, true)
     }
 
+    var effectiveSelectedRecipeID: String {
+        MembershipStore.shared.allowsRecipe(selectedRecipeID) ? selectedRecipeID : Self.defaultRecipeID
+    }
+
     var selectedRecipe: FilmRecipe {
-        recipe(for: selectedRecipeID)
+        recipe(for: effectiveSelectedRecipeID)
     }
 
     /// The recipe rail, detail sheet, live preview, and exports must all use
     /// the same effective values. Returning resolved overrides here prevents
     /// a customized look from being represented by a stale stock thumbnail.
     var recipes: [FilmRecipe] {
-        FilmRecipe.builtIns.map { recipe(for: $0.id) }
+        FilmRecipe.builtIns.filter { Self.validRecipeIDs.contains($0.id) }.map { recipe(for: $0.id) }
+    }
+
+    /// Membership is deliberately separate from the full editing/review catalog.
+    var quickRecipes: [FilmRecipe] {
+        FilmRecipe.builtIns.filter { libraryPreferences.isEnabled($0.id) }.map { recipe(for: $0.id) }
+    }
+
+    /// A hidden current look remains an ordering anchor for an explicit swipe.
+    /// It is not reinserted into the popup or made active by this navigation aid.
+    var quickNavigationRecipes: [FilmRecipe] {
+        FilmRecipe.builtIns.filter { $0.id == selectedRecipeID || libraryPreferences.isEnabled($0.id) }
+            .map { recipe(for: $0.id) }
     }
 
     func recipe(for id: String) -> FilmRecipe {
-        recipeOverrides[id]
+        guard Self.validRecipeIDs.contains(id) else { return Self.defaultRecipe }
+        // Preserve paid customizations on disk, but never apply them while free.
+        if !MembershipStore.shared.hasFullAccess { return Self.builtInRecipesByID[id] ?? Self.defaultRecipe }
+        return recipeOverrides[id]
             ?? Self.builtInRecipesByID[id]
             ?? Self.defaultRecipe
     }
 
     func select(recipe: FilmRecipe) {
-        guard Self.validRecipeIDs.contains(recipe.id) else { return }
+        guard Self.validRecipeIDs.contains(recipe.id), MembershipStore.shared.requireRecipe(recipe.id) else { return }
         selectedRecipeID = recipe.id
     }
 
@@ -482,6 +523,8 @@ final class CameraViewModel: ObservableObject {
     }
 
     func update(recipe: FilmRecipe) {
+        guard Self.validRecipeIDs.contains(recipe.id) else { return }
+        guard MembershipStore.shared.require(.recipeEditing) else { return }
         guard let parent = FilmRecipe.builtIns.first(where: {
             $0.id == recipe.id
         }) else {
@@ -496,6 +539,7 @@ final class CameraViewModel: ObservableObject {
     }
 
     func reset(recipeID: String) {
+        guard Self.validRecipeIDs.contains(recipeID) else { return }
         guard recipeOverrides.removeValue(forKey: recipeID) != nil else { return }
         persistRecipeOverrides()
     }
@@ -509,18 +553,61 @@ final class CameraViewModel: ObservableObject {
         defaults.set(data, forKey: Self.recipeOverridesKey)
     }
 
+    private var reviewDocumentID: UUID?
+    private var pendingOriginalRetention: CapturedWork?
+
+    private struct CapturedWork: Sendable {
+        let photo: CameraService.CapturedPhoto
+        let recipe: FilmRecipe
+        let finish: PhotoFinish
+        let viewport: CGSize
+        let drawable: CGSize
+        let grainSeed: UInt32
+        let dateStampEnabled: Bool
+        let dateStampText: String?
+    }
+
     var isReviewingImport: Bool { reviewSource == .photoLibrary && reviewImage != nil }
     var hasPendingCapture: Bool { reviewSource == .camera && reviewImage != nil }
 
     func capture(camera: CameraService, photoLibrary: any PhotoSaving) {
         guard !isCapturing, !isImporting, !isSaving, reviewImage == nil else { return }
+        let captureStartedAt = ContinuousClock.now
+        if let pendingOriginalRetention {
+            isCapturing = true
+            Task {
+                await developCapture(
+                    pendingOriginalRetention,
+                    captureStartedAt: captureStartedAt,
+                    camera: camera,
+                    photoLibrary: photoLibrary
+                )
+            }
+            return
+        }
+        let membership = MembershipStore.shared
+        guard let permit = membership.reserveCapture() else { return }
+        // This update is ordered before capture on the camera's session queue.
+        camera.setPremiumControlsEnabled(membership.hasFullAccess)
         isCapturing = true
         toastTask?.cancel()
         toastMessage = nil
         saveErrorMessage = nil
         saveErrorRequiresSettings = false
-        let recipe = selectedRecipe
-        let finish = PhotoFinish(rawValue: defaults.string(forKey: "captureFinish") ?? "") ?? .photo
+        // Freeze both the sensor controller and the exact development used
+        // in the viewfinder. Async rendering never reads mutable Auto state.
+        camera.setSceneAutoCapturePaused(true)
+        let recipe = camera.sceneAuto.development.applying(to: selectedRecipe)
+        let finish = membership.hasFullAccess
+            ? (PhotoFinish(rawValue: defaults.string(forKey: "captureFinish") ?? "") ?? .photo)
+            : .photo
+        if camera.proCaptureSettings.livePhoto && finish != .photo {
+            camera.setSceneAutoCapturePaused(false)
+            membership.finishCapture(permit, succeeded: false)
+            isCapturing = false
+            showToast("Live Photos require Photo finish. Turn off Instant Print before capturing.", style: .error)
+            return
+        }
         let viewportSize = camera.previewViewportSize
         // Use the drawable the viewfinder really rendered into: its scale
         // comes from the window's screen (which can differ from the main
@@ -541,73 +628,139 @@ final class CameraViewModel: ObservableObject {
             )
         }
         let grainSeed = camera.previewGrainSeed
+        // Freeze the optional stamp at shutter time so a retry cannot change
+        // because the setting or timezone changed after capture.
+        let dateStampEnabled = G7DateStampPreferences.isEnabled(in: defaults)
+        let dateStampTimeZoneIdentifier = TimeZone.current.identifier
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-ui-testing") { captureTimingStatus = "requested" }
+#endif
 
         camera.capturePhoto { [weak self] capturedPhoto in
             Task { @MainActor [weak self] in
+                var succeeded = false
+                defer {
+                    camera.setSceneAutoCapturePaused(false)
+                    membership.finishCapture(permit, succeeded: succeeded)
+                }
                 guard let self else { return }
+#if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("-ui-testing") { self.captureTimingStatus = "capture-complete:\(captureStartedAt.duration(to: .now).components.seconds)s" }
+#endif
 
                 guard let capturedPhoto else {
                     self.isCapturing = false
                     if camera.availability == .simulator {
                         self.showToast("Capture is available on a physical device", style: .info)
                     } else {
-                        self.showToast("Capture could not be completed. Resume the camera and try again.", style: .error)
+                        let message = camera.statusMessage == "Start the camera before capturing."
+                            ? "Capture could not be completed. Resume the camera and try again."
+                            : camera.statusMessage
+                        self.showToast(message, style: .error)
                     }
                     return
                 }
 
-                // The camera stays live. Rendering and Photos IO must not
-                // stop the session or present a Retake/Save interstitial.
-                // Keep the Photos saver on the main actor; only the render
-                // inputs cross into the detached background task.
-                let renderedPhoto = await Task.detached(priority: .userInitiated) {
-                    autoreleasepool {
-                        Self.render(
-                            sourceData: capturedPhoto.fileData,
-                            recipe: recipe,
-                            viewportSize: viewportSize,
-                            previewDrawableSize: previewDrawableSize,
-                            capturedAt: capturedPhoto.capturedAt,
-                            flashFired: capturedPhoto.flashFired,
-                            grainSeed: grainSeed,
-                            finish: finish
-                        )
-                    }
-                }.value
+                succeeded = await self.developCapture(
+                    CapturedWork(photo: capturedPhoto, recipe: recipe, finish: finish,
+                                 viewport: viewportSize, drawable: previewDrawableSize, grainSeed: grainSeed,
+                                 dateStampEnabled: dateStampEnabled,
+                                 dateStampText: dateStampEnabled
+                                    ? G7DateStampRenderer.dateText(
+                                        for: capturedPhoto.capturedAt,
+                                        timeZone: TimeZone(identifier: dateStampTimeZoneIdentifier) ?? .current
+                                    )
+                                    : nil),
+                    captureStartedAt: captureStartedAt,
+                    camera: camera, photoLibrary: photoLibrary
+                )
+            }
+        }
+    }
 
-                guard let renderedPhoto else {
-                    // CameraScreen owns session lifecycle. Ending the capture
-                    // without a review lets its visibility-aware policy decide
-                    // whether the camera should resume.
-                    camera.setFrameDeliveryPaused(false)
-                    self.isCapturing = false
-                    self.showToast("The selected look could not be rendered. Try the capture again.", style: .error)
-                    return
-                }
+    private func developCapture(
+        _ work: CapturedWork,
+        captureStartedAt: ContinuousClock.Instant,
+        camera: CameraService,
+        photoLibrary: any PhotoSaving
+    ) async -> Bool {
+        let recipe = work.recipe
+        let finish = work.finish
+        let grainSeed = work.grainSeed
+        let document: FilmyPhotoDocument
+        do {
+            document = try await FilmyPhotoStore.shared.create(
+                processed: work.photo.fileData, raw: work.photo.rawFileData,
+                liveMovieURL: work.photo.livePhotoMovieURL, capturedAt: work.photo.capturedAt,
+                geometry: .init(viewportWidth: work.viewport.width, viewportHeight: work.viewport.height,
+                                previewWidth: work.drawable.width, previewHeight: work.drawable.height,
+                                grainSeed: grainSeed, flashFired: work.photo.flashFired),
+                recipe: recipe, finish: finish, settings: work.photo.outputSettings
+            )
+            pendingOriginalRetention = nil
+            if let movie = work.photo.livePhotoMovieURL { CameraService.removeOwnedTemporaryMovie(movie) }
+        } catch {
+            // Keep the captured bytes and owned Live movie for an explicit
+            // retry. A disk failure must not silently throw away a RAW capture.
+            pendingOriginalRetention = work
+            isCapturing = false
+            showToast("Original not saved. Free storage, then tap the shutter to retry. Keep Filmy open.", style: .error)
+            return false
+        }
+        let rendered = await Task.detached(priority: .userInitiated) {
+            autoreleasepool {
+                Self.render(
+                    sourceData: work.photo.fileData, recipe: recipe,
+                    viewportSize: work.viewport, previewDrawableSize: work.drawable,
+                    capturedAt: work.photo.capturedAt, flashFired: work.photo.flashFired,
+                    grainSeed: grainSeed, finish: finish, outputSettings: work.photo.outputSettings,
+                    dateStampEnabled: work.dateStampEnabled, dateStampText: work.dateStampText
+                )
+            }
+        }.value
+        guard var renderedPhoto = rendered, let firstRevision = document.currentRevision else {
+            isCapturing = false
+            showToast("Original retained in Filmy originals. Open it there to retry developing this look.", style: .error)
+            return false
+        }
+        do {
+            try await FilmyPhotoStore.shared.addRevision(
+                document.id, expectedRevisionID: firstRevision.id, recipe: recipe, finish: finish,
+                settings: work.photo.outputSettings, renderedData: renderedPhoto.data
+            )
+        } catch {
+            isCapturing = false
+            showToast("Original retained. Filmy could not save the developed version; retry from Filmy originals.", style: .error)
+            return false
+        }
+        renderedPhoto.documentID = document.id
 #if DEBUG
-                if FilmyCaptureDiagnostics.isEnabled() {
+        if ProcessInfo.processInfo.arguments.contains("-ui-testing") { self.captureTimingStatus = "render-complete:\(captureStartedAt.duration(to: .now).components.seconds)s" }
+#endif
+#if DEBUG
+        if FilmyCaptureDiagnostics.isEnabled() {
                     let metadata = FilmyCaptureDiagnostics.Metadata(
-                        capturedAt: capturedPhoto.capturedAt,
+                        capturedAt: work.photo.capturedAt,
                         sourceDimensions: .init(
-                            width: Int(capturedPhoto.dimensions.width),
-                            height: Int(capturedPhoto.dimensions.height)
+                            width: Int(work.photo.dimensions.width),
+                            height: Int(work.photo.dimensions.height)
                         ),
                         viewportSize: .init(
-                            width: viewportSize.width.isFinite ? max(viewportSize.width, 0) : 0,
-                            height: viewportSize.height.isFinite ? max(viewportSize.height, 0) : 0
+                            width: work.viewport.width.isFinite ? max(work.viewport.width, 0) : 0,
+                            height: work.viewport.height.isFinite ? max(work.viewport.height, 0) : 0
                         ),
                         previewDrawableSize: .init(
-                            width: previewDrawableSize.width.isFinite ? max(previewDrawableSize.width, 0) : 0,
-                            height: previewDrawableSize.height.isFinite ? max(previewDrawableSize.height, 0) : 0
+                            width: work.drawable.width.isFinite ? max(work.drawable.width, 0) : 0,
+                            height: work.drawable.height.isFinite ? max(work.drawable.height, 0) : 0
                         ),
                         grainSeed: grainSeed,
-                        flashFired: capturedPhoto.flashFired,
+                        flashFired: work.photo.flashFired,
                         finish: finish,
                         appVersion: PhotoOutputEncoder.currentApplicationVersion,
                         appBuild: PhotoOutputEncoder.currentApplicationBuild,
                         recipe: recipe
                     )
-                    let originalData = capturedPhoto.fileData
+                    let originalData = work.photo.fileData
                     let finalJPEGData = renderedPhoto.data
                     Task.detached(priority: .utility) {
                         _ = await FilmyCaptureDiagnostics.persist(
@@ -618,12 +771,11 @@ final class CameraViewModel: ObservableObject {
                     }
                 }
 #endif
-                self.saveCapturedPhoto(
-                    renderedPhoto, recipe: recipe, finish: finish, photoLibrary: photoLibrary
-                )
-                self.isCapturing = false
-            }
-        }
+        saveCapturedPhoto(renderedPhoto, recipe: recipe, finish: finish, photoLibrary: photoLibrary)
+        isCapturing = false
+        // A rendered photo counts once even if Photos saving must be retried.
+        // Retry/discard never recaptures or charges again.
+        return true
     }
 
     /// Shares the tested, generation-guarded save transaction with imports,
@@ -637,6 +789,7 @@ final class CameraViewModel: ObservableObject {
     ) {
         guard !isSaving, !isImporting, reviewImage == nil else { return }
         reviewSource = .camera
+        reviewDocumentID = photo.documentID
         reviewImage = photo.image
         reviewImageData = photo.data
         reviewCapturedAt = photo.capturedAt
@@ -651,6 +804,7 @@ final class CameraViewModel: ObservableObject {
 
     func importPhoto(data: Data, camera: CameraService? = nil) async {
         guard !isCapturing, !isImporting, !isSaving, reviewImage == nil else { return }
+        guard MembershipStore.shared.require(.photoImport) else { return }
 
         isImporting = true
         saveErrorMessage = nil
@@ -697,7 +851,8 @@ final class CameraViewModel: ObservableObject {
             data: data,
             capturedAt: importedAt,
             mode: .photoLibrary,
-            normalizedSubjectRegions: renderedPhoto.normalizedSubjectRegions
+            normalizedSubjectRegions: renderedPhoto.normalizedSubjectRegions,
+            location: nil
         )
         fullResolutionReviewRecipe = recipe
         fullResolutionReviewFinish = .photo
@@ -723,6 +878,9 @@ final class CameraViewModel: ObservableObject {
     }
 
     private func applyReview(recipe: FilmRecipe, finish: PhotoFinish) {
+        guard MembershipStore.shared.require(.photoImport),
+              MembershipStore.shared.requireRecipe(recipe.id) else { return }
+        if finish != .photo && !MembershipStore.shared.require(.photoFinishes) { return }
         guard reviewImage != nil,
               let source = reviewRenderSource,
               !isSaving,
@@ -954,9 +1112,17 @@ final class CameraViewModel: ObservableObject {
             image: image,
             imageData: imageData,
             recipe: recipe,
-            capturedAt: capturedAt
+            capturedAt: capturedAt,
+            documentID: reviewDocumentID
         ) { [weak self] result in
             guard let self, self.reviewWorkGeneration == generation, self.isSaving else { return }
+#if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-ui-testing") {
+                let succeeded: Bool
+                if case .success = result { succeeded = true } else { succeeded = false }
+                self.captureTimingStatus = "save-callback:\(succeeded)"
+            }
+#endif
             self.isSaving = false
             switch result {
             case .success:
@@ -980,6 +1146,7 @@ final class CameraViewModel: ObservableObject {
         reviewWorkGeneration &+= 1
         reviewWorkQueue.cancelPending()
         reviewImage = nil
+        reviewDocumentID = nil
         reviewImageData = nil
         reviewCapturedAt = nil
         reviewRecipe = nil
@@ -1036,9 +1203,13 @@ final class CameraViewModel: ObservableObject {
         previewDrawableSize: CGSize,
         capturedAt: Date,
         flashFired: Bool,
+        location: CLLocation? = nil,
         grainSeed: UInt32,
         normalizedSubjectRegions: [CGRect]? = nil,
-        finish: PhotoFinish = .photo
+        finish: PhotoFinish = .photo,
+        outputSettings: ProCaptureSettings? = nil,
+        dateStampEnabled: Bool = false,
+        dateStampText: String? = nil
     ) -> RenderedPhoto? {
         // Resolve the source image's EXIF orientation before applying the
         // preview crop. The finished JPEG is written with orientation=1, so
@@ -1048,7 +1219,9 @@ final class CameraViewModel: ObservableObject {
             options: [.applyOrientationProperty: true]
         ) else { return nil }
         let framedInput: CIImage
-        if viewportSize.width > 0, viewportSize.height > 0 {
+        if let outputSettings {
+            framedInput = ProPhotoOutput.framedSource(input, viewportSize: viewportSize, resolution: outputSettings.resolution)
+        } else if viewportSize.width > 0, viewportSize.height > 0 {
             let crop = CameraFrameLayout.aspectFillCrop(
                 sourceExtent: input.extent,
                 targetSize: viewportSize
@@ -1105,13 +1278,37 @@ final class CameraViewModel: ObservableObject {
             grainSeed: grainSeed,
             grainPhase: grainPhase
         )
-        guard let finished = PhotoPrintCompositor.composedImage(filtered, finish: finish),
-              let output = FilmRenderer.outputCGImage(finished, from: finished.extent) else { return nil }
+        if let outputSettings {
+            let graded: CIImage
+            if outputSettings.dynamicRange == .hdr {
+                guard let expanded = CIImage(data: sourceData, options: [.applyOrientationProperty: true, .expandToHDR: true]),
+                      let hdr = ProPhotoOutput.preservingHeadroom(
+                        film: filtered, sourceSDR: framedInput,
+                        sourceHDR: ProPhotoOutput.framedSource(expanded, viewportSize: viewportSize, resolution: outputSettings.resolution)
+                      ) else { return nil }
+                graded = hdr
+            } else { graded = filtered }
+            guard let composed = PhotoPrintCompositor.composedImage(graded, finish: finish) else { return nil }
+            let finished = G7DateStampRenderer.applyingStamp(
+                to: composed, text: dateStampText, enabled: dateStampEnabled
+            )
+            guard let data = ProPhotoOutput.encode(
+                    finished, sourceData: sourceData, capturedAt: capturedAt, recipe: recipe, settings: outputSettings
+                  ), let image = downsampledReviewImage(from: data) else { return nil }
+            return RenderedPhoto(image: image, data: data, capturedAt: capturedAt, flashFired: flashFired,
+                                 normalizedSubjectRegions: resolvedSubjectRegions)
+        }
+        guard let composed = PhotoPrintCompositor.composedImage(filtered, finish: finish) else { return nil }
+        let finished = G7DateStampRenderer.applyingStamp(
+            to: composed, text: dateStampText, enabled: dateStampEnabled
+        )
+        guard let output = FilmRenderer.outputCGImage(finished, from: finished.extent) else { return nil }
         guard let data = PhotoOutputEncoder.jpegData(
             for: output,
             sourceData: sourceData,
             capturedAt: capturedAt,
-            recipe: recipe
+            recipe: recipe,
+            location: location
         ) else {
             return nil
         }
@@ -1123,6 +1320,7 @@ final class CameraViewModel: ObservableObject {
             data: data,
             capturedAt: capturedAt,
             flashFired: flashFired,
+            location: location,
             normalizedSubjectRegions: resolvedSubjectRegions
         )
     }
@@ -1133,25 +1331,55 @@ final class CameraViewModel: ObservableObject {
     /// pixel count before rendering. Everyday phone photos stay untouched.
     nonisolated static let importPixelBudget: CGFloat = 40_000_000
 
+    nonisolated static let importMaximumDimension: CGFloat = 16_384
+
+    nonisolated static func boundedImportSize(_ size: CGSize) -> CGSize? {
+        ImageSizePolicy.boundedSize(
+            size, maximumPixels: importPixelBudget, maximumDimension: importMaximumDimension
+        )
+    }
+
     nonisolated static func boundedImportInput(_ image: CIImage) -> CIImage {
         let extent = image.extent
-        let area = extent.width * extent.height
-        guard area > importPixelBudget, area.isFinite, area > 0,
-              let lanczos = CIFilter(name: "CILanczosScaleTransform") else {
-            return image
-        }
+        guard extent.origin.x.isFinite, extent.origin.y.isFinite,
+              let size = boundedImportSize(extent.size) else { return CIImage.empty() }
+        guard size != extent.size else { return image }
+        return CameraFrameLayout.aspectFill(image, in: CGRect(origin: .zero, size: size))
+    }
 
-        let scale = (importPixelBudget / area).squareRoot()
-        lanczos.setValue(image, forKey: kCIInputImageKey)
-        lanczos.setValue(scale, forKey: kCIInputScaleKey)
-        lanczos.setValue(1.0, forKey: kCIInputAspectRatioKey)
-        let boundedExtent = CGRect(
-            x: 0,
-            y: 0,
-            width: max((extent.width * scale).rounded(.down), 1),
-            height: max((extent.height * scale).rounded(.down), 1)
-        )
-        return lanczos.outputImage?.cropped(to: boundedExtent) ?? image
+    /// Inspect encoded metadata before asking a decoder for pixels. For large
+    /// scans/panoramas, ImageIO downsamples first instead of building a full-size
+    /// CI source and shrinking it only after decoding. Normal imports retain the
+    /// original CI decoding/color-management path and EXIF orientation behavior.
+    nonisolated static func preparedImportInput(data: Data) -> (image: CIImage, isFullResolution: Bool)? {
+        guard !Task.isCancelled,
+              let source = CGImageSourceCreateWithData(
+                data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary
+              ),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any],
+              let width = (properties[kCGImagePropertyPixelWidth as String] as? NSNumber)?.doubleValue,
+              let height = (properties[kCGImagePropertyPixelHeight as String] as? NSNumber)?.doubleValue else { return nil }
+        let orientation = (properties[kCGImagePropertyOrientation as String] as? NSNumber)?.uint32Value ?? 1
+        let sourceSize = (5...8).contains(orientation)
+            ? CGSize(width: height, height: width) : CGSize(width: width, height: height)
+        guard let size = boundedImportSize(sourceSize) else { return nil }
+        if size == sourceSize {
+            guard let image = CIImage(data: data, options: [.applyOrientationProperty: true]),
+                  ImageSizePolicy.isFinitePositive(image.extent.size),
+                  image.extent.origin.x.isFinite, image.extent.origin.y.isFinite else { return nil }
+            return (image, true)
+        }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: Int(max(size.width, size.height))
+        ]
+        guard !Task.isCancelled,
+              let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary),
+              !Task.isCancelled else { return nil }
+        let input = CameraFrameLayout.aspectFill(CIImage(cgImage: thumbnail), in: CGRect(origin: .zero, size: size))
+        return (input, false)
     }
 
     private nonisolated static func renderImported(
@@ -1161,11 +1389,8 @@ final class CameraViewModel: ObservableObject {
         normalizedSubjectRegions: [CGRect]? = nil,
         finish: PhotoFinish = .photo
     ) -> RenderedPhoto? {
-        guard !Task.isCancelled, let input = CIImage(
-            data: sourceData,
-            options: [.applyOrientationProperty: true]
-        ) else { return nil }
-
+        guard let prepared = preparedImportInput(data: sourceData) else { return nil }
+        let input = prepared.image
         let extent = input.extent
         guard !extent.isEmpty, extent.width.isFinite, extent.height.isFinite else {
             return nil
@@ -1178,7 +1403,7 @@ final class CameraViewModel: ObservableObject {
             y: -extent.minY
         ))
         let framedInput = Self.boundedImportInput(unboundedInput)
-        let isFullResolution = framedInput.extent.size == unboundedInput.extent.size
+        let isFullResolution = prepared.isFullResolution && framedInput.extent.size == unboundedInput.extent.size
         guard !Task.isCancelled else { return nil }
         let renderContext: FilmRenderer.CaptureContext
         let resolvedSubjectRegions: [CGRect]?
@@ -1212,7 +1437,8 @@ final class CameraViewModel: ObservableObject {
                 for: output,
                 sourceData: sourceData,
                 capturedAt: importedAt,
-                recipe: recipe
+                recipe: recipe,
+                location: PhotoLibraryService.location(from: sourceData)
               ) else {
             return nil
         }
@@ -1241,6 +1467,7 @@ final class CameraViewModel: ObservableObject {
                 previewDrawableSize: previewDrawableSize,
                 capturedAt: source.capturedAt,
                 flashFired: flashFired,
+                location: source.location,
                 grainSeed: grainSeed,
                 normalizedSubjectRegions: source.normalizedSubjectRegions,
                 finish: finish
@@ -1377,7 +1604,9 @@ final class CameraViewModel: ObservableObject {
     private nonisolated static func preparedReviewInput(
         source: ReviewRenderSource
     ) -> (image: CIImage, isFullResolution: Bool, exportExtent: CGRect?)? {
-        guard let imageSource = CGImageSourceCreateWithData(source.data as CFData, nil) else {
+        guard let imageSource = CGImageSourceCreateWithData(
+            source.data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary
+        ) else {
             return nil
         }
         let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil)
@@ -1433,13 +1662,8 @@ final class CameraViewModel: ObservableObject {
                 exportExtent
             )
         case .photoLibrary:
-            let sourceArea = (sourceWidth ?? Double(thumbnail.width))
-                * (sourceHeight ?? Double(thumbnail.height))
-            return (
-                input,
-                sourceArea.isFinite && sourceArea <= Double(importPixelBudget),
-                exportExtent
-            )
+            let originalSize = CGSize(width: sourceWidth ?? Double(thumbnail.width), height: sourceHeight ?? Double(thumbnail.height))
+            return (input, boundedImportSize(originalSize) == originalSize, exportExtent)
         }
     }
 
@@ -1460,13 +1684,8 @@ final class CameraViewModel: ObservableObject {
             let crop = CameraFrameLayout.aspectFillCrop(sourceExtent: extent, targetSize: viewport)
             return CGRect(origin: .zero, size: crop.size)
         case .photoLibrary:
-            let area = size.width * size.height
-            guard area.isFinite else { return nil }
-            guard area > importPixelBudget else { return extent }
-            let scale = (importPixelBudget / area).squareRoot()
-            return CGRect(x: 0, y: 0,
-                          width: max((size.width * scale).rounded(.down), 1),
-                          height: max((size.height * scale).rounded(.down), 1))
+            guard let boundedSize = boundedImportSize(size) else { return nil }
+            return CGRect(origin: .zero, size: boundedSize)
         }
     }
 

@@ -1,0 +1,9 @@
+#include "Monetization.xcconfig"
+FILMY_MONETIZATION_ENABLED = YES
+// Google's dedicated test inventory. Never substitute live ad units for testing.
+FILMY_ADS_ENABLED = YES
+FILMY_ADMOB_APP_ID = ca-app-pub-3940256099942544~1458002511
+FILMY_ADMOB_BANNER_ID = ca-app-pub-3940256099942544/2435281174
+// Debug permits StoreKit sandbox/local tests. Not a production legal approval.
+FILMY_LEGAL_READY = YES
+#include? "Monetization.Local.Debug.xcconfig"

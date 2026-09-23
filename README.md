@@ -16,7 +16,9 @@ For a code walkthrough, begin with [`FilmyCamera/ContentView.swift`](FilmyCamera
 - GPU-backed Core Image processing with a generated 3D color cube, dynamic range, tone curve, temperature/tint, Color Chrome, FX Blue, detail, grain, halation, and vignette stages.
 - Native bi-planar YUV preview buffers when available, with a BGRA fallback, and a session-scoped grain phase shared by preview and capture for a more faithful WYSIWYG frame.
 - A dedicated G7 X Compact profile and curated editable film recipes based on public Fujifilm-style controls: film base, tone curve, color, white-balance shift, dynamic range, Color Chrome, FX Blue, sharpness, noise reduction, clarity, grain, grain size, halation, and vignette.
-- 128 editable looks, including original negative, slide, cinema, instant, digital, experimental, and monochrome collections, with search and favorites.
+- 743 editable looks: 595 source-linked public camera recipes, 20 neutral camera foundations, and the 128 original looks. No random combinatorial expansion.
+- A 19-pack recipe manager with whole-pack and individual quick-menu controls, mixed states, search, favorites-only setup, bulk actions, and undo. All 743 looks may be active at once. Existing users retain their original quick menu; new packs start hidden.
+- Source sheets preserve published camera settings, original recipe names, publisher links, retrieval dates, implementation differences, and before/after samples. Source-camera settings are separate from Filmy's editable approximation.
 - A cancelable 3-, 5-, or 10-second capture timer; 4:3, square, 3:2, and 16:9 framing; composition guides; and optional horizon, histogram, clipping zebras, and focus peaking. Preview aids never enter saved photos.
 - Full-resolution capture review with retake or explicit Save to Photos, so a frame is never committed silently. Reviews can keep the full photo edge to edge or add the optional white Instant Print border with its generous bottom margin.
 - Try another look on the same capture or import and compare with Original before saving. Review previews are bounded to 1800 pixels, and changed looks export at full resolution on Save without changing the next shot's recipe.
@@ -34,6 +36,12 @@ For a code walkthrough, begin with [`FilmyCamera/ContentView.swift`](FilmyCamera
 - sRGB output normalization plus embedded recipe provenance metadata on saved JPEGs.
 - Simulator-safe empty state: the full interface runs without camera hardware and clearly asks for a physical iPhone or iPad for capture.
 - iPad support: readable-width pages, an adaptive Roll contact sheet, and the same viewfinder chrome verified on an iPad Pro and on iPhone-size layouts.
+
+## Fuji-style shooting controls
+
+The camera's **Q** button opens persistent C1–C7 banks, customizable quick controls, three Auto ISO programs, digital prime cropping/lens lock, electronic/OVF-style/hybrid finders, Natural Live View, contrast-based split/microprism focus aids, and the Drive/BKT system. Capture tools include same-shot film/ISO/WB brackets, real exposure/RAW dynamic-range brackets, focus bracketing/stacking, computational ND, multiple exposures, preview-resolution pre-shot, and foreground interval shooting. The RAW library keeps untouched originals and editable development sidecars; failed Photos exports remain recoverable.
+
+See [the shooting-system guide](docs/fuji-shooting-system.md) for setup, supported behavior, resolution limits, hardware requirements, and device acceptance tests. OVF-style and focusing aids are electronic interpretations, ND is temporal averaging rather than an optical filter, and sensor DR200/400 requires RAW plus real underexposure. Physical-device validation remains necessary before release.
 
 ## Build
 
@@ -53,11 +61,12 @@ Run the complete test suite with `python3 scripts/testing/run.py ci --destinatio
 
 The app requires iOS 17 or later. Camera and Photos permissions are requested only when the relevant feature is used.
 
-## Future monetization
+## Filmy Pro, accounts, and advertising
 
-The current launch is fully free: all shipped looks, camera tools, import, review, Save to Photos, and the optional Instant Print finish are available without a paywall, subscription trial, or export watermark. Existing images remain usable regardless of any future access model.
+This candidate adds a 10-photo daily free tier, three starter looks, native monthly App Store subscriptions with an eligible one-month trial, optional Apple/Google sign-in, and AdMob banners outside the camera. Trial and paid access unlock Pro and remove ads. Existing saved images remain accessible. No watermark is added.
 
-The product target is an exceptional film-simulation and G7X-inspired camera with additional capture and editing tools in a premium monthly subscription. Price, trial duration, and the exact feature split remain open. See the [premium camera vision](docs/premium-camera-vision.md) for the staged feature and quality targets and the [monetization roadmap](docs/monetization-roadmap.md) for future access and export proposals. Subscription restrictions and watermarking are not enabled in the current launch; RAW and HDR work described in those documents remains roadmap work.
+The product target is an exceptional film-simulation and G7X-inspired camera with additional capture and editing tools in a premium monthly subscription. Price, trial duration, and the exact feature split remain open. See the [premium camera vision](docs/premium-camera-vision.md) for the staged feature and quality targets and the [monetization roadmap](docs/monetization-roadmap.md) for future access and export proposals. Subscription restrictions and watermarking are not enabled in the current launch; RAW capture/development is now implemented in the Q shooting system with hardware validation pending; general HDR output remains roadmap work.
+Production activation still requires App Store Connect products, Firebase provider configuration, AdMob publisher IDs/consent messages, and reviewed legal disclosures. Release purchases and ads fail closed until configured. See the [implementation and setup guide](docs/monetization.md) and [monetized release checklist](docs/app-store/monetized-release.md). The [older roadmap](docs/monetization-roadmap.md) is historical; RAW/HDR and other capabilities are not implied by the new paywall.
 
 ## Rendering note
 
@@ -66,3 +75,30 @@ The recipe controls intentionally model the public vocabulary used by Fujifilm c
 ## Research
 
 See [docs/research.md](docs/research.md) for the open-source architecture review and the rendering decisions used here.
+
+## Recipe packs and fidelity
+
+Open the camera look popup, then **Packs**. Open a pack to choose individual looks, or use **Actions > Enable all 743 looks**. Hiding a look does not change the current capture, delete edits, or remove favorites. **Browse all** and capture review retain the full catalog.
+
+See [the catalog and fidelity audit](docs/recipe-library-and-fidelity.md), [all 128 original-look audit rows](docs/original-recipe-audit.csv), and [the machine-readable source audit](docs/recipe-catalog-audit.json). The rendering tests check operational consistency, not a measured match to camera JPEGs.
+
+## Smart looks
+
+The Smart looks control above the viewfinder offers on-device, scene-aware recipe suggestions.
+Tap **Apply** for the leading recommendation, or open it to compare three renders of the same
+frame, choose Natural, Vivid, Cinema, or B&W, and apply a look with one tap. Undo restores the
+previous look unless you have since chosen another manually. Suggestions never select a recipe
+or save a photo automatically. Toggle analysis off in the Smart looks sheet.
+
+The engine combines Apple Vision scene/face detection with light, contrast, and color measurements
+and ranks the actual available recipes, including edited controls. It uses bounded, throttled
+background work, pauses for capture and heat, and never uploads image data. These are aesthetic
+starting points, not a guarantee of the best filter. See [the implementation and device-validation
+notes](docs/smart-recipes.md).
+
+## Pro capture and persistent originals
+
+Capability-gated resolution, RAW/ProRAW, HEIF/P3, HDR highlight preservation,
+silent original Live Photos, exposure priority, focus aids and a persistent
+non-destructive photo library are documented in
+[Pro camera features and limitations](docs/PRO_CAMERA_FEATURES.md).

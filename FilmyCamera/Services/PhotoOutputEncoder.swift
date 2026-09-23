@@ -1,10 +1,11 @@
 import CoreGraphics
+import CoreLocation
 import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
 /// Encodes a finished frame as a Photos-ready JPEG while preserving useful
-/// camera provenance and keeping location data out of app-created exports.
+/// camera provenance and, when authorized, capture location in app-created exports.
 enum PhotoOutputEncoder {
     static let outputProfileName = "sRGB IEC61966-2.1"
     static let recipeMetadataFormat = "filmy-camera.recipe-provenance"
@@ -75,32 +76,12 @@ enum PhotoOutputEncoder {
         bundleString(forKey: "CFBundleVersion")
     }
 
-    private static let preservedCaptureExifKeys: [String] = [
-        kCGImagePropertyExifExposureTime as String,
-        kCGImagePropertyExifExposureBiasValue as String,
-        kCGImagePropertyExifExposureProgram as String,
-        kCGImagePropertyExifISOSpeedRatings as String,
-        kCGImagePropertyExifFNumber as String,
-        kCGImagePropertyExifFocalLength as String,
-        kCGImagePropertyExifFocalLenIn35mmFilm as String,
-        kCGImagePropertyExifLensModel as String,
-        kCGImagePropertyExifLensSpecification as String,
-        kCGImagePropertyExifFlash as String,
-        kCGImagePropertyExifMeteringMode as String,
-        kCGImagePropertyExifWhiteBalance as String,
-        kCGImagePropertyExifDateTimeOriginal as String,
-        kCGImagePropertyExifDateTimeDigitized as String,
-        kCGImagePropertyExifOffsetTimeOriginal as String,
-        kCGImagePropertyExifOffsetTimeDigitized as String,
-        kCGImagePropertyExifSubsecTimeOriginal as String,
-        kCGImagePropertyExifSubsecTimeDigitized as String
-    ]
-
     static func jpegData(
         for image: CGImage,
         sourceData: Data,
         capturedAt: Date,
         recipe: FilmRecipe,
+        location: CLLocation? = nil,
         appVersion: String = currentApplicationVersion,
         appBuild: String = currentApplicationBuild
     ) -> Data? {
@@ -113,23 +94,52 @@ enum PhotoOutputEncoder {
             return nil
         }
 
-        // Build export metadata from an explicit allowlist. Source TIFF,
-        // MakerApple, GPS, and other camera/device metadata must never cross
-        // this boundary into an app-created JPEG. Capture facts such as
-        // exposure, ISO, and lens are useful provenance and are copied below.
+        let properties = exportProperties(
+            width: outputImage.width, height: outputImage.height,
+            sourceData: sourceData, capturedAt: capturedAt, recipe: recipe,
+            location: location,
+            appVersion: appVersion, appBuild: appBuild
+        )
+
+        let outputData = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            outputData,
+            UTType.jpeg.identifier as CFString,
+            1,
+            nil
+        ) else {
+            return nil
+        }
+
+        CGImageDestinationAddImage(destination, outputImage, properties as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return outputData as Data
+    }
+
+    static func exportProperties(
+        width: Int, height: Int, sourceData: Data, capturedAt: Date, recipe: FilmRecipe,
+        location: CLLocation? = nil,
+        appVersion: String = currentApplicationVersion, appBuild: String = currentApplicationBuild,
+        profileName: String = outputProfileName, isSRGB: Bool = true
+    ) -> [String: Any] {
+        // Preserve genuine source camera facts. App-created fields below are
+        // limited to values we can prove (the finished dimensions and capture
+        // time); location is added only from the explicit authorized snapshot.
         var properties: [String: Any] = [
             kCGImagePropertyColorModel as String: kCGImagePropertyColorModelRGB,
-            kCGImagePropertyProfileName as String: Self.outputProfileName,
-            kCGImagePropertyPixelWidth as String: outputImage.width,
-            kCGImagePropertyPixelHeight as String: outputImage.height,
+            kCGImagePropertyProfileName as String: profileName,
+            kCGImagePropertyPixelWidth as String: width,
+            kCGImagePropertyPixelHeight as String: height,
             kCGImagePropertyOrientation as String: 1,
             kCGImageDestinationLossyCompressionQuality as String: Self.jpegCompressionQuality
         ]
-
         let tiff: [String: Any] = [
             kCGImagePropertyTIFFSoftware as String: "Filmy Camera",
             kCGImagePropertyTIFFImageDescription as String: "Filmy Camera • \(recipe.name)"
         ]
+        // Do not merge source TIFF or MakerApple dictionaries. They can carry
+        // owner, device, serial, and other private fields that do not belong
+        // on an app-created export.
         properties[kCGImagePropertyTIFFDictionary as String] = tiff
 
         // The filtered frame may be aspect-fill cropped before encoding. Keep
@@ -158,12 +168,12 @@ enum PhotoOutputEncoder {
            let originalOffset = exif[originalOffsetKey] as? String {
             exif[digitizedOffsetKey] = originalOffset
         }
-        exif[kCGImagePropertyExifPixelXDimension as String] = outputImage.width
-        exif[kCGImagePropertyExifPixelYDimension as String] = outputImage.height
+        exif[kCGImagePropertyExifPixelXDimension as String] = width
+        exif[kCGImagePropertyExifPixelYDimension as String] = height
         // EXIF 2.3: 1 means sRGB. This complements the embedded ICC
         // profile for readers that inspect EXIF but do not parse ICC
         // resources.
-        exif[kCGImagePropertyExifColorSpace as String] = 1
+        exif[kCGImagePropertyExifColorSpace as String] = isSRGB ? 1 : 65_535
         if let provenance = provenanceJSON(
             for: recipe,
             appVersion: appVersion,
@@ -172,34 +182,82 @@ enum PhotoOutputEncoder {
             exif[kCGImagePropertyExifUserComment as String] = provenance
         }
         properties[kCGImagePropertyExifDictionary as String] = exif
-
-        let outputData = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(
-            outputData,
-            UTType.jpeg.identifier as CFString,
-            1,
-            nil
-        ) else {
-            return nil
+        if let location, CLLocationCoordinate2DIsValid(location.coordinate) {
+            properties[kCGImagePropertyGPSDictionary as String] = gpsDictionary(for: location)
         }
 
-        CGImageDestinationAddImage(destination, outputImage, properties as CFDictionary)
-        guard CGImageDestinationFinalize(destination) else { return nil }
-        return outputData as Data
+        return properties
     }
 
-    private static func captureExif(from sourceData: Data) -> [String: Any] {
-        guard let source = CGImageSourceCreateWithData(sourceData as CFData, nil),
-              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any],
+    static func captureExif(from sourceData: Data) -> [String: Any] {
+        guard let properties = sourceProperties(from: sourceData),
               let sourceExif = properties[kCGImagePropertyExifDictionary as String] as? [String: Any] else {
             return [:]
         }
 
-        return preservedCaptureExifKeys.reduce(into: [String: Any]()) { result, key in
-            if let value = sourceExif[key] {
-                result[key] = value
-            }
+        // Keep only useful capture facts. In particular, do not carry MakerNote,
+        // owner, comment, serial, or other camera-private fields into an export.
+        let safeKeys: Set<String> = [
+            kCGImagePropertyExifExposureTime as String,
+            kCGImagePropertyExifExposureBiasValue as String,
+            kCGImagePropertyExifISOSpeedRatings as String,
+            kCGImagePropertyExifFNumber as String,
+            kCGImagePropertyExifFocalLength as String,
+            kCGImagePropertyExifFocalLenIn35mmFilm as String,
+            kCGImagePropertyExifLensModel as String,
+            kCGImagePropertyExifDateTimeOriginal as String,
+            kCGImagePropertyExifOffsetTimeOriginal as String,
+            kCGImagePropertyExifDateTimeDigitized as String,
+            kCGImagePropertyExifOffsetTimeDigitized as String,
+            kCGImagePropertyExifExposureProgram as String,
+            kCGImagePropertyExifMeteringMode as String,
+            kCGImagePropertyExifFlash as String,
+            kCGImagePropertyExifWhiteBalance as String,
+            kCGImagePropertyExifSceneType as String,
+            kCGImagePropertyExifCustomRendered as String,
+            kCGImagePropertyExifContrast as String,
+            kCGImagePropertyExifSaturation as String,
+            kCGImagePropertyExifSharpness as String
+        ]
+        return sourceExif.filter { safeKeys.contains($0.key) }
+    }
+
+    private static func sourceProperties(from sourceData: Data) -> [String: Any]? {
+        guard let source = CGImageSourceCreateWithData(sourceData as CFData, nil) else { return nil }
+        return CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any]
+    }
+
+    private static func gpsDictionary(for location: CLLocation) -> [String: Any] {
+        let coordinate = location.coordinate
+        let stampFormatter = DateFormatter()
+        stampFormatter.locale = Locale(identifier: "en_US_POSIX")
+        stampFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+        stampFormatter.dateFormat = "yyyy:MM:dd"
+        let timeFormatter = DateFormatter()
+        timeFormatter.locale = Locale(identifier: "en_US_POSIX")
+        timeFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+        timeFormatter.dateFormat = "HH:mm:ss.SSS"
+        var gps: [String: Any] = [
+            kCGImagePropertyGPSLatitude as String: abs(coordinate.latitude),
+            kCGImagePropertyGPSLatitudeRef as String: coordinate.latitude >= 0 ? "N" : "S",
+            kCGImagePropertyGPSLongitude as String: abs(coordinate.longitude),
+            kCGImagePropertyGPSLongitudeRef as String: coordinate.longitude >= 0 ? "E" : "W",
+            kCGImagePropertyGPSDateStamp as String: stampFormatter.string(from: location.timestamp),
+            kCGImagePropertyGPSTimeStamp as String: timeFormatter.string(from: location.timestamp)
+        ]
+        if location.altitude.isFinite, location.verticalAccuracy >= 0 {
+            gps[kCGImagePropertyGPSAltitude as String] = abs(location.altitude)
+            gps[kCGImagePropertyGPSAltitudeRef as String] = location.altitude < 0 ? 1 : 0
         }
+        if location.speed >= 0, location.speed.isFinite {
+            gps[kCGImagePropertyGPSSpeed as String] = location.speed * 3.6
+            gps[kCGImagePropertyGPSSpeedRef as String] = "K"
+        }
+        if location.course >= 0, location.course.isFinite {
+            gps[kCGImagePropertyGPSTrack as String] = location.course
+            gps[kCGImagePropertyGPSTrackRef as String] = "T"
+        }
+        return gps
     }
 
     private static func bundleString(forKey key: String) -> String {
@@ -210,7 +268,7 @@ enum PhotoOutputEncoder {
         return value
     }
 
-    private static func provenanceJSON(
+    static func provenanceJSON(
         for recipe: FilmRecipe,
         appVersion: String,
         appBuild: String
@@ -226,6 +284,25 @@ enum PhotoOutputEncoder {
         ) else {
             return nil
         }
-        return String(data: data, encoding: .utf8)
+        guard let json = String(data: data, encoding: .utf8) else { return nil }
+        return asciiSafeJSON(json)
+    }
+
+    /// ImageIO can serialize EXIF UserComment as ASCII and replace non-ASCII
+    /// source settings with "?". JSON Unicode escapes preserve the original
+    /// text without changing the metadata schema or its existing readers.
+    static func asciiSafeJSON(_ json: String) -> String {
+        var escaped = ""
+        escaped.reserveCapacity(json.utf8.count)
+        for unit in json.utf16 {
+            if unit < 128 {
+                escaped.unicodeScalars.append(UnicodeScalar(Int(unit))!)
+            } else {
+                // Escaping UTF-16 units also preserves non-BMP characters as
+                // standard JSON surrogate pairs instead of dropping them.
+                escaped += String(format: "\\u%04X", Int(unit))
+            }
+        }
+        return escaped
     }
 }

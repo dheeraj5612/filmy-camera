@@ -132,12 +132,12 @@ private struct ViewfinderChromeHeightKey: PreferenceKey {
 /// primary controls in an edge column; compact layouts keep them below the
 /// frame within thumb reach.
 struct CameraScreen: View {
-    // The portrait-only iPad window scales to 75% in landscape. Preserve
-    // a physical target above 44 points for compact camera controls.
+    // Keep edge controls comfortably reachable with a two-handed iPad grip.
     private var cameraHitTarget: CGFloat {
         UIDevice.current.userInterfaceIdiom == .pad ? 64 : FilmyTheme.minimumHitTarget
     }
 
+    @ObservedObject private var membership = MembershipStore.shared
     @ObservedObject var camera: CameraService
     @ObservedObject var viewModel: CameraViewModel
     @ObservedObject var photoLibrary: PhotoLibraryService
@@ -153,31 +153,58 @@ struct CameraScreen: View {
     @AppStorage("showGrid") private var showGrid = true
     @StateObject private var countdown = CaptureCountdown()
     @StateObject private var assists = CompositionAssistStore()
+    @StateObject private var smartRecipes = SmartRecipeStore()
+    @State private var isShowingSmartRecipes = false
+    @State private var smartPresentation: SmartRecipeSnapshot?
+    @StateObject private var shooting = FujiShootingController()
+    @State private var isShowingFujiMenu = false
     @State private var isShowingCaptureSetup = false
-    @AppStorage("captureDelay") private var captureDelay = CaptureDelay.off
-    @AppStorage("captureAspect") private var captureAspect = CaptureAspect.viewfinder
-    @AppStorage("compositionGuide") private var compositionGuide = CompositionGuide.thirds
-    @AppStorage("showHistogram") private var showHistogram = false
-    @AppStorage("showZebras") private var showZebras = false
-    @AppStorage("showFocusPeaking") private var showFocusPeaking = false
-    @AppStorage("showHorizonLevel") private var showHorizonLevel = false
+    @AppStorage("captureDelay") private var storedCaptureDelay = CaptureDelay.off
+    private var captureDelay: CaptureDelay { membership.hasFullAccess ? storedCaptureDelay : .off }
+    @AppStorage("captureAspect") private var storedCaptureAspect = CaptureAspect.viewfinder
+    private var captureAspect: CaptureAspect { membership.hasFullAccess ? storedCaptureAspect : .viewfinder }
+    @AppStorage("compositionGuide") private var storedCompositionGuide = CompositionGuide.thirds
+    private var compositionGuide: CompositionGuide { membership.hasFullAccess ? storedCompositionGuide : .thirds }
+    @AppStorage("showHistogram") private var storedShowHistogram = false
+    private var showHistogram: Bool { membership.hasFullAccess && storedShowHistogram }
+    @AppStorage("showZebras") private var storedShowZebras = false
+    private var showZebras: Bool { membership.hasFullAccess && storedShowZebras }
+    @AppStorage("showFocusPeaking") private var storedShowFocusPeaking = false
+    private var showFocusPeaking: Bool { membership.hasFullAccess && storedShowFocusPeaking }
+    @AppStorage("showHorizonLevel") private var storedShowHorizonLevel = false
+    private var showHorizonLevel: Bool { membership.hasFullAccess && storedShowHorizonLevel }
     @State private var recipeForDetail: FilmRecipe?
     @State private var isShowingTools: Bool
     @State private var isShowingManualControls = false
     @State private var isShowingLiveAdjustments = false
     @State private var isShowingLookDrawer = false
     @State private var isShowingLookLibrary = false
+    @State private var isShowingRecipeManager = false
+    @State private var quickRecipeQuery = ""
     @State private var focusPoint: CGPoint?
     @State private var focusNormalizedPoint: CGPoint?
     @State private var pinchStartZoom: CGFloat = 1
     @State private var isPinching = false
     @State private var previewDragMaySelectLook: Bool?
+    @State private var previewDragAxis: CameraPreviewDragAxis?
+    @State private var exposureDragStart: Float?
+    @State private var focusFeedbackRevision = 0
     @State private var suppressLookSwipeUntil = Date.distantPast
     @State private var viewfinderChromeHeights: [ViewfinderChromeEdge: CGFloat] = [:]
     @State private var isShutterBlinking = false
     @State private var isConfirmingCaptureDiscard = false
     @State private var favoritesOnly = false
     @AppStorage("favoriteRecipeIDs.v1") private var favoriteData = Data()
+    @AppStorage("cameraGripUseLeftHanded.v1") private var useLeftHandedGrip = false
+    @State private var hardwareShutterCaptureRequest = 0
+    @State private var hasDismissedLensAdvisory = false
+#if DEBUG
+    @State private var hardwareShutterEventCount = 0
+    @State private var hardwareShutterLastPhase = "none"
+    @State private var hardwareShutterActionCount = 0
+    @State private var hardwareShutterEventReadiness = "unset"
+    @State private var hardwareShutterCaptureReadiness = "unset"
+#endif
 
     init(
         camera: CameraService,
@@ -198,17 +225,15 @@ struct CameraScreen: View {
         self.onImportPhoto = onImportPhoto
         self.isImportInProgress = isImportInProgress
 
-        // The tools strip stays hidden until asked for so the viewfinder
-        // opens quiet. UI tests that exercise exposure and zoom launch with
-        // it open; the viewfinder-chrome preview launches with it closed so
-        // the toggle itself can be verified.
+        // Show capture controls on launch. The explicit collapsed-chrome
+        // test fixture still exercises revealing them with the toggle.
         let arguments = ProcessInfo.processInfo.arguments
         let isUITesting = arguments.contains("-ui-testing")
         let isViewfinderPreview = arguments.contains("-ui-testing-viewfinder-chrome")
-        _isShowingTools = State(initialValue: isUITesting && !isViewfinderPreview)
+        _isShowingTools = State(initialValue: !(isUITesting && isViewfinderPreview))
     }
 
-    var body: some View {
+    private var cameraLayers: some View {
         ZStack {
             GeometryReader { proxy in
                 let isLandscape = proxy.size.width > proxy.size.height
@@ -218,7 +243,8 @@ struct CameraScreen: View {
                     if usesEdgeControlColumn {
                         edgeControlShell(
                             isLandscape: isLandscape,
-                            availableHeight: proxy.size.height
+                            availableHeight: proxy.size.height,
+                            availableWidth: proxy.size.width
                         )
                     } else {
                         portraitShell(availableHeight: proxy.size.height)
@@ -245,6 +271,20 @@ struct CameraScreen: View {
                     } else if let toastMessage = viewModel.toastMessage {
                         ToastView(message: toastMessage, style: viewModel.toastStyle)
                             .transition(.opacity)
+                    } else if camera.isLensSmudged && !hasDismissedLensAdvisory && camera.availability == .running {
+                        HStack(spacing: 12) {
+                            Label("Wipe the camera lens for a clearer photo", systemImage: "camera.aperture")
+                                .font(.subheadline)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Button { hasDismissedLensAdvisory = true } label: {
+                                Image(systemName: "xmark")
+                                    .frame(width: 44, height: 44)
+                            }
+                            .accessibilityLabel("Dismiss lens cleaning tip")
+                        }
+                        .padding(.leading, 14)
+                        .viewfinderChrome(RoundedRectangle(cornerRadius: 16))
+                        .accessibilityIdentifier("camera-lens-cleaning-tip")
                     }
                 }
                 .padding(.horizontal, 16)
@@ -252,10 +292,15 @@ struct CameraScreen: View {
                 // Animate feedback only, not the camera's geometry transaction.
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: viewModel.toastMessage)
             }
-            .allowsHitTesting(!isReviewing && !countdown.state.isActive)
-            .disabled(isReviewing || countdown.state.isActive)
+            .allowsHitTesting(!isReviewing && !countdown.state.isActive && !shooting.isBusy)
+            .disabled(isReviewing || countdown.state.isActive || shooting.isBusy)
             .accessibilityElement(children: .contain)
             .accessibilityHidden(isReviewing || countdown.state.isActive)
+
+            VStack {
+                FujiShootingStatusView(controller: shooting, photoLibrary: photoLibrary)
+                Spacer()
+            }.padding(.top, 104).zIndex(3)
 
             if countdown.state.isActive { countdownOverlay.zIndex(2) }
 
@@ -287,8 +332,31 @@ struct CameraScreen: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .zIndex(1)
             }
+
+#if DEBUG
+            if hardwareShutterDiagnosticsEnabled {
+                hardwareShutterDiagnostics
+            }
+#endif
         }
-        .modifier(CameraHardwareShutterModifier(enabled: canTriggerShutter, action: capture))
+    }
+
+    var body: some View {
+        cameraLifecycleView
+    }
+
+    private var cameraHardwareView: some View {
+        cameraLayers
+#if DEBUG
+        .modifier(CameraHardwareShutterModifier(enabled: canTriggerShutter, action: { hardwareShutterCaptureRequest &+= 1 }) { phase in
+            guard hardwareShutterDiagnosticsEnabled else { return }
+            hardwareShutterEventCount += 1
+            hardwareShutterLastPhase = phase
+            hardwareShutterEventReadiness = "ready=\(canTriggerShutter);blocker=\(hardwareShutterBlockingReason)"
+        })
+#else
+        .modifier(CameraHardwareShutterModifier(enabled: canTriggerShutter, action: { hardwareShutterCaptureRequest &+= 1 }))
+#endif
         .confirmationDialog("Discard this unsaved photo?", isPresented: $isConfirmingCaptureDiscard, titleVisibility: .visible) {
             Button("Discard photo", role: .destructive) { viewModel.discardReview() }
                 .accessibilityIdentifier("capture-save-confirm-discard")
@@ -296,26 +364,88 @@ struct CameraScreen: View {
         } message: {
             Text("This photo has not been saved to Photos. Discarding cannot be undone.")
         }
+    }
+
+    private var smartRecipeLifecycleView: some View {
+        cameraHardwareView
+        .onChange(of: isSmartRecipeAnalysisActive, initial: true) { _, _ in updateSmartRecipeAnalysis() }
+        .onChange(of: viewModel.recipes) { _, _ in updateSmartRecipeAnalysis() }
+        .onChange(of: favoriteData) { _, _ in updateSmartRecipeAnalysis() }
+        .onChange(of: smartRecipeFrameKey) { _, _ in smartRecipes.invalidateScene() }
+        .onChange(of: viewModel.selectedRecipeID) { _, selected in
+            smartRecipes.reconcileSelection(currentID: selected, availableIDs: Set(viewModel.recipes.map(\.id)))
+        }
+        .sheet(isPresented: $isShowingSmartRecipes, onDismiss: { smartPresentation = nil }) {
+            SmartRecipeSheet(
+                store: smartRecipes, snapshot: smartPresentation,
+                selectedID: viewModel.selectedRecipeID, canApply: canApplySmartRecipe,
+                onApply: applySmartRecipe, onClose: { isShowingSmartRecipes = false }
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+    }
+
+    private var shootingStateView: some View {
+        smartRecipeLifecycleView
+        .onChange(of: isShootingSessionActive, initial: true) { _, active in
+            shooting.attach(camera: camera, viewModel: viewModel, active: active)
+        }
+        .onChange(of: camera.manualControls.activeDeviceID) { _, _ in shooting.invalidatePreview() }
+        .onChange(of: camera.selectedLensID) { _, _ in shooting.invalidatePreview() }
+        .onChange(of: camera.zoomFactor) { _, _ in shooting.invalidatePreview() }
+        .onChange(of: viewModel.selectedRecipe) { _, _ in shooting.invalidatePreview() }
+        .onChange(of: shooting.isBusy) { _, busy in if busy { countdown.cancel(); blinkShutter() } }
+        .onChange(of: membership.hasFullAccess) { _, premium in
+            if !premium {
+                isShowingLiveAdjustments = false
+                recipeForDetail = nil
+                countdown.cancel()
+            }
+            updateCompositionAssists()
+        }
         .onChange(of: assistOptions, initial: true) { _, _ in updateCompositionAssists() }
         .onChange(of: isCameraVisibleForAssists, initial: true) { _, visible in
             if !visible { countdown.cancel() }
             updateCompositionAssists()
         }
-        .onChange(of: captureAspect) { _, _ in countdown.cancel(); assists.stop(); updateCompositionAssists() }
+        .onChange(of: isCameraVisibleForAssists && !countdown.state.isActive, initial: true) { _, active in
+            camera.setSceneAutoViewfinderActive(active)
+        }
+        .onChange(of: captureAspect) { _, _ in countdown.cancel(); assists.stop(); shooting.invalidatePreview(); updateCompositionAssists() }
         .onChange(of: canTriggerShutter) { _, enabled in
             if !enabled {
                 isPinching = false
                 previewDragMaySelectLook = nil
+                previewDragAxis = nil
+                exposureDragStart = nil
             }
+        }
+        // Re-enter through current SwiftUI state after the system callback,
+        // avoiding a retained callback snapshot with stale scene values.
+        .onChange(of: hardwareShutterCaptureRequest) { _, _ in capture() }
+        .onChange(of: camera.isLensSmudged) { _, smudged in
+            if !smudged { hasDismissedLensAdvisory = false }
         }
         .onChange(of: camera.previewViewportSize) { _, _ in
             // A mask from the previous crop must not stretch over a newly
             // rotated or resized viewfinder while its replacement renders.
             assists.stop()
+            shooting.invalidatePreview()
             updateCompositionAssists()
         }
+    }
+
+    private var cameraPresentationsView: some View {
+        shootingStateView
+        .sheet(isPresented: $isShowingFujiMenu) {
+            FujiQuickMenuView(controller: shooting, camera: camera, viewModel: viewModel, photoLibrary: photoLibrary)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(FilmyTheme.background)
+        }
         .sheet(isPresented: $isShowingCaptureSetup) {
-            CaptureSetupView()
+            PremiumFeatureGate(feature: .captureSetup) { CaptureSetupView() }
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(FilmyTheme.background)
@@ -323,25 +453,42 @@ struct CameraScreen: View {
         .sheet(isPresented: $isShowingLookLibrary) {
             LookLibraryView(
                 recipes: viewModel.recipes,
-                selectedRecipeID: viewModel.selectedRecipeID,
+                selectedRecipeID: viewModel.effectiveSelectedRecipeID,
                 onSelect: { recipe in
+                    guard membership.requireRecipe(recipe.id) else { return }
                     viewModel.select(recipe: recipe)
                     isShowingLookLibrary = false
                     isShowingLookDrawer = false
                 },
-                onClose: { isShowingLookLibrary = false }
+                onClose: { isShowingLookLibrary = false },
+                libraryPreferences: $viewModel.libraryPreferences
             )
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
             .presentationBackground(FilmyTheme.background)
             .presentationCornerRadius(28)
         }
+        .sheet(isPresented: $isShowingRecipeManager) {
+            RecipeLibraryManagerView(
+                preferences: $viewModel.libraryPreferences,
+                recipes: viewModel.recipes,
+                selectedRecipeID: viewModel.selectedRecipeID,
+                onSelect: { recipe in
+                    viewModel.select(recipe: recipe)
+                    isShowingRecipeManager = false
+                    isShowingLookDrawer = false
+                }
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
         .sheet(item: $recipeForDetail) { recipe in
             RecipeDetailView(
                 recipe: recipe,
                 originalRecipe: viewModel.originalRecipe(for: recipe.id),
-                isSelected: viewModel.selectedRecipeID == recipe.id,
+                isSelected: viewModel.effectiveSelectedRecipeID == recipe.id,
                 onSelect: {
+                    guard membership.requireRecipe(recipe.id) else { return }
                     viewModel.select(recipe: recipe)
                     recipeForDetail = nil
                 },
@@ -360,12 +507,17 @@ struct CameraScreen: View {
             .presentationCornerRadius(30)
         }
         .sheet(isPresented: $isShowingManualControls) {
-            ManualCameraControlsView(camera: camera)
+            PremiumFeatureGate(feature: .manualControls) { ManualCameraControlsView(camera: camera) }
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(FilmyTheme.background)
         }
+    }
+
+    private var cameraLifecycleView: some View {
+        cameraPresentationsView
         .onAppear {
+            shooting.attach(camera: camera, viewModel: viewModel, active: isShootingSessionActive)
             updateCameraActivity()
             updateIdleTimer()
             // Keeps the Roll thumbnail in the capture row current without
@@ -376,12 +528,16 @@ struct CameraScreen: View {
         // instant; the scene phase handler still stops it when the app leaves
         // the foreground.
         .onDisappear {
+            camera.setSceneAutoViewfinderActive(false)
+            shooting.attach(camera: camera, viewModel: viewModel, active: false)
             countdown.cancel()
             assists.stop()
+            smartRecipes.stop()
             camera.stop(after: CameraActivityPolicy.inactiveGracePeriod)
             UIApplication.shared.isIdleTimerDisabled = false
         }
         .onChange(of: scenePhase) { _, _ in
+            shooting.attach(camera: camera, viewModel: viewModel, active: isShootingSessionActive)
             updateCameraActivity()
             updateIdleTimer()
         }
@@ -471,6 +627,7 @@ struct CameraScreen: View {
                 .disabled(isChromeDisabled)
         }
         .overlay(alignment: .bottom) {
+            #if !G7_APP
             if isShowingLookDrawer {
                 lookDrawer(
                     maxHeight: max(
@@ -483,37 +640,66 @@ struct CameraScreen: View {
                     .disabled(isChromeDisabled)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+            #endif
         }
     }
 
-    private func edgeControlShell(isLandscape: Bool, availableHeight: CGFloat) -> some View {
-        HStack(spacing: 12) {
+    private func edgeControlShell(
+        isLandscape: Bool,
+        availableHeight: CGFloat,
+        availableWidth: CGFloat
+    ) -> some View {
+        let isPad = UIDevice.current.userInterfaceIdiom == .pad
+        let railOnLeading = useLeftHandedGrip
+        let railWidth: CGFloat = isPad ? 152 : 136
+        let drawerOnLeading = !railOnLeading
+
+        return HStack(spacing: isPad ? 16 : 12) {
+            if railOnLeading {
+                edgeControlColumn
+                    .frame(width: railWidth)
+                    .disabled(isChromeDisabled)
+            }
+
             viewfinderStage(isLandscape: isLandscape, overlaysTopBar: true)
 
-            edgeControlColumn
-                .frame(width: 136)
-                .disabled(isChromeDisabled)
+            if !railOnLeading {
+                edgeControlColumn
+                    .frame(width: railWidth)
+                    .disabled(isChromeDisabled)
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .overlay(alignment: .bottomLeading) {
+        .padding(.horizontal, isPad ? 20 : 12)
+        .padding(.vertical, isPad ? 12 : 6)
+        .overlay(alignment: drawerOnLeading ? .bottomLeading : .bottomTrailing) {
+            #if !G7_APP
             if isShowingLookDrawer {
                 lookDrawer(
                     maxHeight: isLandscape
                         ? max(160, min(UIDevice.current.userInterfaceIdiom == .pad ? 460 : 240, availableHeight - 130))
                         : max(180, min(UIDevice.current.userInterfaceIdiom == .pad ? 460 : 360, availableHeight - 190))
                 )
-                    .padding(.leading, 12)
-                    .padding(.trailing, 160)
-                    .padding(.bottom, 78)
+                    .frame(
+                        maxWidth: min(560, max(280, availableWidth - railWidth - 52)),
+                        alignment: drawerOnLeading ? .leading : .trailing
+                    )
+                    .padding(.leading, drawerOnLeading ? 12 : 160)
+                    .padding(.trailing, drawerOnLeading ? 160 : 12)
+                    .padding(.bottom, isPad ? 86 : 78)
                     .disabled(isChromeDisabled)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+            #endif
         }
     }
 
     private var isChromeDisabled: Bool {
+        // Prime-lens setup can remain active while the camera is unavailable
+        // (including Simulator), but it does not make local navigation unsafe.
+        // Keep the broader Fuji transaction locks in place while allowing the
+        // looks drawer to open during that setup-only phase.
         viewModel.isCapturing || viewModel.isSaving || viewModel.hasPendingCapture || isImporting
+            || shooting.isBusy || shooting.isComposing
     }
 
     private var portraitControlClearance: CGFloat {
@@ -563,18 +749,33 @@ struct CameraScreen: View {
                 .allowsHitTesting(canTriggerShutter)
             }
 
+            if camera.isRunning && !isReviewing {
+                FocusAssistOverlay(camera: camera, size: size,
+                                   topClearance: overlaysTopBar ? (viewfinderChromeHeights[.top] ?? 54) + 8 : 8)
+            }
             if let focusPoint {
                 // The tap gesture reports locations in the frame's own space,
                 // so the reticle lands exactly where the user touched. It stays
                 // hit-test transparent so a visible reticle cannot swallow the
                 // next focus tap.
                 FocusReticle()
+                    .overlay(alignment: .bottom) {
+                        if camera.manualControls.exposureMode != .manual {
+                            Label(String(format: "%+.1f EV", camera.exposureBias), systemImage: "sun.max.fill")
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(FilmyTheme.accent)
+                                .padding(4)
+                                .background(.black.opacity(0.65), in: Capsule())
+                                .offset(y: 28)
+                                .accessibilityHidden(true)
+                        }
+                    }
                     .position(focusPoint)
                     .transition(reduceMotion ? .opacity : .scale(scale: 1.15).combined(with: .opacity))
                     .allowsHitTesting(false)
-                    .task(id: focusPoint) {
-                        try? await Task.sleep(for: .seconds(1.2))
-                        guard !Task.isCancelled else { return }
+                    .task(id: focusFeedbackRevision) {
+                        try? await Task.sleep(for: .seconds(5))
+                        guard !Task.isCancelled, exposureDragStart == nil else { return }
                         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) {
                             self.focusPoint = nil
                         }
@@ -627,11 +828,17 @@ struct CameraScreen: View {
             ZStack {
                 // Keep the renderer mounted across camera start/stop so its
                 // frame handler and render-status probe retain their lifetime.
-                FilteredCameraPreview(camera: camera, recipe: viewModel.selectedRecipe)
+                FilteredCameraPreview(
+                    camera: camera,
+                    recipe: camera.sceneAuto.development.applying(to: viewModel.selectedRecipe),
+                    naturalLiveView: shooting.settings.showsNaturalPreview,
+                    digitalCrop: shooting.settings.previewCrop
+                )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .allowsHitTesting(false)
 
                 if !shouldShowCameraEmptyState {
+                    FujiViewfinderOverlay(controller: shooting, camera: camera)
                     livePreviewControls(in: proxy.size)
                 }
             }
@@ -639,6 +846,8 @@ struct CameraScreen: View {
             .onChange(of: proxy.size) { _, size in
                 isPinching = false
                 previewDragMaySelectLook = nil
+                previewDragAxis = nil
+                exposureDragStart = nil
                 camera.updateOrientation(for: size)
             }
         }
@@ -650,10 +859,12 @@ struct CameraScreen: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Live camera preview")
             .accessibilityValue("Showing the \(viewModel.selectedRecipe.name) look")
-            .accessibilityHint("Tap to focus, swipe left or right to change looks, double tap to switch cameras, or pinch to zoom. These controls are also available as accessibility actions.")
+            .accessibilityHint("Tap to focus, then slide up to brighten or down to darken. Swipe left or right to change looks, double tap to switch cameras, or pinch to zoom. These controls are also available as accessibility actions.")
             .accessibilityAction(named: "Focus and expose at center") {
                 focusPreview(at: CGPoint(x: size.width / 2, y: size.height / 2), in: size)
             }
+            .accessibilityAction(named: "Brighten exposure") { adjustPreviewExposure(by: 0.3) }
+            .accessibilityAction(named: "Darken exposure") { adjustPreviewExposure(by: -0.3) }
             .accessibilityAction(named: "Next look") { selectAdjacentLook(.next) }
             .accessibilityAction(named: "Previous look") { selectAdjacentLook(.previous) }
             .accessibilityAction(named: "Switch camera", switchCameraFromPreview)
@@ -674,7 +885,7 @@ struct CameraScreen: View {
             .simultaneousGesture(
                 MagnificationGesture()
                     .onChanged { scale in
-                        guard canTriggerShutter else { return }
+                        guard canTriggerShutter, !shooting.settings.lockPrimeLens, !shooting.isComposing else { return }
                         if previewDragMaySelectLook != nil { previewDragMaySelectLook = false }
                         if !isPinching {
                             isPinching = true
@@ -696,13 +907,14 @@ struct CameraScreen: View {
         let normalizedPoint = normalizedFocusPoint(for: location, in: size)
         camera.focus(at: normalizedPoint)
         focusNormalizedPoint = normalizedPoint
+        focusFeedbackRevision += 1
         withAnimation(reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.72)) {
             focusPoint = location
         }
     }
 
     private func switchCameraFromPreview() {
-        guard canTriggerShutter, !isPinching, camera.availableCameraPositions.count > 1 else { return }
+        guard canTriggerShutter, !isPinching, !shooting.settings.lockPrimeLens, !shooting.isComposing, camera.availableCameraPositions.count > 1 else { return }
         focusPoint = nil
         focusNormalizedPoint = nil
         HapticFeedback.play(.selection)
@@ -710,25 +922,63 @@ struct CameraScreen: View {
     }
 
     private func selectAdjacentLook(_ direction: CameraLookDirection) {
-        guard canTriggerShutter, !isPinching,
+        #if G7_APP
+        return
+        #else
+        guard canTriggerShutter, !isPinching, !shooting.isComposing,
               let recipe = CameraPreviewGesturePolicy.targetRecipe(
-                in: viewModel.recipes, selectedIdentifier: viewModel.selectedRecipeID,
+                in: viewModel.quickNavigationRecipes, selectedIdentifier: viewModel.effectiveSelectedRecipeID,
                 direction: direction
               ) else { return }
         viewModel.select(recipe: recipe)
         HapticFeedback.play(.selection)
+        #endif
+    }
+
+    private var canAdjustPreviewExposure: Bool {
+        canTriggerShutter && !isPinching && camera.manualControls.exposureMode != .manual
+            && !camera.manualControls.isApplying
+    }
+
+    private func adjustPreviewExposure(by delta: Float) {
+        guard canAdjustPreviewExposure else { return }
+        camera.setExposureBias(camera.exposureBias + delta)
+        focusFeedbackRevision += 1
     }
 
     private func previewLookSwipe(in size: CGSize) -> some Gesture {
         DragGesture(minimumDistance: 12)
-            .onChanged { _ in
+            .onChanged { value in
                 let enabled = canTriggerShutter && !isPinching && Date() >= suppressLookSwipeUntil
                 if previewDragMaySelectLook == nil { previewDragMaySelectLook = enabled }
                 if !enabled { previewDragMaySelectLook = false }
+                guard previewDragMaySelectLook == true else { return }
+                if previewDragAxis == nil {
+                    previewDragAxis = CameraPreviewGesturePolicy.eligibleDragAxis(
+                        translation: value.translation,
+                        hasFocusPoint: focusPoint != nil,
+                        canAdjustExposure: canAdjustPreviewExposure
+                    )
+                    if previewDragAxis == .exposure {
+                        exposureDragStart = camera.exposureBias
+                    }
+                }
+                guard previewDragAxis == .exposure, canAdjustPreviewExposure,
+                      let start = exposureDragStart,
+                      let bias = CameraPreviewGesturePolicy.exposureBias(start: start,
+                          translation: value.translation, viewportHeight: size.height) else { return }
+                camera.setExposureBias(bias)
+                focusFeedbackRevision += 1
             }
             .onEnded { value in
-                defer { previewDragMaySelectLook = nil }
-                guard let direction = CameraPreviewGesturePolicy.lookDirection(
+                defer {
+                    previewDragMaySelectLook = nil
+                    previewDragAxis = nil
+                    exposureDragStart = nil
+                    focusFeedbackRevision += 1
+                }
+                guard previewDragAxis == .look,
+                      let direction = CameraPreviewGesturePolicy.lookDirection(
                     translation: value.translation,
                     viewportWidth: size.width,
                     interactionEnabled: canTriggerShutter && previewDragMaySelectLook == true,
@@ -755,11 +1005,11 @@ struct CameraScreen: View {
                 toolStrip(minWidth: width - 24)
             }
 
-            // The presets need a live camera; the chrome preview shows them
-            // so the full capture layout can be verified without hardware.
-            if !isShowingLookDrawer,
-               camera.isRunning || isViewfinderChromePreview,
-               !isReviewing {
+            // Keep the zoom row mounted while the session stops/restarts.
+            // Removing it moves the utility rail (and histogram exclusion
+            // area) on every foreground transition. Only visibility and
+            // interaction depend on camera readiness, never its layout.
+            if !isShowingLookDrawer, !isReviewing {
                 ZoomPresetBar(
                     value: camera.zoomFactor,
                     minZoom: camera.minZoomFactor,
@@ -770,6 +1020,10 @@ struct CameraScreen: View {
                         camera.setZoom(camera.zoomFactor + delta)
                     }
                 )
+                .opacity(camera.isRunning || isViewfinderChromePreview ? 1 : 0)
+                .disabled((!camera.isRunning && !isViewfinderChromePreview)
+                    || shooting.settings.lockPrimeLens || shooting.settingsLocked)
+                .accessibilityHidden(!camera.isRunning && !isViewfinderChromePreview)
                 .transition(.opacity)
             }
         }
@@ -811,30 +1065,38 @@ struct CameraScreen: View {
 
                 Spacer(minLength: 0)
 
+                fujiMenuButton
                 captureSetupButton
                 settingsButton
 
             }
         } indicators: {
             HStack(spacing: 8) {
+                SceneAutoControl(camera: camera, isBusy: viewModel.isCapturing || viewModel.isSaving || countdown.state.isActive)
+                Spacer(minLength: 0)
+                SmartRecipeEntryPoint(
+                    store: smartRecipes, selectedID: viewModel.selectedRecipeID,
+                    canApply: canApplySmartRecipe, onOpen: openSmartRecipes,
+                    onApply: applySmartRecipe, onUndo: undoSmartRecipe
+                )
+                Spacer(minLength: 0)
                 activeCaptureIndicators
 
-                CameraStatusPill(
-                    isRunning: camera.isRunning,
-                    availability: camera.availability,
-                    message: camera.statusMessage
-                )
-                .opacity(isLive ? 0 : 1)
-                .accessibilityHidden(isLive)
+                if !isLive {
+                    CameraStatusPill(
+                        isRunning: camera.isRunning,
+                        availability: camera.availability,
+                        message: camera.statusMessage
+                    )
+                }
             }
         }
     }
 
     @ViewBuilder
     private var activeCaptureIndicators: some View {
-        if (abs(camera.exposureBias) >= 0.05 && camera.manualControls.exposureMode == .auto)
-            || camera.isFocusExposureLocked
-            || camera.manualControls.isAnyManualModeEnabled {
+        if !camera.sceneAuto.isEnabled && ((abs(camera.exposureBias) >= 0.05 && camera.manualControls.exposureMode == .auto)
+            || camera.isFocusExposureLocked || camera.manualControls.isAnyManualModeEnabled) {
             Button {
                 if camera.manualControls.isAnyManualModeEnabled {
                     isShowingManualControls = true
@@ -918,6 +1180,7 @@ struct CameraScreen: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.pressable)
+        .disabled(shooting.settings.lockPrimeLens || shooting.settingsLocked)
         .accessibilityIdentifier("camera-switch-control")
         .accessibilityLabel("Switch camera")
         .accessibilityValue(camera.cameraPosition.title)
@@ -1027,30 +1290,61 @@ struct CameraScreen: View {
         .accessibilityHint("Favorites are shared with the look library. This does not change your look.")
     }
 
-    /// Wide iPad layouts use the edge column even in portrait so the picture
-    /// remains visually centered and the primary controls read like a camera
-    /// grip. It also fits an iPhone's compact landscape height.
+    /// Wide layouts use the edge column so the picture remains visually
+    /// centered and the primary controls read like a camera grip.
     private var edgeControlColumn: some View {
-        VStack(spacing: 10) {
+        let isPad = UIDevice.current.userInterfaceIdiom == .pad
+
+        return VStack(spacing: isPad ? 14 : 10) {
             Spacer(minLength: 0)
 
-            currentRecipeButton(compact: true)
-            captureControl
+            VStack(spacing: 8) {
+                currentRecipeButton(compact: true)
+                captureControl
+            }
+            .padding(.vertical, 4)
 
-            HStack(spacing: 8) {
-                rollButton
-                cameraSwitchButton
-                    .disabled(camera.availableCameraPositions.count < 2)
+            VStack(spacing: 8) {
+                HStack(spacing: 8) {
+                    rollButton
+                    cameraSwitchButton
+                        .disabled(camera.availableCameraPositions.count < 2)
+                }
+                HStack(spacing: 8) {
+                    favoriteCurrentLookButton
+                    toolsToggle
+                        .disabled(!camera.isRunning && !isViewfinderChromePreview)
+                }
             }
-            HStack(spacing: 8) {
-                favoriteCurrentLookButton
-                toolsToggle
-                    .disabled(!camera.isRunning && !isViewfinderChromePreview)
-            }
+
+            cameraGripToggle
 
             Spacer(minLength: 0)
         }
         .frame(maxHeight: .infinity)
+    }
+
+    private var cameraGripToggle: some View {
+        Button {
+            useLeftHandedGrip.toggle()
+            HapticFeedback.play(.selection)
+        } label: {
+            Image(systemName: useLeftHandedGrip ? "hand.point.left.fill" : "hand.point.right.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(FilmyTheme.primary)
+                .frame(width: cameraHitTarget, height: cameraHitTarget)
+                .background { ChromeShapeBackground(shape: Circle()) }
+                .contentShape(Circle())
+        }
+        .buttonStyle(.pressable)
+        .accessibilityIdentifier("camera-grip-toggle")
+        .accessibilityLabel("Camera controls position")
+        .accessibilityValue(useLeftHandedGrip ? "Left handed" : "Right handed")
+        .accessibilityHint(
+            useLeftHandedGrip
+                ? "Move the camera controls to the right edge"
+                : "Move the camera controls to the left edge"
+        )
     }
 
     private func currentRecipeButton(compact: Bool = false) -> some View {
@@ -1062,10 +1356,15 @@ struct CameraScreen: View {
                 recipe: viewModel.selectedRecipe,
                 isCustomized: viewModel.isCustomized(viewModel.selectedRecipe),
                 compactLayout: compact,
-                action: toggleLookDrawer
+                action: {
+                    #if !G7_APP
+                    toggleLookDrawer()
+                    #endif
+                }
             )
             Button {
                 let shouldOpen = !isShowingLiveAdjustments
+                guard !shouldOpen || membership.require(.recipeEditing) else { return }
                 closeControlDrawers()
                 isShowingLiveAdjustments = shouldOpen
             } label: {
@@ -1082,7 +1381,14 @@ struct CameraScreen: View {
     private func lookDrawer(maxHeight: CGFloat) -> some View {
         // Header, filters, footer, three gaps, and outer padding must all
         // fit before assigning the remaining height to scrolling recipes.
-        let chromeHeight = 64 + cameraHitTarget + max(48, cameraHitTarget) + 38
+        let showsSearch = maxHeight >= 340
+        let chromeHeight = 64 + cameraHitTarget + max(48, cameraHitTarget) + 38 + (showsSearch ? 50 : 0)
+        let active = viewModel.quickRecipes
+        let visible = active.filter { recipe in
+            (!favoritesOnly || favoriteIDs.contains(recipe.id))
+                && (!showsSearch || quickRecipeQuery.isEmpty
+                    || RecipeCatalog.searchText(for: recipe).localizedStandardContains(quickRecipeQuery))
+        }
 
         return VStack(spacing: 6) {
             HStack(spacing: 10) {
@@ -1105,9 +1411,6 @@ struct CameraScreen: View {
                         .font(.system(size: 12, weight: .bold, design: .rounded))
                         .foregroundStyle(FilmyTheme.primary)
                         .padding(.horizontal, 12)
-                        // In the iPad portrait compatibility window, the
-                        // drawer scales down in landscape. Keep the real
-                        // button target at 44pt after that transform.
                         .frame(minHeight: 64)
                         .background(FilmyTheme.panel, in: Capsule())
                         .contentShape(Rectangle())
@@ -1136,7 +1439,7 @@ struct CameraScreen: View {
                     favoritesOnly = false
                     HapticFeedback.play(.selection)
                 } label: {
-                    Text("All")
+                    Text("Active \(active.count)")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(!favoritesOnly ? FilmyTheme.primary : FilmyTheme.secondary)
                         .padding(.horizontal, 12)
@@ -1168,18 +1471,38 @@ struct CameraScreen: View {
             }
             .buttonStyle(.plain)
 
-            if favoritesOnly && favoriteIDs.intersection(viewModel.recipes.map(\.id)).isEmpty {
-                Text("Heart a look to keep it here.")
+            if showsSearch {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(FilmyTheme.secondary)
+                    TextField("Search active looks", text: $quickRecipeQuery)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.done)
+                        .accessibilityIdentifier("camera-looks-search")
+                    if !quickRecipeQuery.isEmpty {
+                        Button("Clear", systemImage: "xmark.circle.fill") { quickRecipeQuery = "" }
+                            .labelStyle(.iconOnly)
+                            .frame(minWidth: 44, minHeight: 44)
+                    }
+                }
+                .font(.subheadline)
+                .padding(.horizontal, 12)
+                .frame(height: 44)
+                .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 10))
+            }
+
+            if visible.isEmpty {
+                Text(active.isEmpty ? "Your quick menu is empty. Open Packs to add looks."
+                     : favoritesOnly ? "No active favorites match. Manage them in Packs."
+                     : "No active looks match your search.")
                     .font(.subheadline)
                     .foregroundStyle(FilmyTheme.secondary)
                     .frame(maxWidth: .infinity, minHeight: 70)
-                    .accessibilityIdentifier("camera-favorites-empty")
+                    .accessibilityIdentifier(favoritesOnly ? "camera-favorites-empty" : "camera-looks-empty")
             } else {
                 RecipePickerView(
-                    recipes: favoritesOnly
-                        ? viewModel.recipes.filter { favoriteIDs.contains($0.id) }
-                        : viewModel.recipes,
-                    selectedRecipeID: $viewModel.selectedRecipeID,
+                    recipes: visible,
+                    selectedRecipeID: Binding(get: { viewModel.effectiveSelectedRecipeID }, set: { viewModel.select(recipe: viewModel.recipe(for: $0)) }),
                     onOpenDetail: openRecipeDetail,
                     compact: !favoritesOnly
                 )
@@ -1187,26 +1510,31 @@ struct CameraScreen: View {
                 .id(favoritesOnly)
             }
 
-            Button {
-                HapticFeedback.play(.selection)
-                isShowingLookLibrary = true
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "square.grid.2x2")
-                    Text("All \(viewModel.recipes.count) looks")
-                    Spacer(minLength: 0)
-                    Image(systemName: "arrow.up.right")
+            HStack(spacing: 8) {
+                Button {
+                    HapticFeedback.play(.selection)
+                    isShowingLookLibrary = true
+                } label: {
+                    Label("Browse all", systemImage: "square.grid.2x2")
+                        .frame(maxWidth: .infinity, minHeight: max(48, cameraHitTarget))
+                        .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 12))
                 }
-                .font(.system(.subheadline).weight(.semibold))
-                .foregroundStyle(FilmyTheme.accent)
-                .padding(.horizontal, 12)
-                .frame(minHeight: max(48, cameraHitTarget))
-                .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 12))
-                .contentShape(Rectangle())
+                .accessibilityIdentifier("look-library-open")
+                .accessibilityHint("Browse and search all \(viewModel.recipes.count) looks, including hidden recipes")
+                Button {
+                    HapticFeedback.play(.selection)
+                    isShowingRecipeManager = true
+                } label: {
+                    Label("Packs", systemImage: "square.stack.3d.up")
+                        .frame(maxWidth: .infinity, minHeight: max(48, cameraHitTarget))
+                        .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 12))
+                }
+                .accessibilityIdentifier("camera-recipe-packs")
+                .accessibilityHint("Choose the packs and individual looks in your quick menu")
             }
+            .font(.system(.subheadline).weight(.semibold))
+            .foregroundStyle(FilmyTheme.accent)
             .buttonStyle(.pressable)
-            .accessibilityIdentifier("look-library-open")
-            .accessibilityHint("Browse larger previews, search looks, and save favorites")
         }
         .padding(10)
         .frame(maxWidth: 640)
@@ -1231,8 +1559,8 @@ struct CameraScreen: View {
             captureNotice
         } else {
             CaptureButton(
-                isCapturing: viewModel.isCapturing,
-                isEnabled: !camera.manualControls.isApplying && framingIsReady,
+                isCapturing: viewModel.isCapturing || shooting.isBusy,
+                isEnabled: !camera.manualControls.isApplying && framingIsReady && !shooting.settingUpPrime && shooting.validationMessage == nil,
                 unavailableLabel: framingIsReady ? "Applying camera settings" : "Updating framing",
                 unavailableHint: "Wait for the camera to finish applying your settings",
                 action: capture
@@ -1318,7 +1646,6 @@ struct CameraScreen: View {
         } label: {
             VStack(spacing: 3) {
                 RollThumbnail(asset: photoLibrary.galleryAssets.first, photoLibrary: photoLibrary)
-                    .frame(width: 44, height: 44)
                 Text("Roll")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(FilmyTheme.secondary)
@@ -1532,19 +1859,98 @@ struct CameraScreen: View {
         }
     }
 
+    // MARK: - Smart recipe suggestions
+
+    private var canApplySmartRecipe: Bool {
+        scenePhase == .active && isCameraTabActive && camera.isRunning
+            && camera.availability == .running && !isChromeDisabled && !isReviewing
+            && viewModel.reviewImage == nil && !countdown.state.isActive && !camera.manualControls.isApplying
+    }
+
+    private var isSmartRecipeAnalysisActive: Bool {
+        smartRecipes.isEnabled && canTriggerShutter && !isShowingLookDrawer
+            && !isShowingLiveAdjustments && !isShowingTools
+    }
+
+    private var smartRecipeFrameKey: [String] {
+        [camera.cameraPosition.rawValue, camera.selectedLensID ?? "", String(describing: camera.zoomFactor),
+         String(describing: camera.previewViewportSize), String(describing: camera.previewRotationAngle),
+         String(camera.previewMirrored)]
+    }
+
+    private func updateSmartRecipeAnalysis() {
+        let favorites = (try? JSONDecoder().decode(Set<String>.self, from: favoriteData)) ?? []
+        smartRecipes.configure(camera: camera, active: isSmartRecipeAnalysisActive,
+                               recipes: viewModel.recipes, favoriteIDs: favorites)
+    }
+
+    private func openSmartRecipes() {
+        guard !isChromeDisabled, !countdown.state.isActive else { return }
+        smartPresentation = smartRecipes.snapshot
+        closeControlDrawers()
+        isShowingSmartRecipes = true
+    }
+
+    private func applySmartRecipe(_ id: String) {
+        guard smartRecipes.isEnabled, canApplySmartRecipe,
+              let recipe = viewModel.recipes.first(where: { $0.id == id }) else { return }
+        smartRecipes.recordSelection(previousID: viewModel.selectedRecipeID, appliedID: recipe.id)
+        viewModel.select(recipe: recipe)
+        isShowingSmartRecipes = false
+    }
+
+    private func undoSmartRecipe() {
+        guard canApplySmartRecipe,
+              let id = smartRecipes.undo?.target(currentID: viewModel.selectedRecipeID,
+                                                 availableIDs: Set(viewModel.recipes.map(\.id))),
+              let recipe = viewModel.recipes.first(where: { $0.id == id }) else { return }
+        smartRecipes.clearUndo()
+        viewModel.select(recipe: recipe)
+    }
+
     // MARK: - Actions
 
     private func capture() {
+#if DEBUG
+        if hardwareShutterDiagnosticsEnabled {
+            hardwareShutterActionCount += 1
+            hardwareShutterCaptureReadiness = "ready=\(canTriggerShutter);blocker=\(hardwareShutterBlockingReason)"
+        }
+#endif
         guard canTriggerShutter else { return }
         closeControlDrawers()
         if captureDelay == .off {
-            viewModel.capture(camera: camera, photoLibrary: photoLibrary)
+            performShutterCapture()
         } else {
             countdown.start(seconds: captureDelay.rawValue) {
                 guard canTriggerShutter else { return }
-                viewModel.capture(camera: camera, photoLibrary: photoLibrary)
+                performShutterCapture()
             }
         }
+    }
+
+    private func performShutterCapture() {
+        if shooting.needsCoordinator {
+            shooting.capture(camera: camera, viewModel: viewModel, photoLibrary: photoLibrary)
+        } else {
+            viewModel.capture(camera: camera, photoLibrary: photoLibrary)
+        }
+    }
+
+    private var fujiMenuButton: some View {
+        Button {
+            closeControlDrawers()
+            isShowingFujiMenu = true
+        } label: {
+            Text("Q").font(.system(size: 17, weight: .bold, design: .rounded))
+                .foregroundStyle(shooting.needsCoordinator ? FilmyTheme.filmAccent : .white)
+                .frame(width: cameraHitTarget, height: cameraHitTarget)
+                .background { ChromeShapeBackground(shape: Circle()) }
+                .contentShape(Circle())
+        }
+        .buttonStyle(.pressable)
+        .accessibilityLabel("Open Q shooting menu")
+        .accessibilityIdentifier("fuji-q-menu")
     }
 
     private func closeControlDrawers() {
@@ -1556,11 +1962,13 @@ struct CameraScreen: View {
     }
 
     private func openRecipeDetail(_ recipe: FilmRecipe) {
+        guard !shooting.isComposing, membership.require(.recipeEditing) else { return }
         closeControlDrawers()
         recipeForDetail = viewModel.recipe(for: recipe.id)
     }
 
     private func toggleLookDrawer() {
+        guard !shooting.isComposing else { return }
         withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.84)) {
             if !isShowingLookDrawer {
                 isShowingLiveAdjustments = false
@@ -1671,8 +2079,11 @@ struct CameraScreen: View {
             )
         }
 
+        let factor = CGFloat(shooting.settings.previewCrop)
+        let croppedPoint = CGPoint(x: 0.5 + (rotatedPreviewPoint.x - 0.5) / factor,
+                                   y: 0.5 + (rotatedPreviewPoint.y - 0.5) / factor)
         return CameraService.captureDevicePoint(
-            fromRotatedPreviewPoint: rotatedPreviewPoint,
+            fromRotatedPreviewPoint: croppedPoint,
             rotationAngle: camera.previewRotationAngle,
             mirrored: camera.previewMirrored
         )
@@ -1716,6 +2127,9 @@ private struct RollThumbnail: View {
                     .foregroundStyle(.white)
             }
         }
+        // Constrain the aspect-fill image before clipping, so portrait and
+        // landscape photos cannot draw over the Roll label below it.
+        .frame(width: 44, height: 44)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -1782,14 +2196,62 @@ private struct CameraLensMenu: View {
 // MARK: - Capture setup and assist presentation
 
 extension CameraScreen {
+    private var isShootingSessionActive: Bool {
+        scenePhase == .active && isCameraTabActive && camera.isRunning && camera.availability == .running
+            && !isReviewing && !isImporting
+    }
     private var isCameraVisibleForAssists: Bool {
         scenePhase == .active && isCameraTabActive && camera.isRunning && camera.availability == .running && !isReviewing && !isImporting
-            && !viewModel.isCapturing && recipeForDetail == nil && !isShowingLookLibrary
+            && !viewModel.isCapturing && recipeForDetail == nil && !isShowingLookLibrary && !isShowingRecipeManager
             && !isShowingManualControls && !isShowingCaptureSetup
+            && !isShowingFujiMenu
+            && !isShowingSmartRecipes
     }
     private var canTriggerShutter: Bool {
-        isCameraVisibleForAssists && viewModel.reviewImage == nil && !viewModel.isSaving && !camera.manualControls.isApplying && !countdown.state.isActive && framingIsReady
+        isCameraVisibleForAssists && viewModel.reviewImage == nil && !viewModel.isSaving && !camera.manualControls.isApplying
+            && !countdown.state.isActive && framingIsReady && !shooting.isBusy && !shooting.settingUpPrime
+            && !camera.isFujiCapturing && !isShowingFujiMenu && shooting.validationMessage == nil
     }
+#if DEBUG
+    private var hardwareShutterDiagnosticsEnabled: Bool {
+        ProcessInfo.processInfo.arguments.contains("-ui-testing")
+    }
+
+    private var hardwareShutterBlockingReason: String {
+        if scenePhase != .active { return "scene-inactive" }
+        if !isCameraTabActive { return "camera-tab-inactive" }
+        if !camera.isRunning { return "camera-not-running" }
+        if camera.availability != .running { return "availability-\(camera.availability.rawValue)" }
+        if isReviewing { return "reviewing" }
+        if isImporting { return "importing" }
+        if viewModel.isCapturing { return "capturing" }
+        if recipeForDetail != nil { return "recipe-detail" }
+        if isShowingLookLibrary { return "look-library" }
+        if isShowingManualControls { return "manual-controls" }
+        if isShowingCaptureSetup { return "capture-setup" }
+        if viewModel.reviewImage != nil { return "review-image" }
+        if viewModel.isSaving { return "saving" }
+        if camera.manualControls.isApplying { return "manual-controls-applying" }
+        if countdown.state.isActive { return "countdown-active" }
+        if !framingIsReady { return "framing-not-ready" }
+        return "none"
+    }
+
+    private var hardwareShutterDiagnosticsValue: String {
+        "ready=\(canTriggerShutter);blocker=\(hardwareShutterBlockingReason);events=\(hardwareShutterEventCount);lastPhase=\(hardwareShutterLastPhase);actions=\(hardwareShutterActionCount);eventReady=\(hardwareShutterEventReadiness);captureReady=\(hardwareShutterCaptureReadiness);capture=\(viewModel.captureTimingStatus)"
+    }
+
+    private var hardwareShutterDiagnostics: some View {
+        Text(hardwareShutterDiagnosticsValue)
+            .accessibilityElement()
+            .accessibilityIdentifier("camera-hardware-shutter-status")
+            .accessibilityLabel("Hardware shutter status")
+            .accessibilityValue(hardwareShutterDiagnosticsValue)
+            .frame(width: 1, height: 1)
+            .opacity(0.001)
+            .allowsHitTesting(false)
+    }
+#endif
     private var framingIsReady: Bool {
         guard captureAspect != .viewfinder else { return true }
         let viewport = camera.previewViewportSize
@@ -1798,7 +2260,7 @@ extension CameraScreen {
         return abs(Double(viewport.width / viewport.height) - ratio) < 0.015
     }
     private var assistOptions: CompositionAssistStore.Options {
-        .init(histogram: showHistogram, zebras: showZebras, peaking: showFocusPeaking, level: showHorizonLevel)
+        .init(histogram: showHistogram, zebras: showZebras, peaking: showFocusPeaking, level: showHorizonLevel, digitalCrop: shooting.settings.previewCrop)
     }
     private func updateCompositionAssists() {
         assists.configure(camera: camera, options: assistOptions, active: isCameraVisibleForAssists)
@@ -1850,9 +2312,15 @@ extension CameraScreen {
 private struct CameraHardwareShutterModifier: ViewModifier {
     let enabled: Bool
     let action: () -> Void
+#if DEBUG
+    let onEventPhase: (String) -> Void
+#endif
     @ViewBuilder func body(content: Content) -> some View {
         if #available(iOS 18.0, *) {
             content.onCameraCaptureEvent(isEnabled: enabled) { event in
+#if DEBUG
+                onEventPhase(String(describing: event.phase))
+#endif
                 if event.phase == .ended { action() }
             }
         } else {

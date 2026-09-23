@@ -1,0 +1,129 @@
+id,name,film_base,origin,exposure,grain,halation,vignette,blue_response,calibration,action
+provia-standard,Natural Standard,provia,publicOfficialDocumentation,0,0,0.01,0.04,0.02,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+classic-chrome,Muted Color,classicChrome,publicOfficialDocumentation,0,0.5,0.04,0.12,0.18,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+velvia-vivid,Vivid Slide,velvia,publicOfficialDocumentation,0,0,0.02,0.1,0.34,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+astia-soft,Soft Portrait,astia,publicOfficialDocumentation,0,0,0.03,0.08,0.04,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+pro-neg-high,Defined Negative,proNegative,publicOfficialDocumentation,0,0,0.01,0.06,0.02,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+eterna-cinema,Cinema Soft,eterna,publicOfficialDocumentation,0,0,0.1,0.16,-0.06,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+acros-monochrome,Fine Monochrome,monochrome,publicOfficialDocumentation,0,0.5,0.02,0.14,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+sepia-archive,Sepia Archive,sepia,publicOfficialDocumentation,0,0.5,0.02,0.12,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+acros-neutral-filter,Neutral Monochrome,acros,publicOfficialDocumentation,0,0.5,0.01,0.14,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+acros-yellow-filter,Yellow Monochrome,acrosYellow,publicOfficialDocumentation,0,0.5,0.01,0.14,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+acros-red-filter,Red Monochrome,acrosRed,publicOfficialDocumentation,0,0.5,0.01,0.16,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+acros-green-filter,Green Monochrome,acrosGreen,publicOfficialDocumentation,0,0.5,0.01,0.13,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+classic-negative,Warm Negative,classicNegative,publicOfficialDocumentation,0,0.5,0.06,0.14,0.24,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+nostalgic-negative,Memory Negative,nostalgicNegative,publicOfficialDocumentation,0,0.5,0.12,0.18,0.3,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+eterna-bleach-bypass,Silver Cinema,eternaBleachBypass,publicOfficialDocumentation,0,0.5,0.04,0.18,0.08,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+pro-neg-standard,Neutral Portrait,proNegStandard,publicOfficialDocumentation,0,0,0.03,0.08,0.02,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+reala-ace,Natural Negative,realaAce,publicOfficialDocumentation,0,0,0.02,0.06,0.14,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+g7x-compact,G7 X Compact,compactDigital,publicCanonDocumentation,0.05,0,0,0,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+nostalgic-summer,Nostalgic Summer,nostalgicNegative,publicOfficialRecipe,0.45,0.5,0.06,0.1,0.2,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+aurea-golden,Aurea Golden,nostalgicNegative,publicOfficialRecipe,0.33,0.5,0.08,0.12,0.2,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+eternal-pastel,Eternal Pastel,classicChrome,publicOfficialRecipe,0.33,1,0.06,0.12,0.14,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+crepuscolo-blue,Crepuscolo Blue,nostalgicNegative,publicOfficialRecipe,0,1,0.05,0.16,0.2,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+black-ice,Black Ice,acrosYellow,publicOfficialRecipe,0,1,0.01,0.16,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+matter-monochrome,Matter Monochrome,acrosYellow,publicOfficialRecipe,0,0.5,0.01,0.14,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+honey-portrait,Honey Portrait,astia,publicOfficialRecipe,0.33,0.5,0.04,0.08,0.04,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+pacifica-100,Pacifica 100,velvia,publicOfficialRecipe,0,1,0.02,0.12,0.04,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+desert-daydream,Desert Daydream,velvia,publicOfficialRecipe,0,0.5,0.03,0.1,0.04,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+quiet-provia,Quiet Provia,provia,publicOfficialRecipe,0,0,0.01,0.06,0.04,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+velvet-haze,Velvet Haze,proNegStandard,publicOfficialRecipe,0,0,0.06,0.1,0.04,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+pastel-400,Pastel 400,classicChrome,publicCommunityRecipe,0.83,1,0.05,0.1,0.14,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+archive-64,Archive 64,classicChrome,publicCommunityRecipe,0.67,0.5,0.03,0.09,0.14,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+tungsten-800,Tungsten 800,eterna,publicCommunityRecipe,0.17,1,0.2,0.18,0.08,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+pushed-tungsten,Pushed Tungsten,eternaBleachBypass,publicCommunityRecipe,0.17,1,0.14,0.18,0.08,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+pacific-blues,Pacific Blues,classicNegative,publicCommunityRecipe,0.83,1,0.05,0.14,0.24,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+green-800,Green 800,proNegStandard,publicCommunityRecipe,0.67,1,0.04,0.13,0.04,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+hp5-texture,HP5 Texture,monochrome,publicCommunityRecipe,0,1,0.01,0.16,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+negative-portrait-160,Portrait 160,proNegStandard,originalCreativeDesign,0.12,0.5,0.02,0.04,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+negative-portrait-400,Portrait 400,proNegative,originalCreativeDesign,0.08,0.5,0.04,0.06,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+negative-portrait-800,Portrait 800,nostalgicNegative,originalCreativeDesign,0.1,0.5,0.08,0.1,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+negative-gold-200,Gold 200,classicNegative,originalCreativeDesign,0.05,0.5,0.04,0.1,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+negative-consumer-400,Consumer 400,realaAce,originalCreativeDesign,0,0.5,0.02,0.09,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+negative-coastal-100,Coastal 100,provia,originalCreativeDesign,0.1,0.5,0.01,0.03,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+negative-city-200,City 200,classicChrome,originalCreativeDesign,-0.04,0.5,0.01,0.11,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+negative-soft-cream,Soft Cream,astia,originalCreativeDesign,0.17,0.5,0.05,0.05,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+negative-olive-400,Olive 400,classicNegative,originalCreativeDesign,-0.02,0.5,0.03,0.12,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+negative-rose-200,Rose 200,proNegStandard,originalCreativeDesign,0.08,0.5,0.04,0.06,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+negative-pastel-day,Pastel Day,astia,originalCreativeDesign,0.22,0.5,0.03,0.02,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+negative-woodland,Woodland Negative,realaAce,originalCreativeDesign,-0.07,0.5,0.02,0.12,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+negative-copper-800,Copper 800,nostalgicNegative,originalCreativeDesign,-0.03,0.5,0.1,0.13,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+negative-winter-200,Winter 200,provia,originalCreativeDesign,0.08,0.5,0.02,0.04,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+negative-travel-400,Travel 400,realaAce,originalCreativeDesign,0.05,0.5,0.03,0.07,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+negative-faded-album,Faded Album,nostalgicNegative,originalCreativeDesign,0.1,0.5,0.08,0.18,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+slide-chrome-50,Chrome 50,velvia,originalCreativeDesign,-0.08,0.5,0.01,0.08,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+slide-chrome-100,Chrome 100,provia,originalCreativeDesign,-0.04,0.5,0.02,0.06,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+slide-mountain-50,Mountain 50,velvia,originalCreativeDesign,-0.15,0.5,0.01,0.12,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+slide-warm-projector,Warm Projector,provia,originalCreativeDesign,-0.03,0.5,0.04,0.14,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+slide-cool-chrome,Cool Chrome,realaAce,originalCreativeDesign,-0.06,0.5,0.01,0.05,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+slide-sunset-chrome,Sunset Chrome,velvia,originalCreativeDesign,-0.1,0.5,0.06,0.1,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+slide-botanical,Botanical Slide,velvia,originalCreativeDesign,-0.07,0.5,0.02,0.07,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+slide-soft-transparency,Soft Transparency,astia,originalCreativeDesign,0.05,0.5,0.02,0.03,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+slide-blue-hour,Blue Hour Slide,provia,originalCreativeDesign,-0.14,0.5,0.04,0.13,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+slide-archive-projector,Archive Projector,classicChrome,originalCreativeDesign,-0.04,0.5,0.05,0.19,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+cinema-daylight-250,Daylight 250,eterna,originalCreativeDesign,0.05,0.5,0.05,0.06,0.16,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+cinema-tungsten-500,Cinema Tungsten 500,eterna,originalCreativeDesign,-0.04,0.5,0.13,0.1,0.16,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+cinema-night-neon,Night Neon,standard,originalCreativeDesign,-0.1,0.5,0.22,0.18,0.16,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+cinema-silver-screen,Silver Screen Color,eternaBleachBypass,originalCreativeDesign,-0.06,0.5,0.03,0.12,0.16,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+cinema-amber-teal,Amber and Teal,eterna,originalCreativeDesign,0,0.5,0.09,0.11,0.16,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+cinema-matinee,Matinee,eterna,originalCreativeDesign,0.12,0.5,0.07,0.06,0.16,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+cinema-noir-color,Color Noir,eternaBleachBypass,originalCreativeDesign,-0.14,0.5,0.07,0.21,0.16,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+cinema-road-movie,Road Movie,classicChrome,originalCreativeDesign,0,0.5,0.05,0.12,0.16,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+cinema-rainy-city,Rainy City,eterna,originalCreativeDesign,-0.08,0.5,0.08,0.13,0.16,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+cinema-summer-feature,Summer Feature,eterna,originalCreativeDesign,0.13,0.5,0.08,0.05,0.16,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+cinema-velvet-night,Velvet Night,standard,originalCreativeDesign,-0.09,0.5,0.18,0.17,0.16,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+cinema-newsreel-color,Newsreel Color,classicChrome,originalCreativeDesign,-0.03,0.5,0.02,0.1,0.16,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+instant-cream-square,Cream Square,nostalgicNegative,originalCreativeDesign,0.12,0.5,0.08,0.16,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+instant-pastel-square,Pastel Square,astia,originalCreativeDesign,0.2,0.5,0.07,0.12,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+instant-sun-faded,Sun Faded Instant,classicNegative,originalCreativeDesign,0.08,0.5,0.1,0.22,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+instant-cool-pack,Cool Pack,proNegStandard,originalCreativeDesign,0.1,0.5,0.04,0.13,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+instant-party-pack,Party Pack,standard,originalCreativeDesign,0.05,0.5,0.08,0.25,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+instant-warm-pack,Warm Pack,nostalgicNegative,originalCreativeDesign,0.07,0.5,0.11,0.17,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+instant-soft-focus,Soft Focus Instant,astia,originalCreativeDesign,0.19,0.5,0.19,0.15,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+instant-expired-pack,Expired Pack,standard,originalCreativeDesign,0,0.5,0.09,0.3,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+digital-ccd-daylight,CCD Daylight,standard,originalCreativeDesign,0,0.5,0,0.08,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+digital-ccd-twilight,CCD Twilight,standard,originalCreativeDesign,-0.08,0.5,0.04,0.12,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+digital-pocket-positive,Pocket Positive,standard,originalCreativeDesign,-0.03,0.5,0,0.14,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+digital-pocket-negative,Pocket Negative,classicChrome,originalCreativeDesign,0.02,0.5,0.02,0.1,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+digital-rangefinder-color,Rangefinder Color,standard,originalCreativeDesign,-0.03,0.5,0,0.11,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+digital-rangefinder-soft,Rangefinder Soft,proNegStandard,originalCreativeDesign,0.08,0.5,0.01,0.08,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+digital-mirrorless-clean,Mirrorless Clean,standard,originalCreativeDesign,0,0,0,0,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+digital-mirrorless-vivid,Mirrorless Vivid,standard,originalCreativeDesign,-0.03,0,0,0.03,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+digital-mirrorless-portrait,Mirrorless Portrait,standard,originalCreativeDesign,0.1,0,0.01,0.03,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+digital-bridge-zoom,Bridge Zoom,standard,originalCreativeDesign,-0.01,0.5,0,0.13,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+digital-pocket-flash,Pocket Flash Color,standard,originalCreativeDesign,0.05,0.5,0.04,0.25,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+digital-pocket-soft,Pocket Soft,standard,originalCreativeDesign,0.12,0.5,0.06,0.09,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+digital-cmos-studio,CMOS Studio,standard,originalCreativeDesign,0.04,0,0,0.01,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+digital-cmos-night,CMOS Night Color,standard,originalCreativeDesign,-0.07,0.5,0.05,0.08,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+digital-toy-digital,Toy Digital,standard,originalCreativeDesign,-0.02,0.5,0.04,0.44,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+digital-compact-sunset,Compact Sunset,standard,originalCreativeDesign,0.01,0.5,0.06,0.12,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+experimental-cross-process,Cross Process,standard,originalCreativeDesign,-0.03,0.5,0.06,0.17,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+experimental-red-dusk,Red Dusk,standard,originalCreativeDesign,-0.1,0.5,0.11,0.23,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+experimental-mint-dream,Mint Dream,astia,originalCreativeDesign,0.17,0.5,0.12,0.09,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+experimental-violet-hour,Violet Hour,standard,originalCreativeDesign,-0.03,0.5,0.14,0.16,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+experimental-solar-gold,Solar Gold,classicNegative,originalCreativeDesign,0.08,0.5,0.16,0.2,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+experimental-washed-cyan,Washed Cyan,standard,originalCreativeDesign,0.13,0.5,0.08,0.17,0.03,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+monochrome-silver-100,Silver 100,acros,originalCreativeDesign,0.02,0.5,0,0.06,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+monochrome-silver-400,Silver 400,acros,originalCreativeDesign,0,0.5,0,0.1,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+monochrome-silver-1600,Silver 1600,acros,originalCreativeDesign,-0.08,0.5,0,0.15,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+monochrome-fine-25,Fine 25,monochrome,originalCreativeDesign,0.04,0.5,0,0.02,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+monochrome-street-hard,Street Hard,acrosRed,originalCreativeDesign,-0.12,0.5,0,0.19,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+monochrome-street-soft,Street Soft,acros,originalCreativeDesign,0.08,0.5,0,0.09,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+monochrome-portrait-green,Portrait Green Filter,acrosGreen,originalCreativeDesign,0.07,0.5,0,0.06,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+monochrome-landscape-red,Landscape Red Filter,acrosRed,originalCreativeDesign,-0.07,0.5,0,0.1,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+monochrome-classic-yellow,Classic Yellow Filter,acrosYellow,originalCreativeDesign,0.01,0.5,0,0.07,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+monochrome-matte-paper,Matte Paper,monochrome,originalCreativeDesign,0.12,0.5,0,0.12,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+monochrome-gloss-paper,Gloss Paper,acros,originalCreativeDesign,-0.04,0.5,0,0.08,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+monochrome-noir-rain,Noir Rain,acrosRed,originalCreativeDesign,-0.15,0.5,0,0.24,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+monochrome-high-key,High Key Silver,acrosGreen,originalCreativeDesign,0.28,0.5,0,0.02,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+monochrome-low-key,Low Key Silver,acros,originalCreativeDesign,-0.26,0.5,0,0.22,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+monochrome-warm-fiber,Warm Fiber,monochrome,originalCreativeDesign,0.05,0.5,0,0.12,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+monochrome-cool-silver,Cool Silver,acros,originalCreativeDesign,0,0.5,0,0.08,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+monochrome-selenium,Selenium Mood,acros,originalCreativeDesign,-0.04,0.5,0,0.14,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+monochrome-copper-print,Copper Print,sepia,originalCreativeDesign,0.06,0.5,0,0.19,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+monochrome-blue-print,Blue Print,monochrome,originalCreativeDesign,0.03,0.5,0,0.08,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+monochrome-press-3200,Press 3200,acrosYellow,originalCreativeDesign,-0.09,1,0,0.16,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+monochrome-night-silver,Night Silver,acros,originalCreativeDesign,-0.12,0.5,0,0.23,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+monochrome-architecture,Architectural Silver,monochrome,originalCreativeDesign,-0.03,0.5,0,0.04,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+monochrome-soft-charcoal,Soft Charcoal,acrosGreen,originalCreativeDesign,0.1,0.5,0,0.11,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives
+monochrome-silver-rangefinder,Silver Rangefinder,monochrome,originalCreativeDesign,0,0.5,0,0.09,0,Not hardware-calibrated,Preserve authored controls and stable ID; add neutral/source-traced alternatives

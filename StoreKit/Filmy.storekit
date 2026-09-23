@@ -1,0 +1,51 @@
+{
+  "identifier": "18AF61C9-6045-4E4F-A7AC-C60D31065CD4",
+  "nonRenewingSubscriptions": [],
+  "products": [],
+  "settings": {
+    "_applicationInternalID": "6801404866",
+    "_developerTeamID": "6ALSCF5GBV",
+    "_failTransactionsEnabled": false,
+    "_locale": "en_US",
+    "_storefront": "USA",
+    "_timeRate": 0
+  },
+  "subscriptionGroups": [
+    {
+      "id": "26091501",
+      "localizations": [],
+      "name": "Filmy Pro",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "4.99",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "26091502",
+          "introductoryOffer": {
+            "internalID": "26091503",
+            "paymentMode": "free",
+            "subscriptionPeriod": "P1M"
+          },
+          "localizations": [
+            {
+              "description": "Unlimited photos, all film recipes and controls, no ads.",
+              "displayName": "Filmy Pro Monthly",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.dheeraj.filmycamera.pro.monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Filmy Pro Monthly (TEST PRICE ONLY)",
+          "subscriptionGroupID": "26091501",
+          "type": "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version": {
+    "major": 3,
+    "minor": 0
+  }
+}

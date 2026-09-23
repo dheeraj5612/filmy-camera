@@ -1,0 +1,115 @@
+name: Pro capture checks
+
+on:
+  pull_request:
+    paths:
+      - FilmyCamera/**
+      - FilmyCameraTests/**
+      - FilmyCameraUITests/**
+      - FilmyCamera.xcodeproj/**
+      - scripts/testing/**
+      - project.yml
+      - .github/workflows/pro-capture-checks.yml
+  push:
+    branches: [main]
+    paths:
+      - FilmyCamera/**
+      - FilmyCameraTests/**
+      - FilmyCameraUITests/**
+      - project.yml
+      - .github/workflows/pro-capture-checks.yml
+  workflow_dispatch:
+    inputs:
+      require_release_camera_api:
+        type: boolean
+        default: false
+        description: Fail the iOS 27 job unless release aperture/priority declarations are installed
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pro-capture-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, xcode-27]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Record source and SDK capability
+        shell: bash
+        env:
+          RUNNER_LABEL: ${{ matrix.runner }}
+          REQUIRE_RELEASE_API: ${{ inputs.require_release_camera_api }}
+        run: |
+          set -euo pipefail
+          [[ "$RUNNER_LABEL" != 'macos-15' ]] || echo 'DEVELOPER_DIR=/Applications/Xcode_26.3.app/Contents/Developer' >> "$GITHUB_ENV"
+          [[ "$RUNNER_LABEL" != 'macos-15' ]] || export DEVELOPER_DIR=/Applications/Xcode_26.3.app/Contents/Developer
+          mkdir -p "$RUNNER_TEMP/evidence"
+          git rev-parse HEAD | tee "$RUNNER_TEMP/evidence/source-sha.txt"
+          git archive HEAD -o "$RUNNER_TEMP/evidence/source.tar"
+          xcodebuild -version | tee "$RUNNER_TEMP/evidence/xcode.txt"
+          sdk=$(xcrun --sdk iphonesimulator --show-sdk-path)
+          flag=''
+          if grep -R -q --include='*.h' 'setExposureModeCustomWithLensAperture:' "$sdk/System/Library/Frameworks"; then
+            flag=FILMY_IOS27_SDK
+            echo 'Release camera API branch enabled; the build must compile it.' > "$RUNNER_TEMP/evidence/camera-api.txt"
+          else
+            echo 'Compatibility path only. This SDK does not expose the release aperture/priority APIs; those branches are NOT validated by this run.' > "$RUNNER_TEMP/evidence/camera-api.txt"
+          fi
+          cat "$RUNNER_TEMP/evidence/camera-api.txt" >> "$GITHUB_STEP_SUMMARY"
+          echo "FILMY_CI_API_FLAG=$flag" >> "$GITHUB_ENV"
+          if [[ "$RUNNER_LABEL" == 'xcode-27' && "$REQUIRE_RELEASE_API" == 'true' && -z "$flag" ]]; then
+            echo 'Release camera declarations are required but unavailable.' >&2
+            exit 1
+          fi
+      - name: Build the checked-in project
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/ProCaptureBuild" \
+            "FILMY_SDK_CONDITIONS=$FILMY_CI_API_FLAG" CODE_SIGNING_ALLOWED=NO build \
+            > "$RUNNER_TEMP/evidence/build.log" 2>&1
+      - name: Run declared unit lane and Pro controls UI smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s scripts/testing -p 'test_*.py' > "$RUNNER_TEMP/evidence/python-tests.log" 2>&1
+          python3 scripts/testing/run.py inventory > "$RUNNER_TEMP/evidence/inventory.json"
+          python3 - "$RUNNER_TEMP/evidence/inventory.json" > "$RUNNER_TEMP/evidence/unit-selectors.txt" <<'PY'
+          import json,sys
+          inventory=json.load(open(sys.argv[1]))
+          for identifier,group in inventory['tests'].items():
+              if group == 'unit': print('-only-testing:'+identifier)
+          PY
+          device=$(xcrun simctl list devices available -j | python3 -c 'import json,sys;print(next(d["udid"] for ds in json.load(sys.stdin)["devices"].values() for d in ds if "iPhone" in d["name"]))')
+          selections=()
+          while IFS= read -r selector; do selections+=("$selector"); done < "$RUNNER_TEMP/evidence/unit-selectors.txt"
+          [[ ${#selections[@]} -gt 0 ]]
+          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera \
+            -destination "platform=iOS Simulator,id=$device" -derivedDataPath "$RUNNER_TEMP/ProCaptureBuild" \
+            -parallel-testing-enabled NO "${selections[@]}" \
+            "FILMY_SDK_CONDITIONS=$FILMY_CI_API_FLAG" CODE_SIGNING_ALLOWED=NO test \
+            > "$RUNNER_TEMP/evidence/unit-tests.log" 2>&1
+          xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera \
+            -destination "platform=iOS Simulator,id=$device" -derivedDataPath "$RUNNER_TEMP/ProCaptureBuild" \
+            -parallel-testing-enabled NO -only-testing:FilmyCameraUITests/FilmyCameraUITests/testProControlsAdaptAndReturnToCamera \
+            "FILMY_SDK_CONDITIONS=$FILMY_CI_API_FLAG" CODE_SIGNING_ALLOWED=NO test \
+            > "$RUNNER_TEMP/evidence/ui-smoke.log" 2>&1
+      - name: Preserve source and validation evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: pro-capture-${{ matrix.runner }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/evidence/
+          retention-days: 7

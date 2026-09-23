@@ -3,13 +3,17 @@ set -euo pipefail
 
 script_dir="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 root_dir="$(cd -P "${script_dir}/../.." && pwd -P)"
-archive_path="${FILMY_ARCHIVE_PATH:-${root_dir}/build/FilmyCamera.xcarchive}"
-derived_data_path="${FILMY_DERIVED_DATA_PATH:-${root_dir}/build/DerivedData}"
+# shellcheck source=scripts/release/app-config.sh
+source "${root_dir}/scripts/release/app-config.sh"
+archive_path="${FILMY_ARCHIVE_PATH:-${release_app_archive_default}}"
+derived_data_path="${FILMY_DERIVED_DATA_PATH:-${release_app_derived_data_default}}"
 xcodegen_version='2.45.4'
 xcodegen_sha256='6aa2b4da95304b343bea12890c59f9655aa428c08b351d57d592cfab4e88a9f1'
 xcodegen_path="${FILMY_XCODEGEN_PATH:-${root_dir}/.ci/xcodegen/bin/xcodegen}"
 source_revision=""
 allow_provisioning_updates=false
+clean_build_artifacts=false
+clean_ci_artifacts=false
 asc_key_id="${FILMY_ASC_KEY_ID:-}"
 asc_issuer_id="${FILMY_ASC_ISSUER_ID:-}"
 asc_key_path="${FILMY_ASC_KEY_PATH:-}"
@@ -21,12 +25,15 @@ usage() {
   cat <<'EOF'
 Usage:
   scripts/release/archive-device.sh [--allow-provisioning-updates]
+      [--clean-build-artifacts] [--clean-ci-artifacts]
 
 App Store archives require Xcode 26+ with the iOS 26+ SDK. The older CI
 simulator toolchain is for compatibility tests, not distribution archives.
 
 Options:
   --allow-provisioning-updates  Explicitly allow Xcode to contact Apple while archiving.
+  --clean-build-artifacts     Clear this workflow's derived data before building.
+  --clean-ci-artifacts        Remove stale generated CI evidence.
 
 When --allow-provisioning-updates is used, FILMY_ASC_KEY_ID,
 FILMY_ASC_ISSUER_ID, and FILMY_ASC_KEY_PATH may also be set to authenticate
@@ -46,6 +53,14 @@ while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --allow-provisioning-updates)
       allow_provisioning_updates=true
+      shift
+      ;;
+    --clean-build-artifacts)
+      clean_build_artifacts=true
+      shift
+      ;;
+    --clean-ci-artifacts)
+      clean_ci_artifacts=true
       shift
       ;;
     -h|--help)
@@ -163,6 +178,12 @@ validate_asc_credentials() {
   asc_key_path="${canonical_key_path}"
 }
 
+if [[ "${clean_build_artifacts}" == true ]]; then
+  "${script_dir}/clean-build-artifacts.sh" "${derived_data_path}"
+fi
+if [[ "${clean_ci_artifacts}" == true ]]; then
+  "${script_dir}/clean-ci-artifacts.sh"
+fi
 mkdir -p "$(dirname "${archive_path}")" "${derived_data_path}"
 (
   cd "${root_dir}"
@@ -176,7 +197,7 @@ fi
 
 archive_args=(
   -project "${root_dir}/FilmyCamera.xcodeproj"
-  -scheme FilmyCamera
+  -scheme "${release_app_target}"
   -configuration Release
   -destination 'generic/platform=iOS'
   -derivedDataPath "${derived_data_path}"
@@ -189,12 +210,13 @@ if [[ -n "${code_sign_style}${code_sign_identity}${provisioning_profile_specifie
     echo "FILMY_CODE_SIGN_STYLE, FILMY_CODE_SIGN_IDENTITY, and FILMY_PROVISIONING_PROFILE_SPECIFIER must be provided together" >&2
     exit 64
   }
+  # Only the application's Release settings consume these variables. Global
+  # provisioning overrides also reach Swift Package targets, which cannot use
+  # an app provisioning profile.
   signing_args+=(
-    "CODE_SIGN_STYLE=${code_sign_style}"
-    "CODE_SIGN_IDENTITY=${code_sign_identity}"
-    "PROVISIONING_PROFILE_SPECIFIER=${provisioning_profile_specifier}"
-    "CODE_SIGNING_REQUIRED=YES"
-    "CODE_SIGNING_ALLOWED=YES"
+    "FILMY_APP_CODE_SIGN_STYLE=${code_sign_style}"
+    "FILMY_APP_CODE_SIGN_IDENTITY=${code_sign_identity}"
+    "FILMY_APP_PROVISIONING_PROFILE_SPECIFIER=${provisioning_profile_specifier}"
   )
 fi
 if [[ "${allow_provisioning_updates}" == true ]]; then
@@ -219,6 +241,6 @@ fi
 archive_args+=( archive )
 xcodebuild "${archive_args[@]}"
 
-printf '%s\n' "${source_revision}" > "${archive_path}/FilmyCamera.source-sha"
+printf '%s\n' "${source_revision}" > "${archive_path}/${release_app_provenance_file}"
 
 "${script_dir}/validate-archive.sh" "${archive_path}"

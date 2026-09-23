@@ -14,11 +14,11 @@ class CatalogContractTests(unittest.TestCase):
         self.render_tests = (ROOT / 'FilmyCameraTests/RecipeRenderGalleryTests.swift').read_text().split(
             'final class CatalogRenderAcceptanceTests: XCTestCase {', 1)[1]
 
-    def test_manifest_has_92_unique_stable_original_ids(self):
+    def test_manifest_has_106_unique_stable_original_ids(self):
         ids = self.manifest['ids']
-        self.assertEqual(len(ids), 92)
-        self.assertEqual(len(set(ids)), 92)
-        self.assertEqual(sum(self.manifest['collections'].values()), 92)
+        self.assertEqual(len(ids), 106)
+        self.assertEqual(len(set(ids)), 106)
+        self.assertEqual(sum(self.manifest['collections'].values()), 106)
         for collection, expected in self.manifest['collections'].items():
             self.assertEqual(sum(x.startswith(collection + '-') for x in ids), expected)
 
@@ -36,7 +36,7 @@ class CatalogContractTests(unittest.TestCase):
         legacy_ids = re.findall(r'\bid: "([a-z0-9-]+)"', legacy)
         self.assertEqual(len(legacy_ids), 36)
         cases = re.findall(r'func testRender_\w+\(\) throws \{ try verifyRecipe\("([a-z0-9-]+)"\)', self.render_tests)
-        self.assertEqual(len(cases), 128)
+        self.assertEqual(len(cases), 142)
         self.assertEqual(cases, legacy_ids + self.manifest['ids'])
 
     def test_renders_cannot_skip_for_missing_private_fixture(self):
@@ -47,9 +47,9 @@ class CatalogContractTests(unittest.TestCase):
         self.assertIn('kCGImagePropertyGPSDictionary', self.render_tests)
         self.assertIn('CatalogRenderAcceptanceTests', (ROOT / 'scripts/testing/suites.json').read_text())
 
-    def test_render_workflow_requires_all_149_cases_without_skips(self):
+    def test_render_workflow_requires_all_181_cases_without_skips(self):
         workflow = (ROOT / '.github/workflows/catalog-acceptance.yml').read_text()
-        self.assertIn('s["passedTests"] == 149', workflow)
+        self.assertIn('s["passedTests"] == 181', workflow)
         self.assertIn('s["failedTests"] == 0 and s["skippedTests"] == 0', workflow)
         self.assertIn('Catalog result bundle is required', workflow)
         self.assertNotIn('contents: write', workflow)

@@ -133,7 +133,9 @@ final class NormalRollManagementTests: XCTestCase {
         app?.terminate()
         XCUIDevice.shared.orientation = .portrait
         app = XCUIApplication()
-        // No -ui-testing: exercise actual PhotosPicker, PhotoKit and cache.
+        // Avoid the exact -ui-testing flag so PhotosPicker, PhotoKit and cache
+        // remain real while premium entitlement is deterministic for this lane.
+        app.launchArguments = ["-ui-testing-photos-e2e"]
         app.launch()
         let skip = app.buttons["Skip"]
         if skip.waitForExistence(timeout: 2) { skip.tap() }
@@ -269,6 +271,37 @@ final class NormalRollManagementTests: XCTestCase {
         XCTAssertEqual(clear.value as? String, "Available", "A just-saved fixture must have a persistent local fallback")
         XCTAssertTrue(clear.isEnabled && clear.isHittable)
         clear.tap()
+        let confirm = app.buttons.matching(identifier: "confirm-clear-local-cache").firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        screenshot("clear-cache-confirmation-keeps-photos")
+        let keepCache = app.buttons["Keep cache"]
+        let dismissRegion = app.otherElements["PopoverDismissRegion"].firstMatch
+        XCTAssertTrue(waitUntil { keepCache.exists || dismissRegion.exists })
+        if keepCache.exists {
+            keepCache.tap()
+        } else {
+            // Native popover presentations omit the cancel button. Dismiss
+            // outside the popover, then verify the same cache-preserving result.
+            let popover = app.popovers.firstMatch
+            XCTAssertTrue(popover.waitForExistence(timeout: 5))
+            let bounds = dismissRegion.frame
+            let excluded = popover.frame.insetBy(dx: -8, dy: -8)
+            let candidates = [
+                CGPoint(x: bounds.minX + 8, y: bounds.midY),
+                CGPoint(x: bounds.maxX - 8, y: bounds.midY),
+                CGPoint(x: bounds.midX, y: bounds.minY + 48)
+            ]
+            let point = try XCTUnwrap(candidates.first { bounds.contains($0) && !excluded.contains($0) },
+                                      "The native popover must expose a safe outside dismissal region")
+            dismissRegion.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: point.x - bounds.minX, dy: point.y - bounds.minY)).tap()
+        }
+        XCTAssertTrue(waitUntil { !confirm.exists })
+        XCTAssertEqual(clear.value as? String, "Available", "Cancel must retain the local fallback")
+        XCTAssertTrue(clear.isEnabled)
+        clear.tap()
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.tap()
         XCTAssertTrue(waitUntil { clear.value as? String == "Empty" && !clear.isEnabled },
                       "Clear must remove the cached files and disable the empty action")
         screenshot("clear-local-cache-empty-readback")
@@ -289,8 +322,12 @@ final class NormalRollManagementTests: XCTestCase {
     }
 
     private func rollCount() -> Int? {
-        for label in app.staticTexts.allElementsBoundByIndex.map(\.label) where label.hasSuffix(" frames") {
-            if let count = Int(label.dropLast(" frames".count)) { return count }
+        let countLabel = app.staticTexts.matching(
+            NSPredicate(format: "label ENDSWITH %@", " frames")
+        ).firstMatch
+        if countLabel.exists,
+           let count = Int(countLabel.label.dropLast(" frames".count)) {
+            return count
         }
         if app.staticTexts["Your frames will live here"].exists || app.staticTexts["Your selected roll is empty"].exists {
             return 0
