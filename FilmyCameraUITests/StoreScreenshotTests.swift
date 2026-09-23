@@ -643,8 +643,8 @@ final class CaptureSetupUITests: XCTestCase {
 @MainActor
 private func waitForStationaryControl(_ control: XCUIElement, in app: XCUIApplication) -> Bool {
     // Accessibility queries on a loaded hosted iPad can take several seconds
-    // per observation. Allow enough time to compare two complete samples.
-    let deadline = Date(timeIntervalSinceNow: 15)
+    // per observation. Allow enough time to compare several complete samples.
+    let deadline = Date(timeIntervalSinceNow: 30)
     let frameTolerance: CGFloat = 1.0
     var previousFrame: CGRect?
     var stationarySince: Date?
@@ -665,8 +665,11 @@ private func waitForStationaryControl(_ control: XCUIElement, in app: XCUIApplic
                    abs(frame.minY - previousFrame.minY) <= frameTolerance,
                    abs(frame.width - previousFrame.width) <= frameTolerance,
                    abs(frame.height - previousFrame.height) <= frameTolerance {
-                    if let stationarySince, Date().timeIntervalSince(stationarySince) >= 0.3 {
-                        return control.isHittable
+                    // A stable frame can still sit under a finishing overlay;
+                    // keep polling instead of failing on the first miss.
+                    if let stationarySince, Date().timeIntervalSince(stationarySince) >= 0.3,
+                       control.isHittable {
+                        return true
                     }
                 } else {
                     stationarySince = Date()
