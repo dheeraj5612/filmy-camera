@@ -200,7 +200,7 @@ enum RecipeCatalog {
     /// color filters that were missing before this catalog. These are not extra
     /// Internet recipes and are reported separately from sourced adaptations.
     static let cameraBaselines: [FilmRecipe] = FilmRecipe.FilmBase.allCases.compactMap { base in
-        guard base != .standard && base != .compactDigital else { return nil }
+        guard base != .standard && base != .compactDigital && base != .firstPhone else { return nil }
         let mono = base.monochromeFilter != nil || base == .sepia
         let suffix: String
         switch base.monochromeFilter {

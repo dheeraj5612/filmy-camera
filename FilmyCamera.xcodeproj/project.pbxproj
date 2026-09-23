@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		00493D9DE920BF3A134CCF56 /* NormalPhotoFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E79227F5594654480E6C981 /* NormalPhotoFlowTests.swift */; };
 		020D3A1BCF35368AF1D93441 /* CompositionAssistStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DEAF80BF98F3BCC9BB1DBC1 /* CompositionAssistStore.swift */; };
+		04CF929872123A7F3D05D946 /* G7DateStampRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4FB0ED6D5C4E95D50EDFCA8 /* G7DateStampRenderer.swift */; };
 		0627EF543547DE635281EA13 /* CaptureImageProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F98076359FD3F0A0C70AEE75 /* CaptureImageProcessor.swift */; };
 		0EE339ACFC466E68AF2AEB84 /* SceneAutoControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA765277D3D9474D090F622C /* SceneAutoControl.swift */; };
 		0F78AF03F58F3B9498AA5889 /* HistogramPlacementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5D96E086FC9CCF420279875 /* HistogramPlacementTests.swift */; };
@@ -74,6 +75,7 @@
 		6BDE1EA5CA0A9354B51DFDFC /* CaptureSceneReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 746AE0F718F80CB150D77D2B /* CaptureSceneReader.swift */; };
 		6C60E0AC417BE6AEEB8C6FF4 /* GalleryPagingPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF42BA8A443489B0CB928D60 /* GalleryPagingPolicyTests.swift */; };
 		6D06FBEA0EC4C7BE25A00E41 /* RecipeLibraryManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFE8E7CB785F8A6FFA86EEDE /* RecipeLibraryManagerView.swift */; };
+		6D8BB2EEF221E38529BF0B02 /* OGiPhoneLookTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CFDE94535982843AE933010 /* OGiPhoneLookTests.swift */; };
 		6FACAD244A3DEBE9DBAC1002 /* ProPhotoEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3588E469B6096B1E148A8DA /* ProPhotoEncoder.swift */; };
 		6FE02A023A65F1C1A77D4DA8 /* GoogleUserMessagingPlatform in Frameworks */ = {isa = PBXBuildFile; productRef = 6156234BCE199EFE71255CFC /* GoogleUserMessagingPlatform */; };
 		72CCD86D39C28D0706E94CD9 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = A6CCB1924F6BC724DAD5E77E /* FirebaseAuth */; };
@@ -133,6 +135,7 @@
 		C3C0C6C707A69ABF746889DE /* MonetizationUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1B2A6E5F3CFA6DD1EF67A7F /* MonetizationUITests.swift */; };
 		C4D440CDE09BDCC292A6DCB8 /* CameraServiceAvailabilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34105C69677310EA27B9F6C4 /* CameraServiceAvailabilityTests.swift */; };
 		C70373098CEE45627237523A /* FilmyCameraUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61617C6B4DB09D291F5DEA10 /* FilmyCameraUITests.swift */; };
+		C7B18D9A5CDE0DCB42DE27F7 /* G7DateStampRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28D9C22681A9658A87418B33 /* G7DateStampRendererTests.swift */; };
 		C8D2AB628B416941BA34D460 /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED28FA298007EE9E0D94A12B /* Components.swift */; };
 		CB408CD10401552B1EC0A2CB /* CaptureModesScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BBD7E1CFDC78FBBDAAEBEE3 /* CaptureModesScreen.swift */; };
 		CB40BD2B83389CA6F39A3F40 /* MembershipTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D08A045113E57380DF9DB84 /* MembershipTests.swift */; };
@@ -198,6 +201,7 @@
 		1E3E5451BF5130228EAD7B57 /* FilteredCameraPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilteredCameraPreview.swift; sourceTree = "<group>"; };
 		1F50AF57ED0353408C3CC952 /* FlashHardwareDeviceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlashHardwareDeviceTests.swift; sourceTree = "<group>"; };
 		2742A27161237B210E4D8A3C /* FilmRecipe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmRecipe.swift; sourceTree = "<group>"; };
+		28D9C22681A9658A87418B33 /* G7DateStampRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = G7DateStampRendererTests.swift; sourceTree = "<group>"; };
 		2A899EDE46E31E8F3B8ABC2D /* FilmyOpticalAperture.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = FilmyOpticalAperture.m; sourceTree = "<group>"; };
 		2AD7C3AEFA8B673A5F790009 /* PhotoOutputEncoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoOutputEncoderTests.swift; sourceTree = "<group>"; };
 		2BA00D8FA3F0F24067FEC604 /* SignalFrameUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalFrameUITests.swift; sourceTree = "<group>"; };
@@ -252,6 +256,7 @@
 		6940256A8100B915539E21CB /* FilmRecipeReferenceCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmRecipeReferenceCatalog.swift; sourceTree = "<group>"; };
 		6A9AFC52D1FB5ECED33CB2DA /* CameraViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraViewModel.swift; sourceTree = "<group>"; };
 		6AF17D88FBFA77FB56E7868B /* FilmyIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmyIdentity.swift; sourceTree = "<group>"; };
+		6CFDE94535982843AE933010 /* OGiPhoneLookTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OGiPhoneLookTests.swift; sourceTree = "<group>"; };
 		6DB97EEC1B884C4649556C1B /* MembershipPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MembershipPolicy.swift; sourceTree = "<group>"; };
 		6E79227F5594654480E6C981 /* NormalPhotoFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NormalPhotoFlowTests.swift; sourceTree = "<group>"; };
 		70320913FFB9DC4ACF82224A /* FilmyPhotoDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmyPhotoDocument.swift; sourceTree = "<group>"; };
@@ -330,6 +335,7 @@
 		F355DB84E4E768575297585A /* PhotoFinish.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoFinish.swift; sourceTree = "<group>"; };
 		F442C18596057A9E9FE61D36 /* SceneAutoPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneAutoPolicyTests.swift; sourceTree = "<group>"; };
 		F48EF3C63EAF05BFADF4D9C3 /* FilmyCameraUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = FilmyCameraUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		F4FB0ED6D5C4E95D50EDFCA8 /* G7DateStampRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = G7DateStampRenderer.swift; sourceTree = "<group>"; };
 		F523A1A69DAD1D5620739789 /* ImageDecodeQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageDecodeQueueTests.swift; sourceTree = "<group>"; };
 		F56BE8EB7D6BDB867CFD8C3A /* FilmRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmRenderer.swift; sourceTree = "<group>"; };
 		F595081C082AD030B6FE6A2F /* CameraViewModelPersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraViewModelPersistenceTests.swift; sourceTree = "<group>"; };
@@ -404,6 +410,7 @@
 				C7E885F4A09695DFDED956CA /* FilmyPhotoStoreTests.swift */,
 				1F50AF57ED0353408C3CC952 /* FlashHardwareDeviceTests.swift */,
 				1B789FB18A249A0C3CBA9971 /* FujiShootingTests.swift */,
+				28D9C22681A9658A87418B33 /* G7DateStampRendererTests.swift */,
 				FF42BA8A443489B0CB928D60 /* GalleryPagingPolicyTests.swift */,
 				DC88255748574951C8FDBFCB /* HalationArtifactRegressionTests.swift */,
 				D5D96E086FC9CCF420279875 /* HistogramPlacementTests.swift */,
@@ -411,6 +418,7 @@
 				3B8298B6776E9371A4D8BAE9 /* ImageSizePolicyTests.swift */,
 				AE7D2DB4BEABC6F2C54845D5 /* MembershipStoreKitTests.swift */,
 				4D08A045113E57380DF9DB84 /* MembershipTests.swift */,
+				6CFDE94535982843AE933010 /* OGiPhoneLookTests.swift */,
 				B2338DC25752A65D0169B8AC /* PhotoLibraryLargeRollTests.swift */,
 				EB68FCDDC4EB7CE97CF2AD4F /* PhotoLibraryMetadataTests.swift */,
 				2AD7C3AEFA8B673A5F790009 /* PhotoOutputEncoderTests.swift */,
@@ -476,6 +484,7 @@
 				F31AD5AFC881F23BF94C8826 /* FilmyPhotosExporter.swift */,
 				41E23E87D76ABEF077B0D661 /* FilmyPhotoStore.swift */,
 				19311F2D85D54FF2D5F7CE67 /* FocusAssistStore.swift */,
+				F4FB0ED6D5C4E95D50EDFCA8 /* G7DateStampRenderer.swift */,
 				E29271BD5AA68C4C796F7574 /* ImageDecodeQueue.swift */,
 				38A45B903328B74FBF929494 /* NativeCameraControls.swift */,
 				8433ABA6CF2F34E7F51023B6 /* PhotoLibraryService.swift */,
@@ -799,6 +808,7 @@
 				9A58EE8E75398F08CB4F7F4C /* FilmyPhotoStoreTests.swift in Sources */,
 				269C88773100AEDB94BC74A4 /* FlashHardwareDeviceTests.swift in Sources */,
 				87F366B0A614D62A51C8E6CB /* FujiShootingTests.swift in Sources */,
+				C7B18D9A5CDE0DCB42DE27F7 /* G7DateStampRendererTests.swift in Sources */,
 				6C60E0AC417BE6AEEB8C6FF4 /* GalleryPagingPolicyTests.swift in Sources */,
 				EB0B9B31A8898628DD8BD80F /* HalationArtifactRegressionTests.swift in Sources */,
 				0F78AF03F58F3B9498AA5889 /* HistogramPlacementTests.swift in Sources */,
@@ -806,6 +816,7 @@
 				AE3E45D80AC14DF7C80EE106 /* ImageSizePolicyTests.swift in Sources */,
 				2FA25395618B6160D13EE5B6 /* MembershipStoreKitTests.swift in Sources */,
 				CB40BD2B83389CA6F39A3F40 /* MembershipTests.swift in Sources */,
+				6D8BB2EEF221E38529BF0B02 /* OGiPhoneLookTests.swift in Sources */,
 				BEC8BB7A676F9707C7D50A57 /* PhotoLibraryLargeRollTests.swift in Sources */,
 				E9619C95C6EF4EC86F964D60 /* PhotoLibraryMetadataTests.swift in Sources */,
 				8C7CB45FC3BFE9E2C786ACCF /* PhotoOutputEncoderTests.swift in Sources */,
@@ -886,6 +897,7 @@
 				D97DC1B3E968906ACF324B7E /* FujiShootingController.swift in Sources */,
 				9E15182543F76F2F699F6045 /* FujiShootingSettings.swift in Sources */,
 				9A8B24849CC58E0C3AB441A0 /* FujiViewfinderOverlay.swift in Sources */,
+				04CF929872123A7F3D05D946 /* G7DateStampRenderer.swift in Sources */,
 				5488200BFDDF449BAC261F04 /* GalleryPagingPolicy.swift in Sources */,
 				3F104912E7B0F794D16EC5E3 /* GalleryScreen.swift in Sources */,
 				65E53C2550FDC5D5C9701C96 /* HistogramPlacement.swift in Sources */,

@@ -230,6 +230,7 @@ public final class FilmRenderer {
         let grainTexture: CIImage?
         let grainKernel: CIColorKernel?
         let skinColorKernel: CIColorKernel?
+        let firstPhoneNoiseKernel: CIColorKernel?
         let clearImage: CIImage
         let zeroComponents: CIVector
         let oneComponents: CIVector
@@ -304,6 +305,30 @@ public final class FilmRenderer {
                     float amount = skin * excessWarmth / (excessWarmth + 0.12)
                         * (1.0 - smoothstep(0.90, 1.0, outputLuma));
                     return vec4(mix(rendered.rgb, reference, amount), rendered.a);
+                }
+                """)
+            // Three independently phase-shifted samples of the same
+            // deterministic noise field stand in for luma and two chroma
+            // noise channels, stronger in shadows, without adding a second
+            // random source.
+            firstPhoneNoiseKernel = CIColorKernel(source: """
+                kernel vec4 firstPhoneNoise(
+                    __sample image,
+                    __sample lumaNoise,
+                    __sample rgNoise,
+                    __sample bNoise
+                ) {
+                    float luminance = dot(image.rgb, vec3(0.2126, 0.7152, 0.0722));
+                    float shadowBoost = clamp(1.6 - luminance * 1.6, 0.15, 1.6);
+                    float lumaDelta = (lumaNoise.r - 0.5) * 0.05 * shadowBoost;
+                    float rgDelta = (rgNoise.r - 0.5) * 0.035 * shadowBoost;
+                    float bDelta = (bNoise.r - 0.5) * 0.035 * shadowBoost;
+                    vec3 result = image.rgb + vec3(
+                        lumaDelta + rgDelta,
+                        lumaDelta - rgDelta * 0.4,
+                        lumaDelta + bDelta
+                    );
+                    return vec4(clamp(result, 0.0, 1.0), image.a);
                 }
                 """)
             clearImage = CIImage(color: .clear)
@@ -756,6 +781,11 @@ public final class FilmRenderer {
         let processingImage = opaqueImage(from: image)
         diagnostics?[.source] = processingImage
         var output = processingImage
+        // First-generation iPhone: emulate the fixed 2 MP sensor before any
+        // tone or color stage runs, so the rest of the pipeline works from
+        // the same softened base a real 2007 iPhone JPEG would have started
+        // from.
+        output = applyFirstPhoneResolutionLoss(to: output, recipe: safeRecipe)
         output = applyDynamicRange(to: output, recipe: safeRecipe)
         output = applyExposureAndTone(to: output, recipe: safeRecipe)
         diagnostics?[.preSignature] = output
@@ -766,6 +796,7 @@ public final class FilmRenderer {
             recipe: safeRecipe,
             captureContext: captureContext
         )
+        output = applyFirstPhoneTone(to: output, recipe: safeRecipe)
         output = applyWhiteBalance(to: output, recipe: safeRecipe)
         diagnostics?[.postWhiteBalance] = output
         output = applyMonochromeFilter(to: output, recipe: safeRecipe)
@@ -800,6 +831,8 @@ public final class FilmRenderer {
             seed: grainSeed,
             phase: grainPhase
         )
+        output = applyFirstPhoneNoise(to: output, recipe: safeRecipe)
+        output = applyFirstPhoneLensShading(to: output, recipe: safeRecipe)
         output = applyVignette(to: output, recipe: safeRecipe)
         output = clampOutput(toNormalizedRange: output)
         output = restoreAlpha(of: output, from: image)
@@ -1054,6 +1087,7 @@ public final class FilmRenderer {
     /// tonal and saturation shaping.
     private static func applyRecipeCharacter(to image: CIImage, recipe: FilmRecipe) -> CIImage {
         guard recipe.filmBase != .compactDigital,
+              recipe.filmBase != .firstPhone,
               recipe.filmBase != .standard || recipe.creativeCollection != nil else { return image }
 
         let signatureLevels: [CGFloat]
@@ -1100,7 +1134,7 @@ public final class FilmRenderer {
             case .sepia:
                 signatureLevels = [0.025, 0.14, 0.49, 0.81, 0.955]
                 signatureSaturation = 1
-            case .compactDigital:
+            case .compactDigital, .firstPhone:
                 return image
             }
         }
@@ -1152,6 +1186,37 @@ public final class FilmRenderer {
                 (0.80, 0.819),
                 (1.00, 0.972)
             ]
+
+        toneCurve.setValue(image, forKey: kCIInputImageKey)
+        for (index, point) in points.enumerated() {
+            toneCurve.setValue(
+                CIVector(x: point.0, y: point.1),
+                forKey: "inputPoint\(index)"
+            )
+        }
+        return toneCurve.outputImage?.cropped(to: image.extent) ?? image
+    }
+
+    /// Original approximation of the fixed JPEG tone response on the
+    /// first-generation iPhone camera: lifted, compressed shadows, a bright
+    /// midtone push, and a hard highlight shoulder that clips to full white
+    /// well before the input reaches 1.0.
+    private static func applyFirstPhoneTone(
+        to image: CIImage,
+        recipe: FilmRecipe
+    ) -> CIImage {
+        guard recipe.filmBase == .firstPhone,
+              let toneCurve = CIFilter(name: "CIToneCurve") else {
+            return image
+        }
+
+        let points: [(CGFloat, CGFloat)] = [
+            (0.00, 0.03),
+            (0.20, 0.32),
+            (0.45, 0.62),
+            (0.88, 1.00),
+            (1.00, 1.00)
+        ]
 
         toneCurve.setValue(image, forKey: kCIInputImageKey)
         for (index, point) in points.enumerated() {
@@ -1591,6 +1656,115 @@ public final class FilmRenderer {
         max(0.01, referencePixels * resolutionScale(for: extent))
     }
 
+    /// Emulates the original iPhone's fixed 1600x1200 (2 MP) sensor. Frames
+    /// larger than that long edge are downsampled with a Lanczos filter, then
+    /// scaled back up with a plain affine transform (no resampling quality),
+    /// which is what produces the soft, slightly mushy detail loss of an
+    /// upscaled low-resolution capture. Frames already at or under that
+    /// resolution (e.g. the live preview) instead take an equivalent small
+    /// blur so the preview roughly matches the captured still.
+    private static func applyFirstPhoneResolutionLoss(
+        to image: CIImage,
+        recipe: FilmRecipe
+    ) -> CIImage {
+        guard recipe.filmBase == .firstPhone else { return image }
+        let extent = image.extent
+        guard extent.width.isFinite, extent.height.isFinite,
+              extent.width > 0, extent.height > 0 else { return image }
+
+        let sensorLongEdge: CGFloat = 1600
+        let longEdge = max(extent.width, extent.height)
+
+        guard longEdge > sensorLongEdge else {
+            guard let blur = CIFilter(name: "CIGaussianBlur") else { return image }
+            blur.setValue(image.clampedToExtent(), forKey: kCIInputImageKey)
+            blur.setValue(spatialRadius(0.9, for: extent), forKey: kCIInputRadiusKey)
+            return blur.outputImage?.cropped(to: extent) ?? image
+        }
+
+        guard let downscale = CIFilter(name: "CILanczosScaleTransform") else { return image }
+        let scale = sensorLongEdge / longEdge
+        downscale.setValue(image, forKey: kCIInputImageKey)
+        downscale.setValue(scale, forKey: kCIInputScaleKey)
+        downscale.setValue(1.0, forKey: kCIInputAspectRatioKey)
+        guard let downsized = downscale.outputImage else { return image }
+
+        let normalized = downsized.transformed(by: CGAffineTransform(
+            translationX: -downsized.extent.minX,
+            y: -downsized.extent.minY
+        ))
+        let upscale = 1 / scale
+        let upsized = normalized
+            .transformed(by: CGAffineTransform(scaleX: upscale, y: upscale))
+            .transformed(by: CGAffineTransform(translationX: extent.minX, y: extent.minY))
+        return upsized.clampedToExtent().cropped(to: extent)
+    }
+
+    /// Low-amplitude colored sensor noise, stronger in shadows, on top of the
+    /// separate grain texture stage. Deterministic: it reuses the shared grain
+    /// field at fixed phase offsets rather than a fresh random source.
+    private static func applyFirstPhoneNoise(
+        to image: CIImage,
+        recipe: FilmRecipe
+    ) -> CIImage {
+        guard recipe.filmBase == .firstPhone,
+              let texture = immutableResources.grainTexture,
+              let kernel = immutableResources.firstPhoneNoiseKernel else {
+            return image
+        }
+
+        let extent = image.extent
+        let scale = resolutionScale(for: extent)
+        let noiseSize = max(CGFloat(0.6) * scale, 0.3)
+
+        func noiseLayer(phase: CGPoint) -> CIImage {
+            texture
+                .transformed(by: CGAffineTransform(scaleX: noiseSize, y: noiseSize))
+                .transformed(by: CGAffineTransform(translationX: phase.x, y: phase.y))
+                .applyingFilter("CIAffineTile")
+                .cropped(to: extent)
+        }
+
+        let lumaNoise = noiseLayer(phase: CGPoint(x: 11, y: 47))
+        let rgNoise = noiseLayer(phase: CGPoint(x: 133, y: 271))
+        let bNoise = noiseLayer(phase: CGPoint(x: 389, y: 97))
+
+        return kernel.apply(
+            extent: extent,
+            arguments: [image, lumaNoise, rgNoise, bNoise]
+        )?.cropped(to: extent) ?? image
+    }
+
+    /// Simple lens color shading: a neutral-warm center fading to a slightly
+    /// darker, greenish-cyan corner, layered as an additive radial delta.
+    private static func applyFirstPhoneLensShading(
+        to image: CIImage,
+        recipe: FilmRecipe
+    ) -> CIImage {
+        guard recipe.filmBase == .firstPhone,
+              let gradient = CIFilter(name: "CIRadialGradient") else {
+            return image
+        }
+        let extent = image.extent
+        guard extent.width.isFinite, extent.height.isFinite,
+              extent.width > 0, extent.height > 0 else { return image }
+
+        let center = CGPoint(x: extent.midX, y: extent.midY)
+        let radius = max(extent.width, extent.height) * 0.5
+        gradient.setValue(CIVector(cgPoint: center), forKey: "inputCenter")
+        gradient.setValue(0, forKey: "inputRadius0")
+        gradient.setValue(radius * 1.05, forKey: "inputRadius1")
+        // Alpha is 1 throughout so CIAdditionCompositing below adds these
+        // RGB values directly as a delta rather than a premultiplied blend.
+        gradient.setValue(CIColor(red: 0.010, green: -0.004, blue: 0.006, alpha: 1), forKey: "inputColor0")
+        gradient.setValue(CIColor(red: -0.050, green: -0.020, blue: -0.015, alpha: 1), forKey: "inputColor1")
+        guard let shading = gradient.outputImage?.cropped(to: extent) else { return image }
+
+        return shading.applyingFilter("CIAdditionCompositing", parameters: [
+            kCIInputBackgroundImageKey: image
+        ]).cropped(to: extent)
+    }
+
     private static func makeCubeData(
         dimension: Int,
         recipe: FilmRecipe
@@ -1920,6 +2094,16 @@ public final class FilmRenderer {
             mappedBlue += 0.060 * blueWeight
             mappedGreen += 0.004 * blueWeight
             mappedRed -= 0.016 * blueWeight
+        case .firstPhone:
+            // Original approximation of a weak, low-resolution phone-camera
+            // auto white balance: washed-out overall color, a cyan-green
+            // cast concentrated in shadows and midtones, and only a whisper
+            // of warmth in skin (no dedicated warm-portrait tuning like a
+            // modern sensor).
+            saturate(0.90)
+            nudge(-0.018, 0.010, 0.012, by: shadowWeight)
+            nudge(-0.010, 0.008, 0.008, by: midtoneWeight)
+            nudge(0.010, 0.000, -0.004, by: skinSector)
         }
 
         return (mappedRed, mappedGreen, mappedBlue)

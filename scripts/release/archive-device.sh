@@ -12,6 +12,8 @@ xcodegen_sha256='6aa2b4da95304b343bea12890c59f9655aa428c08b351d57d592cfab4e88a9f
 xcodegen_path="${FILMY_XCODEGEN_PATH:-${root_dir}/.ci/xcodegen/bin/xcodegen}"
 source_revision=""
 allow_provisioning_updates=false
+clean_build_artifacts=false
+clean_ci_artifacts=false
 asc_key_id="${FILMY_ASC_KEY_ID:-}"
 asc_issuer_id="${FILMY_ASC_ISSUER_ID:-}"
 asc_key_path="${FILMY_ASC_KEY_PATH:-}"
@@ -23,12 +25,15 @@ usage() {
   cat <<'EOF'
 Usage:
   scripts/release/archive-device.sh [--allow-provisioning-updates]
+      [--clean-build-artifacts] [--clean-ci-artifacts]
 
 App Store archives require Xcode 26+ with the iOS 26+ SDK. The older CI
 simulator toolchain is for compatibility tests, not distribution archives.
 
 Options:
   --allow-provisioning-updates  Explicitly allow Xcode to contact Apple while archiving.
+  --clean-build-artifacts     Clear this workflow's derived data before building.
+  --clean-ci-artifacts        Remove stale generated CI evidence.
 
 When --allow-provisioning-updates is used, FILMY_ASC_KEY_ID,
 FILMY_ASC_ISSUER_ID, and FILMY_ASC_KEY_PATH may also be set to authenticate
@@ -48,6 +53,14 @@ while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --allow-provisioning-updates)
       allow_provisioning_updates=true
+      shift
+      ;;
+    --clean-build-artifacts)
+      clean_build_artifacts=true
+      shift
+      ;;
+    --clean-ci-artifacts)
+      clean_ci_artifacts=true
       shift
       ;;
     -h|--help)
@@ -165,6 +178,12 @@ validate_asc_credentials() {
   asc_key_path="${canonical_key_path}"
 }
 
+if [[ "${clean_build_artifacts}" == true ]]; then
+  "${script_dir}/clean-build-artifacts.sh" "${derived_data_path}"
+fi
+if [[ "${clean_ci_artifacts}" == true ]]; then
+  "${script_dir}/clean-ci-artifacts.sh"
+fi
 mkdir -p "$(dirname "${archive_path}")" "${derived_data_path}"
 (
   cd "${root_dir}"

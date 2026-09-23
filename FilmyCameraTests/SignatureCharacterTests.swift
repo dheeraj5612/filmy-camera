@@ -109,7 +109,8 @@ final class SignatureCharacterTests: XCTestCase {
 
     private static func signatureRepresentatives() throws -> [FilmRecipe] {
         var result: [FilmRecipe] = []
-        for base in FilmRecipe.FilmBase.allCases where base != .standard && base != .compactDigital {
+        for base in FilmRecipe.FilmBase.allCases
+        where base != .standard && base != .compactDigital && base != .firstPhone {
             let recipe = try XCTUnwrap(
                 FilmRecipe.builtIns.first(where: { $0.filmBase == base }),
                 "No built-in representative for \(base.rawValue)"

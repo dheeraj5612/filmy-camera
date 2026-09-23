@@ -45,6 +45,7 @@ extension FilmRecipe {
         case .acros, .acrosYellow, .acrosRed, .acrosGreen, .monochrome, .monochromeYellow, .monochromeRed, .monochromeGreen: return "circle.lefthalf.filled"
         case .sepia: return "clock.arrow.circlepath"
         case .compactDigital: return "camera.fill"
+        case .firstPhone: return "camera"
         case .standard, .provia: return "camera.aperture"
         }
     }
@@ -562,6 +563,8 @@ final class CameraViewModel: ObservableObject {
         let viewport: CGSize
         let drawable: CGSize
         let grainSeed: UInt32
+        let dateStampEnabled: Bool
+        let dateStampText: String?
     }
 
     var isReviewingImport: Bool { reviewSource == .photoLibrary && reviewImage != nil }
@@ -599,6 +602,7 @@ final class CameraViewModel: ObservableObject {
             ? (PhotoFinish(rawValue: defaults.string(forKey: "captureFinish") ?? "") ?? .photo)
             : .photo
         if camera.proCaptureSettings.livePhoto && finish != .photo {
+            camera.setSceneAutoCapturePaused(false)
             membership.finishCapture(permit, succeeded: false)
             isCapturing = false
             showToast("Live Photos require Photo finish. Turn off Instant Print before capturing.", style: .error)
@@ -624,6 +628,10 @@ final class CameraViewModel: ObservableObject {
             )
         }
         let grainSeed = camera.previewGrainSeed
+        // Freeze the optional stamp at shutter time so a retry cannot change
+        // because the setting or timezone changed after capture.
+        let dateStampEnabled = G7DateStampPreferences.isEnabled(in: defaults)
+        let dateStampTimeZoneIdentifier = TimeZone.current.identifier
 #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-ui-testing") { captureTimingStatus = "requested" }
 #endif
@@ -655,7 +663,14 @@ final class CameraViewModel: ObservableObject {
 
                 succeeded = await self.developCapture(
                     CapturedWork(photo: capturedPhoto, recipe: recipe, finish: finish,
-                                 viewport: viewportSize, drawable: previewDrawableSize, grainSeed: grainSeed),
+                                 viewport: viewportSize, drawable: previewDrawableSize, grainSeed: grainSeed,
+                                 dateStampEnabled: dateStampEnabled,
+                                 dateStampText: dateStampEnabled
+                                    ? G7DateStampRenderer.dateText(
+                                        for: capturedPhoto.capturedAt,
+                                        timeZone: TimeZone(identifier: dateStampTimeZoneIdentifier) ?? .current
+                                    )
+                                    : nil),
                     captureStartedAt: captureStartedAt,
                     camera: camera, photoLibrary: photoLibrary
                 )
@@ -698,7 +713,8 @@ final class CameraViewModel: ObservableObject {
                     sourceData: work.photo.fileData, recipe: recipe,
                     viewportSize: work.viewport, previewDrawableSize: work.drawable,
                     capturedAt: work.photo.capturedAt, flashFired: work.photo.flashFired,
-                    grainSeed: grainSeed, finish: finish, outputSettings: work.photo.outputSettings
+                    grainSeed: grainSeed, finish: finish, outputSettings: work.photo.outputSettings,
+                    dateStampEnabled: work.dateStampEnabled, dateStampText: work.dateStampText
                 )
             }
         }.value
@@ -1191,7 +1207,9 @@ final class CameraViewModel: ObservableObject {
         grainSeed: UInt32,
         normalizedSubjectRegions: [CGRect]? = nil,
         finish: PhotoFinish = .photo,
-        outputSettings: ProCaptureSettings? = nil
+        outputSettings: ProCaptureSettings? = nil,
+        dateStampEnabled: Bool = false,
+        dateStampText: String? = nil
     ) -> RenderedPhoto? {
         // Resolve the source image's EXIF orientation before applying the
         // preview crop. The finished JPEG is written with orientation=1, so
@@ -1270,15 +1288,21 @@ final class CameraViewModel: ObservableObject {
                       ) else { return nil }
                 graded = hdr
             } else { graded = filtered }
-            guard let finished = PhotoPrintCompositor.composedImage(graded, finish: finish),
-                  let data = ProPhotoOutput.encode(
+            guard let composed = PhotoPrintCompositor.composedImage(graded, finish: finish) else { return nil }
+            let finished = G7DateStampRenderer.applyingStamp(
+                to: composed, text: dateStampText, enabled: dateStampEnabled
+            )
+            guard let data = ProPhotoOutput.encode(
                     finished, sourceData: sourceData, capturedAt: capturedAt, recipe: recipe, settings: outputSettings
                   ), let image = downsampledReviewImage(from: data) else { return nil }
             return RenderedPhoto(image: image, data: data, capturedAt: capturedAt, flashFired: flashFired,
                                  normalizedSubjectRegions: resolvedSubjectRegions)
         }
-        guard let finished = PhotoPrintCompositor.composedImage(filtered, finish: finish),
-              let output = FilmRenderer.outputCGImage(finished, from: finished.extent) else { return nil }
+        guard let composed = PhotoPrintCompositor.composedImage(filtered, finish: finish) else { return nil }
+        let finished = G7DateStampRenderer.applyingStamp(
+            to: composed, text: dateStampText, enabled: dateStampEnabled
+        )
+        guard let output = FilmRenderer.outputCGImage(finished, from: finished.extent) else { return nil }
         guard let data = PhotoOutputEncoder.jpegData(
             for: output,
             sourceData: sourceData,

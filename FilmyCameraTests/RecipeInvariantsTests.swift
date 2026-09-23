@@ -85,7 +85,7 @@ final class RecipeInvariantsTests: XCTestCase {
         XCTAssertEqual(FilmRecipe.expandedInternetRecipeIDs.count, 18)
         XCTAssertEqual(Set(FilmRecipe.expandedInternetRecipeIDs).count, 18)
         XCTAssertEqual(FilmRecipe.legacyBuiltIns.count, 36)
-        XCTAssertEqual(FilmRecipe.builtIns.count, 162 + RecipeCatalog.records.count)
+        XCTAssertEqual(FilmRecipe.builtIns.count, 163 + RecipeCatalog.records.count)
         XCTAssertGreaterThanOrEqual(RecipeCatalog.records.count, 500)
 
         let builtInIDs = Set(FilmRecipe.builtIns.map(\.id))
@@ -277,6 +277,10 @@ final class RecipeInvariantsTests: XCTestCase {
                 XCTAssertEqual(recipe.provenance.source, .publicCanonDocumentation, recipe.id)
                 XCTAssertEqual(recipe.provenance.calibration, .notCalibratedToCanonHardware, recipe.id)
                 XCTAssertEqual(recipe.provenance.references, FilmRecipe.g7XPublicReferences, recipe.id)
+            case .publicAppleDocumentation:
+                XCTAssertEqual(recipe.provenance.source, .publicAppleDocumentation, recipe.id)
+                XCTAssertEqual(recipe.provenance.calibration, .notCalibratedToAppleHardware, recipe.id)
+                XCTAssertEqual(recipe.provenance.references, FilmRecipe.ogIPhonePublicReferences, recipe.id)
             case .publicOfficialDocumentation:
                 XCTAssertEqual(recipe.provenance.source, .publicOfficialDocumentation, recipe.id)
                 XCTAssertEqual(recipe.provenance.calibration, .notCalibratedToFujifilmHardware, recipe.id)

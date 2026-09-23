@@ -621,6 +621,8 @@ def main(argv=None):
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--coverage", action="store_true", help="Collect coverage explicitly; off in routine CI")
+    parser.add_argument("--clean-stale-ci-artifacts", action="store_true",
+                        help="Remove old generated CI evidence before testing")
     parser.add_argument("--configuration", choices=CONFIGURATIONS,
                         help="Xcode build configuration (store-media defaults to Release; other lanes to Debug)")
     parser.add_argument("--allow-photos-writes", action="store_true")
@@ -642,6 +644,8 @@ def main(argv=None):
                           "build": not args.skip_build,
                           "phases": selected_phases}, indent=2))
         return 0
+    if args.clean_stale_ci_artifacts:
+        subprocess.run([str(ROOT / "scripts/release/clean-ci-artifacts.sh")], check=True)
     output = (args.output_dir or ROOT / "build/test-runs" /
               (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + uuid.uuid4().hex[:6])).resolve()
     output.mkdir(parents=True, exist_ok=True)
