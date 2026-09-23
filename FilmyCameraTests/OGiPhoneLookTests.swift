@@ -69,8 +69,14 @@ final class OGiPhoneLookTests: XCTestCase {
     func testOGiPhoneClipsNearWhiteHighlights() throws {
         let recipe = try recipe()
         let extent = CGRect(x: 0, y: 0, width: 1, height: 1)
-        let input = CIImage(color: CIColor(red: 0.9, green: 0.9, blue: 0.9, alpha: 1)).cropped(to: extent)
+        // Build an explicit sRGB pixel. CIImage(color:) is a display-color
+        // generator, and its implicit color space/premultiplication path has
+        // produced a mid-gray sample on iOS 27 software rendering even when
+        // initialized with 0.9 components.
+        let input = try Self.nearWhiteFixture()
         let context = CIContext(options: FilmRenderer.testContextOptions)
+        let inputPixels = try Self.pixels(input, extent: extent, context: context)
+        XCTAssertEqual(Double(inputPixels[0]), 0.9, accuracy: 0.02)
         let output = FilmRenderer.render(input, recipe: recipe, quality: .photo)
         let pixels = try Self.pixels(output, extent: extent, context: context)
 
@@ -94,6 +100,24 @@ final class OGiPhoneLookTests: XCTestCase {
         checkerboard.setValue(2.0, forKey: "inputWidth")
         checkerboard.setValue(0.0, forKey: "inputSharpness")
         return (checkerboard.outputImage ?? CIImage(color: .gray)).cropped(to: extent)
+    }
+
+    private static func nearWhiteFixture() throws -> CIImage {
+        var bytes: [UInt8] = [230, 230, 230, 255]
+        let colorSpace = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        let image = bytes.withUnsafeMutableBytes { rawBuffer -> CGImage? in
+            guard let context = CGContext(
+                data: rawBuffer.baseAddress,
+                width: 1,
+                height: 1,
+                bitsPerComponent: 8,
+                bytesPerRow: 4,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return nil }
+            return context.makeImage()
+        }
+        return CIImage(cgImage: try XCTUnwrap(image))
     }
 
     private static func pixels(_ image: CIImage, extent: CGRect, context: CIContext) throws -> [Float] {

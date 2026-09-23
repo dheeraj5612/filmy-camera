@@ -834,6 +834,7 @@ public final class FilmRenderer {
         output = applyFirstPhoneNoise(to: output, recipe: safeRecipe)
         output = applyFirstPhoneLensShading(to: output, recipe: safeRecipe)
         output = applyVignette(to: output, recipe: safeRecipe)
+        output = applyFirstPhoneHighlightClip(to: output, source: processingImage, recipe: safeRecipe)
         output = clampOutput(toNormalizedRange: output)
         output = restoreAlpha(of: output, from: image)
 
@@ -1733,6 +1734,43 @@ public final class FilmRenderer {
             extent: extent,
             arguments: [image, lumaNoise, rgNoise, bNoise]
         )?.cropped(to: extent) ?? image
+    }
+
+    private static func applyFirstPhoneHighlightClip(
+        to image: CIImage,
+        source: CIImage,
+        recipe: FilmRecipe
+    ) -> CIImage {
+        guard recipe.filmBase == .firstPhone,
+              let lumaFilter = CIFilter(name: "CIColorMatrix"),
+              let toneCurve = CIFilter(name: "CIToneCurve"),
+              let blend = CIFilter(name: "CIBlendWithMask") else {
+            return image
+        }
+
+        let luma = CIVector(x: 0.2126, y: 0.7152, z: 0.0722, w: 0)
+        lumaFilter.setValue(source, forKey: kCIInputImageKey)
+        lumaFilter.setValue(luma, forKey: "inputRVector")
+        lumaFilter.setValue(luma, forKey: "inputGVector")
+        lumaFilter.setValue(luma, forKey: "inputBVector")
+        lumaFilter.setValue(immutableResources.alphaVector, forKey: "inputAVector")
+        guard let lumaImage = lumaFilter.outputImage?.cropped(to: image.extent) else { return image }
+
+        toneCurve.setValue(lumaImage, forKey: kCIInputImageKey)
+        toneCurve.setValue(CIVector(x: 0.00, y: 0.00), forKey: "inputPoint0")
+        toneCurve.setValue(CIVector(x: 0.82, y: 0.00), forKey: "inputPoint1")
+        toneCurve.setValue(CIVector(x: 0.90, y: 1.00), forKey: "inputPoint2")
+        toneCurve.setValue(CIVector(x: 0.96, y: 1.00), forKey: "inputPoint3")
+        toneCurve.setValue(CIVector(x: 1.00, y: 1.00), forKey: "inputPoint4")
+        guard let mask = toneCurve.outputImage?.cropped(to: image.extent) else { return image }
+
+        blend.setValue(
+            CIImage(color: CIColor(red: 1, green: 1, blue: 1, alpha: 1)).cropped(to: image.extent),
+            forKey: kCIInputImageKey
+        )
+        blend.setValue(image, forKey: kCIInputBackgroundImageKey)
+        blend.setValue(mask, forKey: "inputMaskImage")
+        return blend.outputImage?.cropped(to: image.extent) ?? image
     }
 
     /// Simple lens color shading: a neutral-warm center fading to a slightly
