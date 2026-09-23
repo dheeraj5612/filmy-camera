@@ -586,12 +586,28 @@ final class CaptureSetupUITests: XCTestCase {
                       "Explore looks must finish moving before it is tapped")
         browse.tap()
         let search = app.textFields["look-library-search"]
-        XCTAssertTrue(search.waitForExistence(timeout: 10)); search.tap(); search.typeText("CCD Daylight\n")
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        XCTAssertTrue(focusSearchField(search), "Look search must take keyboard focus before typing")
+        search.typeText("CCD Daylight\n")
         let style = app.buttons["library-recipe-digital-ccd-daylight"]
         XCTAssertTrue(style.waitForExistence(timeout: 5)); style.tap()
         XCTAssertTrue(menu.waitForExistence(timeout: 5)); XCTAssertTrue(menu.label.contains("CCD Daylight"))
         app.terminate(); app.launch()
         XCTAssertTrue(menu.waitForExistence(timeout: 15)); XCTAssertTrue(menu.label.contains("CCD Daylight"))
+    }
+
+    /// The library sheet can still be presenting when the field first becomes
+    /// hittable, so a single tap may not take focus. Retry until it does.
+    private func focusSearchField(_ field: XCUIElement) -> Bool {
+        for _ in 0..<4 {
+            if field.isHittable { field.tap() }
+            let deadline = Date().addingTimeInterval(3)
+            while Date() < deadline {
+                if (field.value(forKey: "hasKeyboardFocus") as? Bool) == true { return true }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            }
+        }
+        return false
     }
 
     private func openCaptureSetup(in app: XCUIApplication) {
