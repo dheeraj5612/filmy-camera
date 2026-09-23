@@ -131,7 +131,8 @@ enum CaptureImageProcessor {
                                                                  y: image.extent.height / disparity.extent.height))
         guard let filter = CIFilter(name: "CIDepthBlurEffect", parameters: [
             kCIInputImageKey: image, "inputDisparityImage": aligned, "inputAperture": 4.0,
-            "inputFocusRect": CIVector(x: 0.45, y: 0.45, z: 0.1, w: 0.1)
+            "inputFocusRect": CIVector(x: image.extent.minX + image.extent.width * 0.45, y: image.extent.minY + image.extent.height * 0.45,
+                                       z: image.extent.width * 0.1, w: image.extent.height * 0.1)
         ]), let output = filter.outputImage else { throw CaptureModesError.invalidImage }
         return output.cropped(to: image.extent)
     }

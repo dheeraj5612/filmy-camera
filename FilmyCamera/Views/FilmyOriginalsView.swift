@@ -44,7 +44,7 @@ struct FilmyOriginalsView: View {
         .navigationTitle("Filmy originals")
         .toolbar(.visible, for: .navigationBar)
         .accessibilityIdentifier("filmy-originals-library")
-        .task { await refresh() }
+        .onAppear { Task { await refresh() } }
         .refreshable { await refresh() }
     }
 
@@ -318,10 +318,12 @@ struct FilmyPhotoEditorView: View {
         do {
             let identifier = try await FilmyPhotosExporter.save(documentID, asNewCopy: asNewCopy)
             let latest = try await FilmyPhotoStore.shared.loadDocument(documentID)
-            let thumbnail = try await FilmyPhotoStore.shared.thumbnailData(documentID).flatMap { UIImage(data: $0) }
+            let thumbnailData = try await FilmyPhotoStore.shared.thumbnailData(documentID)
+            let thumbnail = thumbnailData.flatMap { UIImage(data: $0) }
             if let revision = latest.currentRevision {
                 await photoLibrary.registerDocumentExport(identifier, recipe: revision.recipe,
-                                                          capturedAt: latest.capturedAt, thumbnail: thumbnail)
+                                                          capturedAt: latest.capturedAt,
+                                                          thumbnailData: thumbnailData, thumbnail: thumbnail)
             }
             await load()
             message = "Saved to Photos with original resources and reversible Filmy edits."

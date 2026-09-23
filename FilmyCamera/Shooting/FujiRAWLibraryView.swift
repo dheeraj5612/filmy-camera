@@ -198,7 +198,8 @@ struct FujiRAWDevelopView: View {
         .sheet(isPresented: $editingRecipe) {
             RecipeDetailView(recipe: draft.recipe, originalRecipe: viewModel.originalRecipe(for: draft.recipe.id),
                 isSelected: true, onSelect: { editingRecipe = false }, onCancel: { editingRecipe = false },
-                onUpdate: { draft.recipe = $0; editingRecipe = false }, onReset: { draft.recipe = original.recipe })
+                onUpdate: { draft.recipe = $0; editingRecipe = false },
+                onReset: { draft.recipe = viewModel.originalRecipe(for: draft.recipe.id) })
         }
     }
     private func control(_ title: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {

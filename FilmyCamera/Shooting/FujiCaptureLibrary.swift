@@ -217,7 +217,8 @@ actor FujiCaptureLibrary {
             guard UUID(uuidString: entry.lastPathComponent) != nil else { return nil }
             let manifest = entry.appendingPathComponent("record.json")
             guard fileManager.fileExists(atPath: manifest.path) else { return nil }
-            return try JSONDecoder().decode(type, from: Data(contentsOf: manifest))
+            // Skip a single undecodable manifest rather than aborting the whole listing.
+            return try? JSONDecoder().decode(type, from: Data(contentsOf: manifest))
         }
     }
 }

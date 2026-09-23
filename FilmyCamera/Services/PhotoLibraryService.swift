@@ -890,6 +890,16 @@ final class PhotoLibraryService: ObservableObject {
         return location(fromGPS: gps)
     }
 
+    /// Reads only the metadata header, not the whole image, so large
+    /// originals are not fully decoded just to recover a geotag.
+    nonisolated static func location(fromURL url: URL?) -> CLLocation? {
+        guard let url,
+              let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any],
+              let gps = properties[kCGImagePropertyGPSDictionary as String] as? [String: Any] else { return nil }
+        return location(fromGPS: gps)
+    }
+
     nonisolated static func location(fromGPS gps: [String: Any]) -> CLLocation? {
         guard let latitude = (gps[kCGImagePropertyGPSLatitude as String] as? NSNumber)?.doubleValue,
               let longitude = (gps[kCGImagePropertyGPSLongitude as String] as? NSNumber)?.doubleValue else { return nil }
@@ -1067,10 +1077,12 @@ final class PhotoLibraryService: ObservableObject {
         }
     }
 
-    func registerDocumentExport(_ identifier: String, recipe: FilmRecipe, capturedAt: Date, thumbnail: UIImage?) async {
+    func registerDocumentExport(
+        _ identifier: String, recipe: FilmRecipe, capturedAt: Date, thumbnailData: Data?, thumbnail: UIImage?
+    ) async {
         if let thumbnail {
             await rememberSavedAsset(identifier, metadata: SavedFrameMetadata(recipe: recipe, capturedAt: capturedAt),
-                                     imageData: nil, image: thumbnail)
+                                     imageData: thumbnailData, image: thumbnail)
         } else {
             savedAssetIdentifiers = PhotoLibraryAssetOwnership.adding(identifier, to: savedAssetIdentifiers)
             metadataByAssetIdentifier[identifier] = SavedFrameMetadata(recipe: recipe, capturedAt: capturedAt)

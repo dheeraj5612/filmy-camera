@@ -4058,11 +4058,6 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         pendingPhotoFlashFallback = requestedFlashMode != .off && effectiveFlashMode == .off
         armCaptureTimeoutOnQueue(after: Self.captureTimeout(exposureSeconds: device.exposureDuration.seconds))
         photoOutput.capturePhoto(with: settings, delegate: self)
-        let captureID = settings.uniqueID
-        sessionQueue.asyncAfter(deadline: .now() + 45) { [weak self] in
-            guard let self, self.pendingPhotoUniqueID == captureID else { return }
-            self.cancelPendingPhotoOnQueue(status: "Capture timed out. Please try again.")
-        }
     }
 
     /// Leave headroom for long exposures and computational processing without
@@ -4457,7 +4452,7 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
             if !failed, assembly.isComplete, let data = assembly.processed {
                 photo = CapturedPhoto(
                     fileData: data, capturedAt: self.pendingPhotoCapturedAt ?? Date(),
-                    dimensions: dimensions, flashFired: flashFired,
+                    dimensions: dimensions, flashFired: flashFired, location: self.pendingPhotoLocation,
                     rawFileData: assembly.raw, livePhotoMovieURL: assembly.liveMovieURL,
                     outputSettings: assembly.settings
                 )
@@ -4724,6 +4719,7 @@ extension CameraService {
               !sceneAutoHeld, !sceneAutoCapturePaused, sceneAutoViewfinderActive,
               session.isRunning, wantsToRun, sessionAvailability == .running,
               pendingPhotoCompletion == nil, pendingManualControlsPhotoCompletion == nil,
+              fujiLease == nil, fujiAutoISOProfile == nil,
               !isApplyingManualControls, let device = activeDevice(), device.uniqueID == sceneAutoRestore?.deviceID else { return }
         let bounds = manualExposureBoundsOnQueue(for: device)
         let minimumDuration = CMTimeGetSeconds(device.activeFormat.minExposureDuration)

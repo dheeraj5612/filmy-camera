@@ -102,6 +102,15 @@ final class CaptureModesModel: ObservableObject {
         let orientation = UIDevice.current.orientation
         let angle: CGFloat? = orientation == .landscapeLeft ? 0 : orientation == .landscapeRight ? 180 : nil
         engine.setSpatialAngle(angle)
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        let interfaceOrientation: UIInterfaceOrientation?
+        if #available(iOS 26.0, *) {
+            interfaceOrientation = scene?.effectiveGeometry.interfaceOrientation
+        } else {
+            interfaceOrientation = scene?.interfaceOrientation
+        }
+        let viewSize = scene?.screen.bounds.size ?? .zero
+        engine.setRotationAngle(CameraService.videoRotationAngle(for: interfaceOrientation, fallbackViewSize: viewSize))
     }
 
     func setInteractionAllowed(_ allowed: Bool) {

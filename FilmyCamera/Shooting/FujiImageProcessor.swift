@@ -1,5 +1,6 @@
 @preconcurrency import CoreImage
 import CoreGraphics
+import CoreLocation
 import Foundation
 import ImageIO
 import UIKit
@@ -160,7 +161,10 @@ enum FujiImageProcessor {
         let filtered = FilmRenderer.render(image, recipe: recipe, quality: .photo, grainSeed: grainSeed)
         guard let composed = PhotoPrintCompositor.composedImage(filtered, finish: finish),
               let cg = FilmRenderer.outputCGImage(composed, from: composed.extent),
-              let data = PhotoOutputEncoder.jpegData(for: cg, sourceData: originalData, capturedAt: capturedAt, recipe: recipe) else {
+              let data = PhotoOutputEncoder.jpegData(
+                for: cg, sourceData: originalData, capturedAt: capturedAt, recipe: recipe,
+                location: PhotoLibraryService.location(from: originalData)
+              ) else {
             throw FujiShootingError.processingFailed
         }
         return FujiRenderedImage(data: data, width: cg.width, height: cg.height)

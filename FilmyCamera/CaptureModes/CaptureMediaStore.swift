@@ -39,11 +39,15 @@ enum CaptureMediaStore {
     }
 
     static func saveRecipe(_ recipe: FilmRecipe, in id: UUID) throws {
+        lock.lock()
+        defer { lock.unlock() }
         try JSONEncoder().encode(recipe).write(to: file("recipe.json", in: id), options: .atomic)
     }
 
     static func loadRecipe(in id: UUID) throws -> FilmRecipe {
-        try JSONDecoder().decode(FilmRecipe.self, from: Data(contentsOf: file("recipe.json", in: id)))
+        lock.lock()
+        defer { lock.unlock() }
+        return try JSONDecoder().decode(FilmRecipe.self, from: Data(contentsOf: file("recipe.json", in: id)))
     }
 
     static func delete(_ id: UUID) throws {

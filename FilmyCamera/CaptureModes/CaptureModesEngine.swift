@@ -33,11 +33,13 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
     private var photoDelegate: ModesPhotoDelegate?
     private var processing: Task<Void, Never>?
     private var movieTimer: DispatchSourceTimer?
+    private var shutdownWaiters: [CheckedContinuation<Void, Never>] = []
     private var movieStart: Date?
     private var wantsRunning = false
     private var controlsAllowed = true
     private var pendingConfiguration: (CaptureMode, Bool)?
     private var spatialAngle: CGFloat?
+    private var rotationAngle: CGFloat = 90
     private var observers: [NSObjectProtocol] = []
     private var savedMetering: (AVCaptureDevice.FocusMode, AVCaptureDevice.ExposureMode, AVCaptureDevice.WhiteBalanceMode)?
 
@@ -156,8 +158,8 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
                 state.microphoneEnabled = true
             }
             for output in session.outputs {
-                if let connection = output.connection(with: .video), connection.isVideoRotationAngleSupported(90), mode != .spatialVideo {
-                    connection.videoRotationAngle = 90
+                if let connection = output.connection(with: .video), connection.isVideoRotationAngleSupported(rotationAngle), mode != .spatialVideo {
+                    connection.videoRotationAngle = rotationAngle
                 }
             }
             if mode.isVideo, let connection = movie.connection(with: .video) {
@@ -230,6 +232,21 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
     }
 
     func setSpatialAngle(_ angle: CGFloat?) { queue.async { [self] in spatialAngle = angle } }
+
+    /// Interface-orientation-derived rotation for non-spatial video/photo connections, matching
+    /// the main capture path (CameraService.videoRotationAngle). Applied on the next configure and
+    /// immediately to already-installed connections so landscape iPad captures aren't sideways.
+    func setRotationAngle(_ angle: CGFloat) {
+        queue.async { [self] in
+            rotationAngle = angle
+            guard state.mode != .spatialVideo else { return }
+            for output in session.outputs {
+                if let connection = output.connection(with: .video), connection.isVideoRotationAngleSupported(angle) {
+                    connection.videoRotationAngle = angle
+                }
+            }
+        }
+    }
 
     func setZoom(_ value: Double) {
         queue.async { [self] in
@@ -368,7 +385,10 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
         if state.mode == .portrait {
             settings.isDepthDataDeliveryEnabled = true
             settings.embedsDepthDataInPhoto = true
-            if photos.isPortraitEffectsMatteDeliveryEnabled { settings.isPortraitEffectsMatteDeliveryEnabled = true }
+            if photos.isPortraitEffectsMatteDeliveryEnabled {
+                settings.isPortraitEffectsMatteDeliveryEnabled = true
+                settings.embedsPortraitEffectsMatteInPhoto = true
+            }
         }
         return settings
     }
@@ -463,8 +483,13 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
         pendingConfiguration = nil
         processing?.cancel()
         sequence?.requestStop()
-        if movie.isRecording { movie.stopRecording() }
-        if session.isRunning { session.stopRunning() }
+        if movie.isRecording {
+            // Wait for fileOutput(_:didFinishRecordingTo:from:error:) to stop the session so the
+            // movie trailer is written before the capture session tears down.
+            movie.stopRecording()
+        } else if session.isRunning {
+            session.stopRunning()
+        }
         if sequence?.shouldFinish == true { finishSequence() }
         if photoDelegate == nil, processing == nil, !movie.isRecording { state.phase = .stopped }
         state.message = reason
@@ -473,7 +498,11 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
 
     func shutdown() async {
         await withCheckedContinuation { continuation in
-            queue.async { [self] in pauseOnQueue(reason: "Camera closed"); continuation.resume() }
+            queue.async { [self] in
+                pauseOnQueue(reason: "Camera closed")
+                // A recording movie stops the session from its finish callback; resume then.
+                if movie.isRecording { shutdownWaiters.append(continuation) } else { continuation.resume() }
+            }
         }
     }
 
@@ -490,9 +519,13 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
     private func fail(_ error: Error) {
         sequence = nil
         restoreMetering()
-        if let record = media { emit(.saved(record)); media = nil }
+        if let record = media {
+            if record.originals.isEmpty { try? CaptureMediaStore.delete(record.id) } else { emit(.saved(record)) }
+            media = nil
+        }
         state.message = error.localizedDescription
         emit(.failed(error.localizedDescription))
+        if !wantsRunning, !movie.isRecording, session.isRunning { session.stopRunning() }
         settle()
     }
 
@@ -558,6 +591,11 @@ extension CaptureModesEngine: AVCaptureFileOutputRecordingDelegate {
         let message = error?.localizedDescription
         let successfullyFinished = error == nil || ((error as NSError?)?.userInfo[AVErrorRecordingSuccessfullyFinishedKey] as? Bool == true)
         queue.async { [self] in
+            defer {
+                if !wantsRunning, session.isRunning { session.stopRunning() }
+                let waiters = shutdownWaiters; shutdownWaiters = []
+                waiters.forEach { $0.resume() }
+            }
             movieTimer?.cancel(); movieTimer = nil; movieStart = nil
             guard var record = media else { settle(); return }
             do {
@@ -567,7 +605,11 @@ extension CaptureModesEngine: AVCaptureFileOutputRecordingDelegate {
                 try CaptureMediaStore.persist(record)
                 media = record
                 if wantsRunning { process(record) }
-                else { emit(.saved(record)); media = nil; settle() }
+                else {
+                    emit(.saved(record)); media = nil
+                    if session.isRunning { session.stopRunning() }
+                    settle()
+                }
             } catch { fail(error) }
         }
     }

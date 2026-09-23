@@ -59,8 +59,17 @@ final class ModesPreviewView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        if let connection = preview.connection, connection.isVideoRotationAngleSupported(90) {
-            connection.videoRotationAngle = 90
+        guard let connection = preview.connection else { return }
+        let scene = window?.windowScene
+        let interfaceOrientation: UIInterfaceOrientation?
+        if #available(iOS 26.0, *) {
+            interfaceOrientation = scene?.effectiveGeometry.interfaceOrientation
+        } else {
+            interfaceOrientation = scene?.interfaceOrientation
+        }
+        let angle = CameraService.videoRotationAngle(for: interfaceOrientation, fallbackViewSize: bounds.size)
+        if connection.isVideoRotationAngleSupported(angle) {
+            connection.videoRotationAngle = angle
         }
     }
 
@@ -146,14 +155,19 @@ final class ModesShutterControl: UIControl {
     override func beginTracking(_ touch: UITouch, with event: UIEvent?) -> Bool {
         guard isEnabled else { return false }
         held = false
+        holdTimer?.invalidate()
         if canHold {
-            holdTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: false) { [weak self] _ in
+            let timer = Timer(timeInterval: 0.25, repeats: false) { [weak self] _ in
                 MainActor.assumeIsolated {
                     guard let self, self.isTracking, self.isEnabled else { return }
                     self.held = true
                     self.beginHold()
                 }
             }
+            // UIKit's active touch-tracking run loop mode can starve a timer registered only in
+            // .default, so held burst captures might never arm. .common keeps it firing while tracking.
+            RunLoop.main.add(timer, forMode: .common)
+            holdTimer = timer
         }
         return true
     }

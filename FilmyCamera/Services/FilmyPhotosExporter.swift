@@ -74,6 +74,7 @@ enum FilmyPhotosExporter {
         let createChanges: @Sendable () -> Void = {
             let request = PHAssetCreationRequest.forAsset()
             request.creationDate = document.capturedAt
+            request.location = PhotoLibraryService.location(fromURL: original)
             request.addResource(with: .photo, fileURL: original, options: nil)
             if let raw { request.addResource(with: .alternatePhoto, fileURL: raw, options: nil) }
             if let movie { request.addResource(with: .pairedVideo, fileURL: movie, options: nil) }
@@ -132,6 +133,7 @@ enum FilmyPhotosExporter {
         }
         let output = PHContentEditingOutput(contentEditingInput: input)
         output.adjustmentData = adjustment
+        var renderedURL = output.renderedContentURL
         if document.hasLivePhoto {
             guard let context = PHLivePhotoEditingContext(livePhotoEditingInput: input),
                   let revision = document.currentRevision else { throw ExportError.writeFailed }
@@ -157,7 +159,9 @@ enum FilmyPhotosExporter {
                     )
                     // Materialize in Filmy's working color space rather than
                     // relying on Photos' unspecified CIContext color policy.
-                    guard let colorSpace = CGColorSpace(name: CGColorSpace.displayP3),
+                    let colorSpaceName = revision.output.colorGamut == .displayP3
+                        ? CGColorSpace.displayP3 : CGColorSpace.sRGB
+                    guard let colorSpace = CGColorSpace(name: colorSpaceName),
                           let rendered = ProPhotoOutput.context.createCGImage(
                             filtered, from: filtered.extent, format: .RGBA8, colorSpace: colorSpace
                           ) else {
@@ -174,6 +178,7 @@ enum FilmyPhotosExporter {
             guard output.supportedRenderedContentTypes.contains(type) else { throw ExportError.unsupportedOutput }
             let url = try output.renderedContentURL(for: type)
             try Data(contentsOf: rendition, options: .mappedIfSafe).write(to: url, options: .atomic)
+            renderedURL = url
         }
         let outputBox = Box(output)
         let assetBox = Box(asset)
@@ -183,6 +188,6 @@ enum FilmyPhotosExporter {
         try await PHPhotoLibrary.shared().performChanges(updateChanges)
         // Photos has consumed its copy. Only remove the URL it explicitly
         // gave us; do not enumerate or purge the shared temporary directory.
-        try? FileManager.default.removeItem(at: output.renderedContentURL)
+        try? FileManager.default.removeItem(at: renderedURL)
     }
 }

@@ -1,11 +1,12 @@
 # App Privacy answer matrix — en-US
 
-Status: updated for version 1.0.1 metadata changes. Saved App Store Connect answers require separate readback; this document does not prove submission.
+Status: updated for version 1.0.2 (free release, `FILMY_MONETIZATION_ENABLED=NO`). Saved App Store Connect answers require separate readback; this document does not prove submission.
 
 ## Tracking
 
 - Tracking: No
-- Reason: the app has no advertising SDK, analytics SDK, cross-app identifier, or network service that receives user activity.
+- Reason: 1.0.2 ships with monetization disabled. The binary links FirebaseAuth, GoogleSignIn, and GoogleMobileAds (with UMP) for a future opt-in membership release, but none is configured or started: `AuthenticationStore` returns before `FirebaseApp.configure` and `AdvertisingStore.prepare()` returns before any consent request or `MobileAds.shared.start` unless `MonetizationConfiguration.isEnabled`. No analytics SDK, cross-app identifier, or network service receives user activity.
+- `FilmyCamera/Resources/PrivacyInfo.xcprivacy` already declares Name, Email Address, and User ID (linked, app functionality, not tracking) for the account flow. Those types are collected only when monetization is enabled; re-answer this matrix (and add advertising data for ads) before shipping a build with `FILMY_MONETIZATION_ENABLED=YES`.
 
 ## Data linked to the user
 

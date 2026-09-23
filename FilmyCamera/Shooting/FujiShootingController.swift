@@ -336,13 +336,21 @@ final class FujiShootingController: ObservableObject {
                     multipleCount += 1; ghostImage = UIImage(cgImage: thumbnail.image)
                 }
             } else {
+                var variantError: Error?
                 for (recipe, label) in variants {
                     try Task.checkCancellation()
                     var edited = record; edited.recipe = recipe
-                    let result = try await worker.develop(data: data, record: edited, finish: request.finish, grainSeed: request.grainSeed)
-                    try await export(result.data, recipe: recipe, capturedAt: record.capturedAt,
-                                     label: "\(record.label) · \(label)", photoLibrary: photoLibrary)
+                    do {
+                        let result = try await worker.develop(data: data, record: edited, finish: request.finish, grainSeed: request.grainSeed)
+                        try await export(result.data, recipe: recipe, capturedAt: record.capturedAt,
+                                         label: "\(record.label) · \(label)", photoLibrary: photoLibrary)
+                    } catch {
+                        // Keep exporting the remaining variants even if one fails;
+                        // surface the first failure after all have been attempted.
+                        if variantError == nil { variantError = error }
+                    }
                 }
+                if let variantError { throw variantError }
             }
             progress = 0.6 + 0.4 * Double(index + 1) / Double(captured.count)
         }

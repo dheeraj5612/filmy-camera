@@ -50,8 +50,8 @@ def main() -> None:
                 raise RuntimeError(f"Camera handoff anchor is missing: {anchor}")
         CAMERA.write_text(camera.rstrip() + "\n" + SUSPEND)
     descriptions = {
-        "NSCameraUsageDescription": "Filmy Camera uses the camera to capture photos and videos and to read text or codes when requested.",
-        "NSMicrophoneUsageDescription": "Filmy Camera records microphone audio when you enable audio for a video.",
+        "NSCameraUsageDescription": "Filmy Camera uses the camera to preview and capture photos and videos, and to read text or codes when requested.",
+        "NSMicrophoneUsageDescription": "Filmy Camera records microphone audio only when you enable audio for a video or Live Photo.",
         "NSPhotoLibraryAddUsageDescription": "Filmy Camera saves finished photos and videos to your photo library.",
     }
     project = PROJECT.read_text()

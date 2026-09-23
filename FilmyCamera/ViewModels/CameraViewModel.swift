@@ -1438,7 +1438,7 @@ final class CameraViewModel: ObservableObject {
                 sourceData: sourceData,
                 capturedAt: importedAt,
                 recipe: recipe,
-                location: nil
+                location: PhotoLibraryService.location(from: sourceData)
               ) else {
             return nil
         }

@@ -85,7 +85,6 @@ struct ManualCameraControlsView: View {
                         unavailableCard
                     }
 
-                    ProCaptureControlsView(camera: camera)
                     resetButton
                 }
                 .frame(maxWidth: 720, alignment: .leading)
