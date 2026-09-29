@@ -13,6 +13,34 @@ final class RecipeLibraryUITests: XCTestCase {
         app.launch()
     }
 
+    func testOriginalPreviewToggleAndLookSelectionClearTheViewfinder() {
+        launchApp()
+        let menu = app.buttons["recipe-menu"]
+        let compare = app.buttons["camera-original-preview-toggle"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 10))
+        XCTAssertTrue(compare.exists)
+        let selectedLook = menu.label
+        let initialPreview = compare.value as? String
+
+        compare.tap()
+        XCTAssertNotEqual(compare.value as? String, initialPreview)
+        XCTAssertEqual(menu.label, selectedLook)
+        compare.tap()
+        XCTAssertEqual(compare.value as? String, initialPreview)
+
+        menu.tap()
+        let alternate = app.buttons["recipe-g7x-compact"]
+        XCTAssertTrue(alternate.waitForExistence(timeout: 5))
+        alternate.tap()
+        let drawerClosed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: app.buttons["recipe-drawer-close"]
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [drawerClosed], timeout: 5), .completed)
+        XCTAssertTrue(menu.label.contains("G7 X Compact"))
+        XCTAssertEqual(compare.value as? String, initialPreview)
+    }
+
     func testEnableAllHideAllUndoAndRelaunchPreserveTheCurrentLook() throws {
         launchApp()
         openManager()

@@ -278,6 +278,13 @@ final class FilmyCameraUITests: XCTestCase {
         scrollToHittable(alternate, in: compactApp)
         assertMinimumHitTarget(alternate, named: "CCD Daylight recipe")
         alternate.tap()
+        XCTAssertTrue(compactApp.buttons["recipe-menu"].waitForExistence(timeout: 5))
+        XCTAssertTrue(compactApp.buttons["recipe-menu"].label.contains("CCD Daylight"))
+        XCTAssertTrue(waitUntil(timeout: 5) {
+            !compactApp.descendants(matching: .any)["recipe-drawer"].exists
+        }, "Selecting a look must dismiss the picker")
+
+        openRecipeDrawer(in: compactApp)
         XCTAssertTrue(compactApp.buttons["Tune CCD Daylight"].waitForExistence(timeout: 5))
         #if targetEnvironment(simulator)
         // iPadOS 26 Simulator can report the first tile of a nested row as
@@ -293,11 +300,15 @@ final class FilmyCameraUITests: XCTestCase {
         assertMinimumHitTarget(selectedRecipe, named: "G7 X recipe")
         selectedRecipe.tap()
         #endif
-        XCTAssertTrue(compactApp.buttons["Tune G7 X Compact"].waitForExistence(timeout: 5),
-                      "Tapping the visible G7 X tile must select its camera profile")
-        XCTAssertEqual(selectedRecipe.value as? String, "Selected")
+        XCTAssertTrue(compactApp.buttons["recipe-menu"].label.contains("G7 X Compact"))
+        XCTAssertTrue(waitUntil(timeout: 5) {
+            !compactApp.descendants(matching: .any)["recipe-drawer"].exists
+        }, "Selecting a look must dismiss the picker")
 
+        openRecipeDrawer(in: compactApp)
         let tune = compactApp.buttons["Tune G7 X Compact"]
+        XCTAssertTrue(tune.waitForExistence(timeout: 5),
+                      "The selected G7 X profile must expose its tuning control")
         assertMinimumHitTarget(tune, named: "Tune G7 X profile")
         tune.tap()
 
@@ -1773,6 +1784,9 @@ final class FilmyCameraUITests: XCTestCase {
         var selectedRecipes = Set<String>()
         for _ in 0..<3 {
             for identifier in candidates {
+                if !app.descendants(matching: .any)["recipe-picker"].exists {
+                    openRecipeDrawer(in: app)
+                }
                 let swatch = app.buttons[identifier]
                 // A horizontal rail intentionally exposes partial cards.
                 // Tap a stable visible region inside the picker's viewport,
@@ -1782,12 +1796,15 @@ final class FilmyCameraUITests: XCTestCase {
                       waitForStableHittableFrame(swatch, timeout: 2) else { continue }
                 let visible = swatch.frame.intersection(picker.frame).intersection(app.frame)
                 guard visible.width >= 44, visible.height >= 44 else { continue }
+                let previousLook = app.buttons["recipe-menu"].label
                 swatch.coordinate(withNormalizedOffset: .zero)
                     .withOffset(CGVector(dx: visible.midX - swatch.frame.minX,
                                          dy: visible.midY - swatch.frame.minY))
                     .tap()
-                XCTAssertTrue(waitUntil(timeout: 2) { swatch.value as? String == "Selected" },
-                              "Tapping \(identifier) must select that recipe")
+                XCTAssertTrue(waitUntil(timeout: 5) {
+                    !app.descendants(matching: .any)["recipe-drawer"].exists
+                        && app.buttons["recipe-menu"].label != previousLook
+                }, "Tapping \(identifier) must update the current look and dismiss the picker")
                 selectedRecipes.insert(identifier)
                 taps += 1
             }
@@ -1795,7 +1812,6 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(taps, 6, "The look drawer should expose several recipes to switch between")
         XCTAssertGreaterThanOrEqual(selectedRecipes.count, 2,
                                     "Rapid switching must exercise distinct recipes")
-        app.buttons["recipe-drawer-close"].tap()
         XCTAssertTrue(waitForCameraShell(in: app, timeout: 5), "The shell must survive rapid recipe switching")
         if isPhysical {
             XCTAssertTrue(waitForLiveShutter(in: app, timeout: 5), "The viewfinder must stay live while switching recipes")

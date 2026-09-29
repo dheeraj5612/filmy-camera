@@ -470,10 +470,10 @@ final class NormalPhotoFlowTests: XCTestCase {
             waitUntil(timeout: 10) { currentLook.label.contains(name) },
             "Selecting \(name) must update the current look"
         )
-        let close = app.buttons["recipe-drawer-close"]
-        XCTAssertTrue(close.waitForExistence(timeout: 5), "The look drawer must remain dismissible")
-        close.tap()
-        XCTAssertTrue(waitForDisappearance(close, timeout: 5), "Selecting a look must leave the camera controls available")
+        XCTAssertTrue(
+            waitForDisappearance(app.buttons["recipe-drawer-close"], timeout: 5),
+            "Selecting a look must dismiss the picker and leave the camera controls available"
+        )
     }
 
     private func waitForRotatedGeometry(timeout: TimeInterval) -> Bool {

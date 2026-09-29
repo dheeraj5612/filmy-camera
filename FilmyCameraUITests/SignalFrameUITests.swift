@@ -151,9 +151,8 @@ final class SignalFrameUITests: XCTestCase {
         XCTAssertTrue(app.buttons["recipe-provia-standard"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["recipe-g7x-compact"].exists)
         tapWhenStable(app.buttons["recipe-provia-standard"], in: app)
-        waitForValue("Selected", of: app.buttons["recipe-provia-standard"], app: app)
-        tapWhenStable(app.buttons["recipe-drawer-close"], in: app)
         waitForCamera(app)
+        XCTAssertTrue(app.buttons["recipe-menu"].label.contains("Provia Standard"))
         waitForValue("Favorite", of: app.buttons["camera-favorite-look"], app: app)
     }
 
@@ -258,9 +257,8 @@ final class SignalFrameUITests: XCTestCase {
         tapWhenStable(app.buttons["camera-looks-favorites"], in: app)
         assertReachable(app.buttons["recipe-g7x-compact"], in: app)
         tapWhenStable(app.buttons["recipe-g7x-compact"], in: app)
-        waitForValue("Selected", of: app.buttons["recipe-g7x-compact"], app: app)
-        tapWhenStable(app.buttons["recipe-drawer-close"], in: app)
         waitForCamera(app)
+        XCTAssertTrue(app.buttons["recipe-menu"].label.contains("G7 X Compact"))
         XCTAssertEqual(app.buttons["recipe-menu"].label, selected)
         waitForValue("Favorite", of: app.buttons["camera-favorite-look"], app: app)
         snapshot("signal-frame-accessible-favorite-roundtrip")
@@ -327,11 +325,15 @@ final class SignalFrameUITests: XCTestCase {
             if recipe.exists && recipe.isHittable && picker.frame.contains(recipe.frame) { break }
             if id == "g7x-compact" { picker.swipeDown() } else { picker.swipeUp() }
         }
+        let expectedName = recipe.label.components(separatedBy: ",").first ?? id
         tapWhenStable(recipe, in: app, file: file, line: line)
-        waitForValue("Selected", of: recipe, app: app, file: file, line: line)
-        // The quick picker stays open while comparing looks; the user closes it.
-        tapWhenStable(app.buttons["recipe-drawer-close"], in: app, file: file, line: line)
         waitForCamera(app, file: file, line: line)
+        XCTAssertTrue(
+            app.buttons["recipe-menu"].label.localizedCaseInsensitiveContains(expectedName),
+            "Selecting a look must update the current menu",
+            file: file,
+            line: line
+        )
     }
 
     private func relaunchPreservingPreferences(_ app: XCUIApplication) {

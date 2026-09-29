@@ -255,15 +255,6 @@ final class GalleryPagingUITests: XCTestCase {
         XCTAssertTrue(recipeTileIsSafelyTappable(tile, picker: picker),
                       "Recipe \(name) must be selectable inside the recipe picker")
         tile.tap()
-        guard dismissLookLibraryIfPresented() else { return }
-        let close = app.buttons["recipe-drawer-close"]
-        XCTAssertTrue(close.waitForExistence(timeout: 5), "Recipe picker must expose its close control")
-        guard let close = waitForStableButton("recipe-drawer-close", timeout: 5) else {
-            attachRecipeCloseFailure("recipe-drawer-close-unhittable-\(id)")
-            XCTFail("Recipe picker close control must have a stable on-screen hit target")
-            return
-        }
-        close.tap()
         XCTAssertTrue(waitUntil(timeout: 5) {
             !app.descendants(matching: .any)["recipe-drawer"].exists
                 && menu.label.contains(name)

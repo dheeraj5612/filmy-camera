@@ -178,6 +178,8 @@ struct CameraScreen: View {
     @State private var isShowingManualControls = false
     @State private var isShowingLiveAdjustments = false
     @State private var isShowingLookDrawer = false
+    @State private var originalPreviewOverride: Bool?
+    @GestureState private var isHoldingOriginalPreview = false
     @State private var isShowingLookLibrary = false
     @State private var isShowingRecipeManager = false
     @State private var quickRecipeQuery = ""
@@ -373,6 +375,7 @@ struct CameraScreen: View {
         .onChange(of: favoriteData) { _, _ in updateSmartRecipeAnalysis() }
         .onChange(of: smartRecipeFrameKey) { _, _ in smartRecipes.invalidateScene() }
         .onChange(of: viewModel.selectedRecipeID) { _, selected in
+            originalPreviewOverride = nil
             smartRecipes.reconcileSelection(currentID: selected, availableIDs: Set(viewModel.recipes.map(\.id)))
         }
         .sheet(isPresented: $isShowingSmartRecipes, onDismiss: { smartPresentation = nil }) {
@@ -395,6 +398,7 @@ struct CameraScreen: View {
         .onChange(of: camera.selectedLensID) { _, _ in shooting.invalidatePreview() }
         .onChange(of: camera.zoomFactor) { _, _ in shooting.invalidatePreview() }
         .onChange(of: viewModel.selectedRecipe) { _, _ in shooting.invalidatePreview() }
+        .onChange(of: shooting.settings.showsNaturalPreview) { _, _ in originalPreviewOverride = nil }
         .onChange(of: shooting.isBusy) { _, busy in if busy { countdown.cancel(); blinkShutter() } }
         .onChange(of: membership.hasFullAccess) { _, premium in
             if !premium {
@@ -702,6 +706,14 @@ struct CameraScreen: View {
             || shooting.isBusy || shooting.isComposing
     }
 
+    private var isShowingOriginalPreview: Bool {
+        originalPreviewOverride ?? shooting.settings.showsNaturalPreview
+    }
+
+    private func toggleOriginalPreview() {
+        originalPreviewOverride = !isShowingOriginalPreview
+    }
+
     private var portraitControlClearance: CGFloat {
         dynamicTypeSize.isAccessibilitySize ? 176 : 150
     }
@@ -732,6 +744,16 @@ struct CameraScreen: View {
             } else if isReviewing {
                 Color.black.opacity(0.55)
                     .allowsHitTesting(false)
+            }
+
+            if (!shouldShowCameraEmptyState || isViewfinderChromePreview) && !isReviewing {
+                HStack {
+                    Spacer(minLength: 0)
+                    originalPreviewButton
+                }
+                .padding(.top, overlaysTopBar ? (viewfinderChromeHeights[.top] ?? 54) + 12 : 12)
+                .padding(.trailing, 12)
+                .disabled(isChromeDisabled)
             }
 
             if showGrid && camera.isRunning {
@@ -831,7 +853,7 @@ struct CameraScreen: View {
                 FilteredCameraPreview(
                     camera: camera,
                     recipe: camera.sceneAuto.development.applying(to: viewModel.selectedRecipe),
-                    naturalLiveView: shooting.settings.showsNaturalPreview,
+                    naturalLiveView: isShowingOriginalPreview || isHoldingOriginalPreview,
                     digitalCrop: shooting.settings.previewCrop
                 )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -858,8 +880,9 @@ struct CameraScreen: View {
             .contentShape(Rectangle())
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Live camera preview")
-            .accessibilityValue("Showing the \(viewModel.selectedRecipe.name) look")
-            .accessibilityHint("Tap to focus, then slide up to brighten or down to darken. Swipe left or right to change looks, double tap to switch cameras, or pinch to zoom. These controls are also available as accessibility actions.")
+            .accessibilityValue(isShowingOriginalPreview || isHoldingOriginalPreview
+                ? "Showing original preview" : "Showing the \(viewModel.selectedRecipe.name) look")
+            .accessibilityHint("Tap to focus, press and hold to compare the original, then slide up to brighten or down to darken. Swipe left or right to change looks, double tap to switch cameras, or pinch to zoom. These controls are also available as accessibility actions.")
             .accessibilityAction(named: "Focus and expose at center") {
                 focusPreview(at: CGPoint(x: size.width / 2, y: size.height / 2), in: size)
             }
@@ -867,6 +890,9 @@ struct CameraScreen: View {
             .accessibilityAction(named: "Darken exposure") { adjustPreviewExposure(by: -0.3) }
             .accessibilityAction(named: "Next look") { selectAdjacentLook(.next) }
             .accessibilityAction(named: "Previous look") { selectAdjacentLook(.previous) }
+            .accessibilityAction(named: isShowingOriginalPreview ? "Show selected look" : "Show original preview") {
+                toggleOriginalPreview()
+            }
             .accessibilityAction(named: "Switch camera", switchCameraFromPreview)
             .accessibilityIdentifier("camera-preview")
             .gesture(
@@ -882,6 +908,13 @@ struct CameraScreen: View {
                     }
             )
             .simultaneousGesture(previewLookSwipe(in: size))
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 0.25)
+                    .sequenced(before: DragGesture(minimumDistance: 0))
+                    .updating($isHoldingOriginalPreview) { value, isHolding, _ in
+                        if case .second(true, _) = value { isHolding = true }
+                    }
+            )
             .simultaneousGesture(
                 MagnificationGesture()
                     .onChanged { scale in
@@ -1366,6 +1399,7 @@ struct CameraScreen: View {
                 let shouldOpen = !isShowingLiveAdjustments
                 guard !shouldOpen || membership.require(.recipeEditing) else { return }
                 closeControlDrawers()
+                if shouldOpen { originalPreviewOverride = nil }
                 isShowingLiveAdjustments = shouldOpen
             } label: {
                 Label("Adjust", systemImage: "slider.horizontal.3")
@@ -1376,6 +1410,29 @@ struct CameraScreen: View {
             .accessibilityIdentifier("live-recipe-adjustments")
             .accessibilityHint("Adjust the look while watching the live camera preview")
         }
+    }
+
+    private var originalPreviewButton: some View {
+        Button {
+            HapticFeedback.play(.selection)
+            toggleOriginalPreview()
+        } label: {
+            VStack(spacing: 2) {
+                Image(systemName: "circle.lefthalf.filled")
+                    .font(.system(size: 18, weight: .semibold))
+                Text(isShowingOriginalPreview ? "Original" : "Compare")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+            }
+            .foregroundStyle(isShowingOriginalPreview ? FilmyTheme.accent : .white)
+            .frame(width: max(60, cameraHitTarget), height: max(56, cameraHitTarget))
+            .background { ChromeShapeBackground(shape: RoundedRectangle(cornerRadius: 14)) }
+            .contentShape(RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.pressable)
+        .accessibilityIdentifier("camera-original-preview-toggle")
+        .accessibilityLabel(isShowingOriginalPreview ? "Show selected look" : "Show original preview")
+        .accessibilityValue(isShowingOriginalPreview ? "Original" : "Selected look")
+        .accessibilityHint("Compare the live camera preview without changing the selected look or saved photo")
     }
 
     private func lookDrawer(maxHeight: CGFloat) -> some View {
@@ -1502,7 +1559,13 @@ struct CameraScreen: View {
             } else {
                 RecipePickerView(
                     recipes: visible,
-                    selectedRecipeID: Binding(get: { viewModel.effectiveSelectedRecipeID }, set: { viewModel.select(recipe: viewModel.recipe(for: $0)) }),
+                    selectedRecipeID: Binding(get: { viewModel.effectiveSelectedRecipeID }, set: { id in
+                        viewModel.select(recipe: viewModel.recipe(for: id))
+                        originalPreviewOverride = nil
+                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) {
+                            isShowingLookDrawer = false
+                        }
+                    }),
                     onOpenDetail: openRecipeDetail,
                     compact: !favoritesOnly
                 )
