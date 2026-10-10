@@ -44,6 +44,7 @@ extension FilmRecipe {
         case .acros, .acrosYellow, .acrosRed, .acrosGreen, .monochrome: return "circle.lefthalf.filled"
         case .sepia: return "clock.arrow.circlepath"
         case .compactDigital: return "camera.fill"
+        case .firstPhone: return "camera"
         case .standard, .provia: return "camera.aperture"
         }
     }
