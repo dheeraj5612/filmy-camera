@@ -1,0 +1,709 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		01B17CF55077F62D0C767CE7 /* FilmyCaptureDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C22CE4C4072959DEDE38015 /* FilmyCaptureDiagnostics.swift */; };
+		0939E507DFE1F826C2DA0EF3 /* ReviewComparisonState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4878BAA3BD1EC783B0B3F45F /* ReviewComparisonState.swift */; };
+		0B304A6E6CA83A8BD6E117CF /* FilmRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9DFB93D48E03003D53CB90F /* FilmRenderer.swift */; };
+		1937DD6C46DC4146D6C5A4DB /* CameraScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 513E4F72E7CFFCA116025FEF /* CameraScreen.swift */; };
+		2D8FC11AA9FE6E1256940AA7 /* CaptureReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB9A8DB4F989AB51AC801700 /* CaptureReviewView.swift */; };
+		340E8D7F666137A1B1D7D1A4 /* FilmyIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5A3A5FB0F110CC1D03373F0 /* FilmyIdentity.swift */; };
+		3A9FC63583FBD8F0CB7EEA4B /* G7CameraUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 266298BCFD02EB88C17D2EA1 /* G7CameraUITests.swift */; };
+		3ABF31B073A8F69CD722B58D /* G7DateStampRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6853DA1B629893934D925844 /* G7DateStampRenderer.swift */; };
+		3C5E9DFFC76EBDC51361FF63 /* FilmRecipeReferenceCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F24865F055EBABD9EB93AEB /* FilmRecipeReferenceCatalog.swift */; };
+		3EC86E698EA3B32D16AF5045 /* G7CameraControlDeck.swift in Sources */ = {isa = PBXBuildFile; fileRef = D48AF5867CF97443891CE9E5 /* G7CameraControlDeck.swift */; };
+		428B6DAC0E5DCE8A6076589B /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17154796D4BB1BF90BAB7209 /* ContentView.swift */; };
+		46BB502B04684F322D6E41BE /* ManualCameraControlsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CB1383B4C6F74C762B67911 /* ManualCameraControlsView.swift */; };
+		4ECEB35C64C769BBD4F95771 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 2E88F8D8484E3297B907853F /* PrivacyInfo.xcprivacy */; };
+		52B3FF1447B9CBEE1983189E /* GalleryScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A16448E80962AF4DBA41699C /* GalleryScreen.swift */; };
+		598C1316774F18424F59A209 /* CameraFrameLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1ACA54C6B662439A1DADE056 /* CameraFrameLayout.swift */; };
+		5EE2FD7832A3240A56E30A9C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 40AE072359A989B8D263E32A /* Assets.xcassets */; };
+		653D8D5A8749761B52123E1F /* RecipePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFE08FFEB4C7D2D716CC9FA7 /* RecipePickerView.swift */; };
+		66480D4833DFA2CD4A00B311 /* CameraPreviewGesturePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2068738D7E7584BFFA9588D5 /* CameraPreviewGesturePolicy.swift */; };
+		69348694DD9013FBE6A90429 /* FilmyCameraApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 318270A94F521C0FD68C442C /* FilmyCameraApp.swift */; };
+		7616A5A039FA51BC4D243A28 /* FilteredCameraPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97D939F7CCEED4B2DB9CAC7E /* FilteredCameraPreview.swift */; };
+		7B42C9F141A7B767E73CD986 /* G7DateStampRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 473C52652BED283FF3563438 /* G7DateStampRendererTests.swift */; };
+		7DD59D00D0FD0A7E4F766CA9 /* CompositionAssistStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3F41F0C2EB9755176C6C767 /* CompositionAssistStore.swift */; };
+		849D502A65EC7FF444359D5D /* CameraViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75E102386A11A39206410AF0 /* CameraViewModel.swift */; };
+		8787FD65D1E35FCAB48E61DB /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05E84EE67A629E71C4E4519E /* SettingsView.swift */; };
+		90B5B5BE8861F94BD3138544 /* PhotoPrintCompositor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CFA23324879BE9432F4E4B7 /* PhotoPrintCompositor.swift */; };
+		99A59B981B5623D0A2DB91A9 /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31F87AEEFDAA150FD749E12D /* Components.swift */; };
+		A5EBD874C33A97EEFE1266B0 /* GalleryPagingPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27D79C5584E70BD13DDA4C0A /* GalleryPagingPolicy.swift */; };
+		C33E8A6D018817E36E0925B3 /* PhotoLibraryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4104B66BBD5555F6E9A1274 /* PhotoLibraryService.swift */; };
+		C664D41295B99D9C6AD4E5D2 /* CameraService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CB1F86BF7175A31BFC61A8D /* CameraService.swift */; };
+		D0949DF6724909F73846F3E8 /* AppConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0163D00C37DFAAE80CB09915 /* AppConfiguration.swift */; };
+		D338ACBB24E8E7A132200725 /* PhotoOutputEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BB9A192ED60B4535E6E53B4 /* PhotoOutputEncoder.swift */; };
+		D4EAE0A2D117D8552529FAF2 /* CameraManualControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DADDD09DC47D3F7E4DF1031 /* CameraManualControls.swift */; };
+		D58DC7A37DA028991D5BC317 /* PhotoFinish.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EAEF930DC0C4192490C5A20 /* PhotoFinish.swift */; };
+		D63FDB6094423B3957A0232C /* HistogramPlacement.swift in Sources */ = {isa = PBXBuildFile; fileRef = E31C985FD2F8C86A9E9A6776 /* HistogramPlacement.swift */; };
+		E276A432FDA89A68E25AB7A3 /* G7AppConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29CE098121A46EC93AF33C1B /* G7AppConfigurationTests.swift */; };
+		E69171BB5F4343D2593EF2DA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 05A1CB163DDABFB9EB32B290 /* Assets.xcassets */; };
+		EA65A217334F00483D1C4E4F /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82C9856AC400CD3C638E1742 /* OnboardingView.swift */; };
+		EE766D3D6CD666457C4996A5 /* FilmRecipe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AB7799F81B5EC947B7B636C /* FilmRecipe.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		9FE1F966593660BD3DC61BA1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1A1A761709DA96406C33C37C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 534CABEF788A291E79B6A513;
+			remoteInfo = G7Camera;
+		};
+		D8F550C84B50B606FCA62D41 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1A1A761709DA96406C33C37C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 534CABEF788A291E79B6A513;
+			remoteInfo = G7Camera;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		0163D00C37DFAAE80CB09915 /* AppConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfiguration.swift; sourceTree = "<group>"; };
+		05A1CB163DDABFB9EB32B290 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		05E84EE67A629E71C4E4519E /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		0CB1F86BF7175A31BFC61A8D /* CameraService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraService.swift; sourceTree = "<group>"; };
+		17154796D4BB1BF90BAB7209 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		1ACA54C6B662439A1DADE056 /* CameraFrameLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraFrameLayout.swift; sourceTree = "<group>"; };
+		1DADDD09DC47D3F7E4DF1031 /* CameraManualControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraManualControls.swift; sourceTree = "<group>"; };
+		2068738D7E7584BFFA9588D5 /* CameraPreviewGesturePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraPreviewGesturePolicy.swift; sourceTree = "<group>"; };
+		266298BCFD02EB88C17D2EA1 /* G7CameraUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = G7CameraUITests.swift; sourceTree = "<group>"; };
+		27D79C5584E70BD13DDA4C0A /* GalleryPagingPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalleryPagingPolicy.swift; sourceTree = "<group>"; };
+		29CE098121A46EC93AF33C1B /* G7AppConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = G7AppConfigurationTests.swift; sourceTree = "<group>"; };
+		2E88F8D8484E3297B907853F /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		318270A94F521C0FD68C442C /* FilmyCameraApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmyCameraApp.swift; sourceTree = "<group>"; };
+		31F87AEEFDAA150FD749E12D /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
+		3F9E7101D9123875FE8E8F39 /* G7CameraTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = G7CameraTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		40AE072359A989B8D263E32A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		473C52652BED283FF3563438 /* G7DateStampRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = G7DateStampRendererTests.swift; sourceTree = "<group>"; };
+		4878BAA3BD1EC783B0B3F45F /* ReviewComparisonState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewComparisonState.swift; sourceTree = "<group>"; };
+		513E4F72E7CFFCA116025FEF /* CameraScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraScreen.swift; sourceTree = "<group>"; };
+		5BB9A192ED60B4535E6E53B4 /* PhotoOutputEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoOutputEncoder.swift; sourceTree = "<group>"; };
+		6853DA1B629893934D925844 /* G7DateStampRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = G7DateStampRenderer.swift; sourceTree = "<group>"; };
+		6AB7799F81B5EC947B7B636C /* FilmRecipe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmRecipe.swift; sourceTree = "<group>"; };
+		6CFA23324879BE9432F4E4B7 /* PhotoPrintCompositor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoPrintCompositor.swift; sourceTree = "<group>"; };
+		70EADF6B8693F5B1968A8078 /* G7CameraUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = G7CameraUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		75E102386A11A39206410AF0 /* CameraViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraViewModel.swift; sourceTree = "<group>"; };
+		7EAEF930DC0C4192490C5A20 /* PhotoFinish.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoFinish.swift; sourceTree = "<group>"; };
+		82C9856AC400CD3C638E1742 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		832932A26AEACA4C86113331 /* G7Camera.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = G7Camera.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		8CB1383B4C6F74C762B67911 /* ManualCameraControlsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualCameraControlsView.swift; sourceTree = "<group>"; };
+		97D939F7CCEED4B2DB9CAC7E /* FilteredCameraPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilteredCameraPreview.swift; sourceTree = "<group>"; };
+		9C22CE4C4072959DEDE38015 /* FilmyCaptureDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmyCaptureDiagnostics.swift; sourceTree = "<group>"; };
+		9F24865F055EBABD9EB93AEB /* FilmRecipeReferenceCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmRecipeReferenceCatalog.swift; sourceTree = "<group>"; };
+		A16448E80962AF4DBA41699C /* GalleryScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalleryScreen.swift; sourceTree = "<group>"; };
+		AB9A8DB4F989AB51AC801700 /* CaptureReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureReviewView.swift; sourceTree = "<group>"; };
+		B3F41F0C2EB9755176C6C767 /* CompositionAssistStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompositionAssistStore.swift; sourceTree = "<group>"; };
+		B9DFB93D48E03003D53CB90F /* FilmRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmRenderer.swift; sourceTree = "<group>"; };
+		D4104B66BBD5555F6E9A1274 /* PhotoLibraryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibraryService.swift; sourceTree = "<group>"; };
+		D48AF5867CF97443891CE9E5 /* G7CameraControlDeck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = G7CameraControlDeck.swift; sourceTree = "<group>"; };
+		E31C985FD2F8C86A9E9A6776 /* HistogramPlacement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistogramPlacement.swift; sourceTree = "<group>"; };
+		F5A3A5FB0F110CC1D03373F0 /* FilmyIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilmyIdentity.swift; sourceTree = "<group>"; };
+		FFE08FFEB4C7D2D716CC9FA7 /* RecipePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipePickerView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		140328C178807929ECA7E480 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				1ACA54C6B662439A1DADE056 /* CameraFrameLayout.swift */,
+				0CB1F86BF7175A31BFC61A8D /* CameraService.swift */,
+				B3F41F0C2EB9755176C6C767 /* CompositionAssistStore.swift */,
+				B9DFB93D48E03003D53CB90F /* FilmRenderer.swift */,
+				9C22CE4C4072959DEDE38015 /* FilmyCaptureDiagnostics.swift */,
+				6853DA1B629893934D925844 /* G7DateStampRenderer.swift */,
+				D4104B66BBD5555F6E9A1274 /* PhotoLibraryService.swift */,
+				5BB9A192ED60B4535E6E53B4 /* PhotoOutputEncoder.swift */,
+				6CFA23324879BE9432F4E4B7 /* PhotoPrintCompositor.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		1775D86B7AE5275FD76D2B34 /* UITests */ = {
+			isa = PBXGroup;
+			children = (
+				266298BCFD02EB88C17D2EA1 /* G7CameraUITests.swift */,
+			);
+			path = UITests;
+			sourceTree = "<group>";
+		};
+		1E59D3025C6A8402DA5AC286 /* filmyCamera-g7x */ = {
+			isa = PBXGroup;
+			children = (
+				AFB5EB1E937D0CB73E9C83A0 /* FilmyCamera */,
+			);
+			name = "filmyCamera-g7x";
+			path = ..;
+			sourceTree = "<group>";
+		};
+		208A8E6D4311B70259EB0BCE /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				05A1CB163DDABFB9EB32B290 /* Assets.xcassets */,
+				2E88F8D8484E3297B907853F /* PrivacyInfo.xcprivacy */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		7782C0AB7107E5EB22AE4188 = {
+			isa = PBXGroup;
+			children = (
+				1E59D3025C6A8402DA5AC286 /* filmyCamera-g7x */,
+				9757493CF88FA75C942C3AC5 /* Tests */,
+				1775D86B7AE5275FD76D2B34 /* UITests */,
+				40AE072359A989B8D263E32A /* Assets.xcassets */,
+				BD644E0E3D49B93BC7E08394 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		9757493CF88FA75C942C3AC5 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				29CE098121A46EC93AF33C1B /* G7AppConfigurationTests.swift */,
+				473C52652BED283FF3563438 /* G7DateStampRendererTests.swift */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		AFB5EB1E937D0CB73E9C83A0 /* FilmyCamera */ = {
+			isa = PBXGroup;
+			children = (
+				D344660E06F715421140EFCC /* Models */,
+				208A8E6D4311B70259EB0BCE /* Resources */,
+				140328C178807929ECA7E480 /* Services */,
+				EE194F5AA0188DF672A002B6 /* ViewModels */,
+				DB1EAEC1E10E6226F2F87D9D /* Views */,
+				17154796D4BB1BF90BAB7209 /* ContentView.swift */,
+				318270A94F521C0FD68C442C /* FilmyCameraApp.swift */,
+			);
+			path = FilmyCamera;
+			sourceTree = "<group>";
+		};
+		BD644E0E3D49B93BC7E08394 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				832932A26AEACA4C86113331 /* G7Camera.app */,
+				3F9E7101D9123875FE8E8F39 /* G7CameraTests.xctest */,
+				70EADF6B8693F5B1968A8078 /* G7CameraUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		D344660E06F715421140EFCC /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				0163D00C37DFAAE80CB09915 /* AppConfiguration.swift */,
+				1DADDD09DC47D3F7E4DF1031 /* CameraManualControls.swift */,
+				2068738D7E7584BFFA9588D5 /* CameraPreviewGesturePolicy.swift */,
+				6AB7799F81B5EC947B7B636C /* FilmRecipe.swift */,
+				9F24865F055EBABD9EB93AEB /* FilmRecipeReferenceCatalog.swift */,
+				27D79C5584E70BD13DDA4C0A /* GalleryPagingPolicy.swift */,
+				E31C985FD2F8C86A9E9A6776 /* HistogramPlacement.swift */,
+				7EAEF930DC0C4192490C5A20 /* PhotoFinish.swift */,
+				4878BAA3BD1EC783B0B3F45F /* ReviewComparisonState.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		DB1EAEC1E10E6226F2F87D9D /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				513E4F72E7CFFCA116025FEF /* CameraScreen.swift */,
+				AB9A8DB4F989AB51AC801700 /* CaptureReviewView.swift */,
+				31F87AEEFDAA150FD749E12D /* Components.swift */,
+				F5A3A5FB0F110CC1D03373F0 /* FilmyIdentity.swift */,
+				97D939F7CCEED4B2DB9CAC7E /* FilteredCameraPreview.swift */,
+				D48AF5867CF97443891CE9E5 /* G7CameraControlDeck.swift */,
+				A16448E80962AF4DBA41699C /* GalleryScreen.swift */,
+				8CB1383B4C6F74C762B67911 /* ManualCameraControlsView.swift */,
+				82C9856AC400CD3C638E1742 /* OnboardingView.swift */,
+				FFE08FFEB4C7D2D716CC9FA7 /* RecipePickerView.swift */,
+				05E84EE67A629E71C4E4519E /* SettingsView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		EE194F5AA0188DF672A002B6 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				75E102386A11A39206410AF0 /* CameraViewModel.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		44FE6547CE2F38B4038E89CD /* G7CameraTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F8C9FF9E985626F7B4CF5976 /* Build configuration list for PBXNativeTarget "G7CameraTests" */;
+			buildPhases = (
+				07636B3909F742FC87A927FC /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				23DC387BBB70809F2DA97BCE /* PBXTargetDependency */,
+			);
+			name = G7CameraTests;
+			packageProductDependencies = (
+			);
+			productName = G7CameraTests;
+			productReference = 3F9E7101D9123875FE8E8F39 /* G7CameraTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		534CABEF788A291E79B6A513 /* G7Camera */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 37C8F2D2955F6AC71714829C /* Build configuration list for PBXNativeTarget "G7Camera" */;
+			buildPhases = (
+				669ED2EB68009D08145B4393 /* Sources */,
+				D026B40600B0D6E4EFEBE7A0 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = G7Camera;
+			packageProductDependencies = (
+			);
+			productName = G7Camera;
+			productReference = 832932A26AEACA4C86113331 /* G7Camera.app */;
+			productType = "com.apple.product-type.application";
+		};
+		CFE18B340E43A518EE0D6F20 /* G7CameraUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6CEDE901D48F8959024A2112 /* Build configuration list for PBXNativeTarget "G7CameraUITests" */;
+			buildPhases = (
+				13ADD8300FD326A6F2F65C77 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				1D4FF92560C36F496ADC2E9E /* PBXTargetDependency */,
+			);
+			name = G7CameraUITests;
+			packageProductDependencies = (
+			);
+			productName = G7CameraUITests;
+			productReference = 70EADF6B8693F5B1968A8078 /* G7CameraUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		1A1A761709DA96406C33C37C /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					44FE6547CE2F38B4038E89CD = {
+						DevelopmentTeam = 6ALSCF5GBV;
+						ProvisioningStyle = Automatic;
+					};
+					534CABEF788A291E79B6A513 = {
+						DevelopmentTeam = 6ALSCF5GBV;
+						ProvisioningStyle = Automatic;
+					};
+					CFE18B340E43A518EE0D6F20 = {
+						DevelopmentTeam = 6ALSCF5GBV;
+						ProvisioningStyle = Automatic;
+						TestTargetID = 534CABEF788A291E79B6A513;
+					};
+				};
+			};
+			buildConfigurationList = 096952B4BF90865BF890289E /* Build configuration list for PBXProject "G7Camera" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 7782C0AB7107E5EB22AE4188;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = BD644E0E3D49B93BC7E08394 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				534CABEF788A291E79B6A513 /* G7Camera */,
+				44FE6547CE2F38B4038E89CD /* G7CameraTests */,
+				CFE18B340E43A518EE0D6F20 /* G7CameraUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		D026B40600B0D6E4EFEBE7A0 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E69171BB5F4343D2593EF2DA /* Assets.xcassets in Resources */,
+				5EE2FD7832A3240A56E30A9C /* Assets.xcassets in Resources */,
+				4ECEB35C64C769BBD4F95771 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		07636B3909F742FC87A927FC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E276A432FDA89A68E25AB7A3 /* G7AppConfigurationTests.swift in Sources */,
+				7B42C9F141A7B767E73CD986 /* G7DateStampRendererTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		13ADD8300FD326A6F2F65C77 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3A9FC63583FBD8F0CB7EEA4B /* G7CameraUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		669ED2EB68009D08145B4393 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D0949DF6724909F73846F3E8 /* AppConfiguration.swift in Sources */,
+				598C1316774F18424F59A209 /* CameraFrameLayout.swift in Sources */,
+				D4EAE0A2D117D8552529FAF2 /* CameraManualControls.swift in Sources */,
+				66480D4833DFA2CD4A00B311 /* CameraPreviewGesturePolicy.swift in Sources */,
+				1937DD6C46DC4146D6C5A4DB /* CameraScreen.swift in Sources */,
+				C664D41295B99D9C6AD4E5D2 /* CameraService.swift in Sources */,
+				849D502A65EC7FF444359D5D /* CameraViewModel.swift in Sources */,
+				2D8FC11AA9FE6E1256940AA7 /* CaptureReviewView.swift in Sources */,
+				99A59B981B5623D0A2DB91A9 /* Components.swift in Sources */,
+				7DD59D00D0FD0A7E4F766CA9 /* CompositionAssistStore.swift in Sources */,
+				428B6DAC0E5DCE8A6076589B /* ContentView.swift in Sources */,
+				EE766D3D6CD666457C4996A5 /* FilmRecipe.swift in Sources */,
+				3C5E9DFFC76EBDC51361FF63 /* FilmRecipeReferenceCatalog.swift in Sources */,
+				0B304A6E6CA83A8BD6E117CF /* FilmRenderer.swift in Sources */,
+				69348694DD9013FBE6A90429 /* FilmyCameraApp.swift in Sources */,
+				01B17CF55077F62D0C767CE7 /* FilmyCaptureDiagnostics.swift in Sources */,
+				340E8D7F666137A1B1D7D1A4 /* FilmyIdentity.swift in Sources */,
+				7616A5A039FA51BC4D243A28 /* FilteredCameraPreview.swift in Sources */,
+				3EC86E698EA3B32D16AF5045 /* G7CameraControlDeck.swift in Sources */,
+				3ABF31B073A8F69CD722B58D /* G7DateStampRenderer.swift in Sources */,
+				A5EBD874C33A97EEFE1266B0 /* GalleryPagingPolicy.swift in Sources */,
+				52B3FF1447B9CBEE1983189E /* GalleryScreen.swift in Sources */,
+				D63FDB6094423B3957A0232C /* HistogramPlacement.swift in Sources */,
+				46BB502B04684F322D6E41BE /* ManualCameraControlsView.swift in Sources */,
+				EA65A217334F00483D1C4E4F /* OnboardingView.swift in Sources */,
+				D58DC7A37DA028991D5BC317 /* PhotoFinish.swift in Sources */,
+				C33E8A6D018817E36E0925B3 /* PhotoLibraryService.swift in Sources */,
+				D338ACBB24E8E7A132200725 /* PhotoOutputEncoder.swift in Sources */,
+				90B5B5BE8861F94BD3138544 /* PhotoPrintCompositor.swift in Sources */,
+				653D8D5A8749761B52123E1F /* RecipePickerView.swift in Sources */,
+				0939E507DFE1F826C2DA0EF3 /* ReviewComparisonState.swift in Sources */,
+				8787FD65D1E35FCAB48E61DB /* SettingsView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		1D4FF92560C36F496ADC2E9E /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 534CABEF788A291E79B6A513 /* G7Camera */;
+			targetProxy = D8F550C84B50B606FCA62D41 /* PBXContainerItemProxy */;
+		};
+		23DC387BBB70809F2DA97BCE /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 534CABEF788A291E79B6A513 /* G7Camera */;
+			targetProxy = 9FE1F966593660BD3DC61BA1 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		128D6EC73D62391D15C7BB55 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.dheeraj.g7camera.tests;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) G7_APP";
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/G7Camera.app/G7Camera";
+			};
+			name = Debug;
+		};
+		15AD802B43D359A48C00736F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 6ALSCF5GBV;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = minimal;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		1990883CB52AD2FC924C8BAB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.dheeraj.g7camera.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = G7Camera;
+			};
+			name = Release;
+		};
+		347F05FEE2DE4D1BF7557D31 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dheeraj.g7camera;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) G7_APP";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		58D270039F02682A68C89E37 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 6ALSCF5GBV;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_STRICT_CONCURRENCY = minimal;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		82733A423A6F4E69D303B549 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dheeraj.g7camera;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) G7_APP";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		9727BBF275A2968E8B3EAF09 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.dheeraj.g7camera.tests;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) G7_APP";
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/G7Camera.app/G7Camera";
+			};
+			name = Release;
+		};
+		E26BBAFD8E0A39F4E258030C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.dheeraj.g7camera.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = G7Camera;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		096952B4BF90865BF890289E /* Build configuration list for PBXProject "G7Camera" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				15AD802B43D359A48C00736F /* Debug */,
+				58D270039F02682A68C89E37 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		37C8F2D2955F6AC71714829C /* Build configuration list for PBXNativeTarget "G7Camera" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				82733A423A6F4E69D303B549 /* Debug */,
+				347F05FEE2DE4D1BF7557D31 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		6CEDE901D48F8959024A2112 /* Build configuration list for PBXNativeTarget "G7CameraUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E26BBAFD8E0A39F4E258030C /* Debug */,
+				1990883CB52AD2FC924C8BAB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F8C9FF9E985626F7B4CF5976 /* Build configuration list for PBXNativeTarget "G7CameraTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				128D6EC73D62391D15C7BB55 /* Debug */,
+				9727BBF275A2968E8B3EAF09 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 1A1A761709DA96406C33C37C /* Project object */;
+}

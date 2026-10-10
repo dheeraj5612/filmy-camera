@@ -115,8 +115,8 @@ final class FilmyCameraUITests: XCTestCase {
         exposure.tap()
         let iso = app.sliders["manual-iso-slider"]
         XCTAssertTrue(iso.waitForExistence(timeout: 8))
-        scrollToHittable(iso, in: app)
         XCTAssertTrue(waitUntil(timeout: 5, condition: { iso.isEnabled }))
+        scrollToHittable(iso, in: app)
         iso.adjust(toNormalizedSliderPosition: 0.25)
         XCTAssertTrue(waitUntil(timeout: 5, condition: { iso.isEnabled }))
         let whiteBalanceSection = app.buttons["manual-section-whiteBalance"]
@@ -1422,7 +1422,10 @@ final class FilmyCameraUITests: XCTestCase {
         // the accessibility tree. Scroll the active Pro sheet explicitly.
         let manualControlsScroll = app.scrollViews["manual-controls-scroll"]
         let scrollView = manualControlsScroll.exists ? manualControlsScroll : app.scrollViews.firstMatch
-        for _ in 0..<20 {
+        for attempt in 0..<20 {
+            if manualControlsScroll.exists, element.elementType == .slider {
+                print("Pro scroll attempt \(attempt): exists=\(element.exists) enabled=\(element.isEnabled) hittable=\(element.isHittable) control=\(element.frame) scroll=\(scrollView.frame) app=\(app.frame)")
+            }
             if element.exists, element.isHittable {
                 let viewport = scrollView.exists ? scrollView.frame.intersection(app.frame) : app.frame
                 // A partly exposed button can report hittable while its center
@@ -1441,6 +1444,13 @@ final class FilmyCameraUITests: XCTestCase {
             } else {
                 (scrollView.exists ? scrollView : app).swipeUp(velocity: .slow)
             }
+        }
+        if !element.exists || !element.isHittable {
+            attachScreenshot(named: "scroll-control-unreachable")
+            let diagnostic = XCTAttachment(string: app.debugDescription)
+            diagnostic.name = "Unreachable control hierarchy: \(element.identifier)"
+            diagnostic.lifetime = .keepAlways
+            add(diagnostic)
         }
         XCTAssertTrue(element.exists && element.isHittable, "The requested control must scroll into view")
     }

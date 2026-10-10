@@ -142,7 +142,7 @@ enum PhotoLibraryServiceError: LocalizedError, Sendable {
         case .accessDenied:
             return "Photos access is needed to manage this frame. Enable it in Settings, then try again."
         case .notOwned:
-            return "Filmy Camera can only remove frames that it created. This frame was left in Photos."
+            return "\(AppConfiguration.displayName) can only remove frames that it created. This frame was left in Photos."
         case .changeFailed:
             return "Photos could not update this frame. Try again in a moment."
         }
@@ -158,7 +158,7 @@ enum PhotoLibrarySaveError: LocalizedError, Equatable, Sendable {
         case .accessDenied:
             return "Photo access is needed to save this frame. Enable Photos access in Settings, then try again."
         case .writeFailed:
-            return "Photos could not save this frame. Keep Filmy Camera open and retry the save in a moment."
+            return "Photos could not save this frame. Keep \(AppConfiguration.displayName) open and retry the save in a moment."
         }
     }
 
@@ -470,7 +470,7 @@ final class PhotoLibraryService: ObservableObject {
     @Published private(set) var addOnlyAuthorizationStatus: PHAuthorizationStatus
     @Published private(set) var isLoading = false
 
-    private let albumTitle = "Filmy Camera"
+    private let albumTitle = AppConfiguration.displayName
     private let savedFrameMetadataKey = "filmyCamera.savedFrameMetadata"
     private nonisolated static let savedFrameResourcesKey = "filmyCamera.savedFrameResources"
     private var savedFrameResourcesKey: String { Self.savedFrameResourcesKey }

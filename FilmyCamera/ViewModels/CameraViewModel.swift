@@ -107,7 +107,7 @@ final class CameraViewModel: ObservableObject {
 #if DEBUG
     @Published private(set) var captureTimingStatus = "idle"
 #endif
-    nonisolated static let defaultRecipeID = "g7x-compact"
+    nonisolated static let defaultRecipeID = AppConfiguration.defaultRecipeID
 
     private static let builtInRecipesByID = Dictionary(
         uniqueKeysWithValues: FilmRecipe.builtIns.map { ($0.id, $0) }
@@ -121,7 +121,7 @@ final class CameraViewModel: ObservableObject {
     /// the actual first look, including a customized color cube.
     nonisolated static func launchRecipe(defaults: UserDefaults = .standard) -> FilmRecipe {
         let storedID = defaults.string(forKey: selectedRecipeIDKey) ?? defaultRecipeID
-        let base = FilmRecipe.builtIns.first { $0.id == storedID }
+        let base = FilmRecipe.builtIns.first { $0.id == storedID && AppConfiguration.isRecipeAllowed($0.id) }
             ?? FilmRecipe.builtIns.first { $0.id == defaultRecipeID }
             ?? FilmRecipe.builtIns[0]
         guard let saved = decodeRecipeOverrides(from: defaults.data(forKey: recipeOverridesKey))
@@ -184,13 +184,35 @@ final class CameraViewModel: ObservableObject {
         let data: Data
         let capturedAt: Date
         let mode: Mode
+        /// Frozen at shutter/import time so later preference or timezone
+        /// changes cannot make review and export disagree.
+        let dateStampEnabled: Bool
+        let dateStampText: String?
         let normalizedSubjectRegions: [CGRect]?
+
+        init(
+            data: Data,
+            capturedAt: Date,
+            mode: Mode,
+            dateStampEnabled: Bool = false,
+            dateStampText: String? = nil,
+            normalizedSubjectRegions: [CGRect]? = nil
+        ) {
+            self.data = data
+            self.capturedAt = capturedAt
+            self.mode = mode
+            self.dateStampEnabled = dateStampEnabled
+            self.dateStampText = dateStampText
+            self.normalizedSubjectRegions = normalizedSubjectRegions
+        }
 
         func storing(normalizedSubjectRegions: [CGRect]?) -> Self {
             Self(
                 data: data,
                 capturedAt: capturedAt,
                 mode: mode,
+                dateStampEnabled: dateStampEnabled,
+                dateStampText: dateStampText,
                 normalizedSubjectRegions: normalizedSubjectRegions
             )
         }
@@ -266,7 +288,7 @@ final class CameraViewModel: ObservableObject {
 
     /// New installs and unknown persisted selections land on the G7 X profile.
     private static let fallbackRecipeID = CameraViewModel.defaultRecipeID
-    private static let validRecipeIDs = Set(FilmRecipe.builtIns.map(\.id))
+    private static let validRecipeIDs = Set(FilmRecipe.builtIns.map(\.id).filter(AppConfiguration.isRecipeAllowed))
 
     private let defaults: UserDefaults
 
@@ -352,6 +374,9 @@ final class CameraViewModel: ObservableObject {
         )
         var migratedRecipes: [String: FilmRecipe] = [:]
         for savedRecipe in decoded.recipes.values {
+            guard AppConfiguration.isRecipeAllowed(savedRecipe.id) else {
+                continue
+            }
             guard let parent = Self.builtInRecipesByID[savedRecipe.id] else {
                 continue
             }
@@ -466,11 +491,12 @@ final class CameraViewModel: ObservableObject {
     /// the same effective values. Returning resolved overrides here prevents
     /// a customized look from being represented by a stale stock thumbnail.
     var recipes: [FilmRecipe] {
-        FilmRecipe.builtIns.map { recipe(for: $0.id) }
+        FilmRecipe.builtIns.filter { Self.validRecipeIDs.contains($0.id) }.map { recipe(for: $0.id) }
     }
 
     func recipe(for id: String) -> FilmRecipe {
-        recipeOverrides[id]
+        guard Self.validRecipeIDs.contains(id) else { return Self.defaultRecipe }
+        return recipeOverrides[id]
             ?? Self.builtInRecipesByID[id]
             ?? Self.defaultRecipe
     }
@@ -481,10 +507,12 @@ final class CameraViewModel: ObservableObject {
     }
 
     func originalRecipe(for id: String) -> FilmRecipe {
-        Self.builtInRecipesByID[id] ?? Self.defaultRecipe
+        guard Self.validRecipeIDs.contains(id) else { return Self.defaultRecipe }
+        return Self.builtInRecipesByID[id] ?? Self.defaultRecipe
     }
 
     func update(recipe: FilmRecipe) {
+        guard Self.validRecipeIDs.contains(recipe.id) else { return }
         guard let parent = FilmRecipe.builtIns.first(where: {
             $0.id == recipe.id
         }) else {
@@ -499,6 +527,7 @@ final class CameraViewModel: ObservableObject {
     }
 
     func reset(recipeID: String) {
+        guard Self.validRecipeIDs.contains(recipeID) else { return }
         guard recipeOverrides.removeValue(forKey: recipeID) != nil else { return }
         persistRecipeOverrides()
     }
@@ -544,6 +573,11 @@ final class CameraViewModel: ObservableObject {
             )
         }
         let grainSeed = camera.previewGrainSeed
+        // Freeze both pieces of user-facing stamp state for this capture. The
+        // rendered JPEG and every later source-based re-render must agree even
+        // if the setting or device timezone changes while capture completes.
+        let dateStampEnabled = G7DateStampPreferences.isEnabled(in: defaults)
+        let dateStampTimeZone = TimeZone.current
 #if DEBUG
         let captureStartedAt = ContinuousClock.now
         if ProcessInfo.processInfo.arguments.contains("-ui-testing") { captureTimingStatus = "requested" }
@@ -566,6 +600,13 @@ final class CameraViewModel: ObservableObject {
                     return
                 }
 
+                let dateStampText = dateStampEnabled
+                    ? G7DateStampRenderer.dateText(
+                        for: capturedPhoto.capturedAt,
+                        timeZone: dateStampTimeZone
+                    )
+                    : nil
+
                 // The camera stays live. Rendering and Photos IO must not
                 // stop the session or present a Retake/Save interstitial.
                 // Keep the Photos saver on the main actor; only the render
@@ -580,6 +621,8 @@ final class CameraViewModel: ObservableObject {
                             capturedAt: capturedPhoto.capturedAt,
                             flashFired: capturedPhoto.flashFired,
                             grainSeed: grainSeed,
+                            dateStampEnabled: dateStampEnabled,
+                            dateStampText: dateStampText,
                             finish: finish
                         )
                     }
@@ -710,6 +753,8 @@ final class CameraViewModel: ObservableObject {
             data: data,
             capturedAt: importedAt,
             mode: .photoLibrary,
+            dateStampEnabled: false,
+            dateStampText: nil,
             normalizedSubjectRegions: renderedPhoto.normalizedSubjectRegions
         )
         fullResolutionReviewRecipe = recipe
@@ -1058,6 +1103,8 @@ final class CameraViewModel: ObservableObject {
         flashFired: Bool,
         grainSeed: UInt32,
         normalizedSubjectRegions: [CGRect]? = nil,
+        dateStampEnabled: Bool = false,
+        dateStampText: String? = nil,
         finish: PhotoFinish = .photo
     ) -> RenderedPhoto? {
         // Resolve the source image's EXIF orientation before applying the
@@ -1125,8 +1172,13 @@ final class CameraViewModel: ObservableObject {
             grainSeed: grainSeed,
             grainPhase: grainPhase
         )
-        guard let finished = PhotoPrintCompositor.composedImage(filtered, finish: finish),
-              let output = FilmRenderer.outputCGImage(finished, from: finished.extent) else { return nil }
+        guard let finished = PhotoPrintCompositor.composedImage(filtered, finish: finish) else { return nil }
+        let stamped = G7DateStampRenderer.applyingStamp(
+            to: finished,
+            text: dateStampText,
+            enabled: dateStampEnabled
+        )
+        guard let output = FilmRenderer.outputCGImage(stamped, from: stamped.extent) else { return nil }
         guard let data = PhotoOutputEncoder.jpegData(
             for: output,
             sourceData: sourceData,
@@ -1263,6 +1315,8 @@ final class CameraViewModel: ObservableObject {
                 flashFired: flashFired,
                 grainSeed: grainSeed,
                 normalizedSubjectRegions: source.normalizedSubjectRegions,
+                dateStampEnabled: source.dateStampEnabled,
+                dateStampText: source.dateStampText,
                 finish: finish
             )
         case .photoLibrary:
@@ -1337,9 +1391,14 @@ final class CameraViewModel: ObservableObject {
             grainPhase: grainPhase
         )
         guard let finished = PhotoPrintCompositor.composedImage(filtered, finish: finish) else { return nil }
+        let stamped = G7DateStampRenderer.applyingStamp(
+            to: finished,
+            text: source.dateStampText,
+            enabled: source.dateStampEnabled
+        )
         // Bound the entire display composition, including paper. Save always
         // renders from the original at native photo dimensions.
-        let display = boundedReviewPreviewInput(finished)
+        let display = boundedReviewPreviewInput(stamped)
         guard let output = FilmRenderer.outputCGImage(display, from: display.extent) else {
             return nil
         }

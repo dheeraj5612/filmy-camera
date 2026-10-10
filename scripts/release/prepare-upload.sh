@@ -8,12 +8,14 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root_dir="$(cd "${script_dir}/../.." && pwd)"
-bundle_id="com.dheeraj.filmycamera"
-project_spec="${root_dir}/project.yml"
+# shellcheck source=app-config.sh
+source "${root_dir}/scripts/release/app-config.sh"
+bundle_id="${release_app_bundle_id}"
+project_spec="${release_app_project_spec}"
 team_id="$(sed -n 's/^[[:space:]]*DEVELOPMENT_TEAM:[[:space:]]*\([^[:space:]]*\)[[:space:]]*$/\1/p' "${project_spec}" | head -n 1)"
 
-archive_path="${FILMY_ARCHIVE_PATH:-${root_dir}/build/FilmyCamera.xcarchive}"
-export_path="${FILMY_EXPORT_PATH:-${root_dir}/build/export}"
+archive_path="${FILMY_ARCHIVE_PATH:-${release_app_archive_default}}"
+export_path="${FILMY_EXPORT_PATH:-${release_app_export_default}}"
 asc_key_id="${FILMY_ASC_KEY_ID:-}"
 asc_issuer_id="${FILMY_ASC_ISSUER_ID:-}"
 asc_key_path="${FILMY_ASC_KEY_PATH:-}"
@@ -42,8 +44,8 @@ Modes:
   --upload                        Export an IPA, then upload it with Transporter.
 
 Options:
-  --archive PATH                  Release archive (default: build/FilmyCamera.xcarchive).
-  --export-path PATH              Empty export directory (default: build/export).
+  --archive PATH                  Release archive for the selected app variant.
+  --export-path PATH              Empty export directory for the selected app variant.
   --allow-provisioning-updates    Explicitly allow Xcode to contact Apple during export.
   -h, --help                      Show this help.
 
@@ -53,6 +55,8 @@ Upload credentials are read only from these environment variables:
   FILMY_ASC_KEY_PATH               An unencrypted .p8 file outside this repository.
 
 No credential values are printed. --check never exports, contacts Apple, or uploads.
+FILMY_APP_VARIANT may be filmy (default) or g7 to select the archive, IPA, and
+App Store media paths.
 EOF
 }
 
@@ -149,8 +153,12 @@ run_project_preflight() {
 }
 
 run_store_metadata_preflight() {
-  "${script_dir}/validate-store-metadata.sh" --final
-  "${script_dir}/validate-store-media.sh"
+  "${script_dir}/validate-store-metadata.sh" --final "${release_app_store_metadata_path}"
+  if [[ "${release_app_variant}" == "g7" ]]; then
+    "${script_dir}/validate-g7-media.sh"
+  else
+    "${script_dir}/validate-store-media.sh"
+  fi
 }
 
 has_distribution_identity() {
@@ -376,7 +384,7 @@ prepare_export() {
     return 1
   fi
 
-  ipa_path="${export_path}/FilmyCamera.ipa"
+  ipa_path="${export_path}/${release_app_bundle_name}.ipa"
   validate_exported_ipa "${ipa_path}"
   echo "Release IPA export prepared"
   echo "  bundle: ${bundle_id}"

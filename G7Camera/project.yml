@@ -1,0 +1,89 @@
+name: G7Camera
+
+options:
+  bundleIdPrefix: com.dheeraj
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: minimal
+    TARGETED_DEVICE_FAMILY: "1"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: 6ALSCF5GBV
+    SUPPORTS_MACCATALYST: NO
+
+targets:
+  G7Camera:
+    type: application
+    platform: iOS
+    sources:
+      - path: ../FilmyCamera
+        excludes:
+          - Info.plist
+          - Resources/Assets.xcassets/AppIcon.appiconset
+      - path: Assets.xcassets
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dheeraj.g7camera
+        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "1.0"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) G7_APP"
+        SWIFT_EMIT_LOC_STRINGS: YES
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: G7X Camera
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        NSMotionUsageDescription: G7X Camera uses device orientation only to display the optional horizon level. Motion data is not saved or uploaded.
+        NSCameraUsageDescription: G7X Camera uses the camera to preview and capture photos.
+        NSPhotoLibraryAddUsageDescription: G7X Camera saves finished photos to your Photos library when you take a picture.
+        NSPhotoLibraryUsageDescription: G7X Camera lets you choose existing photos for editing and displays photos saved in the G7X Camera Roll.
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UIRequiresFullScreen: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    scheme:
+      gatherCoverageData: false
+      testTargets:
+        - G7CameraTests
+        - G7CameraUITests
+
+  G7CameraTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+    dependencies:
+      - target: G7Camera
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.dheeraj.g7camera.tests
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) G7_APP"
+
+  G7CameraUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: G7Camera
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.dheeraj.g7camera.uitests
+        TARGETED_DEVICE_FAMILY: "1"

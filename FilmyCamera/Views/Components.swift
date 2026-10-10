@@ -102,11 +102,19 @@ enum FilmyTheme {
     static let tertiary = Color(white: 0.65)
 
     // Signal colors
+    #if G7_APP
+    static let accent = Color(red: 0.388, green: 1.0, blue: 0.604) // #63FF9A
+    static let comparison = Color(red: 0.388, green: 1.0, blue: 0.604)
+    static let accentWarm = Color(red: 0.388, green: 1.0, blue: 0.604)
+    static let filmAccent = Color(red: 0.839, green: 1.0, blue: 0.886) // #D6FFE2
+    static let mint = Color(red: 0.839, green: 1.0, blue: 0.886)
+    #else
     static let accent = Color(red: 1, green: 0.471, blue: 0.329)
     static let comparison = Color(red: 0.416, green: 0.863, blue: 1)
     static let accentWarm = Color(red: 1, green: 0.471, blue: 0.329)
     static let filmAccent = Color(red: 0.855, green: 0.953, blue: 0.396)
     static let mint = Color(red: 0.54, green: 0.92, blue: 0.69)
+    #endif
     static let danger = Color(red: 1, green: 0.43, blue: 0.47)
 
     // Chrome that floats over the live viewfinder
@@ -1320,7 +1328,7 @@ struct PreviewPlaceholder: View {
                         Button(actionTitle, action: action)
                             .buttonStyle(.filmyPrimary)
                             .accessibilityIdentifier(actionTitle == "Open Settings" ? "camera-permission-action" : "camera-recovery-action")
-                            .accessibilityHint(actionTitle == "Open Settings" ? "Opens Filmy Camera permissions" : "Attempts to resume the camera")
+                            .accessibilityHint(actionTitle == "Open Settings" ? "Opens \(AppConfiguration.displayName) permissions" : "Attempts to resume the camera")
                     } else {
                         ProgressView().tint(FilmyTheme.accent)
                     }

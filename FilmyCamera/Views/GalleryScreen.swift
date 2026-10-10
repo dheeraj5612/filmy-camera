@@ -173,7 +173,7 @@ struct GalleryScreen: View {
                     RollEmptyState(
                         systemName: "photo.badge.plus",
                         title: "Give your roll a home",
-                        message: "Allow photo access to show the frames you have made with Filmy Camera.",
+                        message: "Allow photo access to show the frames you have made with \(AppConfiguration.displayName).",
                         actionTitle: "Allow Photos access",
                         action: requestReadAccess
                     )
@@ -182,7 +182,7 @@ struct GalleryScreen: View {
                     RollEmptyState(
                         systemName: "photo.on.rectangle.angled",
                         title: "Your frames will live here",
-                        message: "Photos you take with Filmy Camera save here automatically. You can also import and edit a photo."
+                        message: "Photos you take with \(AppConfiguration.displayName) save here automatically. You can also import and edit a photo."
                     )
                     .padding(.horizontal, FilmyTheme.pageMargin)
                 }
@@ -195,7 +195,7 @@ struct GalleryScreen: View {
                     RollEmptyState(
                         systemName: "photo.on.rectangle.angled",
                         title: "Your selected roll is empty",
-                        message: "Filmy Camera can only show frames saved by Filmy Camera that you allow it to read."
+                        message: "\(AppConfiguration.displayName) can only show frames saved by \(AppConfiguration.displayName) that you allow it to read."
                     )
                     .padding(.horizontal, FilmyTheme.pageMargin)
                 } else {
@@ -226,7 +226,7 @@ struct GalleryScreen: View {
             RollEmptyState(
                 systemName: "photo",
                 title: "Gallery unavailable",
-                message: "Filmy Camera could not read the photo library right now."
+                message: "\(AppConfiguration.displayName) could not read the photo library right now."
             )
             .padding(.horizontal, FilmyTheme.pageMargin)
         }
@@ -264,7 +264,7 @@ struct GalleryScreen: View {
             RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous)
                 .strokeBorder(FilmyTheme.line, lineWidth: 1)
         }
-        .accessibilityHint("Choose which saved Filmy Camera frames can be viewed in the Roll")
+        .accessibilityHint("Choose which saved \(AppConfiguration.displayName) frames can be viewed in the Roll")
         .accessibilityIdentifier("gallery-manage-limited-access")
     }
 
@@ -308,7 +308,7 @@ struct GalleryScreen: View {
                     .foregroundStyle(FilmyTheme.accent)
                     .frame(minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
                     .accessibilityIdentifier("gallery-photos-permission-settings")
-                    .accessibilityHint("Opens Filmy Camera Photos permissions")
+                    .accessibilityHint("Opens \(AppConfiguration.displayName) Photos permissions")
             }
 
             Spacer(minLength: 0)
@@ -823,7 +823,7 @@ private struct GalleryDetailView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This removes the frame from Photos and from your Filmy Camera roll.")
+            Text("This removes the frame from Photos and from your \(AppConfiguration.displayName) roll.")
         }
         .alert(
             "Couldn’t update frame",

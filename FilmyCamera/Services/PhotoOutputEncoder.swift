@@ -127,8 +127,8 @@ enum PhotoOutputEncoder {
         ]
 
         let tiff: [String: Any] = [
-            kCGImagePropertyTIFFSoftware as String: "Filmy Camera",
-            kCGImagePropertyTIFFImageDescription as String: "Filmy Camera • \(recipe.name)"
+            kCGImagePropertyTIFFSoftware as String: AppConfiguration.displayName,
+            kCGImagePropertyTIFFImageDescription as String: "\(AppConfiguration.displayName) • \(recipe.name)"
         ]
         properties[kCGImagePropertyTIFFDictionary as String] = tiff
 

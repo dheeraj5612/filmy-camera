@@ -363,6 +363,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     @Published public private(set) var selectedLensID: String?
     @Published public private(set) var exposureBias: Float = 0
     @Published public private(set) var isFocusExposureLocked = false
+    @Published public private(set) var isLensSmudged = false
     @Published public private(set) var manualControls: CameraManualControls = .unavailable
     @Published public private(set) var previewFrameSize: CGSize = .zero
     @Published public private(set) var previewViewportSize: CGSize = .zero
@@ -456,6 +457,9 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private var sessionObservers: [NSObjectProtocol] = []
     private var activeConstituentObservation: NSKeyValueObservation?
     private var observedVirtualDeviceID: String?
+    private var lensSmudgeObservation: NSKeyValueObservation?
+    private var observedLensSmudgeDeviceID: String?
+    private var lensSmudgeObservationToken = UUID()
     private var previewRotationAngleState: CGFloat = 90
     private var captureRotationAngleState: CGFloat = 90
     private var rotationCoordinatorToken = UUID()
@@ -2203,6 +2207,10 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             restoreContinuousFocusExposureOnQueue(for: device)
             reapplyDesiredManualControlsOnQueue(for: device)
             configureOrientation()
+            session.beginConfiguration()
+            configureLensSmudgeDetectionOnQueue(for: device)
+            session.commitConfiguration()
+            installLensSmudgeObservationOnQueue(for: device)
             session.startRunning()
             publishStartOutcomeOnQueue(running: session.isRunning)
             return
@@ -2270,9 +2278,11 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         session.addOutput(photoOutput)
         photoOutput.maxPhotoQualityPrioritization = .quality
         configurePhotoDimensions(for: device)
+        configureLensSmudgeDetectionOnQueue(for: device)
         session.commitConfiguration()
 
         installRotationCoordinatorOnQueue(for: device)
+        installLensSmudgeObservationOnQueue(for: device)
         configureCaptureCapabilitiesOnQueue(for: device)
         configureStartupLensOnQueue(for: device)
         refreshCameraInventoryOnQueue(for: device)
@@ -2349,6 +2359,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         isApplyingManualExposure = false
         isApplyingManualWhiteBalance = false
         isApplyingManualFocus = false
+        resetLensSmudgeObservationOnQueue()
         session.beginConfiguration()
         for input in session.inputs {
             session.removeInput(input)
@@ -2365,6 +2376,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
 
     private func resetSessionGraphOnQueue(pendingCaptureStatus: String) {
         cancelPendingPhotoOnQueue(status: pendingCaptureStatus)
+        resetLensSmudgeObservationOnQueue()
         activeConstituentObservation?.invalidate()
         activeConstituentObservation = nil
         observedVirtualDeviceID = nil
@@ -2420,7 +2432,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
              Reason.audioDeviceInUseByAnotherClient.rawValue:
             return "Another app is using the camera."
         case Reason.videoDeviceNotAvailableWithMultipleForegroundApps.rawValue:
-            return "Camera paused while multitasking. Make Filmy Camera full screen to continue."
+            return "Camera paused while multitasking. Make \(AppConfiguration.displayName) full screen to continue."
         case Reason.videoDeviceNotAvailableDueToSystemPressure.rawValue:
             return "Camera paused until the device cools down."
         default:
@@ -2791,6 +2803,81 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         publishStatus("\(option.title) lens ready")
     }
 
+    /// Opts into AVFoundation's advisory lens smudge detector while the
+    /// session graph is being configured. The caller owns the surrounding
+    /// beginConfiguration/commitConfiguration pair so enabling it is always
+    /// completed before a new session starts or an input switch commits.
+    private func configureLensSmudgeDetectionOnQueue(for device: AVCaptureDevice) {
+#if compiler(>=6.2)
+        guard #available(iOS 26.0, *),
+              device.activeFormat.isCameraLensSmudgeDetectionSupported else {
+            resetLensSmudgeObservationOnQueue()
+            return
+        }
+
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+            device.setCameraLensSmudgeDetectionEnabled(
+                true,
+                detectionInterval: CMTime(seconds: 60, preferredTimescale: 1)
+            )
+        } catch {
+            // Smudge detection is advisory; a device refusing this optional
+            // configuration must not affect capture readiness.
+            resetLensSmudgeObservationOnQueue()
+        }
+#else
+        resetLensSmudgeObservationOnQueue()
+#endif
+    }
+
+    /// Observes only the currently configured device. KVO can deliver a
+    /// callback after invalidation, so both the device ID and generation token
+    /// are checked again on sessionQueue before publishing to the main queue.
+    private func installLensSmudgeObservationOnQueue(for device: AVCaptureDevice) {
+#if compiler(>=6.2)
+        guard #available(iOS 26.0, *),
+              device.activeFormat.isCameraLensSmudgeDetectionSupported,
+              device.isCameraLensSmudgeDetectionEnabled else {
+            resetLensSmudgeObservationOnQueue()
+            return
+        }
+
+        lensSmudgeObservation?.invalidate()
+        let token = UUID()
+        lensSmudgeObservationToken = token
+        let deviceID = device.uniqueID
+        observedLensSmudgeDeviceID = deviceID
+        lensSmudgeObservation = device.observe(
+            \AVCaptureDevice.cameraLensSmudgeDetectionStatus,
+            options: [.initial, .new]
+        ) { [weak self] _, change in
+            guard let status = change.newValue else { return }
+            self?.sessionQueue.async { [weak self] in
+                guard let self,
+                      self.lensSmudgeObservationToken == token,
+                      self.observedLensSmudgeDeviceID == deviceID,
+                      let activeDevice = self.activeDevice(),
+                      activeDevice.uniqueID == deviceID else {
+                    return
+                }
+                self.publishLensSmudged(status == .smudged)
+            }
+        }
+#else
+        resetLensSmudgeObservationOnQueue()
+#endif
+    }
+
+    private func resetLensSmudgeObservationOnQueue() {
+        lensSmudgeObservation?.invalidate()
+        lensSmudgeObservation = nil
+        observedLensSmudgeDeviceID = nil
+        lensSmudgeObservationToken = UUID()
+        publishLensSmudged(false)
+    }
+
     @discardableResult
     private func setZoomOnQueue(_ factor: CGFloat) -> Bool {
         guard let device = activeDevice() else { return false }
@@ -2907,6 +2994,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
 
         let oldInput = session.inputs.compactMap { $0 as? AVCaptureDeviceInput }.first
+        resetLensSmudgeObservationOnQueue()
         session.beginConfiguration()
         if let oldInput {
             session.removeInput(oldInput)
@@ -2920,6 +3008,9 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             } else {
                 restoredPreviousInput = false
             }
+            if restoredPreviousInput, let oldDevice = oldInput?.device {
+                configureLensSmudgeDetectionOnQueue(for: oldDevice)
+            }
             session.commitConfiguration()
 
             if Self.shouldResetSessionGraphAfterFailedInputReplacement(
@@ -2928,6 +3019,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 resetSessionGraphOnQueue(
                     pendingCaptureStatus: "Camera needs to be reopened."
                 )
+            } else if restoredPreviousInput, let oldDevice = oldInput?.device {
+                installLensSmudgeObservationOnQueue(for: oldDevice)
             }
             return false
         }
@@ -2940,8 +3033,10 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         isApplyingManualFocus = false
         configurePhotoDimensions(for: device)
         configureOrientation()
+        configureLensSmudgeDetectionOnQueue(for: device)
         session.commitConfiguration()
         installRotationCoordinatorOnQueue(for: device)
+        installLensSmudgeObservationOnQueue(for: device)
         return true
     }
 
@@ -3825,6 +3920,13 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         publishOnMain { [weak self] in
             guard let self, self.isFocusExposureLocked != locked else { return }
             self.isFocusExposureLocked = locked
+        }
+    }
+
+    private func publishLensSmudged(_ smudged: Bool) {
+        publishOnMain { [weak self] in
+            guard let self, self.isLensSmudged != smudged else { return }
+            self.isLensSmudged = smudged
         }
     }
 
