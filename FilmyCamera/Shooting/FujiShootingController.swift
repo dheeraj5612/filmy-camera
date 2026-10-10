@@ -64,7 +64,13 @@ final class FujiShootingController: ObservableObject {
     private nonisolated(unsafe) var memoryObserver: NSObjectProtocol?
     private nonisolated(unsafe) var thermalObserver: NSObjectProtocol?
 
-    init(defaults: UserDefaults = .standard, library: FujiCaptureLibrary = .shared) {
+    init(defaults explicitDefaults: UserDefaults? = nil, library: FujiCaptureLibrary = .shared) {
+        let arguments = ProcessInfo.processInfo.arguments
+        let isUITesting = arguments.contains("-ui-testing") || arguments.contains("-ui-testing-real-roll")
+            || arguments.contains("-ui-testing-onboarding")
+        let suite = isUITesting ? ProcessInfo.processInfo.environment["FILMY_TEST_DEFAULTS_SUITE"] : nil
+        let testDefaults = suite.flatMap { $0.hasPrefix("FilmyCameraUITests.") ? UserDefaults(suiteName: $0) : nil }
+        let defaults = explicitDefaults ?? testDefaults ?? .standard
         self.defaults = defaults; self.library = library
         let loaded = FujiPreferences.load(from: defaults)
         preferences = loaded.preferences

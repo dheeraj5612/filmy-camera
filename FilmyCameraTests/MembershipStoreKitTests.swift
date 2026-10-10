@@ -15,8 +15,10 @@ final class MembershipStoreKitTests: XCTestCase {
         return session
     }
 
-    private func store() -> MembershipStore {
-        MembershipStore(persistence: MemoryPhotoQuotaPersistence(), useStoreKitForTesting: true)
+    private func store() async -> MembershipStore {
+        let store = MembershipStore(persistence: MemoryPhotoQuotaPersistence(), useStoreKitForTesting: true)
+        await store.start()
+        return store
     }
 
     private func waitForPremium(_ expected: Bool, in store: MembershipStore) async throws {
@@ -33,7 +35,7 @@ final class MembershipStoreKitTests: XCTestCase {
     func testLocalizedMonthlyProductHasExactlyOneMonthFreeTrial() async throws {
         let session = try session()
         defer { session.clearTransactions() }
-        let store = store()
+        let store = await store()
         await store.refresh()
         await store.loadProduct()
         let product = try XCTUnwrap(store.product)
@@ -49,7 +51,7 @@ final class MembershipStoreKitTests: XCTestCase {
     func testPurchaseUnlocksTrialWithoutConsumingAllowance() async throws {
         let session = try session()
         defer { session.clearTransactions() }
-        let store = store()
+        let store = await store()
         await store.refresh()
         await store.loadProduct()
         await store.purchase()
@@ -64,7 +66,7 @@ final class MembershipStoreKitTests: XCTestCase {
         let session = try session()
         defer { session.clearTransactions() }
         _ = try await session.buyProduct(identifier: MonetizationConfiguration.monthlyProductID)
-        let store = store()
+        let store = await store()
         await store.restore()
         try await waitForPremium(true, in: store)
         XCTAssertTrue(store.isPremium, store.purchaseMessage ?? "Restore did not find purchase")
@@ -74,7 +76,7 @@ final class MembershipStoreKitTests: XCTestCase {
         let session = try session()
         defer { session.clearTransactions() }
         let transaction = try await session.buyProduct(identifier: MonetizationConfiguration.monthlyProductID)
-        let store = store()
+        let store = await store()
         await store.refresh()
         XCTAssertTrue(store.isPremium)
         try session.refundTransaction(identifier: XCTUnwrap(UInt(exactly: transaction.id)))
@@ -87,7 +89,7 @@ final class MembershipStoreKitTests: XCTestCase {
         let session = try session()
         defer { session.clearTransactions() }
         let transaction = try await session.buyProduct(identifier: MonetizationConfiguration.monthlyProductID)
-        let store = store()
+        let store = await store()
         await store.refresh()
         XCTAssertTrue(store.isPremium)
         try session.disableAutoRenewForTransaction(identifier: XCTUnwrap(UInt(exactly: transaction.id)))
@@ -101,7 +103,7 @@ final class MembershipStoreKitTests: XCTestCase {
         let session = try session()
         defer { session.clearTransactions() }
         _ = try await session.buyProduct(identifier: MonetizationConfiguration.monthlyProductID)
-        let store = store()
+        let store = await store()
         await store.loadProduct()
         await store.refresh()
         XCTAssertTrue(store.isTrial)
@@ -123,7 +125,7 @@ final class MembershipStoreKitTests: XCTestCase {
         let session = try session()
         defer { session.clearTransactions() }
         try await session.setSimulatedError(.generic(.notAvailableInStorefront), forAPI: .purchase)
-        let store = store()
+        let store = await store()
         await store.refresh()
         await store.loadProduct()
         await store.purchase()
@@ -135,7 +137,7 @@ final class MembershipStoreKitTests: XCTestCase {
         let session = try session()
         defer { session.clearTransactions() }
         session.askToBuyEnabled = true
-        let store = store()
+        let store = await store()
         await store.refresh()
         await store.loadProduct()
         await store.purchase()

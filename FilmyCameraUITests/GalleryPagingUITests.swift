@@ -218,12 +218,13 @@ final class GalleryPagingUITests: XCTestCase {
     }
 
     private func recipeTileIsSafelyTappable(_ tile: XCUIElement, picker: XCUIElement) -> Bool {
-        guard tile.exists, tile.isHittable else { return false }
+        guard tile.exists else { return false }
         let frame = tile.frame
         let pickerFrame = picker.frame
         guard frame.width > 0, frame.height > 0,
               pickerFrame.width > 0, pickerFrame.height > 0,
-              pickerFrame.contains(CGPoint(x: frame.midX, y: frame.midY)) else {
+              frame.intersection(pickerFrame).intersection(app.frame).width >= 44,
+              frame.intersection(pickerFrame).intersection(app.frame).height >= 44 else {
             return false
         }
         let libraryButton = app.buttons["look-library-open"]
@@ -254,16 +255,10 @@ final class GalleryPagingUITests: XCTestCase {
         }
         XCTAssertTrue(recipeTileIsSafelyTappable(tile, picker: picker),
                       "Recipe \(name) must be selectable inside the recipe picker")
-        tile.tap()
-        guard dismissLookLibraryIfPresented() else { return }
-        let close = app.buttons["recipe-drawer-close"]
-        XCTAssertTrue(close.waitForExistence(timeout: 5), "Recipe picker must expose its close control")
-        guard let close = waitForStableButton("recipe-drawer-close", timeout: 5) else {
-            attachRecipeCloseFailure("recipe-drawer-close-unhittable-\(id)")
-            XCTFail("Recipe picker close control must have a stable on-screen hit target")
-            return
-        }
-        close.tap()
+        let visible = tile.frame.intersection(picker.frame).intersection(app.frame)
+        tile.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: visible.midX - tile.frame.minX,
+                                 dy: visible.midY - tile.frame.minY)).tap()
         XCTAssertTrue(waitUntil(timeout: 5) {
             !app.descendants(matching: .any)["recipe-drawer"].exists
                 && menu.label.contains(name)

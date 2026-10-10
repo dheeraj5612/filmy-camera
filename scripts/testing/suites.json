@@ -75,7 +75,9 @@
     "FilmyCameraTests/ProPhotoEncoderTests": "integration",
     "FilmyCameraTests/OGiPhoneLookTests": "integration",
     "FilmyCameraTests/G7DateStampRendererTests": "integration",
-    "FilmyCameraTests/OGiPhoneLookPreviewTests": "fixtures"
+    "FilmyCameraTests/OGiPhoneLookPreviewTests": "fixtures",
+    "FilmyCameraUITests/PhysicalCaptureFeatureTests": "device",
+    "FilmyCameraUITests/PhysicalFeatureGapTests": "device"
   },
   "overrides": {
     "FilmyCameraUITests/FilmyCameraUITests/testSimulatorFallbackExposesReadableStateWithoutPreviewAction": "simulator-e2e",

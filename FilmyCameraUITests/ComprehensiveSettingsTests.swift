@@ -324,13 +324,19 @@ final class ComprehensiveSettingsTests: XCTestCase {
         let form = app.descendants(matching: .any)["capture-setup-form"]
         let editor = app.descendants(matching: .any)["recipe-detail-scroll"]
         let scroll = form.exists ? form : (editor.exists ? editor : app.scrollViews.firstMatch)
-        for attempt in 0..<22 {
+        // A native iPad Form can require more than one viewport of travel when
+        // keyboard or large-text settings change its content height.
+        for attempt in 0..<40 {
             var viewport = scroll.frame.intersection(app.frame)
             let action = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Apply changes to ' OR label BEGINSWITH 'Done editing '")).firstMatch
             if editor.exists && action.exists {
                 viewport.size.height = max(0, min(viewport.height, action.frame.minY - viewport.minY - 8))
             }
-            if control.exists && (!requireHittable || control.isHittable) && viewport.contains(control.frame) { return control }
+            if control.exists && (!requireHittable || control.isHittable) {
+                // SwiftUI can report a one-pixel edge mismatch between the
+                // hosted collection view and its accessibility frame.
+                if viewport.insetBy(dx: -2, dy: -2).contains(control.frame) { return control }
+            }
             let downward = control.exists && control.frame.midY < viewport.midY
             // Use a measured, bounded movement in the editor's margin. A
             // full-height swipe can jump past a nearby slider and alternate
@@ -350,7 +356,7 @@ final class ComprehensiveSettingsTests: XCTestCase {
                 // an unresolved target gives us no frame from which to infer
                 // the direction. Search from both ends instead of repeatedly
                 // swiping toward the bottom when the target is absent.
-                if attempt < 11 { scroll.swipeDown() } else { scroll.swipeUp() }
+                if attempt < 20 { scroll.swipeDown() } else { scroll.swipeUp() }
             } else if downward { scroll.swipeDown() } else { scroll.swipeUp() }
         }
         let container = form.exists ? "capture-setup-form" : (editor.exists ? "recipe-detail-scroll" : "first scroll view")

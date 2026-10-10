@@ -2,13 +2,13 @@
 
 Status: final
 
-Final listing text for App Store Connect 1.0.2, saved in the version draft. Version 1.0.1 remains publicly available. Build upload, matching screenshots, release acceptance, and submission are still pending; final metadata status does not mean the update has been submitted.
+Finalized local listing text for App Store Connect 1.0.2. Version 1.0.1 remains publicly available. Portal save/readback, build upload, matching screenshots, release acceptance, and submission are still pending; this file does not prove that the metadata is saved or submitted.
 
 ## Listing fields
 
 - **App name:** Filmy Camera: Film Filters
 - **Subtitle:** Retro Photos & Manual Controls
-- **Promotional text:** Find your look with 743 editable film recipes, compact-digital color, manual camera controls, and Instant Print borders. Free, with no account or watermark.
+- **Promotional text:** Find your look with 758 editable film recipes, compact-digital color, manual camera controls, and Instant Print borders. Free, with no account or watermark.
 - **Primary category:** Photo & Video
 - **Secondary category:** Lifestyle
 - **Age rating:** 4+ (no user-generated content, unrestricted web access, or simulated gambling)
@@ -17,12 +17,12 @@ Final listing text for App Store Connect 1.0.2, saved in the version draft. Vers
 
 ## Description
 
-Create film-style photos with 743 editable looks, vintage grain, and manual camera controls. Filmy Camera brings analog-inspired color and compact-digital character to your iPhone and iPad, with no account or watermark.
+Create film-style photos with 758 editable looks, vintage grain, and manual camera controls. Filmy Camera brings analog-inspired color and compact-digital character to your iPhone and iPad, with no account or watermark.
 
 Pick a look, frame it in the live preview, and capture. Your finished photo saves automatically. Or import a photo, compare it with the original, and save your own edit.
 
 MAKE IT YOUR LOOK
-Explore 743 editable looks across 19 recipe packs. Choose which packs and individual looks appear in your quick menu, search your favorites, try the warm G7 X Compact look, and adjust tone, color, white balance, grain, clarity, and vignette. Published recipe settings include source links and notes about their interpretation in Filmy Camera.
+Explore 758 editable looks across 19 recipe packs. Choose which packs and individual looks appear in your quick menu, search your favorites, try the warm G7 X Compact look, and adjust tone, color, white balance, grain, clarity, and vignette. Published recipe settings include source links and notes about their interpretation in Filmy Camera.
 
 TAKE CONTROL
 Use manual ISO, shutter speed, sensor white balance, and focus on supported cameras. Compose with 4:3, square, 3:2, or 16:9 framing, optional guides, a horizon level, live histogram, clipping warnings, and focus peaking. Set a 3-, 5-, or 10-second timer.
@@ -57,7 +57,7 @@ The keyword field uses 98 of Apple's 100 characters. It avoids words already cov
 
 A larger film library and more control over your photos.
 
-- Explore 743 editable looks with recipe packs and quick-menu customization.
+- Explore 758 editable looks with recipe packs and quick-menu customization.
 - Discover scene-aware look suggestions and optional automatic camera adjustments.
 - Refined shooting controls and editing workflows, with features matched to your device's capabilities.
 - Improved iPad layouts, photo metadata handling, and capture reliability.

@@ -163,6 +163,25 @@ final class FujiShootingTests: XCTestCase {
         XCTAssertEqual(defaults.data(forKey: "fuji.shooting.recovery"), damaged)
     }
 
+    @MainActor
+    func testControllerLoadsAndPersistsAnExplicitPreferenceSuite() throws {
+        let suite = "FujiShootingTests.Controller.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let standardBefore = UserDefaults.standard.data(forKey: "fuji.shooting.v1")
+        var stored = FujiPreferences()
+        stored.selectedBank = 3
+        stored.banks = [.init(id: 3, name: "Isolated C3", recipe: recipe, settings: .init(), camera: .init(),
+                              savedAt: Date(timeIntervalSince1970: 123))]
+        defaults.set(try JSONEncoder().encode(stored), forKey: "fuji.shooting.v1")
+
+        let controller = FujiShootingController(defaults: defaults)
+        XCTAssertEqual(controller.preferences.selectedBank, 3)
+        XCTAssertEqual(controller.preferences.banks.first?.name, "Isolated C3")
+        XCTAssertEqual(UserDefaults.standard.data(forKey: "fuji.shooting.v1"), standardBefore,
+                       "An explicit preference suite must not write to standard defaults")
+    }
+
     func testCompletionGateAllowsOnlyOneCallbackAcrossConcurrentRacers() async {
         let completed = expectation(description: "exactly one callback")
         completed.assertForOverFulfill = true

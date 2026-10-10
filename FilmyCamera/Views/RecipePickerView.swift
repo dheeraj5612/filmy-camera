@@ -242,7 +242,7 @@ struct RecipePickerView: View {
         .accessibilityIdentifier("recipe-\(recipe.id)")
         .accessibilityLabel("\(recipe.name), \(recipe.descriptor)")
         .accessibilityValue(isSelected ? "Selected" : "Not selected")
-        .accessibilityHint("Double tap to select this look. Use the View recipe details action for more information.")
+        .accessibilityHint("Select this look and return to the camera preview. Use the View recipe details action for more information.")
         .accessibilityAction(named: "View recipe details") {
             onOpenDetail(recipe)
         }

@@ -278,6 +278,13 @@ final class FilmyCameraUITests: XCTestCase {
         scrollToHittable(alternate, in: compactApp)
         assertMinimumHitTarget(alternate, named: "CCD Daylight recipe")
         alternate.tap()
+        XCTAssertTrue(compactApp.buttons["recipe-menu"].waitForExistence(timeout: 5))
+        XCTAssertTrue(compactApp.buttons["recipe-menu"].label.contains("CCD Daylight"))
+        XCTAssertTrue(waitUntil(timeout: 5) {
+            !compactApp.descendants(matching: .any)["recipe-drawer"].exists
+        }, "Selecting a look must dismiss the picker")
+
+        openRecipeDrawer(in: compactApp)
         XCTAssertTrue(compactApp.buttons["Tune CCD Daylight"].waitForExistence(timeout: 5))
         #if targetEnvironment(simulator)
         // iPadOS 26 Simulator can report the first tile of a nested row as
@@ -293,11 +300,15 @@ final class FilmyCameraUITests: XCTestCase {
         assertMinimumHitTarget(selectedRecipe, named: "G7 X recipe")
         selectedRecipe.tap()
         #endif
-        XCTAssertTrue(compactApp.buttons["Tune G7 X Compact"].waitForExistence(timeout: 5),
-                      "Tapping the visible G7 X tile must select its camera profile")
-        XCTAssertEqual(selectedRecipe.value as? String, "Selected")
+        XCTAssertTrue(compactApp.buttons["recipe-menu"].label.contains("G7 X Compact"))
+        XCTAssertTrue(waitUntil(timeout: 5) {
+            !compactApp.descendants(matching: .any)["recipe-drawer"].exists
+        }, "Selecting a look must dismiss the picker")
 
+        openRecipeDrawer(in: compactApp)
         let tune = compactApp.buttons["Tune G7 X Compact"]
+        XCTAssertTrue(tune.waitForExistence(timeout: 5),
+                      "The selected G7 X profile must expose its tuning control")
         assertMinimumHitTarget(tune, named: "Tune G7 X profile")
         tune.tap()
 
@@ -1425,6 +1436,78 @@ final class FilmyCameraUITests: XCTestCase {
         }
     }
 
+    private func waitForStableVisibleFrame(
+        _ element: XCUIElement,
+        in viewport: XCUIElement,
+        timeout: TimeInterval
+    ) -> Bool {
+        var previous: CGRect?
+        var stableSamples = 0
+        return waitUntil(timeout: timeout) {
+            guard element.exists else { previous = nil; stableSamples = 0; return false }
+            let frame = element.frame.intersection(viewport.frame).intersection(app.frame)
+            guard frame.width >= 44, frame.height >= 44 else {
+                previous = nil
+                stableSamples = 0
+                return false
+            }
+            if let previous,
+               abs(frame.minX - previous.minX) < 1,
+               abs(frame.minY - previous.minY) < 1,
+               abs(frame.width - previous.width) < 1,
+               abs(frame.height - previous.height) < 1 {
+                stableSamples += 1
+            } else {
+                stableSamples = 1
+            }
+            previous = frame
+            return stableSamples >= 2
+        }
+    }
+
+    private func waitForSettledPreviewGeometry(
+        _ preview: XCUIElement,
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) -> Bool {
+        var previousPreview: CGRect?
+        var previousApp: CGRect?
+        var stableSamples = 0
+        return waitUntil(timeout: timeout) {
+            guard preview.exists else {
+                previousPreview = nil
+                previousApp = nil
+                stableSamples = 0
+                return false
+            }
+            let previewFrame = preview.frame
+            let appFrame = app.frame
+            guard previewFrame.width > 0, previewFrame.height > 0,
+                  appFrame.width > 0, appFrame.height > 0 else {
+                previousPreview = nil
+                previousApp = nil
+                stableSamples = 0
+                return false
+            }
+            if let oldPreview = previousPreview, let oldApp = previousApp,
+               abs(previewFrame.minX - oldPreview.minX) < 1,
+               abs(previewFrame.minY - oldPreview.minY) < 1,
+               abs(previewFrame.width - oldPreview.width) < 1,
+               abs(previewFrame.height - oldPreview.height) < 1,
+               abs(appFrame.minX - oldApp.minX) < 1,
+               abs(appFrame.minY - oldApp.minY) < 1,
+               abs(appFrame.width - oldApp.width) < 1,
+               abs(appFrame.height - oldApp.height) < 1 {
+                stableSamples += 1
+            } else {
+                stableSamples = 1
+            }
+            previousPreview = previewFrame
+            previousApp = appFrame
+            return stableSamples >= 3
+        }
+    }
+
     private func assertMinimumAccessibilityFrame(_ element: XCUIElement, named: String) {
         XCTAssertTrue(element.waitForExistence(timeout: 5), named + " should exist")
         XCTAssertGreaterThanOrEqual(element.frame.width, 44, named + " needs a 44pt width")
@@ -1773,21 +1856,30 @@ final class FilmyCameraUITests: XCTestCase {
         var selectedRecipes = Set<String>()
         for _ in 0..<3 {
             for identifier in candidates {
+                if !app.descendants(matching: .any)["recipe-picker"].exists {
+                    openRecipeDrawer(in: app)
+                }
                 let swatch = app.buttons[identifier]
                 // A horizontal rail intentionally exposes partial cards.
                 // Tap a stable visible region inside the picker's viewport,
                 // avoiding XCTest's automatic scroll-to-center on clipped
                 // cards and excluding rows hidden under the drawer footer.
-                guard swatch.exists, swatch.isHittable,
-                      waitForStableHittableFrame(swatch, timeout: 2) else { continue }
+                // During a drawer transition XCTest can expose a valid frame
+                // before it has installed an activation point. Waiting on
+                // isHittable in that interval produces a false AX failure.
+                guard swatch.exists,
+                      waitForStableVisibleFrame(swatch, in: picker, timeout: 3) else { continue }
                 let visible = swatch.frame.intersection(picker.frame).intersection(app.frame)
                 guard visible.width >= 44, visible.height >= 44 else { continue }
+                let previousLook = app.buttons["recipe-menu"].label
                 swatch.coordinate(withNormalizedOffset: .zero)
                     .withOffset(CGVector(dx: visible.midX - swatch.frame.minX,
                                          dy: visible.midY - swatch.frame.minY))
                     .tap()
-                XCTAssertTrue(waitUntil(timeout: 2) { swatch.value as? String == "Selected" },
-                              "Tapping \(identifier) must select that recipe")
+                XCTAssertTrue(waitUntil(timeout: 5) {
+                    !app.descendants(matching: .any)["recipe-drawer"].exists
+                        && app.buttons["recipe-menu"].label != previousLook
+                }, "Tapping \(identifier) must update the current look and dismiss the picker")
                 selectedRecipes.insert(identifier)
                 taps += 1
             }
@@ -1795,7 +1887,6 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(taps, 6, "The look drawer should expose several recipes to switch between")
         XCTAssertGreaterThanOrEqual(selectedRecipes.count, 2,
                                     "Rapid switching must exercise distinct recipes")
-        app.buttons["recipe-drawer-close"].tap()
         XCTAssertTrue(waitForCameraShell(in: app, timeout: 5), "The shell must survive rapid recipe switching")
         if isPhysical {
             XCTAssertTrue(waitForLiveShutter(in: app, timeout: 5), "The viewfinder must stay live while switching recipes")
@@ -1863,7 +1954,14 @@ final class FilmyCameraUITests: XCTestCase {
         let preview = app.descendants(matching: .any)["camera-preview"]
         XCTAssertTrue(preview.waitForExistence(timeout: 5))
         XCTAssertGreaterThan(preview.frame.height, 0)
-        XCTAssertTrue(app.frame.contains(preview.frame))
+        let previewSettled = waitForSettledPreviewGeometry(preview, in: app, timeout: 5)
+        if !previewSettled {
+            add(XCTAttachment(string: "app=\(app.frame)\npreview=\(preview.frame)"))
+            attachScreenshot(named: "square-preview-geometry-not-settled")
+        }
+        XCTAssertTrue(previewSettled, "Square preview and app window must settle before geometry assertions")
+        XCTAssertTrue(app.frame.insetBy(dx: -2, dy: -2).contains(preview.frame),
+                      "The settled square preview must remain fully visible in the app window")
         XCTAssertEqual(preview.frame.width / preview.frame.height, 1, accuracy: 0.01)
         let histogram = app.descendants(matching: .any).matching(
             NSPredicate(format: "label BEGINSWITH 'Preview luminance histogram.'")

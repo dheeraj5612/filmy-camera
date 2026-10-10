@@ -675,7 +675,10 @@ private func waitForStationaryControl(_ control: XCUIElement, in app: XCUIApplic
         // while the activation point is temporarily invalid.
         if control.exists && control.isEnabled {
             let frame = control.frame
-            if frame.width >= 44 && frame.height >= 44 && app.frame.contains(frame) {
+            let visible = frame.intersection(app.frame)
+            if frame.width >= 44 && frame.height >= 44
+                && visible.width >= frame.width - 2
+                && visible.height >= frame.height - 2 {
                 if let previousFrame,
                    abs(frame.minX - previousFrame.minX) <= frameTolerance,
                    abs(frame.minY - previousFrame.minY) <= frameTolerance,

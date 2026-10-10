@@ -13,6 +13,34 @@ final class RecipeLibraryUITests: XCTestCase {
         app.launch()
     }
 
+    func testOriginalPreviewToggleAndLookSelectionClearTheViewfinder() {
+        launchApp()
+        let menu = app.buttons["recipe-menu"]
+        let compare = app.buttons["camera-original-preview-toggle"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 10))
+        XCTAssertTrue(compare.exists)
+        let selectedLook = menu.label
+        let initialPreview = compare.value as? String
+
+        compare.tap()
+        XCTAssertNotEqual(compare.value as? String, initialPreview)
+        XCTAssertEqual(menu.label, selectedLook)
+        compare.tap()
+        XCTAssertEqual(compare.value as? String, initialPreview)
+
+        menu.tap()
+        let alternate = app.buttons["recipe-g7x-compact"]
+        XCTAssertTrue(alternate.waitForExistence(timeout: 5))
+        alternate.tap()
+        let drawerClosed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: app.buttons["recipe-drawer-close"]
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [drawerClosed], timeout: 5), .completed)
+        XCTAssertTrue(menu.label.contains("G7 X Compact"))
+        XCTAssertEqual(compare.value as? String, initialPreview)
+    }
+
     func testEnableAllHideAllUndoAndRelaunchPreserveTheCurrentLook() throws {
         launchApp()
         openManager()
@@ -57,8 +85,17 @@ final class RecipeLibraryUITests: XCTestCase {
         let toggle = app.switches["manage-toggle-source-filmrecipes-123-chrome-78e134597cdf"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 8))
         if app.keyboards.firstMatch.exists {
-            let done = app.keyboards.buttons["search"].exists ? app.keyboards.buttons["search"] : app.keyboards.buttons["Search"]
-            if done.exists { done.tap() }
+            // On iPad the keyboard action key can be partially outside the
+            // app's accessibility frame, making XCTest's tap try to scroll it
+            // and fail with kAXErrorFailure. Return from the search field,
+            // then fall back to tapping a stable page title.
+            search.typeText("\n")
+            if app.keyboards.firstMatch.exists {
+                let title = app.staticTexts.matching(
+                    NSPredicate(format: "label == 'Recipe Packs' OR label == 'Recipes'")
+                ).firstMatch
+                if title.exists && title.isHittable { title.tap() }
+            }
         }
         let before = try activeCounts().enabled
         let wasEnabled = toggle.value as? String == "1"
