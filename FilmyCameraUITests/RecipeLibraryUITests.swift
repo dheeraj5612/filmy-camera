@@ -8,7 +8,7 @@ final class RecipeLibraryUITests: XCTestCase {
         continueAfterFailure = false
         XCUIDevice.shared.orientation = .portrait
         app = XCUIApplication()
-        app.launchEnvironment["FILMY_TEST_DEFAULTS_SUITE"] = "RecipeLibraryUITests.\(UUID().uuidString)"
+        app.launchEnvironment["FILMY_TEST_DEFAULTS_SUITE"] = "FilmyCameraUITests.RecipeLibrary.\(UUID().uuidString)"
         app.launchArguments = ["-ui-testing", "-ui-testing-viewfinder-chrome", "-selectedRecipeID", "classic-chrome"]
         app.launch()
     }

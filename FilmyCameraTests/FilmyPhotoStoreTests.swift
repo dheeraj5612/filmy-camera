@@ -174,16 +174,26 @@ final class FilmyPhotoStoreTests: XCTestCase {
         let location = root()
         defer { try? FileManager.default.removeItem(at: location) }
         let store = FilmyPhotoStore(root: location)
-        let project = try await store.insert(original: try fixture(), raw: nil, movieURL: nil, capturedAt: Date(timeIntervalSince1970: 5),
-            dimensions: .init(width: 64, height: 48), edit: edit())
-        let receipt = await store.photosReceiptURL(for: project.id)
+        // Receipts belong to documents, the format the Photos exporter links.
+        var settings = ProCaptureSettings()
+        settings.resolution = .mp12
+        settings.format = .jpeg
+        settings.colorGamut = .sRGB
+        let created = try await store.create(
+            processed: try fixture(), raw: nil, liveMovieURL: nil, capturedAt: Date(timeIntervalSince1970: 5),
+            geometry: FilmyRenderGeometry(viewportWidth: 4, viewportHeight: 3,
+                                          previewWidth: 400, previewHeight: 300,
+                                          grainSeed: 1, flashFired: false),
+            recipe: FilmRecipe.builtIns[0], finish: .photo, settings: settings
+        )
+        let receipt = await store.photosReceiptURL(for: created.id)
         PhotosExportReceipt.record("A/L0/001", at: receipt)
         XCTAssertEqual(PhotosExportReceipt.adoptable(at: receipt) { _ in true }, "A/L0/001")
         XCTAssertNotNil(PhotosExportReceipt.pending(at: receipt))
         XCTAssertNil(PhotosExportReceipt.adoptable(at: receipt) { _ in false })
         XCTAssertNil(PhotosExportReceipt.pending(at: receipt))
         // The manifest has no receipt field, so older documents decode unchanged.
-        let document = try await store.loadDocument(project.id)
+        let document = try await store.loadDocument(created.id)
         XCTAssertNil(document.photosAssetIdentifier)
     }
 

@@ -190,6 +190,8 @@ final class FilmyCameraUITests: XCTestCase {
         assertMinimumHitTarget(classicChrome, named: "Muted Color recipe")
         classicChrome.tap()
 
+        reopenRecipeDrawerAfterSelection(in: app)
+
         let details = app.buttons["Tune Muted Color"]
         assertMinimumHitTarget(details, named: "Tune recipe")
         details.tap()
@@ -1265,6 +1267,7 @@ final class FilmyCameraUITests: XCTestCase {
         ).firstMatch
         assertMinimumHitTarget(mutedColor, named: "Muted Color recipe")
         mutedColor.tap()
+        reopenRecipeDrawerAfterSelection(in: app)
 
         let tune = app.buttons["Tune Muted Color"]
         assertMinimumHitTarget(tune, named: "Open recipe detail")
@@ -1353,11 +1356,20 @@ final class FilmyCameraUITests: XCTestCase {
         let recipe = target.buttons["recipe-\(recipeID)"]
         assertMinimumHitTarget(recipe, named: recipeID + " recipe")
         recipe.tap()
+        reopenRecipeDrawerAfterSelection(in: target)
 
         let tune = target.buttons[tuneLabel]
         assertMinimumHitTarget(tune, named: tuneLabel)
         tune.tap()
         XCTAssertTrue(target.staticTexts["Recipe controls"].waitForExistence(timeout: 5))
+    }
+
+    /// Choosing a look dismisses the picker; reopen it to reach the tuning control.
+    private func reopenRecipeDrawerAfterSelection(in target: XCUIApplication) {
+        XCTAssertTrue(waitUntil(timeout: 5) {
+            !target.descendants(matching: .any)["recipe-drawer"].exists
+        }, "Selecting a look must dismiss the picker")
+        openRecipeDrawer(in: target)
     }
 
     private func makeApplication() -> XCUIApplication {
