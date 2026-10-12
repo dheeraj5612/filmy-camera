@@ -651,7 +651,7 @@ final class PhysicalFeatureGapTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
-        app.terminate()
+        MainActor.assumeIsolated { app.terminate() }
     }
 
     func testPhysicalIntervalShootingCompletesAndRetainsRollOutputs() throws {
