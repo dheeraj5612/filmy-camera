@@ -78,8 +78,8 @@ enum G7DateStampRenderer {
 
         let overlayImage = CIImage(cgImage: overlay)
         let positioned = overlayImage.transformed(by: CGAffineTransform(
-            translationX: extent.maxX - inset - overlayImage.extent.width - overlayImage.extent.minX,
-            y: extent.minY + inset - overlayImage.extent.minY
+            translationX: (extent.maxX - inset - overlayImage.extent.width - overlayImage.extent.minX).rounded(),
+            y: (extent.minY + inset - overlayImage.extent.minY).rounded()
         ))
         return positioned.composited(over: image)
     }

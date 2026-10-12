@@ -39,6 +39,8 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
     private var movieStart: Date?
     private var wantsRunning = false
     private var pausedByInterruption = false
+    /// Interruption ended while busy; settle() reopens once. Cleared by any pause or reconfigure. Queue-only.
+    private var reopenWhenSettled = false
     private var controlsAllowed = true
     private var pendingConfiguration: (CaptureMode, Bool)?
     private var spatialAngle: CGFloat?
@@ -61,7 +63,12 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
         })
         observers.append(NotificationCenter.default.addObserver(forName: AVCaptureSession.interruptionEndedNotification, object: session, queue: nil) { [weak self] _ in
             self?.queue.async { [weak self] in
-                guard let self, self.pausedByInterruption, !self.state.phase.isBusy else { return }
+                guard let self, self.pausedByInterruption else { return }
+                if self.state.phase.isBusy {
+                    // Reopen from settle() once the busy phase ends, unless the user stops first.
+                    self.reopenWhenSettled = true
+                    return
+                }
                 self.pausedByInterruption = false
                 // The model reopens only while foregrounded, reusing its permission and microphone path.
                 self.emit(.requestedMode(self.state.mode))
@@ -89,6 +96,7 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
         queue.async { [self] in
             wantsRunning = true
             pausedByInterruption = false
+            reopenWhenSettled = false
             if state.phase.isBusy {
                 pendingConfiguration = (mode, microphone)
                 return
@@ -482,7 +490,20 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
             } catch {
                 guard let self else { return }
                 let message = error.localizedDescription
-                queue.async { [self] in processing = nil; fail(CaptureModesError.unavailable(message)) }
+                let cancelled = error is CancellationError
+                self.queue.async { [self] in
+                    self.processing = nil
+                    if cancelled {
+                        // A deliberate pause is not a failure: deliver the retained original once, keep the pause message.
+                        if let record = self.media {
+                            if record.originals.isEmpty { try? CaptureMediaStore.delete(record.id) } else { self.emit(.saved(record)) }
+                            self.media = nil
+                        }
+                        self.settle()
+                    } else {
+                        self.fail(CaptureModesError.unavailable(message))
+                    }
+                }
             }
         }
     }
@@ -510,7 +531,12 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
                             } catch {
                                 guard let self else { return }
                                 let message = error.localizedDescription
-                                queue.async { [self] in processing = nil; fail(CaptureModesError.unavailable(message)) }
+                                let cancelled = error is CancellationError
+                                self.queue.async { [self] in
+                                    self.processing = nil
+                                    // A deliberate pause is not a failure; keep the pause message.
+                                    if cancelled { self.settle() } else { self.fail(CaptureModesError.unavailable(message)) }
+                                }
                             }
                         }
                     } catch { fail(error) }
@@ -527,6 +553,7 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
 
     private func pauseOnQueue(reason: String) {
         wantsRunning = false
+        reopenWhenSettled = false
         pendingConfiguration = nil
         processing?.cancel()
         sequence?.requestStop()
@@ -561,6 +588,11 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
         } else {
             state.phase = wantsRunning && session.isRunning ? .ready : .stopped
             publish()
+            if reopenWhenSettled, !wantsRunning, !session.isInterrupted {
+                reopenWhenSettled = false
+                pausedByInterruption = false
+                emit(.requestedMode(state.mode))
+            }
         }
     }
 
@@ -687,13 +719,34 @@ extension CaptureModesEngine: AVCaptureFileOutputRecordingDelegate {
     func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL,
                     from connections: [AVCaptureConnection], error: Error?) {
         let message = error?.localizedDescription
-        guard error != nil else {
+        guard let error else {
             queue.async { [self] in finishMovie(at: outputFileURL, recoverable: true, early: false, message: nil) }
             return
         }
-        // Any error: validate the file off the session queue, then apply the verdict on queue.
+        // Max duration or disk limit: AVFoundation finished the file cleanly. Keep the empty-file guard.
+        let finishedKey = (error as NSError).userInfo[AVErrorRecordingSuccessfullyFinishedKey] as? Bool
+        if finishedKey == true {
+            let attributes = try? FileManager.default.attributesOfItem(atPath: outputFileURL.path)
+            let size: Int64 = (attributes?[.size] as? NSNumber)?.int64Value ?? 0
+            if size > 0 {
+                queue.async { [self] in finishMovie(at: outputFileURL, recoverable: true, early: true, message: nil) }
+                return
+            }
+        }
+        // Any other error: validate the file off the session queue, then apply the verdict on queue.
         queue.async { [self] in
+            // A late callback for an older recording must not touch the current capture or its timer;
+            // finishMovie ignores it but still releases shutdown waiters.
+            if let current = media, outputFileURL.deletingLastPathComponent().lastPathComponent != current.id.uuidString {
+                finishMovie(at: outputFileURL, recoverable: false, early: true, message: message)
+                return
+            }
             pendingMovieValidation = true
+            // Stop looking like a live recording while the file is checked.
+            movieTimer?.cancel(); movieTimer = nil
+            state.phase = .processing
+            if wantsRunning { state.message = "Checking the recording" }
+            publish()
             Task.detached { [self] in
                 let ok = await CaptureModesEngine.movieIsRecoverable(at: outputFileURL)
                 queue.async { [self] in finishMovie(at: outputFileURL, recoverable: ok, early: true, message: message) }

@@ -138,6 +138,14 @@ enum PhotoLibraryServiceError: LocalizedError, Sendable {
     case accessDenied
     case notOwned
     case changeFailed
+    /// The user declined the system confirmation prompt. Not a failure.
+    case cancelled
+
+    /// Maps a failed `performChanges` error; `userCancelled` is a decline, not a fault.
+    static func failure(for error: Error?) -> PhotoLibraryServiceError {
+        guard let photosError = error as? PHPhotosError else { return .changeFailed }
+        return photosError.code == .userCancelled ? .cancelled : .changeFailed
+    }
 
     var errorDescription: String? {
         switch self {
@@ -147,6 +155,8 @@ enum PhotoLibraryServiceError: LocalizedError, Sendable {
             return "Filmy Camera can only remove frames that it created. This frame was left in Photos."
         case .changeFailed:
             return "Photos could not update this frame. Try again in a moment."
+        case .cancelled:
+            return "Deletion was cancelled."
         }
     }
 }
@@ -233,6 +243,35 @@ enum PhotoLibraryCompletionBridge {
         let box = MainActorCompletionBox(completion: completion)
         return { success, _ in
             box.callAsynchronously(with: success)
+        }
+    }
+
+    private final class MainActorResultBox: @unchecked Sendable {
+        private let completion: @MainActor (Result<Void, PhotoLibraryServiceError>) -> Void
+
+        init(completion: @escaping @MainActor (Result<Void, PhotoLibraryServiceError>) -> Void) {
+            self.completion = completion
+        }
+
+        nonisolated func callAsynchronously(with result: Result<Void, PhotoLibraryServiceError>) {
+            Task { @MainActor in
+                completion(result)
+            }
+        }
+    }
+
+    /// Like `mainActor`, but keeps the PhotoKit error so a declined system
+    /// prompt can be told apart from a real failure.
+    nonisolated static func mainActorResult(
+        _ completion: @escaping @MainActor (Result<Void, PhotoLibraryServiceError>) -> Void
+    ) -> @Sendable (Bool, Error?) -> Void {
+        let box = MainActorResultBox(completion: completion)
+        return { success, error in
+            if success {
+                box.callAsynchronously(with: .success(()))
+            } else {
+                box.callAsynchronously(with: .failure(PhotoLibraryServiceError.failure(for: error)))
+            }
         }
     }
 
@@ -1113,10 +1152,10 @@ final class PhotoLibraryService: ObservableObject {
             completion(.failure(.notOwned))
             return
         }
-        let photoDeleteCompletion = PhotoLibraryCompletionBridge.mainActor { [weak self] success in
+        let photoDeleteCompletion = PhotoLibraryCompletionBridge.mainActorResult { [weak self] result in
             guard let self else { return }
-            guard success else {
-                completion(.failure(.changeFailed))
+            if case .failure = result {
+                completion(result)
                 return
             }
 
@@ -1199,9 +1238,9 @@ final class PhotoLibraryService: ObservableObject {
             completion(.failure(.accessDenied))
             return
         }
-        let photoDeleteCompletion = PhotoLibraryCompletionBridge.mainActor { success in
-            guard success else {
-                completion(.failure(.changeFailed))
+        let photoDeleteCompletion = PhotoLibraryCompletionBridge.mainActorResult { result in
+            if case .failure = result {
+                completion(result)
                 return
             }
             forgetAll()

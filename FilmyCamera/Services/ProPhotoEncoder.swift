@@ -59,7 +59,7 @@ enum ProPhotoEncoder {
         guard scale < 0.9999 else { return image }
         let resized = image.applyingFilter("CILanczosScaleTransform", parameters: [kCIInputScaleKey: scale, kCIInputAspectRatioKey: 1])
         // Fractional extents can cause a one-pixel encoder disagreement.
-        return resized.cropped(to: CGRect(x: 0, y: 0, width: max(1, floor(image.extent.width * scale)), height: max(1, floor(image.extent.height * scale))))
+        return resized.cropped(to: CGRect(x: resized.extent.minX, y: resized.extent.minY, width: max(1, floor(image.extent.width * scale)), height: max(1, floor(image.extent.height * scale))))
     }
 
     static func heifData(image: CIImage, sourceSDR: CIImage, sourceHDR: CIImage?, sourceData: Data,

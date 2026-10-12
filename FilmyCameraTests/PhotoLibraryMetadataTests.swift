@@ -140,6 +140,14 @@ final class PhotoLibraryMetadataTests: XCTestCase {
         XCTAssertTrue(PhotoLibraryServiceError.changeFailed.localizedDescription.contains("Try again"))
     }
 
+    func testDeleteErrorMappingTreatsUserCancelledAsCancelled() {
+        let declined = NSError(domain: PHPhotosErrorDomain, code: PHPhotosError.Code.userCancelled.rawValue)
+        let other = NSError(domain: PHPhotosErrorDomain, code: PHPhotosError.Code.internalError.rawValue)
+        XCTAssertEqual(PhotoLibraryServiceError.failure(for: declined), .cancelled)
+        XCTAssertEqual(PhotoLibraryServiceError.failure(for: other), .changeFailed)
+        XCTAssertEqual(PhotoLibraryServiceError.failure(for: nil), .changeFailed)
+    }
+
     func testSaveFailuresDistinguishAuthorizationFromPhotoKitWriteFailure() {
         XCTAssertEqual(PhotoLibrarySaveError.failure(for: .denied), .accessDenied)
         XCTAssertEqual(PhotoLibrarySaveError.failure(for: .restricted), .accessDenied)

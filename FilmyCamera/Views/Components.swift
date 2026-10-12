@@ -835,12 +835,15 @@ struct ExposureControl: View {
         self.onAdjust = onAdjust
     }
 
+    /// Sign comes from the value rounded to one decimal so -0.03 never shows "−0.0".
+    private var roundedValue: Double { Double((value * 10).rounded() / 10) }
+
     private var valueText: String {
-        String(format: "%@%.1f", value >= 0 ? "+" : "−", abs(value))
+        String(format: "%@%.1f", roundedValue >= 0 ? "+" : "−", abs(roundedValue))
     }
 
     private var accessibilityValueText: String {
-        String(format: "%@%.1f EV", value >= 0 ? "plus " : "minus ", abs(value))
+        String(format: "%@%.1f EV", roundedValue >= 0 ? "plus " : "minus ", abs(roundedValue))
     }
 
     var body: some View {

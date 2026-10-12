@@ -263,4 +263,25 @@ final class ProCaptureTests: XCTestCase {
         }
         return pixels[0]
     }
+
+    func testSettingsDecodeToleratesMissingKeysAndRoundTrips() throws {
+        var full = ProCaptureSettings()
+        full.resolution = .mp48
+        full.format = .proRAW
+        full.dynamicRange = .hdr
+        full.colorGamut = .sRGB
+        full.livePhoto = true
+        full.livePhotoAudio = true
+        let data = try JSONEncoder().encode(full)
+        XCTAssertEqual(try JSONDecoder().decode(ProCaptureSettings.self, from: data), full)
+
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object.removeValue(forKey: "livePhotoAudio")
+        object.removeValue(forKey: "format")
+        let trimmed = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try JSONDecoder().decode(ProCaptureSettings.self, from: trimmed)
+        XCTAssertEqual(decoded.format, ProCaptureSettings().format)
+        XCTAssertEqual(decoded.livePhotoAudio, ProCaptureSettings().livePhotoAudio)
+        XCTAssertEqual(decoded.resolution, .mp48)
+    }
 }

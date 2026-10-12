@@ -104,6 +104,7 @@ struct ManualCameraControlsView: View {
             syncDrafts()
         }
         .onChange(of: controls) { _, _ in syncDraftsIfIdle() }
+        .onChange(of: controls.activeDeviceID) { _, _ in syncDrafts() }
     }
 
     private var sheetHeader: some View {

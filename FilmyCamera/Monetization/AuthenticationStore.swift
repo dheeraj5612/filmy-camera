@@ -57,8 +57,10 @@ final class AuthenticationStore: ObservableObject {
     }
 
     func completeApple(_ result: Result<ASAuthorization, Error>) async {
+        // No nonce means prepareApple failed or declined (its message or another
+        // sign-in's isWorking must survive), so there is nothing to complete.
+        guard isConfigured, appleNonce != nil else { return }
         defer { appleNonce = nil; appleState = nil; isWorking = false }
-        guard isConfigured else { return }
         do {
             let authorization = try result.get()
             guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,

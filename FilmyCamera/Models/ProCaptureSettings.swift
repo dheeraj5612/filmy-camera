@@ -53,6 +53,19 @@ public struct ProCaptureSettings: Codable, Equatable, Sendable {
 
     public init() {}
 
+    /// Tolerant decode: a key missing from a stored record falls back to its
+    /// default, so adding a field never makes saved revisions undecodable.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = Self()
+        resolution = try container.decodeIfPresent(Resolution.self, forKey: .resolution) ?? defaults.resolution
+        format = try container.decodeIfPresent(Format.self, forKey: .format) ?? defaults.format
+        dynamicRange = try container.decodeIfPresent(DynamicRange.self, forKey: .dynamicRange) ?? defaults.dynamicRange
+        colorGamut = try container.decodeIfPresent(ColorGamut.self, forKey: .colorGamut) ?? defaults.colorGamut
+        livePhoto = try container.decodeIfPresent(Bool.self, forKey: .livePhoto) ?? defaults.livePhoto
+        livePhotoAudio = try container.decodeIfPresent(Bool.self, forKey: .livePhotoAudio) ?? defaults.livePhotoAudio
+    }
+
     /// Legacy render callers and golden-image tests retain their sRGB JPEG
     /// contract. New captures use the explicitly selected output preferences.
     public static var legacy: Self {

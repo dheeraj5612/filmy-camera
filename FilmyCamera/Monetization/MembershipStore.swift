@@ -322,7 +322,11 @@ final class MembershipStore: ObservableObject {
 
     func finishCapture(_ permit: CapturePermit, succeeded: Bool) {
         guard let existing = permits.removeValue(forKey: permit.id), existing == permit,
-              !succeeded, let day = permit.chargedDay, var next = quota else { return }
+              !succeeded, let day = permit.chargedDay else { return }
+        guard var next = quota else {
+            notice = "A failed capture could not be refunded because secure storage is unavailable. Your allowance resets on the next day."
+            return
+        }
         next.refund(reservedDay: day)
         do {
             try persistence.save(next)

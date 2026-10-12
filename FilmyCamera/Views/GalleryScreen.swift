@@ -1,3 +1,4 @@
+import Combine
 import Photos
 import SwiftUI
 import UIKit
@@ -108,6 +109,12 @@ struct GalleryScreen: View {
                 guard phase == .active else { return }
                 photoLibrary.refresh()
                 clearSelectionIfUnavailable()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged).receive(on: RunLoop.main)) { _ in
+                rebuildModel()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification).receive(on: RunLoop.main)) { _ in
+                rebuildModel()
             }
             .onChange(of: photoLibrary.authorizationStatus) { _, _ in
                 clearSelectionIfUnavailable()
@@ -633,6 +640,8 @@ struct GalleryScreen: View {
                     isSelecting = false
                     rollSelection.clear()
                 }
+            case .failure(.cancelled):
+                break
             case .failure(let error):
                 HapticFeedback.play(.error)
                 let count = targets.count
@@ -1687,6 +1696,8 @@ private struct GalleryDetailView: View {
                 // The pager Coordinator sees the frame disappear and lands on
                 // the next (else previous) frame, or dismisses when none is
                 // left, so nothing else is needed here.
+                break
+            case .failure(.cancelled):
                 break
             case .failure(let error):
                 actionErrorMessage = error.localizedDescription

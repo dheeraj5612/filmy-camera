@@ -1250,10 +1250,7 @@ final class CameraViewModel: ObservableObject {
         if let outputSettings {
             framedInput = ProPhotoOutput.framedSource(input, viewportSize: viewportSize, resolution: outputSettings.resolution)
         } else if viewportSize.width > 0, viewportSize.height > 0 {
-            let crop = CameraFrameLayout.aspectFillCrop(
-                sourceExtent: input.extent,
-                targetSize: viewportSize
-            )
+            let crop = integralAspectFillCrop(sourceExtent: input.extent, targetSize: viewportSize)
             // The preview rebases its aspect-fill crop to the drawable's
             // zero-origin coordinate space before filtering. Do the same for
             // stills so absolute Core Image phases cannot inherit the sensor
@@ -1669,10 +1666,7 @@ final class CameraViewModel: ObservableObject {
         switch source.mode {
         case .camera(let viewportSize, _, _, _):
             if viewportSize.width > 0, viewportSize.height > 0 {
-                let crop = CameraFrameLayout.aspectFillCrop(
-                    sourceExtent: extent,
-                    targetSize: viewportSize
-                )
+                let crop = integralAspectFillCrop(sourceExtent: extent, targetSize: viewportSize)
                 return (
                     input.cropped(to: crop).transformed(by: CGAffineTransform(
                         translationX: -crop.minX,
@@ -1710,7 +1704,7 @@ final class CameraViewModel: ObservableObject {
         let extent = CGRect(origin: .zero, size: size)
         switch mode {
         case .camera(let viewport, _, _, _):
-            let crop = CameraFrameLayout.aspectFillCrop(sourceExtent: extent, targetSize: viewport)
+            let crop = integralAspectFillCrop(sourceExtent: extent, targetSize: viewport)
             return CGRect(origin: .zero, size: crop.size)
         case .photoLibrary:
             guard let boundedSize = boundedImportSize(size) else { return nil }
@@ -1812,4 +1806,16 @@ final class CameraViewModel: ObservableObject {
         return UIImage(cgImage: thumbnail)
     }
 
+}
+
+/// Aspect-fill crop rounded inward to whole pixels so the rendered edge never samples outside the source.
+private func integralAspectFillCrop(sourceExtent: CGRect, targetSize: CGSize) -> CGRect {
+    let proposed = CameraFrameLayout.aspectFillCrop(sourceExtent: sourceExtent, targetSize: targetSize)
+        .intersection(sourceExtent)
+    guard !proposed.isNull, !proposed.isEmpty else { return sourceExtent }
+    let minX = ceil(proposed.minX)
+    let minY = ceil(proposed.minY)
+    return CGRect(x: minX, y: minY,
+                  width: max(1, floor(proposed.maxX) - minX),
+                  height: max(1, floor(proposed.maxY) - minY))
 }

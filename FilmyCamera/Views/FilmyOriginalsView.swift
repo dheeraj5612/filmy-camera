@@ -124,7 +124,7 @@ struct FilmyPhotoEditorView: View {
                     Toggle("Compare original", isOn: $showingOriginal).accessibilityIdentifier("filmy-compare-original")
                     if let recipe {
                         Picker("Film look", selection: Binding(get: { recipe.id }, set: { id in
-                            self.recipe = FilmRecipe.builtIns.first(where: { $0.id == id })
+                            if let match = FilmRecipe.builtIns.first(where: { $0.id == id }) { self.recipe = match }
                         })) {
                             if !FilmRecipe.builtIns.contains(where: { $0.id == recipe.id }) { Text(recipe.name).tag(recipe.id) }
                             ForEach(FilmRecipe.builtIns) { Text($0.name).tag($0.id) }
@@ -257,7 +257,10 @@ struct FilmyPhotoEditorView: View {
     }
 
     private func showRendition(revisionID: UUID?) async {
-        guard let revisionID else { return }
+        guard let revisionID else {
+            loadingRendition = false
+            return
+        }
         preview = nil
         loadingRendition = true
         let image: UIImage?

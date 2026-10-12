@@ -4521,7 +4521,7 @@ final class CameraCaptureLocationProvider: NSObject, @preconcurrency CLLocationM
         super.init()
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyBest
-        manager.distanceFilter = 10
+        manager.distanceFilter = kCLDistanceFilterNone
         lastEnabled = isEnabled
         defaultsObserver = NotificationCenter.default.addObserver(
             forName: UserDefaults.didChangeNotification, object: nil, queue: .main
@@ -4871,7 +4871,14 @@ extension CameraService {
 extension CameraService {
     public func setProCaptureSettings(_ settings: ProCaptureSettings) {
         sessionQueue.async { [weak self] in
-            guard let self, self.pendingPhotoCompletion == nil, self.pendingManualControlsPhotoCompletion == nil else { return }
+            guard let self else { return }
+            guard self.pendingPhotoCompletion == nil, self.pendingManualControlsPhotoCompletion == nil else {
+                // Revert the UI to the settings the service still holds.
+                let kept = self.capturePreferences
+                self.publishOnMain { [weak self] in self?.proCaptureSettings = kept }
+                self.publishStatus("Finishing the previous capture. Try again in a moment.")
+                return
+            }
             self.captureSettingsGeneration &+= 1
             let generation = self.captureSettingsGeneration
             if let reason = settings.incompatibility { self.publishStatus(reason); return }

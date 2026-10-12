@@ -426,6 +426,8 @@ struct CameraScreen: View {
                 isPinching = false
                 previewDragMaySelectLook = nil
                 previewDragAxis = nil
+                // A cancelled exposure drag must still let the reticle time out.
+                if exposureDragStart != nil { focusFeedbackRevision += 1 }
                 exposureDragStart = nil
             }
         }
@@ -2055,7 +2057,11 @@ struct CameraScreen: View {
             performShutterCapture()
         } else {
             countdown.start(seconds: captureDelay.rawValue) {
-                guard canTriggerShutter else { return }
+                // The gate closed during the countdown: no capture, but tell the user.
+                guard canTriggerShutter else {
+                    HapticFeedback.play(.warning)
+                    return
+                }
                 performShutterCapture()
             }
         }

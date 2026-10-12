@@ -35,6 +35,13 @@ final class G7DateStampRendererTests: XCTestCase {
         XCTAssertEqual(stamped.extent, image.extent)
     }
 
+    func testEnabledStampKeepsExtentForFractionalOriginAndSize() {
+        let extent = CGRect(x: 10.5, y: 7.25, width: 640.5, height: 480.75)
+        let image = CIImage(color: CIColor(red: 0.2, green: 0.3, blue: 0.4)).cropped(to: extent)
+        let stamped = G7DateStampRenderer.applyingStamp(to: image, text: "24.01.31", enabled: true)
+        XCTAssertEqual(stamped.extent, image.extent)
+    }
+
     func testEnabledStampRendersInBottomRightOfOutput() {
         let extent = CGRect(x: 0, y: 0, width: 640, height: 480)
         let image = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 0)).cropped(to: extent)
