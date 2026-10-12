@@ -813,7 +813,7 @@ final class PhysicalFeatureGapTests: XCTestCase {
 
     @discardableResult
     private func resolvePhotosAccessIfNeeded() -> Bool {
-        for host in [app, XCUIApplication(bundleIdentifier: "com.apple.springboard")] {
+        for host in [app!, XCUIApplication(bundleIdentifier: "com.apple.springboard")] {
             let alert = host.alerts.firstMatch
             if alert.exists {
                 for title in ["Allow Full Access", "Allow Access to All Photos", "Allow", "OK"] where alert.buttons[title].exists {
