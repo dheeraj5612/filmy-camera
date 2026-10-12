@@ -628,7 +628,7 @@ final class PhysicalCaptureFeatureTests: XCTestCase {
 /// Physical acceptance for interval, focus stacking and reference import.
 @MainActor
 final class PhysicalFeatureGapTests: XCTestCase {
-    private var app = XCUIApplication()
+    private nonisolated(unsafe) var app: XCUIApplication!
 
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -639,6 +639,7 @@ final class PhysicalFeatureGapTests: XCTestCase {
     }
 
     private func launchPhysicalCamera() {
+        app = XCUIApplication()
         app.launchArguments = ["-ui-testing-real-roll"]
         app.launchEnvironment["FILMY_TEST_DEFAULTS_SUITE"] = "FilmyCameraUITests.PhysicalFeatureGap.\(UUID().uuidString)"
         app.launch()
@@ -651,7 +652,10 @@ final class PhysicalFeatureGapTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
-        MainActor.assumeIsolated { app.terminate() }
+        let launchedApp = app
+        MainActor.assumeIsolated {
+            launchedApp?.terminate()
+        }
     }
 
     func testPhysicalIntervalShootingCompletesAndRetainsRollOutputs() throws {
