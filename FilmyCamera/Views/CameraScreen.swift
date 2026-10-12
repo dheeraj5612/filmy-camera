@@ -778,7 +778,7 @@ struct CameraScreen: View {
 
             if camera.isRunning && !isReviewing {
                 FocusAssistOverlay(camera: camera, size: size,
-                                   topClearance: focusAssistTopClearance)
+                                   topClearance: focusAssistTopClearance(overlaysTopBar: overlaysTopBar))
             }
             if let focusPoint {
                 // The tap gesture reports locations in the frame's own space,
@@ -1467,7 +1467,7 @@ struct CameraScreen: View {
         }
     }
 
-    private var focusAssistTopClearance: CGFloat {
+    private func focusAssistTopClearance(overlaysTopBar: Bool) -> CGFloat {
         let barHeight: CGFloat = viewfinderChromeHeights[.top] ?? 54
         let base: CGFloat = overlaysTopBar ? barHeight + 8 : 8
         let compareHeight: CGFloat = max(56, cameraHitTarget)
