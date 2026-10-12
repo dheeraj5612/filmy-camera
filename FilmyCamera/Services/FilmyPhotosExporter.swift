@@ -4,6 +4,61 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
+/// File-backed receipt that makes a Photos creation idempotent. The placeholder
+/// identifier is written inside the change block, before the commit completes,
+/// so a throw or process death before the capture is linked cannot cause a
+/// duplicate: the next attempt adopts the asset if it resolves, else clears it.
+/// Add-only access cannot fetch, so an unresolved receipt there falls back to a
+/// fresh creation (the previous behavior).
+enum PhotosExportReceipt {
+    /// Receipt location for the save in progress; read by PhotoLibraryService.save.
+    @TaskLocal static var sidecar: URL?
+
+    enum Decision: Equatable {
+        case create
+        case adopt(String)
+        case clearAndCreate
+    }
+
+    /// Pure decision: adopt a pending identifier only if it resolves to an asset.
+    static func decision(pending: String?, resolves: (String) -> Bool) -> Decision {
+        guard let pending, !pending.isEmpty else { return .create }
+        return resolves(pending) ? .adopt(pending) : .clearAndCreate
+    }
+
+    static func pending(at url: URL) -> String? {
+        guard let data = try? Data(contentsOf: url),
+              let text = String(data: data, encoding: .utf8) else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    static func record(_ identifier: String, at url: URL) {
+        try? Data(identifier.utf8).write(to: url, options: .atomic)
+    }
+
+    static func clear(at url: URL) {
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    static func resolves(_ identifier: String) -> Bool {
+        let options = PHFetchOptions()
+        options.includeHiddenAssets = true
+        return PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: options).firstObject != nil
+    }
+
+    /// Identifier of an already-created asset for this receipt, or nil. A stale
+    /// receipt that no longer resolves is cleared.
+    static func adoptable(at url: URL?, resolver: (String) -> Bool = { PhotosExportReceipt.resolves($0) }) -> String? {
+        guard let url else { return nil }
+        switch decision(pending: pending(at: url), resolves: resolver) {
+        case .adopt(let identifier): return identifier
+        case .clearAndCreate: clear(at: url); return nil
+        case .create: return nil
+        }
+    }
+}
+
 /// PhotoKit owns the rendered Live Photo pairing metadata. Never combine a
 /// re-encoded still with an unedited movie and hope the pairing survives.
 @MainActor
@@ -58,12 +113,29 @@ enum FilmyPhotosExporter {
         let adjustment = PHAdjustmentData(formatIdentifier: adjustmentIdentifier, formatVersion: "1", data: adjustmentBytes)
 
         if let existingID {
-            let assets = PHAsset.fetchAssets(withLocalIdentifiers: [existingID], options: nil)
-            guard let asset = assets.firstObject else { throw ExportError.missingAsset }
-            try await update(asset, document: document, rendition: rendition, adjustment: adjustment)
-            return existingID
+            let assets = PHAsset.fetchAssets(withLocalIdentifiers: [existingID], options: hiddenInclusiveFetchOptions())
+            if let asset = assets.firstObject {
+                try await update(asset, document: document, rendition: rendition, adjustment: adjustment)
+                // A receipt left by an interrupted "new copy" must not be adopted later in place of this link.
+                let staleReceiptURL = await store.photosReceiptURL(for: id)
+                PhotosExportReceipt.clear(at: staleReceiptURL)
+                return existingID
+            }
+            // Only full access proves the asset was deleted; under limited
+            // access an empty fetch can mean it was merely deselected.
+            guard status == .authorized else { throw ExportError.missingAsset }
         }
 
+        let receiptURL = await store.photosReceiptURL(for: id)
+        if let adopted = PhotosExportReceipt.adoptable(at: receiptURL) {
+            // A prior attempt created this asset but never linked it.
+            try await store.linkPhotosAsset(adopted, to: id)
+            PhotosExportReceipt.clear(at: receiptURL)
+            let assets = PHAsset.fetchAssets(withLocalIdentifiers: [adopted], options: hiddenInclusiveFetchOptions())
+            guard let asset = assets.firstObject else { throw ExportError.missingAsset }
+            try await update(asset, document: document, rendition: rendition, adjustment: adjustment)
+            return adopted
+        }
         let identifier = Box<String?>(nil)
         let editError = Box<Bool>(false)
         let outputURL = Box<URL?>(nil)
@@ -80,6 +152,7 @@ enum FilmyPhotosExporter {
             if let movie { request.addResource(with: .pairedVideo, fileURL: movie, options: nil) }
             guard let placeholder = request.placeholderForCreatedAsset else { editError.set(true); return }
             identifier.set(placeholder.localIdentifier)
+            PhotosExportReceipt.record(placeholder.localIdentifier, at: receiptURL)
             guard movie == nil else { return }
             let output = PHContentEditingOutput(placeholderForCreatedAsset: placeholder)
             do {
@@ -91,19 +164,26 @@ enum FilmyPhotosExporter {
                 request.contentEditingOutput = output
             } catch { editError.set(true) }
         }
-        try await PHPhotoLibrary.shared().performChanges(createChanges)
         defer { if let url = outputURL.get() { try? FileManager.default.removeItem(at: url) } }
+        try await PHPhotoLibrary.shared().performChanges(createChanges)
         guard let assetID = identifier.get() else { throw ExportError.writeFailed }
         // Link immediately after creation, including a failed edit. Retrying
         // then updates the existing original instead of duplicating it.
         try await store.linkPhotosAsset(assetID, to: id)
+        PhotosExportReceipt.clear(at: receiptURL)
         guard !editError.get() else { throw ExportError.writeFailed }
         if movie != nil {
-            let assets = PHAsset.fetchAssets(withLocalIdentifiers: [assetID], options: nil)
+            let assets = PHAsset.fetchAssets(withLocalIdentifiers: [assetID], options: hiddenInclusiveFetchOptions())
             guard let asset = assets.firstObject else { throw ExportError.missingAsset }
             try await update(asset, document: document, rendition: rendition, adjustment: adjustment)
         }
         return assetID
+    }
+
+    private static func hiddenInclusiveFetchOptions() -> PHFetchOptions {
+        let options = PHFetchOptions()
+        options.includeHiddenAssets = true
+        return options
     }
 
     private static func update(
@@ -134,6 +214,7 @@ enum FilmyPhotosExporter {
         let output = PHContentEditingOutput(contentEditingInput: input)
         output.adjustmentData = adjustment
         var renderedURL = output.renderedContentURL
+        defer { try? FileManager.default.removeItem(at: renderedURL) }
         if document.hasLivePhoto {
             guard let context = PHLivePhotoEditingContext(livePhotoEditingInput: input),
                   let revision = document.currentRevision else { throw ExportError.writeFailed }
@@ -146,7 +227,7 @@ enum FilmyPhotosExporter {
                     let sideways = [CGImagePropertyOrientation.left, .leftMirrored, .right, .rightMirrored].contains(orientation)
                     let target = sideways ? CGSize(width: viewport.height, height: viewport.width) : viewport
                     let source = ProPhotoOutput.framedSource(frame.image, viewportSize: target, resolution: .mp12)
-                    let regions = revision.recipe.filmBase == .compactDigital ? FilmRenderer.portraitSubjectRegions(in: source) : []
+                    let regions: [CGRect] = []
                     let filtered = FilmRenderer.render(
                         source, recipe: revision.recipe, quality: .photo,
                         captureContext: .init(flashFired: geometry.flashFired, subjectRegions: regions),
@@ -186,8 +267,7 @@ enum FilmyPhotosExporter {
             PHAssetChangeRequest(for: assetBox.get()).contentEditingOutput = outputBox.get()
         }
         try await PHPhotoLibrary.shared().performChanges(updateChanges)
-        // Photos has consumed its copy. Only remove the URL it explicitly
-        // gave us; do not enumerate or purge the shared temporary directory.
-        try? FileManager.default.removeItem(at: renderedURL)
+        // The deferred removal drops only the URL Photos explicitly gave us;
+        // do not enumerate or purge the shared temporary directory.
     }
 }

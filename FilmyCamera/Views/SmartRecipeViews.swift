@@ -16,7 +16,8 @@ struct SmartRecipeEntryPoint: View {
                     Image(systemName: "sparkles")
                     Text(store.options.first?.recipe.name ?? store.status.title).lineLimit(1)
                 }
-                .font(.system(size: 11, weight: .semibold))
+                .font(.caption2.weight(.semibold))
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 .padding(.horizontal, 10)
                 .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
@@ -39,7 +40,8 @@ struct SmartRecipeEntryPoint: View {
                     .accessibilityIdentifier("smart-recipes-quick-apply")
             }
         }
-        .font(.system(size: 11, weight: .bold))
+        .font(.caption2.weight(.bold))
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .foregroundStyle(FilmyTheme.accent)
         .buttonStyle(.plain)
         .padding(.trailing, 4)

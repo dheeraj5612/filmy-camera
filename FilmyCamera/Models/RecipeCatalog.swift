@@ -276,7 +276,7 @@ enum RecipeCatalog {
         let source = recipe.provenance.cameraSource
         return [recipe.name, recipe.subtitle, recipe.filmBase.officialName, recipe.filmBase.displayName,
                 recipe.creativeCollection?.title ?? "", source?.originalName ?? "",
-                source?.publisher.title ?? "", source?.cameraScope ?? "", source?.url ?? "",
+                source?.publisher.title ?? "", source?.cameraScope ?? "",
                 packByRecipeID[recipe.id]?.title ?? ""].joined(separator: " ")
     }
 }

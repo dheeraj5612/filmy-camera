@@ -97,6 +97,20 @@ final class FilmyPhotoStoreTests: XCTestCase {
         XCTAssertTrue(listing.photos.isEmpty)
         XCTAssertTrue(FileManager.default.fileExists(atPath: location.appendingPathComponent(".staging-interrupted").path))
     }
+    func testStaleSweepKeepsPendingDirectoryWithManifestAndRemovesOneWithout() async throws {
+        let location = root()
+        defer { try? FileManager.default.removeItem(at: location) }
+        let files = FileManager.default
+        let kept = location.appendingPathComponent(".\(UUID().uuidString).pending")
+        let removed = location.appendingPathComponent(".staging-\(UUID().uuidString)")
+        for url in [kept, removed] { try files.createDirectory(at: url, withIntermediateDirectories: true) }
+        try Data("{}".utf8).write(to: kept.appendingPathComponent("document.json"))
+        let old = Date().addingTimeInterval(-7200)
+        for url in [kept, removed] { try files.setAttributes([.modificationDate: old], ofItemAtPath: url.path) }
+        _ = try await FilmyPhotoStore(root: location).list()
+        XCTAssertTrue(files.fileExists(atPath: kept.path))
+        XCTAssertFalse(files.fileExists(atPath: removed.path))
+    }
     func testCorruptDerivativeAliasCannotDeleteOriginal() async throws {
         let location = root()
         defer { try? FileManager.default.removeItem(at: location) }
@@ -149,5 +163,42 @@ final class FilmyPhotoStoreTests: XCTestCase {
         XCTAssertEqual(updated.revisionForEditing(nil)?.output, laterSettings)
         XCTAssertEqual(updated.revisionForEditing(UUID())?.output, laterSettings)
         XCTAssertEqual(updated.currentRevision?.id, updated.revisionForEditing(nil)?.id)
+    }
+    func testReceiptDecisionAdoptsOnlyResolvingIdentifiers() {
+        XCTAssertEqual(PhotosExportReceipt.decision(pending: nil) { _ in true }, .create)
+        XCTAssertEqual(PhotosExportReceipt.decision(pending: "A/L0/001") { _ in true }, .adopt("A/L0/001"))
+        XCTAssertEqual(PhotosExportReceipt.decision(pending: "A/L0/001") { _ in false }, .clearAndCreate)
+    }
+
+    func testPendingReceiptIsAdoptedWhenResolvingAndClearedWhenNot() async throws {
+        let location = root()
+        defer { try? FileManager.default.removeItem(at: location) }
+        let store = FilmyPhotoStore(root: location)
+        let project = try await store.insert(original: try fixture(), raw: nil, movieURL: nil, capturedAt: Date(timeIntervalSince1970: 5),
+            dimensions: .init(width: 64, height: 48), edit: edit())
+        let receipt = await store.photosReceiptURL(for: project.id)
+        PhotosExportReceipt.record("A/L0/001", at: receipt)
+        XCTAssertEqual(PhotosExportReceipt.adoptable(at: receipt) { _ in true }, "A/L0/001")
+        XCTAssertNotNil(PhotosExportReceipt.pending(at: receipt))
+        XCTAssertNil(PhotosExportReceipt.adoptable(at: receipt) { _ in false })
+        XCTAssertNil(PhotosExportReceipt.pending(at: receipt))
+        // The manifest has no receipt field, so older documents decode unchanged.
+        let document = try await store.loadDocument(project.id)
+        XCTAssertNil(document.photosAssetIdentifier)
+    }
+
+    func testFujiLibraryReportsUnreadableRecordsAndKeepsFiles() async throws {
+        let location = root()
+        defer { try? FileManager.default.removeItem(at: location) }
+        let library = FujiCaptureLibrary(root: location)
+        let folder = location.appendingPathComponent("originals").appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data([1, 2, 3]).write(to: folder.appendingPathComponent("source.jpg"))
+        try Data("{".utf8).write(to: folder.appendingPathComponent("record.json"))
+        let listed = try await library.originals()
+        let unreadable = try await library.unreadableOriginals()
+        XCTAssertTrue(listed.isEmpty)
+        XCTAssertEqual(unreadable.count, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent("source.jpg").path))
     }
 }

@@ -14,12 +14,16 @@ final class G7DateStampRendererTests: XCTestCase {
         )
     }
 
-    func testPreferenceIsNamespacedAndDisabledForFilmyTarget() {
+    func testPreferenceIsNamespacedAndOffUntilOptedIn() {
         let suiteName = "G7DateStampRendererTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         XCTAssertEqual(G7DateStampPreferences.enabledKey, "g7x.dateStamp.enabled")
+        XCTAssertFalse(G7DateStampPreferences.isEnabled(in: defaults))
+        G7DateStampPreferences.setEnabled(true, in: defaults)
+        XCTAssertTrue(G7DateStampPreferences.isEnabled(in: defaults))
+        G7DateStampPreferences.setEnabled(false, in: defaults)
         XCTAssertFalse(G7DateStampPreferences.isEnabled(in: defaults))
     }
 

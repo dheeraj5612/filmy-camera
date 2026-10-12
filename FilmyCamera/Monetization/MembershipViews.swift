@@ -151,6 +151,13 @@ struct MembershipPaywall: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(!membership.canPurchase)
                 .accessibilityIdentifier("membership-purchase")
+                if !membership.entitlementsResolved {
+                    HStack {
+                        Text("Checking your membership status.").font(.footnote).foregroundStyle(.secondary)
+                        Button("Retry") { Task { await membership.refresh() } }
+                            .font(.footnote)
+                    }
+                }
                 if !MonetizationConfiguration.legalLinksConfigured {
                     Text("Subscription terms are not available yet. Purchases are temporarily disabled.")
                         .font(.footnote).foregroundStyle(.secondary)

@@ -158,7 +158,7 @@ struct SmartRecipeProfile: Equatable, Sendable {
     var tint = 0.0
     var exposure = 0.0
     var highlightProtection = 0.0
-    var isMonochrome: Bool { family.hasPrefix("acros") || family == "monochrome" || family == "sepia" }
+    var isMonochrome: Bool { family.hasPrefix("acros") || family.hasPrefix("monochrome") || family == "sepia" }
     var isValid: Bool {
         !id.isEmpty && [contrast, saturation, highlights, grain, warmth, tint, exposure, highlightProtection].allSatisfy(\.isFinite)
     }

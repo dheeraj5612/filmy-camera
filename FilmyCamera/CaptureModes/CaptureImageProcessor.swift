@@ -8,6 +8,8 @@ import simd
 /// Bounded, on-device processing. The film transform is the app's existing renderer,
 /// not a second approximation. Fusion happens before grain and finishing effects.
 enum CaptureImageProcessor {
+    /// Half-float intermediates keep fusion/stitch accumulation from quantizing to 8 bits before the final grade.
+    private nonisolated(unsafe) static let intermediateSpace: CGColorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
     private nonisolated(unsafe) static let linearContext: CIContext = {
         CIContext(options: [.workingColorSpace: CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!,
                             .outputColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!, .cacheIntermediates: false])
@@ -88,7 +90,7 @@ enum CaptureImageProcessor {
     }
 
     static func encode(_ image: CIImage, to url: URL, metadataSource: URL? = nil, retainDepth: Bool = false) throws {
-        guard let cg = FilmRenderer.sharedContext.createCGImage(image, from: image.extent.integral),
+        guard let cg = FilmRenderer.outputCGImage(image, from: image.extent.integral),
               let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.heic.identifier as CFString, 1, nil)
         else { throw CaptureModesError.invalidImage }
         let source = metadataSource.flatMap { CGImageSourceCreateWithURL($0 as CFURL, nil) }
@@ -176,7 +178,7 @@ enum CaptureImageProcessor {
                 ]).applyingFilter("CIColorClamp")
                 let merged = average.applyingFilter("CIBlendWithMask", parameters: [
                     kCIInputBackgroundImageKey: accumulator, kCIInputMaskImageKey: mask]).cropped(to: valid)
-                guard let materialized = context.createCGImage(merged, from: valid) else { throw CaptureModesError.invalidImage }
+                guard let materialized = context.createCGImage(merged, from: valid, format: .RGBAh, colorSpace: intermediateSpace) else { throw CaptureModesError.invalidImage }
                 accumulator = CIImage(cgImage: materialized).transformed(by: CGAffineTransform(translationX: valid.minX, y: valid.minY))
                 crop = valid
                 accepted += 1
@@ -235,7 +237,7 @@ enum CaptureImageProcessor {
                 let faded = warped.applyingFilter("CIBlendWithAlphaMask", parameters: [
                     kCIInputBackgroundImageKey: CIImage(color: .clear).cropped(to: bounds), kCIInputMaskImageKey: feather])
                 let merged = faded.composited(over: canvas).cropped(to: bounds)
-                guard let image = context.createCGImage(merged, from: bounds) else { throw CaptureModesError.invalidImage }
+                guard let image = context.createCGImage(merged, from: bounds, format: .RGBAh, colorSpace: intermediateSpace) else { throw CaptureModesError.invalidImage }
                 canvas = CIImage(cgImage: image).transformed(by: CGAffineTransform(translationX: bounds.minX, y: bounds.minY))
                 bottom = newBottom; top = newTop; lastOrigin = left
                 previous = next; previousToCanvas = transform; accepted += 1

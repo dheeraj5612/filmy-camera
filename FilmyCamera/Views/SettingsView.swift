@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreLocation
 import Photos
 import SwiftUI
 import UIKit
@@ -12,12 +13,18 @@ struct SettingsView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var isConfirmingCacheClear = false
     @State private var cameraAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
+    @State private var locationAuthorizationStatus = CLAuthorizationStatus.notDetermined
+    @State private var isConfirmingCameraReset = false
+    @State private var didResetCameraSettings = false
 
     private let privacyPolicyURL = URL(string: "https://dheeraj5612.github.io/filmycam-legal/privacy-policy.html")!
     private let supportURL = URL(string: "https://dheeraj5612.github.io/filmycam-legal/support.html")!
 
     @AppStorage("showGrid") private var showGrid = true
     @AppStorage("hapticsEnabled") private var hapticsEnabled = true
+    @AppStorage("locationTaggingEnabled.v1") private var locationTaggingEnabled = true
+    @AppStorage("mirrorFrontPhotos.v1") private var mirrorFrontPhotos = true
+    @AppStorage("g7x.dateStamp.enabled") private var dateStampEnabled = false
 
     var body: some View {
         NavigationStack {
@@ -35,6 +42,7 @@ struct SettingsView: View {
                         permissions
                         localCache
                         about
+                        resetSection
                     }
                     .frame(maxWidth: FilmyLayout.readableMaxWidth)
                     .frame(maxWidth: .infinity)
@@ -61,6 +69,12 @@ struct SettingsView: View {
         } message: {
             Text("Only temporary copies on this device are removed. Photos originals are not deleted. Cached frames may disappear from the Roll while Photos access is limited or off.")
         }
+        .confirmationDialog("Reset camera settings?", isPresented: $isConfirmingCameraReset, titleVisibility: .visible) {
+            Button("Reset", role: .destructive, action: resetCameraSettings)
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Timer, aspect, guides, assists, grid, haptics, selfie mirroring and date stamp return to defaults. Your photos and looks are not changed.")
+        }
         .accessibilityAction(.escape, onBackToCamera)
         .onAppear { refreshPermissionState() }
         .onChange(of: scenePhase) { _, phase in
@@ -81,7 +95,7 @@ struct SettingsView: View {
         case .temporarilyUnavailable:
             return "The flash is temporarily unavailable, usually while the device cools down."
         case .available:
-            return "On by default. Your choice is remembered between launches."
+            return "Your choice is remembered between launches."
         }
     }
 
@@ -144,6 +158,108 @@ struct SettingsView: View {
                     .labelsHidden()
                     .tint(FilmyTheme.accent)
             }
+
+            settingsDivider
+            locationTaggingRow
+            settingsDivider
+            mirrorFrontRow
+            settingsDivider
+            dateStampRow
+        }
+    }
+
+    private var locationTaggingRow: some View {
+        SettingRow(
+            systemName: "location.fill",
+            title: "Location tagging",
+            detail: "Adds where you took each photo. Filmy only reads location while the camera is open."
+        ) {
+            Toggle("Location tagging", isOn: $locationTaggingEnabled)
+                .labelsHidden()
+                .tint(FilmyTheme.accent)
+                .accessibilityIdentifier("settings-location-tagging")
+        }
+    }
+
+    private var mirrorFrontRow: some View {
+        SettingRow(
+            systemName: "person.crop.square",
+            title: "Mirror front camera",
+            detail: "Saves selfies as they appear in the preview."
+        ) {
+            Toggle("Mirror front camera", isOn: $mirrorFrontPhotos)
+                .labelsHidden()
+                .tint(FilmyTheme.accent)
+                .accessibilityIdentifier("settings-mirror-front")
+        }
+    }
+
+    private var dateStampRow: some View {
+        SettingRow(
+            systemName: "calendar",
+            title: "Date stamp",
+            detail: "Prints the capture date in the corner of saved photos, like a compact camera."
+        ) {
+            Toggle("Date stamp", isOn: $dateStampEnabled)
+                .labelsHidden()
+                .tint(FilmyTheme.accent)
+                .accessibilityIdentifier("settings-date-stamp")
+        }
+    }
+
+    private var locationStatusTitle: String {
+        if !locationTaggingEnabled { return "Off in Filmy" }
+        switch locationAuthorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways: return "Allowed"
+        case .denied, .restricted: return "Off"
+        default: return "Not asked"
+        }
+    }
+
+    private var locationNeedsSettings: Bool {
+        locationAuthorizationStatus == .denied || locationAuthorizationStatus == .restricted
+    }
+
+    private var locationAccessRow: some View {
+        SettingRow(
+            systemName: "location.fill",
+            title: "Location",
+            detail: "Used only to tag photos while the camera is open."
+        ) {
+            PermissionBadge(
+                title: locationStatusTitle,
+                isEnabled: locationStatusTitle == "Allowed"
+            )
+        }
+        .accessibilityIdentifier("settings-location-access")
+    }
+
+    private var resetSection: some View {
+        settingsSection(title: "RESET") {
+            Button {
+                HapticFeedback.play(.selection)
+                didResetCameraSettings = false
+                isConfirmingCameraReset = true
+            } label: {
+                HStack(alignment: .center, spacing: 13) {
+                    SettingIcon(systemName: "arrow.counterclockwise", tint: FilmyTheme.danger)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Reset camera settings")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(FilmyTheme.danger)
+                        Text(didResetCameraSettings ? "Camera settings reset." : "Photos and looks are kept")
+                            .font(.caption)
+                            .foregroundStyle(FilmyTheme.secondary)
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.vertical, 4)
+                .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("settings-reset-camera")
         }
     }
 
@@ -195,6 +311,21 @@ struct SettingsView: View {
                     systemName: "arrow.up.right.square",
                     identifier: "camera-permission-settings",
                     hint: "Opens Filmy Camera camera permissions",
+                    subtitle: "Continue in iOS Settings",
+                    action: openSystemSettings
+                )
+            }
+
+            settingsDivider
+            locationAccessRow
+
+            if locationNeedsSettings {
+                settingsDivider
+                settingsAction(
+                    title: "Open System Settings",
+                    systemName: "arrow.up.right.square",
+                    identifier: "location-permission-settings",
+                    hint: "Opens Filmy Camera location permissions",
                     subtitle: "Continue in iOS Settings",
                     action: openSystemSettings
                 )
@@ -559,7 +690,25 @@ struct SettingsView: View {
 
     private func refreshPermissionState() {
         cameraAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
+        locationAuthorizationStatus = CLLocationManager().authorizationStatus
         photoLibrary.refresh()
+    }
+
+    private static let cameraSettingKeys: [String] = [
+        "showGrid", "hapticsEnabled", "captureDelay", "captureAspect",
+        "compositionGuide", "showHistogram", "showZebras", "showFocusPeaking",
+        "showHorizonLevel", "mirrorFrontPhotos.v1", "g7x.dateStamp.enabled",
+        "cameraGestureHintSeen.v1"
+    ]
+
+    private func resetCameraSettings() {
+        let defaults = UserDefaults.standard
+        for key in Self.cameraSettingKeys {
+            defaults.removeObject(forKey: key)
+        }
+        HapticFeedback.play(.discard)
+        didResetCameraSettings = true
+        UIAccessibility.post(notification: .announcement, argument: "Camera settings reset.")
     }
 
     private func requestPhotoAccess() {

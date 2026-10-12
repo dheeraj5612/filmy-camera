@@ -11,12 +11,33 @@ struct ProCaptureControlsView: View {
     private var controls: CameraManualControls { camera.manualControls }
     private var priority: Bool { ![CameraExposureProgram.automatic, .manual].contains(camera.exposureProgram) }
 
+    private var hdrDisabled: Bool {
+        settings.dynamicRange != .hdr && (settings.format == .jpeg || settings.livePhoto)
+    }
+
+    private var livePhotoDisabled: Bool {
+        !settings.livePhoto && (!capabilities.livePhotoSupported || settings.format.retainsRAW
+            || settings.resolution != .mp12 || settings.dynamicRange == .hdr)
+    }
+
+    private var availableResolutions: [ProCaptureSettings.Resolution] {
+        ProCaptureSettings.Resolution.allCases.filter { capabilities.resolutions.contains($0) || $0 == settings.resolution }
+    }
+
+    private var availableFormats: [ProCaptureSettings.Format] {
+        ProCaptureSettings.Format.allCases.filter { capabilities.formats.contains($0) || $0 == settings.format }
+    }
+
+    private var availablePrograms: [CameraExposureProgram] {
+        CameraExposureProgram.allCases.filter { capabilities.exposurePrograms.contains($0) || $0 == camera.exposureProgram }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Capture format").font(.headline)
             Picker("Resolution", selection: binding(\.resolution)) {
-                ForEach(ProCaptureSettings.Resolution.allCases) { value in
-                    Text(value.title).tag(value).disabled(!capabilities.resolutions.contains(value))
+                ForEach(availableResolutions) { value in
+                    Text(value.title).tag(value)
                 }
             }
             .pickerStyle(.segmented)
@@ -24,8 +45,8 @@ struct ProCaptureControlsView: View {
             Text("12 and 48 MP use supported sensor dimensions. 24 MP is developed from a 48 MP original, not Apple's deferred 24 MP fusion. These are requested resolutions; the camera can deliver fewer pixels. Cropping reduces the final pixel count. Manual and priority exposure use 12 MP.")
                 .font(.caption).foregroundStyle(.secondary)
             Picker("File format", selection: binding(\.format)) {
-                ForEach(ProCaptureSettings.Format.allCases) { value in
-                    Text(value.title).tag(value).disabled(!capabilities.formats.contains(value))
+                ForEach(availableFormats) { value in
+                    Text(value.title).tag(value)
                 }
             }
             .accessibilityIdentifier("pro-format")
@@ -43,14 +64,21 @@ struct ProCaptureControlsView: View {
                 get: { settings.dynamicRange == .hdr },
                 set: { value in var next = settings; next.dynamicRange = value ? .hdr : .sdr; camera.setProCaptureSettings(next) }
             ))
-            .disabled(settings.dynamicRange != .hdr && (settings.format == .jpeg || settings.livePhoto))
+            .disabled(hdrDisabled)
             .accessibilityIdentifier("pro-hdr")
+            if hdrDisabled {
+                Text("HDR needs HEIF or RAW without Live Photo.")
+                    .font(.caption).foregroundStyle(.orange)
+            }
             Text("HDR preserves available captured highlight headroom. SDR originals are not given artificial HDR brightness. Filmy keeps the original alongside every edit.")
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("Live Photo", isOn: binding(\.livePhoto))
-                .disabled(!settings.livePhoto && (!capabilities.livePhotoSupported || settings.format.retainsRAW
-                    || settings.resolution != .mp12 || settings.dynamicRange == .hdr))
+                .disabled(livePhotoDisabled)
                 .accessibilityIdentifier("pro-live-photo")
+            if livePhotoDisabled && capabilities.livePhotoSupported {
+                Text("Live Photo needs 12 MP, a non-RAW format and standard dynamic range.")
+                    .font(.caption).foregroundStyle(.orange)
+            }
             Text("Live uses 12 MP, standard dynamic range and Photo finish. RAW and Live cannot be combined. The film look is applied to the still and movie during Photos export.")
                 .font(.caption).foregroundStyle(.secondary)
             if settings.livePhoto {
@@ -65,8 +93,8 @@ struct ProCaptureControlsView: View {
             Divider()
             Text("Exposure program").font(.headline)
             Picker("Program", selection: Binding(get: { camera.exposureProgram }, set: { apply($0) })) {
-                ForEach(CameraExposureProgram.allCases) { program in
-                    Text(program.title).tag(program).disabled(!capabilities.exposurePrograms.contains(program))
+                ForEach(availablePrograms) { program in
+                    Text(program.title).tag(program)
                 }
             }
             .accessibilityIdentifier("pro-exposure-program")

@@ -33,6 +33,7 @@ final class MembershipStore: ObservableObject {
     private var updates: Task<Void, Never>?
     private var expiryTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
+    private var refreshAgain = false
     private var productTask: Task<Void, Never>?
     private var testing = false
     private var started = false
@@ -84,8 +85,9 @@ final class MembershipStore: ObservableObject {
         updates = Task { [weak self] in
             for await result in Transaction.updates {
                 guard !Task.isCancelled, let self else { return }
-                if case .verified(let transaction) = result,
-                   transaction.productID == MonetizationConfiguration.monthlyProductID {
+                if case .verified(let transaction) = result {
+                    // Entitlement is gated by product ID in readEntitlements;
+                    // every verified transaction must be finished.
                     await self.refresh()
                     await transaction.finish()
                 } else if case .unverified(let transaction, _) = result,
@@ -105,13 +107,26 @@ final class MembershipStore: ObservableObject {
         guard monetizationEnabled else { return }
         refreshQuota()
         guard !testing else { return }
-        if let refreshTask { await refreshTask.value; return }
+        if let inFlight = refreshTask {
+            // The in-flight read may predate this request; ask for exactly one more.
+            refreshAgain = true
+            await inFlight.value
+            return
+        }
         let task = Task<Void, Never> { [weak self] in
-            await self?.readEntitlements()
+            guard let self else { return }
+            repeat {
+                self.refreshAgain = false
+                await self.readEntitlements()
+            } while self.refreshAgain
+            // Cleared here, with no suspension after the loop check, so a
+            // caller arriving later starts a fresh read instead of joining
+            // a finished one.
+            self.refreshTask = nil
         }
         refreshTask = task
         await task.value
-        refreshTask = nil
+        if refreshTask == task { refreshTask = nil }
     }
 
     private func readEntitlements() async {
@@ -318,7 +333,13 @@ final class MembershipStore: ObservableObject {
 
     func refreshQuota() {
         do {
-            var next = try persistence.load() ?? DailyPhotoQuota(now: Date())
+            var next: DailyPhotoQuota
+            do {
+                next = try persistence.load() ?? DailyPhotoQuota(now: Date())
+            } catch KeychainPhotoQuotaPersistence.Failure.invalidRecord {
+                // An undecodable record can never self-heal; treat it as absent.
+                next = DailyPhotoQuota(now: Date())
+            }
             next.advance(to: Date())
             try persistence.save(next)
             quota = next

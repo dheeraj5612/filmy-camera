@@ -6,7 +6,18 @@ Status: updated for version 1.0.2 (free release, `FILMY_MONETIZATION_ENABLED=NO`
 
 - Tracking: No
 - Reason: 1.0.2 ships with monetization disabled. The binary links FirebaseAuth, GoogleSignIn, and GoogleMobileAds (with UMP) for a future opt-in membership release, but none is configured or started: `AuthenticationStore` returns before `FirebaseApp.configure` and `AdvertisingStore.prepare()` returns before any consent request or `MobileAds.shared.start` unless `MonetizationConfiguration.isEnabled`. No analytics SDK, cross-app identifier, or network service receives user activity.
-- `FilmyCamera/Resources/PrivacyInfo.xcprivacy` already declares Name, Email Address, and User ID (linked, app functionality, not tracking) for the account flow. Those types are collected only when monetization is enabled; re-answer this matrix (and add advertising data for ads) before shipping a build with `FILMY_MONETIZATION_ENABLED=YES`.
+- `FilmyCamera/Resources/PrivacyInfo.xcprivacy` declares no collected data types (`NSPrivacyCollectedDataTypes` is empty), `NSPrivacyTracking` false, and no tracking domains, matching the free Release. The free Release also omits the Sign in with Apple entitlement (`FilmyCamera/FilmyCamera.Release.entitlements`) and registers no Google sign-in URL scheme (`FILMY_GOOGLE_REVERSED_CLIENT_ID` resolves to the bundle identifier in `Config/Monetization.Release.xcconfig`, a valid inert scheme). See "Required before any monetized build".
+
+## Required before any monetized build
+
+Do not ship `FILMY_MONETIZATION_ENABLED=YES` in Release until all of these are done. `scripts/monetization/validate.py` fails a monetized Release whose manifest lacks the account and advertising entries below.
+
+1. Add to `NSPrivacyCollectedDataTypes` (each with `NSPrivacyCollectedDataTypeTracking` set per the final ad configuration):
+   - `NSPrivacyCollectedDataTypeName`, `NSPrivacyCollectedDataTypeEmailAddress`, `NSPrivacyCollectedDataTypeUserID`: Firebase Auth; linked true; purpose `NSPrivacyCollectedDataTypePurposeAppFunctionality`.
+   - `NSPrivacyCollectedDataTypeDeviceID`, `NSPrivacyCollectedDataTypeAdvertisingData`, `NSPrivacyCollectedDataTypeCoarseLocation`, `NSPrivacyCollectedDataTypeOtherUsageData`: AdMob; purpose `NSPrivacyCollectedDataTypePurposeThirdPartyAdvertising`. Add `NSPrivacyCollectedDataTypeProductInteraction` and an analytics purpose only if the SDK configuration enables it.
+   - If ads track users (personalized ads or IDFA): set `NSPrivacyTracking` true, list the Google ad domains the SDK contacts in `NSPrivacyTrackingDomains`, and add `NSUserTrackingUsageDescription` plus an ATT prompt. Owner must confirm the domain list from the SDK release in use; it is not recorded here.
+2. Set `CODE_SIGN_ENTITLEMENTS = FilmyCamera/FilmyCamera.entitlements` and a real `FILMY_GOOGLE_REVERSED_CLIENT_ID` in `Config/Monetization.Release.xcconfig`; enable Sign in with Apple on the App ID in the developer portal and use a provisioning profile that includes it.
+3. Re-answer the App Store Connect App Privacy questionnaire (Contact Info, Identifiers, Usage Data, Coarse Location as applicable) and publish before submission.
 
 ## Data linked to the user
 

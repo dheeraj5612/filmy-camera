@@ -295,6 +295,8 @@ final class CameraViewModel: ObservableObject {
         }
     }
     @Published private(set) var isCapturing = false
+    /// Mirrors the camera screen's Fuji Drive/BKT controller so the workspace switch can wait for it.
+    @Published var isFujiBusy = false
     @Published private(set) var isImporting = false
     @Published private(set) var isSaving = false
     @Published private(set) var saveErrorMessage: String?
@@ -316,6 +318,9 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var isPreparingReviewOriginal = false
     @Published private(set) var pendingReviewRecipeID: String?
     @Published private var recipeOverrides: [String: FilmRecipe] = [:]
+    private var captureOriginalPersisted = false
+    private var preservedUnknownOverrides: [String: FilmRecipe] = [:]
+    private var queuedReviewRequest: (recipe: FilmRecipe, finish: PhotoFinish)?
     @Published var libraryPreferences = RecipeLibraryPreferences() {
         didSet {
             guard libraryPreferences != oldValue else { return }
@@ -362,7 +367,7 @@ final class CameraViewModel: ObservableObject {
         selectedRecipeID = storedRecipeID.flatMap {
             Self.validRecipeIDs.contains($0) ? $0 : nil
         } ?? Self.fallbackRecipeID
-        if storedRecipeID != selectedRecipeID {
+        if storedRecipeID != selectedRecipeID, RecipeCatalog.loadIssues.isEmpty {
             defaults.set(selectedRecipeID, forKey: Self.selectedRecipeIDKey)
         }
 
@@ -372,6 +377,9 @@ final class CameraViewModel: ObservableObject {
         var migratedRecipes: [String: FilmRecipe] = [:]
         for savedRecipe in decoded.recipes.values {
             guard let parent = Self.builtInRecipesByID[savedRecipe.id] else {
+                // Keep customizations for IDs this launch cannot resolve (e.g. the
+                // extended catalog failed to load) so they survive the rewrite.
+                preservedUnknownOverrides[savedRecipe.id] = savedRecipe
                 continue
             }
             if Self.isSupersededG7XDefault(savedRecipe, parent: parent) { continue }
@@ -382,7 +390,7 @@ final class CameraViewModel: ObservableObject {
         }
         recipeOverrides = migratedRecipes
 
-        if decoded.shouldRewrite || migratedRecipes != decoded.recipes {
+        if decoded.shouldRewrite || migratedRecipes.merging(preservedUnknownOverrides, uniquingKeysWith: { current, _ in current }) != decoded.recipes {
             persistRecipeOverrides()
         }
     }
@@ -494,13 +502,13 @@ final class CameraViewModel: ObservableObject {
 
     /// Membership is deliberately separate from the full editing/review catalog.
     var quickRecipes: [FilmRecipe] {
-        FilmRecipe.builtIns.filter { libraryPreferences.isEnabled($0.id) }.map { recipe(for: $0.id) }
+        FilmRecipe.builtIns.filter { Self.validRecipeIDs.contains($0.id) && libraryPreferences.isEnabled($0.id) }.map { recipe(for: $0.id) }
     }
 
     /// A hidden current look remains an ordering anchor for an explicit swipe.
     /// It is not reinserted into the popup or made active by this navigation aid.
     var quickNavigationRecipes: [FilmRecipe] {
-        FilmRecipe.builtIns.filter { $0.id == selectedRecipeID || libraryPreferences.isEnabled($0.id) }
+        FilmRecipe.builtIns.filter { Self.validRecipeIDs.contains($0.id) && ($0.id == selectedRecipeID || libraryPreferences.isEnabled($0.id)) }
             .map { recipe(for: $0.id) }
     }
 
@@ -549,7 +557,8 @@ final class CameraViewModel: ObservableObject {
     }
 
     private func persistRecipeOverrides() {
-        guard let data = try? JSONEncoder().encode(recipeOverrides) else { return }
+        let stored = recipeOverrides.merging(preservedUnknownOverrides, uniquingKeysWith: { current, _ in current })
+        guard let data = try? JSONEncoder().encode(stored) else { return }
         defaults.set(data, forKey: Self.recipeOverridesKey)
     }
 
@@ -639,9 +648,11 @@ final class CameraViewModel: ObservableObject {
         camera.capturePhoto { [weak self] capturedPhoto in
             Task { @MainActor [weak self] in
                 var succeeded = false
+                self?.captureOriginalPersisted = false
                 defer {
                     camera.setSceneAutoCapturePaused(false)
-                    membership.finishCapture(permit, succeeded: succeeded)
+                    // A persisted original is a retained capture: keep the quota charge.
+                    membership.finishCapture(permit, succeeded: succeeded || (self?.captureOriginalPersisted ?? false))
                 }
                 guard let self else { return }
 #if DEBUG
@@ -698,6 +709,7 @@ final class CameraViewModel: ObservableObject {
                 recipe: recipe, finish: finish, settings: work.photo.outputSettings
             )
             pendingOriginalRetention = nil
+            captureOriginalPersisted = true
             if let movie = work.photo.livePhotoMovieURL { CameraService.removeOwnedTemporaryMovie(movie) }
         } catch {
             // Keep the captured bytes and owned Live movie for an explicit
@@ -839,6 +851,7 @@ final class CameraViewModel: ObservableObject {
             return
         }
 
+        queuedReviewRequest = nil
         reviewImage = renderedPhoto.image
         reviewImageData = renderedPhoto.data
         reviewCapturedAt = renderedPhoto.capturedAt
@@ -881,6 +894,11 @@ final class CameraViewModel: ObservableObject {
         guard MembershipStore.shared.require(.photoImport),
               MembershipStore.shared.requireRecipe(recipe.id) else { return }
         if finish != .photo && !MembershipStore.shared.require(.photoFinishes) { return }
+        if isPreparingReviewOriginal, reviewImage != nil, reviewRenderSource != nil,
+           !isSaving, Self.validRecipeIDs.contains(recipe.id) {
+            queuedReviewRequest = (recipe, finish)
+            return
+        }
         guard reviewImage != nil,
               let source = reviewRenderSource,
               !isSaving,
@@ -990,6 +1008,7 @@ final class CameraViewModel: ObservableObject {
                             return
                         }
                         self.isPreparingReviewOriginal = false
+                        defer { self.applyQueuedReviewRequest() }
                         guard let image else {
                             self.reviewRenderErrorMessage = "The original preview could not be prepared. Your filtered review is unchanged."
                             return
@@ -1004,9 +1023,16 @@ final class CameraViewModel: ObservableObject {
                             return
                         }
                         self.isPreparingReviewOriginal = false
+                        self.applyQueuedReviewRequest()
                     }
                 })
         }
+    }
+
+    private func applyQueuedReviewRequest() {
+        guard let request = queuedReviewRequest else { return }
+        queuedReviewRequest = nil
+        applyReview(recipe: request.recipe, finish: request.finish)
     }
 
     func waitForReviewWorkToDrainForTesting() async {
@@ -1021,6 +1047,7 @@ final class CameraViewModel: ObservableObject {
         guard !isSaving, !isRenderingReview, !isPreparingReviewOriginal else { return }
 
         isSaving = true
+        queuedReviewRequest = nil
         saveErrorMessage = nil
         saveErrorRequiresSettings = false
         reviewRenderErrorMessage = nil
@@ -1143,6 +1170,7 @@ final class CameraViewModel: ObservableObject {
     }
 
     private func clearReviewState() {
+        queuedReviewRequest = nil
         reviewWorkGeneration &+= 1
         reviewWorkQueue.cancelPending()
         reviewImage = nil
@@ -1256,7 +1284,7 @@ final class CameraViewModel: ObservableObject {
         if recipe.filmBase == .compactDigital {
             let subjectRegions = normalizedSubjectRegions.map {
                 denormalizedSubjectRegions($0, in: framedInput.extent)
-            } ?? FilmRenderer.portraitSubjectRegions(in: framedInput)
+            } ?? []
             renderContext = FilmRenderer.CaptureContext(
                 flashFired: flashFired,
                 subjectRegions: subjectRegions
@@ -1293,7 +1321,8 @@ final class CameraViewModel: ObservableObject {
                 to: composed, text: dateStampText, enabled: dateStampEnabled
             )
             guard let data = ProPhotoOutput.encode(
-                    finished, sourceData: sourceData, capturedAt: capturedAt, recipe: recipe, settings: outputSettings
+                    finished, sourceData: sourceData, capturedAt: capturedAt, recipe: recipe, settings: outputSettings,
+                    location: location
                   ), let image = downsampledReviewImage(from: data) else { return nil }
             return RenderedPhoto(image: image, data: data, capturedAt: capturedAt, flashFired: flashFired,
                                  normalizedSubjectRegions: resolvedSubjectRegions)
@@ -1410,7 +1439,7 @@ final class CameraViewModel: ObservableObject {
         if recipe.filmBase == .compactDigital {
             let subjectRegions = normalizedSubjectRegions.map {
                 denormalizedSubjectRegions($0, in: framedInput.extent)
-            } ?? FilmRenderer.portraitSubjectRegions(in: framedInput)
+            } ?? []
             renderContext = FilmRenderer.CaptureContext(
                 subjectRegions: subjectRegions
             )
@@ -1522,7 +1551,7 @@ final class CameraViewModel: ObservableObject {
         if recipe.filmBase == .compactDigital {
             let subjectRegions = source.normalizedSubjectRegions.map {
                 denormalizedSubjectRegions($0, in: previewInput.extent)
-            } ?? FilmRenderer.portraitSubjectRegions(in: previewInput)
+            } ?? []
             context = FilmRenderer.CaptureContext(
                 flashFired: flashFired,
                 subjectRegions: subjectRegions

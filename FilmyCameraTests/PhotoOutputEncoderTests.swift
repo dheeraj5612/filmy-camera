@@ -432,6 +432,63 @@ final class PhotoOutputEncoderTests: XCTestCase {
         XCTAssertTrue(metadata.provenance.isComplete)
     }
 
+    private func sourceJPEGWithGPS(latitude: Double, longitude: Double) throws -> (CGImage, Data) {
+        let image = try detailedFixture(width: 8, height: 8)
+        let data = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(
+            data, UTType.jpeg.identifier as CFString, 1, nil))
+        let gps: [String: Any] = [
+            kCGImagePropertyGPSLatitude as String: abs(latitude),
+            kCGImagePropertyGPSLatitudeRef as String: latitude >= 0 ? "N" : "S",
+            kCGImagePropertyGPSLongitude as String: abs(longitude),
+            kCGImagePropertyGPSLongitudeRef as String: longitude >= 0 ? "E" : "W",
+            kCGImagePropertyGPSDateStamp as String: "2020:01:02",
+            kCGImagePropertyGPSTimeStamp as String: "03:04:05.000",
+            kCGImagePropertyGPSAltitude as String: 42.5,
+            kCGImagePropertyGPSAltitudeRef as String: 1
+        ]
+        CGImageDestinationAddImage(destination, image,
+                                   [kCGImagePropertyGPSDictionary as String: gps] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return (image, data as Data)
+    }
+
+    private func outputGPS(_ image: CGImage, source: Data, location: CLLocation?) throws -> [String: Any]? {
+        let data = try XCTUnwrap(PhotoOutputEncoder.jpegData(
+            for: image, sourceData: source, capturedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            recipe: FilmRecipe.builtIns[0], location: location))
+        let output = try XCTUnwrap(CGImageSourceCreateWithData(data as CFData, nil))
+        let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(output, 0, nil) as? [String: Any])
+        return properties[kCGImagePropertyGPSDictionary as String] as? [String: Any]
+    }
+
+    func testGPSCarriesSourceStampsAndAltitudeWhenPositionMatches() throws {
+        let (image, source) = try sourceJPEGWithGPS(latitude: -33.86, longitude: -151.21)
+        let location = CLLocation(coordinate: CLLocationCoordinate2D(latitude: -33.86005, longitude: -151.21005),
+                                  altitude: 0, horizontalAccuracy: 5, verticalAccuracy: -1,
+                                  timestamp: Date(timeIntervalSince1970: 1_700_000_000))
+        let gps = try XCTUnwrap(outputGPS(image, source: source, location: location))
+        XCTAssertEqual(gps[kCGImagePropertyGPSDateStamp as String] as? String, "2020:01:02")
+        XCTAssertNotNil(gps[kCGImagePropertyGPSTimeStamp as String])
+        XCTAssertEqual((gps[kCGImagePropertyGPSAltitude as String] as? NSNumber)?.doubleValue ?? 0, 42.5, accuracy: 0.001)
+        XCTAssertEqual((gps[kCGImagePropertyGPSAltitudeRef as String] as? NSNumber)?.intValue, 1)
+    }
+
+    func testGPSIgnoresSourceStampsWhenPositionDiffers() throws {
+        let (image, source) = try sourceJPEGWithGPS(latitude: -33.86, longitude: -151.21)
+        let location = CLLocation(coordinate: CLLocationCoordinate2D(latitude: -33.87, longitude: -151.21),
+                                  altitude: 0, horizontalAccuracy: 5, verticalAccuracy: -1,
+                                  timestamp: Date(timeIntervalSince1970: 1_700_000_000))
+        let gps = try XCTUnwrap(outputGPS(image, source: source, location: location))
+        XCTAssertEqual(gps[kCGImagePropertyGPSDateStamp as String] as? String, "2023:11:14")
+        XCTAssertNil(gps[kCGImagePropertyGPSAltitude as String])
+    }
+
+    func testNoLocationWritesNoGPSEvenWhenSourceHasOne() throws {
+        let (image, source) = try sourceJPEGWithGPS(latitude: 41.88, longitude: -87.63)
+        XCTAssertNil(try outputGPS(image, source: source, location: nil))
+    }
+
     private func sourceJPEG(for image: CGImage) throws -> Data {
         let data = NSMutableData()
         let destination = try XCTUnwrap(CGImageDestinationCreateWithData(

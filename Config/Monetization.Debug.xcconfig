@@ -1,5 +1,9 @@
 #include "Monetization.xcconfig"
 FILMY_MONETIZATION_ENABLED = YES
+// Sign in with Apple entitlement exists only in the monetized configuration.
+CODE_SIGN_ENTITLEMENTS = FilmyCamera/FilmyCamera.entitlements
+// Placeholder so Debug registers a scheme; override with the real REVERSED_CLIENT_ID in the ignored local xcconfig.
+FILMY_GOOGLE_REVERSED_CLIENT_ID = com.googleusercontent.apps.configure-before-enabling-sign-in
 // Google's dedicated test inventory. Never substitute live ad units for testing.
 FILMY_ADS_ENABLED = YES
 FILMY_ADMOB_APP_ID = ca-app-pub-3940256099942544~1458002511

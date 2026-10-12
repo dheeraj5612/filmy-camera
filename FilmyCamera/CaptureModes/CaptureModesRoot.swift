@@ -13,6 +13,7 @@ struct CaptureModesRoot: View {
     private var busy: Bool {
         cameraViewModel.isCapturing || cameraViewModel.isSaving || cameraViewModel.isImporting
             || cameraViewModel.reviewImage != nil
+            || cameraViewModel.isFujiBusy || camera.isFujiCapturing
     }
 
     var body: some View {

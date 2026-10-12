@@ -13,6 +13,12 @@ final class SmartRecipeEngineTests: XCTestCase {
     private func scene(_ kind: SmartSceneKind, faces: Bool = false, metrics: SmartSceneMetrics = .init()) -> SmartScene {
         SmartScene(kind: kind, evidence: 0.9, metrics: metrics, hasFaces: faces)
     }
+    func testMonochromeFilterFamiliesAreMonochrome() {
+        for family in ["acros", "acrosRed", "monochrome", "monochromeYellow", "monochromeRed", "monochromeGreen", "sepia"] {
+            XCTAssertTrue(SmartRecipeProfile(id: family, family: family).isMonochrome, family)
+        }
+        XCTAssertFalse(SmartRecipeProfile(id: "p", family: "provia").isMonochrome)
+    }
     func testFacesFavorGentlePortraitControls() {
         XCTAssertEqual(SmartRecipeEngine.rank(scene: scene(.people, faces: true), profiles: profiles).first?.id, "portrait")
     }

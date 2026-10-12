@@ -3,25 +3,16 @@ import CoreImage
 import CoreText
 import Foundation
 
-/// Namespaced preference used by the optional G7 X camera experience.
+/// Namespaced opt-in preference for the compact-camera date stamp. Off by default.
 enum G7DateStampPreferences {
     static let enabledKey = "g7x.dateStamp.enabled"
 
     static func isEnabled(in defaults: UserDefaults = .standard) -> Bool {
-#if G7_APP
         defaults.bool(forKey: enabledKey)
-#else
-        false
-#endif
     }
 
     static func setEnabled(_ enabled: Bool, in defaults: UserDefaults = .standard) {
-#if G7_APP
         defaults.set(enabled, forKey: enabledKey)
-#else
-        _ = enabled
-        _ = defaults
-#endif
     }
 }
 

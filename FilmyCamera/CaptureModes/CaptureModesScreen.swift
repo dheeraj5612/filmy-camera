@@ -80,9 +80,12 @@ struct CaptureModesScreen: View {
             .alert("Capture modes", isPresented: Binding(get: { model.errorMessage != nil },
                                                          set: { if !$0 { model.errorMessage = nil } })) {
                 Button("OK", role: .cancel) { model.errorMessage = nil }
-                Button("Settings") {
-                    guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
-                    UIApplication.shared.open(url)
+                // Only permission errors, which all name Settings, can be fixed there.
+                if model.errorMessage?.contains("Settings") == true {
+                    Button("Settings") {
+                        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                        UIApplication.shared.open(url)
+                    }
                 }
             } message: { Text(model.errorMessage ?? "") }
             .onChange(of: interactionBlocked) { _, blocked in model.setInteractionAllowed(!blocked) }
@@ -163,7 +166,7 @@ struct CaptureModesScreen: View {
                             .background(model.requestedMode == mode ? Color.white.opacity(0.22) : Color.white.opacity(0.07), in: Capsule())
                     }
                     .buttonStyle(.plain)
-                    .disabled(!model.canConfigure)
+                    .disabled(!model.canConfigure || !CaptureModesEngine.supportedModes.contains(mode))
                     .accessibilityIdentifier("capture-mode-\(mode.rawValue)")
                     .accessibilityAddTraits(model.requestedMode == mode ? .isSelected : [])
                 }

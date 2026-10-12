@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreLocation
 import CoreImage
 import Foundation
 import ImageIO
@@ -46,7 +47,8 @@ enum ProPhotoOutput {
     }
 
     static func encode(
-        _ image: CIImage, sourceData: Data, capturedAt: Date, recipe: FilmRecipe, settings: ProCaptureSettings
+        _ image: CIImage, sourceData: Data, capturedAt: Date, recipe: FilmRecipe, settings: ProCaptureSettings,
+        location: CLLocation? = nil
     ) -> Data? {
         guard settings.incompatibility == nil else { return nil }
         let hdr = settings.dynamicRange == .hdr
@@ -55,7 +57,7 @@ enum ProPhotoOutput {
         guard let colorSpace = CGColorSpace(name: profile) else { return nil }
         let properties = PhotoOutputEncoder.exportProperties(
             width: Int(image.extent.width), height: Int(image.extent.height),
-            sourceData: sourceData, capturedAt: capturedAt, recipe: recipe,
+            sourceData: sourceData, capturedAt: capturedAt, recipe: recipe, location: location,
             profileName: hdr ? "ITU-R BT.2100 PQ" : settings.colorGamut == .displayP3 ? "Display P3" : PhotoOutputEncoder.outputProfileName,
             isSRGB: !hdr && settings.colorGamut == .sRGB
         )

@@ -32,6 +32,9 @@ final class FujiShootingController: ObservableObject {
     @Published private(set) var progress: Double = 0
     @Published private(set) var multipleCount = 0
     @Published private(set) var pendingExportCount = 0
+    /// Library folders kept on disk whose record.json cannot be read. The Raw
+    /// library view should show "N captures need repair" when this is non-zero.
+    @Published private(set) var unreadableEntries: [FujiUnreadableEntry] = []
     @Published private(set) var originals: [FujiOriginalRecord] = []
     @Published private(set) var hybridImage: UIImage?
     @Published private(set) var focusImage: UIImage?
@@ -55,6 +58,7 @@ final class FujiShootingController: ObservableObject {
     private var appliedProfile: FujiAutoISOProfile?
     private var profileDeviceID: String?
     private var appliedPrimeLock = false
+    private var sensorRestorationFailed = false
     @Published private(set) var settingUpPrime = false
     private var idleTimerWasDisabled: Bool?
     // NotificationCenter's opaque observer tokens are not Sendable. The
@@ -78,15 +82,19 @@ final class FujiShootingController: ObservableObject {
         memoryObserver = NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification,
             object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor [weak self] in
-                    self?.cancel()
-                    self?.sampler.reset()
-                    self?.errorMessage = "Shooting stopped because memory is low. Already saved frames and originals are kept."
+                    guard let self else { return }
+                    // An idle warning only drops buffered preview frames; a partly built multiple exposure is kept.
+                    if self.isBusy {
+                        self.cancel()
+                        self.errorMessage = "Shooting stopped because memory is low. Already saved frames and originals are kept."
+                    }
+                    self.sampler.reset()
                 }
             }
         thermalObserver = NotificationCenter.default.addObserver(forName: ProcessInfo.thermalStateDidChangeNotification,
             object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor [weak self] in
-                    if ProcessInfo.processInfo.thermalState == .critical {
+                    if ProcessInfo.processInfo.thermalState == .critical, self?.isBusy == true {
                         self?.cancel()
                         self?.errorMessage = "The device needs to cool down before another sequence."
                     }
@@ -230,13 +238,16 @@ final class FujiShootingController: ObservableObject {
         if request.settings.drive == .filmBracket && request.filmRecipes.count != 3 {
             errorMessage = "Select three available film recipes in Q → BKT settings."; return
         }
-        isBusy = true; progress = 0; errorMessage = nil; status = request.settings.drive.title
+        isBusy = true; progress = 0; errorMessage = nil; sensorRestorationFailed = false; status = request.settings.drive.title
         keepScreenAwake()
         task = Task { [weak self] in
             guard let self else { return }
             do { try await self.run(request, driver: camera, photoLibrary: photoLibrary) }
             catch {
-                self.errorMessage = error is CancellationError ? FujiShootingError.cancelled.localizedDescription : error.localizedDescription
+                // Keep the more actionable "Sensor restoration failed" message.
+                if !self.sensorRestorationFailed {
+                    self.errorMessage = error is CancellationError ? FujiShootingError.cancelled.localizedDescription : error.localizedDescription
+                }
                 // A partly assembled multiple exposure remains usable after a
                 // capture error. Explicit cancel/background discards it.
             }
@@ -278,8 +289,10 @@ final class FujiShootingController: ObservableObject {
             if let multipleDeviceID, multipleDeviceID != sensor.deviceID {
                 throw FujiShootingError.invalidCombination("The lens changed. Cancel this multiple exposure before continuing.")
             }
+            // Match the live Auto ISO loop in CameraService, which uses 24 mm times the user-facing zoom.
+            let focalLength = max(24 * Double(camera?.zoomFactor ?? 1), 12)
             let base = settings.autoISOProfile.map { FujiMath.autoExposure(metered: sensor.exposure, profile: $0,
-                isoRange: sensor.isoRange, durationRange: sensor.durationRange) } ?? sensor.exposure
+                isoRange: sensor.isoRange, durationRange: sensor.durationRange, focalLength: focalLength) } ?? sensor.exposure
             let exposures = try plan.steps.map { step -> FujiExposure? in
                 custom ? try FujiMath.shiftedExposure(base, stops: step.exposureOffset - step.dynamicRange.protectionStops,
                     isoRange: sensor.isoRange, durationRange: sensor.durationRange) : nil
@@ -320,7 +333,10 @@ final class FujiShootingController: ObservableObject {
             try await driver.endFujiCapture(transactionID: sensor.transactionID)
         } catch {
             do { try await driver.endFujiCapture(transactionID: sensor.transactionID) }
-            catch { errorMessage = "Sensor restoration failed. Reopen the camera before continuing." }
+            catch {
+                sensorRestorationFailed = true
+                errorMessage = "Sensor restoration failed. Reopen the camera before continuing."
+            }
             throw error
         }
         try Task.checkCancellation()
@@ -442,9 +458,14 @@ final class FujiShootingController: ObservableObject {
             return try FujiImageProcessor.thumbnail(source, edge: 512)
         }.value
         let image = UIImage(cgImage: thumbnail.image)
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            photoLibrary.save(image: image, imageData: data, recipe: pending.recipe, capturedAt: pending.capturedAt) {
-                continuation.resume(with: $0.mapError { $0 as Error })
+        // The service records the Photos placeholder identifier here before the
+        // commit completes, so a retry adopts the asset instead of duplicating it.
+        let receipt = await library.receiptURL(pending)
+        try await PhotosExportReceipt.$sidecar.withValue(receipt) { () async throws -> Void in
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                photoLibrary.save(image: image, imageData: data, recipe: pending.recipe, capturedAt: pending.capturedAt) {
+                    continuation.resume(with: $0.mapError { $0 as Error })
+                }
             }
         }
         try await library.markExported(pending)
@@ -497,8 +518,14 @@ final class FujiShootingController: ObservableObject {
     }
 
     func reloadLibrary() async {
-        do { originals = try await library.originals(); pendingExportCount = try await library.pendingExports().count }
-        catch { errorMessage = "The capture library could not be read: \(error.localizedDescription)" }
+        do {
+            originals = try await library.originals()
+            pendingExportCount = try await library.pendingExports().count
+            let unreadableOriginals = try await library.unreadableOriginals()
+            let unreadableExports = try await library.unreadableExports()
+            unreadableEntries = unreadableOriginals + unreadableExports
+        }
+        catch { unreadableEntries = []; errorMessage = "The capture library could not be read: \(error.localizedDescription)" }
     }
 
     func importRAW(_ url: URL, recipe: FilmRecipe) async throws {

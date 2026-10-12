@@ -18,7 +18,7 @@ struct FujiQuickMenuView: View {
                     }
                     Text("\(controller.settings.drive.title) · \(controller.settings.dynamicRange.title)")
                         .font(.title3.weight(.semibold))
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 8)], spacing: 8) {
                         ForEach(controller.preferences.quickControls) { control in
                             NavigationLink {
                                 destination(control)

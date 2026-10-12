@@ -183,7 +183,7 @@ enum PhotoOutputEncoder {
         }
         properties[kCGImagePropertyExifDictionary as String] = exif
         if let location, CLLocationCoordinate2DIsValid(location.coordinate) {
-            properties[kCGImagePropertyGPSDictionary as String] = gpsDictionary(for: location)
+            properties[kCGImagePropertyGPSDictionary as String] = gpsDictionary(for: location, sourceData: sourceData)
         }
 
         return properties
@@ -227,7 +227,7 @@ enum PhotoOutputEncoder {
         return CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any]
     }
 
-    private static func gpsDictionary(for location: CLLocation) -> [String: Any] {
+    private static func gpsDictionary(for location: CLLocation, sourceData: Data) -> [String: Any] {
         let coordinate = location.coordinate
         let stampFormatter = DateFormatter()
         stampFormatter.locale = Locale(identifier: "en_US_POSIX")
@@ -248,6 +248,27 @@ enum PhotoOutputEncoder {
         if location.altitude.isFinite, location.verticalAccuracy >= 0 {
             gps[kCGImagePropertyGPSAltitude as String] = abs(location.altitude)
             gps[kCGImagePropertyGPSAltitudeRef as String] = location.altitude < 0 ? 1 : 0
+        }
+        // The location may be synthesized from stored coordinates (export-time
+        // timestamp, no altitude). When the source carries a GPS fix for the
+        // same position, its fix time and altitude are the truthful values.
+        if let source = sourceProperties(from: sourceData)?[kCGImagePropertyGPSDictionary as String] as? [String: Any],
+           let latitude = source[kCGImagePropertyGPSLatitude as String] as? Double,
+           let longitude = source[kCGImagePropertyGPSLongitude as String] as? Double {
+            // Split into typed steps for the Xcode 16.4 type checker.
+            let latitudeRef = source[kCGImagePropertyGPSLatitudeRef as String] as? String
+            let longitudeRef = source[kCGImagePropertyGPSLongitudeRef as String] as? String
+            let latitudeSign: Double = latitudeRef == "S" ? -1 : 1
+            let longitudeSign: Double = longitudeRef == "W" ? -1 : 1
+            let latitudeDelta: Double = abs(latitude * latitudeSign - coordinate.latitude)
+            let longitudeDelta: Double = abs(longitude * longitudeSign - coordinate.longitude)
+            if latitudeDelta < 0.0001, longitudeDelta < 0.0001 {
+                let carried: [CFString] = [kCGImagePropertyGPSDateStamp, kCGImagePropertyGPSTimeStamp,
+                                           kCGImagePropertyGPSAltitude, kCGImagePropertyGPSAltitudeRef]
+                for key in carried.map({ $0 as String }) {
+                    if let value = source[key] { gps[key] = value }
+                }
+            }
         }
         if location.speed >= 0, location.speed.isFinite {
             gps[kCGImagePropertyGPSSpeed as String] = location.speed * 3.6

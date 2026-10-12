@@ -68,6 +68,104 @@ final class MembershipPolicyTests: XCTestCase {
         XCTAssertEqual(quota.remaining, 9)
     }
 
+    func testClockRollbackCannotRefillExhaustedAllowance() {
+        var quota = DailyPhotoQuota(now: now, timeZone: .gmt)
+        for _ in 0..<MembershipPolicy.dailyPhotoLimit { _ = quota.reserve(at: now) }
+        quota.advance(to: now.addingTimeInterval(-86_400))
+        quota.advance(to: now)
+        XCTAssertEqual(quota.remaining, 0)
+    }
+
+    private func exhaustedQuota() -> DailyPhotoQuota {
+        var quota = DailyPhotoQuota(now: now, timeZone: .gmt)
+        for _ in 0..<MembershipPolicy.dailyPhotoLimit { _ = quota.reserve(at: now, monotonic: 0) }
+        return quota
+    }
+
+    func testForwardGlitchHealsAfterTwentyFourHoursOfMonotonicTime() {
+        var quota = exhaustedQuota()
+        let wrong = now.addingTimeInterval(-10 * 86_400)
+        quota.advance(to: wrong, monotonic: 1_000)
+        XCTAssertEqual(quota.remaining, 0)
+        quota.advance(to: wrong, monotonic: 1_000 + 86_399)
+        XCTAssertEqual(quota.remaining, 0)
+        quota.advance(to: wrong, monotonic: 1_000 + 86_400)
+        XCTAssertEqual(quota.remaining, MembershipPolicy.dailyPhotoLimit)
+        XCTAssertNil(quota.rollbackHeal)
+        XCTAssertEqual(quota.lastObservedAt, wrong)
+        XCTAssertTrue(quota.isValid)
+    }
+
+    func testHealProgressAccumulatesAcrossObservations() {
+        var quota = exhaustedQuota()
+        let wrong = now.addingTimeInterval(-86_400)
+        quota.advance(to: wrong, monotonic: 100)
+        quota.advance(to: wrong, monotonic: 100 + 30_000)
+        quota.advance(to: wrong, monotonic: 100 + 60_000)
+        XCTAssertEqual(quota.remaining, 0)
+        XCTAssertEqual(quota.rollbackHeal?.remaining ?? 0, 86_400 - 60_000, accuracy: 0.001)
+        quota.advance(to: wrong, monotonic: 100 + 86_400)
+        XCTAssertEqual(quota.remaining, MembershipPolicy.dailyPhotoLimit)
+    }
+
+    func testRebootCreditsOnlyTimeSinceBoot() {
+        var quota = exhaustedQuota()
+        let wrong = now.addingTimeInterval(-86_400)
+        quota.advance(to: wrong, monotonic: 500_000)
+        quota.advance(to: wrong, monotonic: 600)
+        XCTAssertEqual(quota.rollbackHeal?.remaining ?? 0, 86_400 - 600, accuracy: 0.001)
+        XCTAssertEqual(quota.rollbackHeal?.lastMonotonic, 600)
+        XCTAssertEqual(quota.remaining, 0)
+    }
+
+    func testRepeatedRollbacksAndSameMonotonicNeverShortenHeal() {
+        var quota = exhaustedQuota()
+        let wrong = now.addingTimeInterval(-86_400)
+        quota.advance(to: wrong, monotonic: 1_000)
+        quota.advance(to: wrong, monotonic: 1_000)
+        quota.advance(to: wrong.addingTimeInterval(-500), monotonic: 1_000)
+        XCTAssertEqual(quota.rollbackHeal?.remaining, 86_400)
+        quota.advance(to: wrong, monotonic: 1_100)
+        quota.advance(to: wrong, monotonic: 1_100)
+        XCTAssertEqual(quota.rollbackHeal?.remaining ?? 0, 86_300, accuracy: 0.001)
+        quota.advance(to: wrong, monotonic: Double.nan)
+        quota.advance(to: wrong, monotonic: -5)
+        XCTAssertGreaterThan(quota.rollbackHeal?.remaining ?? 0, 86_000)
+        XCTAssertEqual(quota.remaining, 0)
+    }
+
+    func testRollbackThenForwardToOriginalTimeNeverRefills() {
+        var quota = exhaustedQuota()
+        quota.advance(to: now.addingTimeInterval(-86_400), monotonic: 10)
+        quota.advance(to: now, monotonic: 20)
+        XCTAssertNil(quota.rollbackHeal)
+        XCTAssertEqual(quota.remaining, 0)
+        quota.advance(to: now.addingTimeInterval(-86_400), monotonic: 30)
+        XCTAssertEqual(quota.rollbackHeal?.remaining, 86_400)
+        XCTAssertEqual(quota.remaining, 0)
+    }
+
+    func testRecordWithoutHealKeysDecodesAndIsValid() throws {
+        let quota = DailyPhotoQuota(now: now, timeZone: .gmt)
+        let data = try JSONEncoder().encode(quota)
+        var fields = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        fields.removeValue(forKey: "rollbackHeal")
+        let old = try JSONSerialization.data(withJSONObject: fields)
+        let restored = try JSONDecoder().decode(DailyPhotoQuota.self, from: old)
+        XCTAssertNil(restored.rollbackHeal)
+        XCTAssertTrue(restored.isValid)
+        XCTAssertEqual(restored.remaining, 10)
+    }
+
+    func testHealRecordSurvivesEncodingRoundTrip() throws {
+        var quota = exhaustedQuota()
+        quota.advance(to: now.addingTimeInterval(-86_400), monotonic: 42)
+        let restored = try JSONDecoder().decode(DailyPhotoQuota.self, from: JSONEncoder().encode(quota))
+        XCTAssertEqual(restored, quota)
+        XCTAssertEqual(restored.rollbackHeal, DailyPhotoQuota.RollbackHeal(remaining: 86_400, lastMonotonic: 42))
+        XCTAssertTrue(restored.isValid)
+    }
+
     func testCalendarMidnightResetsBeforeTwentyFourHoursElapsed() throws {
         let formatter = ISO8601DateFormatter()
         let late = try XCTUnwrap(formatter.date(from: "2026-09-15T23:59:59Z"))
@@ -168,6 +266,19 @@ final class MembershipStoreTests: XCTestCase {
         store.finishCapture(permits[0], succeeded: false)
         XCTAssertNotNil(store.reserveCapture())
         XCTAssertEqual(store.remainingPhotos, 0)
+    }
+
+    private final class InvalidRecordPersistence: PhotoQuotaPersistence {
+        var saved: DailyPhotoQuota?
+        func load() throws -> DailyPhotoQuota? { throw KeychainPhotoQuotaPersistence.Failure.invalidRecord }
+        func save(_ quota: DailyPhotoQuota) throws { saved = quota }
+    }
+
+    func testUndecodableRecordIsReplacedNotLockedOut() {
+        let persistence = InvalidRecordPersistence()
+        let store = MembershipStore(persistence: persistence)
+        XCTAssertEqual(store.remainingPhotos, 10)
+        XCTAssertNotNil(persistence.saved)
     }
 
     func testPersistedFreeQuotaSurvivesStoreRecreation() throws {

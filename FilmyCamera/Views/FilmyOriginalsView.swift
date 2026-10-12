@@ -12,6 +12,7 @@ struct FilmyOriginalsView: View {
     @ObservedObject var photoLibrary: PhotoLibraryService
     @State private var documents: [FilmyPhotoDocument] = []
     @State private var issue: String?
+    @State private var hasLoaded = false
 
     var body: some View {
         List {
@@ -20,7 +21,9 @@ struct FilmyOriginalsView: View {
                     .font(.callout).foregroundStyle(.secondary)
             }
             if let issue { Text(issue).foregroundStyle(.orange) }
-            if documents.isEmpty {
+            if !hasLoaded && documents.isEmpty {
+                ProgressView("Loading originals").frame(maxWidth: .infinity)
+            } else if documents.isEmpty {
                 ContentUnavailableView("Your next frame starts here", systemImage: "photo.stack",
                                        description: Text("New camera captures retain their originals automatically. Older Roll exports are not retroactively recoverable."))
             }
@@ -49,6 +52,7 @@ struct FilmyOriginalsView: View {
     }
 
     private func refresh() async {
+        defer { hasLoaded = true }
         do {
             let inventory = try await FilmyPhotoStore.shared.inventory()
             documents = inventory.documents
@@ -132,13 +136,13 @@ struct FilmyPhotoEditorView: View {
                         Text("Instant Print").tag(PhotoFinish.instantPrint).disabled(document.hasLivePhoto)
                     }.pickerStyle(.segmented)
                     developmentActions
+                    if let message { Text(message).font(.callout).accessibilityIdentifier("filmy-document-message") }
                     Text("Editing previews are SDR and limited to 1800 pixels. HDR is preserved in the saved HEIF when selected. Save version renders from the retained original at the selected output resolution. Every save creates a new version.")
                         .font(.caption).foregroundStyle(.secondary)
                     revisionPicker(document)
                     exportControls(document)
                 }
                 if busy { ProgressView("Processing photo").frame(maxWidth: .infinity) }
-                if let message { Text(message).font(.callout).accessibilityIdentifier("filmy-document-message") }
                 Button("Delete Filmy original and versions", role: .destructive) { confirmDelete = true }
                     .accessibilityIdentifier("filmy-delete-original")
             }
@@ -148,6 +152,9 @@ struct FilmyPhotoEditorView: View {
         .toolbar(.visible, for: .navigationBar)
         .disabled(busy)
         .task { await load() }
+        .onChange(of: message) { _, newValue in
+            if let newValue { UIAccessibility.post(notification: .announcement, argument: newValue) }
+        }
         .confirmationDialog("Delete this Filmy original?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete original and all versions", role: .destructive) {
                 Task {
@@ -195,6 +202,7 @@ struct FilmyPhotoEditorView: View {
     private func revisionPicker(_ document: FilmyPhotoDocument) -> some View {
         Picker("Load a version", selection: Binding(get: { selectedRevisionID ?? document.revisions[0].id }, set: { id in
             selectedRevisionID = id
+            message = nil
             guard let revision = document.revisions.first(where: { $0.id == id }) else { return }
             recipe = revision.recipe
             finish = revision.finish
@@ -267,6 +275,7 @@ struct FilmyPhotoEditorView: View {
     private func develop(save: Bool) async {
         guard !busy, let document, let current = document.currentRevision,
               let editing = document.revisionForEditing(selectedRevisionID), let recipe else { return }
+        message = nil
         busy = true
         defer { busy = false }
         do {
@@ -313,6 +322,7 @@ struct FilmyPhotoEditorView: View {
 
     private func export(asNewCopy: Bool) async {
         guard !busy else { return }
+        message = nil
         busy = true
         defer { busy = false }
         do {

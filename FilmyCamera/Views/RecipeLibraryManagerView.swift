@@ -34,6 +34,8 @@ struct RecipeLibraryManagerView: View {
     }
 
     var body: some View {
+        let shown = filtered
+        let favoriteSet = favorites
         NavigationStack {
             VStack(spacing: 0) {
                 Picker("Library view", selection: $showsRecipes) {
@@ -60,19 +62,19 @@ struct RecipeLibraryManagerView: View {
                             .accessibilityIdentifier("recipe-membership-filter")
                         }
                         Section {
-                            if filtered.isEmpty {
+                            if shown.isEmpty {
                                 ContentUnavailableView("No matching recipes", systemImage: "magnifyingglass",
                                                        description: Text("Change your search or show all recipes."))
                             } else {
-                                ForEach(filtered) { recipe in
+                                ForEach(shown) { recipe in
                                     RecipeManagementRow(recipe: recipe, selectedRecipeID: selectedRecipeID,
-                                                        enabled: preferences.isEnabled(recipe.id), onSelect: onSelect) { enabled in
+                                                        enabled: preferences.isEnabled(recipe.id), favorite: favoriteSet.contains(recipe.id), onSelect: onSelect) { enabled in
                                         change { $0.setRecipe(recipe.id, enabled: enabled) }
                                     }
                                 }
                             }
                         } header: {
-                            Text("\(filtered.count) recipes")
+                            Text("\(shown.count) recipes")
                         }
                     } else {
                         Section {
@@ -100,7 +102,7 @@ struct RecipeLibraryManagerView: View {
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $query, prompt: "Search stocks, names, cameras")
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { bulkMenu }
+                ToolbarItem(placement: .topBarLeading) { bulkMenu(shown: shown, favorites: favoriteSet) }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                         .frame(minWidth: 44, minHeight: 44)
@@ -130,7 +132,7 @@ struct RecipeLibraryManagerView: View {
         .accessibilityIdentifier("recipe-library-manager")
     }
 
-    private var bulkMenu: some View {
+    private func bulkMenu(shown: [FilmRecipe], favorites: Set<String>) -> some View {
         Menu {
             Button("Enable all \(recipes.count) looks", systemImage: "checkmark.circle") {
                 change { $0.setAll(RecipeCatalog.packs, enabled: true) }
@@ -140,20 +142,21 @@ struct RecipeLibraryManagerView: View {
                 change { $0.setAll(RecipeCatalog.packs, enabled: false) }
             }
             .accessibilityIdentifier("recipe-hide-all")
-            Button("Use only my favorites", systemImage: "heart") {
+            Button(favorites.isEmpty ? "No favorites yet" : "Use only my favorites", systemImage: "heart") {
                 change { state in
                     state.setAll(RecipeCatalog.packs, enabled: false)
                     for id in favorites { state.setRecipe(id, enabled: true) }
                 }
             }
-            if searchingRecipes && !filtered.isEmpty {
+            .disabled(favorites.isEmpty)
+            if searchingRecipes && !shown.isEmpty {
                 Divider()
-                Button("Enable \(filtered.count) results") {
-                    let ids = filtered.map(\.id)
+                Button("Enable \(shown.count) results") {
+                    let ids = shown.map(\.id)
                     change { state in for id in ids { state.setRecipe(id, enabled: true) } }
                 }
-                Button("Hide \(filtered.count) results") {
-                    let ids = filtered.map(\.id)
+                Button("Hide \(shown.count) results") {
+                    let ids = shown.map(\.id)
                     change { state in for id in ids { state.setRecipe(id, enabled: false) } }
                 }
             }
@@ -235,12 +238,16 @@ private struct RecipePackDetailView: View {
     let onSelect: (FilmRecipe) -> Void
     @State private var query = ""
     @State private var undoState: RecipeLibraryPreferences?
+    @AppStorage("favoriteRecipeIDs.v1") private var favoriteData = Data()
+
+    private var favorites: Set<String> { LookLibraryIndex.favorites(from: favoriteData) }
 
     private var results: [FilmRecipe] {
         LookLibraryIndex.results(in: recipes, query: query, filter: .all, favorites: [])
     }
 
     var body: some View {
+        let favoriteSet = favorites
         List {
             Section {
                 Text(pack.subtitle).font(.subheadline).foregroundStyle(FilmyTheme.secondary)
@@ -259,7 +266,7 @@ private struct RecipePackDetailView: View {
             Section {
                 ForEach(results) { recipe in
                     RecipeManagementRow(recipe: recipe, selectedRecipeID: selectedRecipeID,
-                                        enabled: preferences.isEnabled(recipe.id), onSelect: onSelect) { enabled in
+                                        enabled: preferences.isEnabled(recipe.id), favorite: favoriteSet.contains(recipe.id), onSelect: onSelect) { enabled in
                         change { $0.setRecipe(recipe.id, enabled: enabled) }
                     }
                 }
@@ -299,13 +306,12 @@ private struct RecipeManagementRow: View {
     let recipe: FilmRecipe
     let selectedRecipeID: String
     let enabled: Bool
+    let favorite: Bool
     let onSelect: (FilmRecipe) -> Void
     let onToggle: (Bool) -> Void
     @State private var showingSource = false
     @AppStorage("favoriteRecipeIDs.v1") private var favoriteData = Data()
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-
-    private var favorite: Bool { LookLibraryIndex.favorites(from: favoriteData).contains(recipe.id) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {

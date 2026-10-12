@@ -101,4 +101,17 @@ final class CaptureModesProcessingTests: XCTestCase {
             }
         }
     }
+
+    func testMovieRecoverabilityRequiresFileAndPlayableVideo() {
+        func ok(size: Int64 = 10, playable: Bool = true, video: Bool = true, seconds: Double = 1) -> Bool {
+            CaptureModesEngine.isRecoverableMovie(fileSize: size, isPlayable: playable,
+                                                  hasVideoTrack: video, durationSeconds: seconds)
+        }
+        XCTAssertTrue(ok())
+        XCTAssertFalse(ok(size: 0))
+        XCTAssertFalse(ok(playable: false))
+        XCTAssertFalse(ok(video: false))
+        XCTAssertFalse(ok(seconds: 0))
+        XCTAssertFalse(ok(seconds: .nan))
+    }
 }

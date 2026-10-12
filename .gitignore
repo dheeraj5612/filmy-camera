@@ -46,3 +46,6 @@ FilmyCamera.xcodeproj/xcuserdata/
 # Local monetization configuration, never upload provider private credentials.
 Config/Monetization.Local.*.xcconfig
 FilmyCamera/GoogleService-Info.plist
+
+# Agent worktrees (a committed gitlink here breaks actions/checkout)
+.claude/worktrees/

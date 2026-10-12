@@ -34,8 +34,11 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
     private var processing: Task<Void, Never>?
     private var movieTimer: DispatchSourceTimer?
     private var shutdownWaiters: [CheckedContinuation<Void, Never>] = []
+    /// True from a movie error callback until finishMovie runs; queue-only. Keeps shutdown() waiting.
+    private var pendingMovieValidation = false
     private var movieStart: Date?
     private var wantsRunning = false
+    private var pausedByInterruption = false
     private var controlsAllowed = true
     private var pendingConfiguration: (CaptureMode, Bool)?
     private var spatialAngle: CGFloat?
@@ -48,14 +51,26 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
         self.recipes = recipes.isEmpty ? [recipe] : recipes
         self.emit = emit
         super.init()
-        for name in [AVCaptureSession.wasInterruptedNotification, AVCaptureSession.runtimeErrorNotification] {
-            observers.append(NotificationCenter.default.addObserver(forName: name, object: session, queue: nil) { [weak self] _ in
-                self?.pause(reason: "Camera interrupted. Completed originals remain in Captures. Reopen the mode to continue.")
-            })
-        }
+        let interruptedReason = "Camera interrupted. Completed originals remain in Captures. Reopen the mode to continue."
+        observers.append(NotificationCenter.default.addObserver(forName: AVCaptureSession.wasInterruptedNotification, object: session, queue: nil) { [weak self] _ in
+            self?.queue.async { [weak self] in self?.pausedByInterruption = true }
+            self?.pause(reason: interruptedReason)
+        })
+        observers.append(NotificationCenter.default.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: session, queue: nil) { [weak self] _ in
+            self?.pause(reason: interruptedReason)
+        })
+        observers.append(NotificationCenter.default.addObserver(forName: AVCaptureSession.interruptionEndedNotification, object: session, queue: nil) { [weak self] _ in
+            self?.queue.async { [weak self] in
+                guard let self, pausedByInterruption, !state.phase.isBusy else { return }
+                pausedByInterruption = false
+                // The model reopens only while foregrounded, reusing its permission and microphone path.
+                emit(.requestedMode(state.mode))
+            }
+        })
         observers.append(NotificationCenter.default.addObserver(forName: ProcessInfo.thermalStateDidChangeNotification,
                                                                  object: nil, queue: nil) { [weak self] _ in
             if ProcessInfo.processInfo.thermalState == .critical {
+                self?.queue.async { [weak self] in self?.pausedByInterruption = false }
                 self?.pause(reason: "The device is too warm to continue. Let it cool before reopening the mode.")
             }
         })
@@ -73,6 +88,7 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
     func configure(mode: CaptureMode, microphone: Bool) {
         queue.async { [self] in
             wantsRunning = true
+            pausedByInterruption = false
             if state.phase.isBusy {
                 pendingConfiguration = (mode, microphone)
                 return
@@ -125,6 +141,12 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
             if selected.isExposureModeSupported(.continuousAutoExposure) { selected.exposureMode = .continuousAutoExposure }
             if selected.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) { selected.whiteBalanceMode = .continuousAutoWhiteBalance }
             if mode == .macro, selected.isAutoFocusRangeRestrictionSupported { selected.autoFocusRangeRestriction = .near }
+            if mode == .portrait, selected.deviceType == .builtInTripleCamera || selected.deviceType == .builtInDualWideCamera, let first = selected.virtualDeviceSwitchOverVideoZoomFactors.first {
+                // Virtual multi-camera devices start on the ultra-wide; begin on the main lens.
+                let lower = selected.minAvailableVideoZoomFactor
+                let upper = selected.maxAvailableVideoZoomFactor
+                selected.videoZoomFactor = min(max(CGFloat(first.doubleValue), lower), upper)
+            }
             if mode.isVideo {
                 let supports30 = selected.activeFormat.videoSupportedFrameRateRanges.contains { $0.minFrameRate <= 30 && $0.maxFrameRate >= 30 }
                 if supports30 {
@@ -193,6 +215,31 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
             emit(.failed(error.localizedDescription))
         }
     }
+
+    /// Modes whose hardware is missing are disabled up front. Without any back camera (e.g. the
+    /// simulator) nothing can be judged, so every mode stays selectable.
+    static let supportedModes: Set<CaptureMode> = {
+        guard AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) != nil else {
+            return Set(CaptureMode.allCases)
+        }
+        var modes = Set(CaptureMode.allCases)
+        if let ultraWide = AVCaptureDevice.default(.builtInUltraWideCamera, for: .video, position: .back) {
+            let close = CaptureModesPolicy.supportsMacro(minimumFocusDistance: Int(ultraWide.minimumFocusDistance),
+                autofocus: ultraWide.isFocusModeSupported(.continuousAutoFocus))
+            if !close { modes.remove(.macro) }
+        } else { modes.remove(.macro) }
+        let portraitTypes: [AVCaptureDevice.DeviceType] = [.builtInDualCamera, .builtInTripleCamera, .builtInDualWideCamera]
+        let rear = AVCaptureDevice.DiscoverySession(deviceTypes: portraitTypes, mediaType: .video, position: .back).devices
+        if rear.isEmpty, AVCaptureDevice.default(.builtInTrueDepthCamera, for: .video, position: .front) == nil {
+            modes.remove(.portrait)
+        }
+        var spatial = false
+        if #available(iOS 18.0, *), let dualWide = AVCaptureDevice.default(.builtInDualWideCamera, for: .video, position: .back) {
+            spatial = dualWide.formats.contains { $0.isSpatialVideoCaptureSupported }
+        }
+        if !spatial { modes.remove(.spatialVideo) }
+        return modes
+    }()
 
     private func selectDevice(for mode: CaptureMode) throws -> AVCaptureDevice {
         let result: AVCaptureDevice?
@@ -499,9 +546,10 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
     func shutdown() async {
         await withCheckedContinuation { continuation in
             queue.async { [self] in
+                pausedByInterruption = false
                 pauseOnQueue(reason: "Camera closed")
                 // A recording movie stops the session from its finish callback; resume then.
-                if movie.isRecording { shutdownWaiters.append(continuation) } else { continuation.resume() }
+                if movie.isRecording || pendingMovieValidation { shutdownWaiters.append(continuation) } else { continuation.resume() }
             }
         }
     }
@@ -586,32 +634,101 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
 }
 
 extension CaptureModesEngine: AVCaptureFileOutputRecordingDelegate {
+    /// A recording that ended with an error is kept only when the file on disk is a non-empty,
+    /// playable video with a positive duration.
+    static func isRecoverableMovie(fileSize: Int64, isPlayable: Bool,
+                                   hasVideoTrack: Bool, durationSeconds: Double) -> Bool {
+        fileSize > 0 && isPlayable && hasVideoTrack
+            && durationSeconds.isFinite && durationSeconds > 0
+    }
+
+    private static func movieIsRecoverable(at url: URL) async -> Bool {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        let size: Int64 = (attributes?[.size] as? NSNumber)?.int64Value ?? 0
+        guard size > 0 else { return false }
+        // Unstructured race: a task group would still await a load that ignores
+        // cancellation, and shutdown waits on this verdict.
+        return await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            let gate = MovieValidationGate(continuation)
+            let work = Task.detached {
+                let asset = AVURLAsset(url: url)
+                let playable: Bool = (try? await asset.load(.isPlayable)) ?? false
+                let duration: CMTime = (try? await asset.load(.duration)) ?? .zero
+                let tracks: [AVAssetTrack] = (try? await asset.loadTracks(withMediaType: .video)) ?? []
+                let verdict: Bool = CaptureModesEngine.isRecoverableMovie(
+                    fileSize: size, isPlayable: playable,
+                    hasVideoTrack: !tracks.isEmpty, durationSeconds: CMTimeGetSeconds(duration))
+                gate.finish(verdict)
+            }
+            Task.detached {
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                work.cancel()
+                gate.finish(false)
+            }
+        }
+    }
+
+    /// Resumes the validation continuation exactly once, whichever side finishes first.
+    private final class MovieValidationGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<Bool, Never>?
+
+        init(_ continuation: CheckedContinuation<Bool, Never>) { self.continuation = continuation }
+
+        func finish(_ value: Bool) {
+            lock.lock()
+            let pending = continuation
+            continuation = nil
+            lock.unlock()
+            pending?.resume(returning: value)
+        }
+    }
+
     func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL,
                     from connections: [AVCaptureConnection], error: Error?) {
         let message = error?.localizedDescription
-        let successfullyFinished = error == nil || ((error as NSError?)?.userInfo[AVErrorRecordingSuccessfullyFinishedKey] as? Bool == true)
-        queue.async { [self] in
-            defer {
-                if !wantsRunning, session.isRunning { session.stopRunning() }
-                let waiters = shutdownWaiters; shutdownWaiters = []
-                waiters.forEach { $0.resume() }
-            }
-            movieTimer?.cancel(); movieTimer = nil; movieStart = nil
-            guard var record = media else { settle(); return }
-            do {
-                guard successfullyFinished else { throw CaptureModesError.unavailable(message ?? "Movie recording failed. Any recoverable original remains in Captures.") }
-                record.originals = [outputFileURL.lastPathComponent]
-                if let message { record.notes.append(message) }
-                try CaptureMediaStore.persist(record)
-                media = record
-                if wantsRunning { process(record) }
-                else {
-                    emit(.saved(record)); media = nil
-                    if session.isRunning { session.stopRunning() }
-                    settle()
-                }
-            } catch { fail(error) }
+        guard error != nil else {
+            queue.async { [self] in finishMovie(at: outputFileURL, recoverable: true, early: false, message: nil) }
+            return
         }
+        // Any error: validate the file off the session queue, then apply the verdict on queue.
+        queue.async { [self] in
+            pendingMovieValidation = true
+            Task.detached { [self] in
+                let ok = await CaptureModesEngine.movieIsRecoverable(at: outputFileURL)
+                queue.async { [self] in finishMovie(at: outputFileURL, recoverable: ok, early: true, message: message) }
+            }
+        }
+    }
+
+    /// Single terminal handler per recording (AVFoundation calls didFinish once; the callback hops here
+    /// exactly once). Recoverable recordings take the success path; others take fail(). The
+    /// `originals.isEmpty` guard makes a repeated callback a no-op, so one capture never emits both.
+    private func finishMovie(at outputFileURL: URL, recoverable: Bool, early: Bool, message: String?) {
+        defer {
+            if !wantsRunning, session.isRunning { session.stopRunning() }
+            let waiters = shutdownWaiters; shutdownWaiters = []
+            waiters.forEach { $0.resume() }
+        }
+        pendingMovieValidation = false
+        // A late callback for an older recording must not touch the current capture or its timer.
+        if let current = media, outputFileURL.deletingLastPathComponent().lastPathComponent != current.id.uuidString { return }
+        movieTimer?.cancel(); movieTimer = nil; movieStart = nil
+        guard var record = media, record.originals.isEmpty else { settle(); return }
+        do {
+            guard recoverable else { throw CaptureModesError.unavailable(message ?? "Movie recording failed. Any recoverable original remains in Captures.") }
+            record.originals = [outputFileURL.lastPathComponent]
+            if early { record.notes.append("Recording stopped early; the original was kept.") }
+            try CaptureMediaStore.persist(record)
+            media = record
+            if wantsRunning { process(record) }
+            else {
+                emit(.saved(record)); media = nil
+                if early { state.message = "Recording stopped early; the original was kept." }
+                if session.isRunning { session.stopRunning() }
+                settle()
+            }
+        } catch { fail(error) }
     }
 }
 

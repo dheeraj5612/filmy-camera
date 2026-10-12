@@ -4,6 +4,25 @@ import UniformTypeIdentifiers
 
 private struct FujiDecodedPreview: @unchecked Sendable { let image: UIImage }
 
+/// Library folders kept on disk whose record.json cannot be read. No delete action.
+private struct FujiUnreadableRow: View {
+    @ObservedObject var controller: FujiShootingController
+
+    var body: some View {
+        let count: Int = controller.unreadableEntries.count
+        let title: String = count == 1 ? "1 capture needs repair" : "\(count) captures need repair"
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.headline)
+            Text("Their files are still on this device but their records cannot be read. Nothing was deleted.")
+                .font(.footnote).foregroundStyle(.secondary)
+            Button("Check again") { Task { await controller.reloadLibrary() } }
+                .disabled(controller.isBusy).frame(minHeight: 44)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("fuji-library-unreadable")
+    }
+}
+
 struct FujiRAWLibraryView: View {
     @ObservedObject var controller: FujiShootingController
     @ObservedObject var viewModel: CameraViewModel
@@ -28,6 +47,9 @@ struct FujiRAWLibraryView: View {
                     Button("Retry \(controller.pendingExportCount) Photos saves") { controller.retryExports(photoLibrary: photoLibrary) }
                         .disabled(controller.isBusy).frame(minHeight: 44)
                 }
+            }
+            if !controller.unreadableEntries.isEmpty {
+                Section("Needs repair") { FujiUnreadableRow(controller: controller) }
             }
             if let error { Section { Text(error).foregroundStyle(.orange).font(.footnote) } }
             if let message = controller.errorMessage { Section { Text(message).foregroundStyle(.orange).font(.footnote) } }

@@ -164,15 +164,23 @@ final class RecipeLibraryTests: XCTestCase {
     func testMembershipFilteringSearchesSourcesWithoutHidingTheFullCatalog() throws {
         var state = RecipeLibraryPreferences()
         let record = try XCTUnwrap(RecipeCatalog.records.first { $0.source.publisher == .filmRecipes })
-        let results = RecipeMembershipFilter.results(FilmRecipe.builtIns, query: record.source.url,
+        let name = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == record.id }).name
+        let results = RecipeMembershipFilter.results(FilmRecipe.builtIns, query: name,
                                                      filter: .hidden, preferences: state, favorites: [])
-        XCTAssertEqual(results.map(\.id), [record.id])
+        XCTAssertTrue(results.map(\.id).contains(record.id))
         state.setRecipe(record.id, enabled: true)
-        let active = RecipeMembershipFilter.results(FilmRecipe.builtIns, query: record.source.url,
+        let active = RecipeMembershipFilter.results(FilmRecipe.builtIns, query: name,
                                                     filter: .active, preferences: state, favorites: [])
-        XCTAssertEqual(active.map(\.id), [record.id])
-        XCTAssertTrue(RecipeMembershipFilter.results(FilmRecipe.builtIns, query: record.source.url,
-                                                     filter: .hidden, preferences: state, favorites: []).isEmpty)
+        XCTAssertTrue(active.map(\.id).contains(record.id))
+        let hidden = RecipeMembershipFilter.results(FilmRecipe.builtIns, query: name,
+                                                    filter: .hidden, preferences: state, favorites: [])
+        XCTAssertFalse(hidden.map(\.id).contains(record.id))
+    }
+
+    func testSearchTextIgnoresSourceURL() throws {
+        let record = try XCTUnwrap(RecipeCatalog.records.first { $0.source.publisher == .filmRecipes })
+        let recipe = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == record.id })
+        XCTAssertFalse(RecipeCatalog.searchText(for: recipe).contains(record.source.url))
     }
 }
 

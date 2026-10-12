@@ -236,8 +236,19 @@ final class NormalRollManagementTests: XCTestCase {
                     return false
                 }
             }
+            if expectedCountAfter > 0, self.app.buttons["Close frame"].exists,
+               self.app.descendants(matching: .any)["gallery-frame-position"].value as? String == "1 of \(expectedCountAfter)" {
+                // The pager stays open on the neighbouring frame.
+                return true
+            }
             return !self.app.buttons["Close frame"].exists && self.rollCount() == expectedCountAfter
         }, "Confirmed deletion must remove the selected fixture and publish the reduced Roll count")
+        if app.buttons["Close frame"].exists {
+            app.buttons["Close frame"].tap()
+            XCTAssertTrue(waitUntil(timeout: 30) {
+                !self.app.buttons["Close frame"].exists && self.rollCount() == expectedCountAfter
+            }, "Closing the pager must show the reduced Roll count")
+        }
         XCTAssertFalse(app.alerts["Couldn’t update frame"].exists)
     }
 

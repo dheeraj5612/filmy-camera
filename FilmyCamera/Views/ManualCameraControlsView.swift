@@ -8,6 +8,7 @@ struct ManualCameraControlsView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var isoDraft: Double = 0
@@ -197,7 +198,7 @@ struct ManualCameraControlsView: View {
                 ForEach(ControlSection.allCases) { section in
                     Button {
                         HapticFeedback.play(.selection)
-                        withAnimation(.easeInOut(duration: 0.2)) { selectedSection = section }
+                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { selectedSection = section }
                     } label: {
                         ZStack(alignment: .topTrailing) {
                             VStack(alignment: .leading, spacing: 5) {

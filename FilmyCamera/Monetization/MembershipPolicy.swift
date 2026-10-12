@@ -39,6 +39,25 @@ struct DailyPhotoQuota: Codable, Equatable {
     private(set) var day: Date
     private(set) var lastObservedAt: Date
     private(set) var used: Int
+    /// Optional so records written before the heal rule still decode.
+    private(set) var rollbackHeal: RollbackHeal?
+
+    /// Trusted elapsed-time countdown started when the wall clock is behind the anchor.
+    struct RollbackHeal: Codable, Equatable {
+        static let window: TimeInterval = 86_400
+        var remaining: TimeInterval
+        var lastMonotonic: TimeInterval
+
+        var isValid: Bool {
+            guard remaining.isFinite, lastMonotonic.isFinite, lastMonotonic >= 0 else { return false }
+            return remaining >= 0 && remaining <= RollbackHeal.window
+        }
+    }
+
+    /// Seconds from a monotonic, sleep-inclusive clock that cannot be set by the user; resets at reboot.
+    static func monotonicNow() -> TimeInterval {
+        TimeInterval(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)) / 1_000_000_000
+    }
 
     init(now: Date, timeZone: TimeZone = .current) {
         timeZoneID = timeZone.identifier
@@ -55,12 +74,36 @@ struct DailyPhotoQuota: Codable, Equatable {
         TimeZone(identifier: timeZoneID) != nil && (0...MembershipPolicy.dailyPhotoLimit).contains(used)
             && day.timeIntervalSince1970.isFinite && lastObservedAt.timeIntervalSince1970.isFinite
             && day <= lastObservedAt
+            && (rollbackHeal?.isValid ?? true)
     }
 
-    mutating func advance(to now: Date) {
-        guard now >= lastObservedAt else { return }
+    mutating func advance(to now: Date, monotonic: TimeInterval = DailyPhotoQuota.monotonicNow()) {
+        // Freezing after a clock rollback is deliberate anti-tamper. It heals
+        // only by trusted elapsed time: once 24 h of monotonic time (or time
+        // since boot after a reboot) accrue while the clock stays behind the
+        // anchor, the current clock is accepted and the allowance resets.
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: timeZoneID) ?? .gmt
+        guard now >= lastObservedAt else {
+            guard monotonic.isFinite, monotonic >= 0 else { return }
+            guard var heal = rollbackHeal else {
+                rollbackHeal = RollbackHeal(remaining: RollbackHeal.window, lastMonotonic: monotonic)
+                return
+            }
+            let credit = monotonic >= heal.lastMonotonic ? monotonic - heal.lastMonotonic : monotonic
+            if credit.isFinite, credit > 0 { heal.remaining -= credit }
+            heal.lastMonotonic = monotonic
+            if heal.remaining <= 0 {
+                day = calendar.startOfDay(for: now)
+                lastObservedAt = now
+                used = 0
+                rollbackHeal = nil
+            } else {
+                rollbackHeal = heal
+            }
+            return
+        }
+        rollbackHeal = nil
         let newDay = calendar.startOfDay(for: now)
         if newDay > day {
             day = newDay
@@ -71,8 +114,8 @@ struct DailyPhotoQuota: Codable, Equatable {
 
     /// Charge *before* handing off to asynchronous camera work. A crash cannot
     /// reset a pending charge. Ordinary capture/render failures refund it.
-    mutating func reserve(at now: Date) -> Date? {
-        advance(to: now)
+    mutating func reserve(at now: Date, monotonic: TimeInterval = DailyPhotoQuota.monotonicNow()) -> Date? {
+        advance(to: now, monotonic: monotonic)
         guard remaining > 0 else { return nil }
         used += 1
         return day

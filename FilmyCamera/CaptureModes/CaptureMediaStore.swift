@@ -99,6 +99,14 @@ enum CaptureMediaStore {
             try Task.checkCancellation()
             let url = try file(name, in: media.id)
             guard FileManager.default.fileExists(atPath: url.path) else { throw CaptureModesError.invalidImage }
+            let receiptURL = try directory(media.id).appendingPathComponent("photos-pending-\(name).txt")
+            if let adopted = PhotosExportReceipt.adoptable(at: receiptURL) {
+                // A prior attempt created this asset but died before recording it.
+                media.photosIdentifiers[name] = adopted
+                try persist(media)
+                PhotosExportReceipt.clear(at: receiptURL)
+                continue
+            }
             let receipt = PhotoReceipt()
             let date = media.createdAt
             let isVideo = media.mode.isVideo
@@ -109,12 +117,14 @@ enum CaptureMediaStore {
                 request.creationDate = date
                 request.addResource(with: isVideo ? .video : .photo, fileURL: url, options: options)
                 receipt.identifier = request.placeholderForCreatedAsset?.localIdentifier
+                if let identifier = receipt.identifier { PhotosExportReceipt.record(identifier, at: receiptURL) }
             }
             guard let identifier = receipt.identifier else {
                 throw CaptureModesError.unavailable("Photos did not return an export receipt. Check Photos before retrying to avoid a duplicate.")
             }
             media.photosIdentifiers[name] = identifier
             try persist(media)
+            PhotosExportReceipt.clear(at: receiptURL)
         }
         return media
     }

@@ -463,6 +463,7 @@ struct RecipeDetailView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var draft: FilmRecipe
+    @State private var isConfirmingDiscard = false
     @State private var expandedSections: Set<EditorSection> = [.tone, .color]
     @State private var isShowingLookInfo = false
     @State private var showingSourceSettings = false
@@ -494,8 +495,13 @@ struct RecipeDetailView: View {
                 VStack(alignment: .leading, spacing: 22) {
                     BackToCameraButton(
                         accessibilityIdentifier: "recipe-back-to-camera",
-                        action: onCancel
+                        action: requestCancel
                     )
+                    .confirmationDialog("Discard changes?", isPresented: $isConfirmingDiscard, titleVisibility: .visible) {
+                        Button("Discard", role: .destructive, action: onCancel)
+                        Button("Keep editing", role: .cancel) { }
+                    }
+                    .interactiveDismissDisabled(hasPendingChanges)
 
                     hero
 
@@ -635,6 +641,14 @@ struct RecipeDetailView: View {
 
     private var hasPendingChanges: Bool {
         draft != recipe
+    }
+
+    private func requestCancel() {
+        if hasPendingChanges {
+            isConfirmingDiscard = true
+        } else {
+            onCancel()
+        }
     }
 
     private var primaryActionTitle: String {
@@ -1457,11 +1471,9 @@ struct LookLibraryView: View {
 
     private var favoriteIDs: Set<String> { LookLibraryIndex.favorites(from: favoriteData) }
 
-    private var results: [FilmRecipe] {
-        LookLibraryIndex.results(in: recipes, query: query, filter: filter, favorites: favoriteIDs)
-    }
-
     var body: some View {
+        let favorites = favoriteIDs
+        let results = LookLibraryIndex.results(in: recipes, query: query, filter: filter, favorites: favorites)
         GeometryReader { geometry in
             let singleColumn = geometry.size.width < 350 || dynamicTypeSize.isAccessibilitySize
             let compactHeader = geometry.size.height < 480 || dynamicTypeSize.isAccessibilitySize
@@ -1498,7 +1510,7 @@ struct LookLibraryView: View {
                             spacing: 16
                         ) {
                             ForEach(results) { recipe in
-                                lookCard(recipe)
+                                lookCard(recipe, favorites: favorites)
                             }
                         }
                         .padding(.horizontal, 22)
@@ -1675,9 +1687,9 @@ struct LookLibraryView: View {
         .accessibilityElement(children: .contain)
     }
 
-    private func lookCard(_ recipe: FilmRecipe) -> some View {
+    private func lookCard(_ recipe: FilmRecipe, favorites: Set<String>) -> some View {
         let selected = recipe.id == selectedRecipeID
-        let favorite = favoriteIDs.contains(recipe.id)
+        let favorite = favorites.contains(recipe.id)
         return VStack(alignment: .leading, spacing: 4) {
             Button {
                 searchIsFocused = false
@@ -1731,7 +1743,7 @@ struct LookLibraryView: View {
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Button {
-                    var updated = favoriteIDs
+                    var updated = favorites
                     if favorite { updated.remove(recipe.id) } else { updated.insert(recipe.id) }
                     favoriteData = LookLibraryIndex.encodeFavorites(updated)
                     HapticFeedback.play(.selection)

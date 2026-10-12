@@ -463,6 +463,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private var wantsToRun = false
     private var authorizationRequestInFlight = false
     private var recoveryAttempt = 0
+    private var recoveryStableGeneration: UInt64 = 0
     private var recoveryScheduled = false
     private var needsGraphRebuild = false
     private var deferredStopGeneration: UInt64 = 0
@@ -632,6 +633,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 ?? self.pendingManualControlsPhotoCompletion
             self.pendingPhotoCompletion = nil
             self.pendingManualControlsPhotoCompletion = nil
+            self.pendingManualControlsPhotoLocation = nil
             self.pendingPhotoCapturedAt = nil
             self.pendingPhotoLocation = nil
             self.pendingPhotoUniqueID = nil
@@ -2314,6 +2316,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private func failDeferredPhotoForManualControlsOnQueue() {
         guard let completion = pendingManualControlsPhotoCompletion else { return }
         pendingManualControlsPhotoCompletion = nil
+        pendingManualControlsPhotoLocation = nil
         cancelCaptureTimeoutOnQueue()
         publishPhoto(nil, completion: completion)
     }
@@ -2520,7 +2523,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             publishStatus(interruptionStatus)
             return
         }
-        recoveryAttempt = 0
+        scheduleRecoveryResetOnQueue()
         publishRunning(true)
         publishAvailability(.running)
         publishStatus("Camera ready")
@@ -2529,7 +2532,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private func publishStartOutcomeOnQueue(running: Bool) {
         publishRunning(running)
         if running {
-            recoveryAttempt = 0
+            scheduleRecoveryResetOnQueue()
             publishAvailability(.running)
             publishStatus("Camera ready")
         } else {
@@ -2540,6 +2543,19 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     static let maxAutomaticRecoveryAttempts = 6
+
+    /// Backoff only resets once the session has stayed running; a runtime
+    /// error loop that recurs shortly after each start must still hit the cap.
+    private func scheduleRecoveryResetOnQueue() {
+        recoveryStableGeneration &+= 1
+        let generation = recoveryStableGeneration
+        sessionQueue.asyncAfter(deadline: .now() + 5) { [weak self] in
+            guard let self,
+                  self.recoveryStableGeneration == generation,
+                  self.session.isRunning, !self.session.isInterrupted else { return }
+            self.recoveryAttempt = 0
+        }
+    }
 
     /// Exponential backoff for reconnecting after a failed start or a runtime
     /// error: 0.5 s, 1 s, 2 s, then 4 s between attempts.
@@ -2554,6 +2570,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         guard wantsToRun,
               !recoveryScheduled,
               recoveryAttempt < Self.maxAutomaticRecoveryAttempts else { return }
+        recoveryStableGeneration &+= 1
         let delay = Self.automaticRecoveryDelay(afterAttempt: recoveryAttempt)
         recoveryAttempt += 1
         recoveryScheduled = true
@@ -2600,14 +2617,12 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         activeConstituentObservation = nil
         observedVirtualDeviceID = nil
 
-        let rotationToken = UUID()
-        rotationCoordinatorToken = rotationToken
+        rotationCoordinatorToken = UUID()
         rotationCoordinatorDeviceID = nil
+        // Main-queue FIFO orders this teardown before any later install, so no
+        // token check (which would read sessionQueue state on main) is needed.
         DispatchQueue.main.async { [weak self] in
-            guard let self,
-                  self.rotationCoordinatorToken == rotationToken else {
-                return
-            }
+            guard let self else { return }
             self.previewRotationObservation?.invalidate()
             self.captureRotationObservation?.invalidate()
             self.previewRotationObservation = nil
@@ -3525,10 +3540,11 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         let previewConnection = videoOutput.connection(with: .video)
         let photoConnection = photoOutput.connection(with: .video)
         let mirrored = activeDevice()?.position == .front
+        let photoMirrored: Bool = mirrored && Self.mirrorFrontPhotosPreference
         for connection in [previewConnection, photoConnection] {
             guard let connection, connection.isVideoMirroringSupported else { continue }
             connection.automaticallyAdjustsVideoMirroring = false
-            connection.isVideoMirrored = mirrored
+            connection.isVideoMirrored = connection === photoConnection ? photoMirrored : mirrored
         }
         configureRotation(
             previewConnection,
@@ -3539,6 +3555,19 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             angle: captureRotationAngleState
         )
         publishPreviewMirroring(previewConnection?.isVideoMirrored ?? false)
+    }
+
+    private static var mirrorFrontPhotosPreference: Bool {
+        UserDefaults.standard.object(forKey: "mirrorFrontPhotos.v1") as? Bool ?? true
+    }
+
+    /// Re-applies the Settings mirror choice to the photo connection; session queue only.
+    private func applyPhotoMirroringOnQueue() {
+        guard let connection = photoOutput.connection(with: .video), connection.isVideoMirroringSupported else { return }
+        let front: Bool = activeDevice()?.position == .front
+        let wanted: Bool = front && Self.mirrorFrontPhotosPreference
+        connection.automaticallyAdjustsVideoMirroring = false
+        if connection.isVideoMirrored != wanted { connection.isVideoMirrored = wanted }
     }
 
     private func configurePreviewFrameRate(for device: AVCaptureDevice) {
@@ -4057,6 +4086,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         pendingPhotoUniqueID = settings.uniqueID
         pendingPhotoFlashFallback = requestedFlashMode != .off && effectiveFlashMode == .off
         armCaptureTimeoutOnQueue(after: Self.captureTimeout(exposureSeconds: device.exposureDuration.seconds))
+        applyPhotoMirroringOnQueue()
         photoOutput.capturePhoto(with: settings, delegate: self)
     }
 
@@ -4131,6 +4161,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         guard let completion else { return }
         pendingPhotoCompletion = nil
         pendingManualControlsPhotoCompletion = nil
+        pendingManualControlsPhotoLocation = nil
         pendingPhotoCapturedAt = nil
         pendingPhotoLocation = nil
         pendingPhotoUniqueID = nil
@@ -4431,7 +4462,10 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
                 Self.removeOwnedTemporaryMovie(outputFileURL)
                 return
             }
-            if failed { self.photoAssembly?.failed = true }
+            if failed {
+                Self.removeOwnedTemporaryMovie(outputFileURL)
+                self.photoAssembly?.liveMovieFailed = true
+            }
             else { self.photoAssembly?.liveMovieURL = outputFileURL }
         }
     }
@@ -4449,15 +4483,20 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
         sessionQueue.async { [weak self] in
             guard let self, let assembly = self.photoAssembly, assembly.uniqueID == id else { return }
             let photo: CapturedPhoto?
-            if !failed, assembly.isComplete, let data = assembly.processed {
+            if !failed || assembly.liveMovieFailed, assembly.isComplete, let data = assembly.processed {
+                var delivered = assembly.settings
+                if assembly.liveMovieFailed { delivered.livePhoto = false }
                 photo = CapturedPhoto(
                     fileData: data, capturedAt: self.pendingPhotoCapturedAt ?? Date(),
                     dimensions: dimensions, flashFired: flashFired, location: self.pendingPhotoLocation,
                     rawFileData: assembly.raw, livePhotoMovieURL: assembly.liveMovieURL,
-                    outputSettings: assembly.settings
+                    outputSettings: delivered
                 )
             } else { photo = nil }
             self.finishPhotoOnQueue(photo, uniqueID: id)
+            if photo != nil, assembly.liveMovieFailed {
+                self.publishStatus("Photo captured. Live Photo movie failed.")
+            }
         }
     }
 }
@@ -4467,7 +4506,12 @@ final class CameraCaptureLocationProvider: NSObject, @preconcurrency CLLocationM
     private let manager = CLLocationManager()
     private var latestLocation: CLLocation?
     private var isActive = false
+    private var activeRequested = false
+    private var lastEnabled = false
+    private nonisolated(unsafe) var defaultsObserver: NSObjectProtocol?
     private var isEnabled: Bool {
+        let taggingOn: Bool = UserDefaults.standard.object(forKey: "locationTaggingEnabled.v1") as? Bool ?? true
+        guard taggingOn else { return false }
         let process = ProcessInfo.processInfo
         return process.arguments.contains("-location-testing") ||
             (!process.arguments.contains("-ui-testing") && process.environment["XCTestConfigurationFilePath"] == nil)
@@ -4478,10 +4522,28 @@ final class CameraCaptureLocationProvider: NSObject, @preconcurrency CLLocationM
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyBest
         manager.distanceFilter = 10
+        lastEnabled = isEnabled
+        defaultsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.defaultsDidChange() }
+        }
+    }
+
+    deinit {
+        if let defaultsObserver { NotificationCenter.default.removeObserver(defaultsObserver) }
+    }
+
+    private func defaultsDidChange() {
+        let enabled: Bool = isEnabled
+        guard enabled != lastEnabled else { return }
+        setActive(activeRequested)
     }
 
     func setActive(_ active: Bool) {
-        isActive = active && isEnabled
+        activeRequested = active
+        lastEnabled = isEnabled
+        isActive = active && lastEnabled
         guard isActive else {
             manager.stopUpdatingLocation()
             latestLocation = nil
@@ -4495,7 +4557,7 @@ final class CameraCaptureLocationProvider: NSObject, @preconcurrency CLLocationM
     }
 
     func captureLocation() -> CLLocation? {
-        guard isActive else { return nil }
+        guard isActive, isEnabled else { return nil }
         return Self.validLocation(latestLocation, authorization: manager.authorizationStatus, at: Date())
     }
 
@@ -5282,6 +5344,7 @@ extension CameraService {
                 lease.operationID = operationID
                 lease.delegate = delegate
                 lease.cancelOperation = { gate.finish(.failure(FujiShootingError.cancelled)) }
+                self.applyPhotoMirroringOnQueue()
                 self.photoOutput.capturePhoto(with: settings, delegate: delegate)
                 self.sessionQueue.asyncAfter(deadline: .now() + max(20, exposure.seconds + 15)) { [weak self] in
                     guard let self, self.fujiLease === lease, lease.operationID == operationID else { return }

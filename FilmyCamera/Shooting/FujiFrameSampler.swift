@@ -149,7 +149,8 @@ final class FujiFrameSampler: @unchecked Sendable {
                 } catch {
                     // Preview assists are optional; never block the main preview.
                     // A clear result removes stale aids instead of freezing them.
-                    callback?(FujiSamplerResult())
+                    self.lock.lock(); let stillValid = generation == self.generation; self.lock.unlock()
+                    if stillValid { callback?(FujiSamplerResult()) }
                 }
             }
         }

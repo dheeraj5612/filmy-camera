@@ -621,7 +621,8 @@ struct FlashControl: View {
                 Image(systemName: mode.systemImageName)
                 Text(mode.statusTitle)
             }
-            .font(.system(size: 11, weight: .bold, design: .rounded))
+            .font(.system(.caption2, design: .rounded).weight(.bold))
+            .dynamicTypeSize(...DynamicTypeSize.accessibility1)
             .foregroundStyle(tint)
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
@@ -1154,7 +1155,6 @@ struct CaptureButton: View {
 
     var body: some View {
         Button {
-            HapticFeedback.play(.capture)
             action()
         } label: {
             ZStack {

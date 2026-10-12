@@ -184,8 +184,36 @@ actor FilmyPhotoStore {
         }
     }
 
+    /// Removes hidden `.<uuid>.pending` / `.staging-<uuid>` directories left by
+    /// a crash. `create` and `insert` are synchronous on this actor, so none
+    /// can be mid-flight here; the age check is an extra margin.
+    private func sweepStaleStaging() {
+        guard let hidden = try? files.contentsOfDirectory(
+            at: root, includingPropertiesForKeys: [.contentModificationDateKey], options: []
+        ) else { return }
+        let cutoff = Date().addingTimeInterval(-3600)
+        for url in hidden {
+            let name = url.lastPathComponent
+            let isPending = name.hasPrefix(".") && name.hasSuffix(".pending")
+                && UUID(uuidString: String(name.dropFirst().dropLast(".pending".count))) != nil
+            let isStaging = name.hasPrefix(".staging-")
+                && UUID(uuidString: String(name.dropFirst(".staging-".count))) != nil
+            guard isPending || isStaging,
+                  let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
+                  modified < cutoff else { continue }
+            // A crash between the manifest write and the final move leaves a
+            // complete capture here. Never delete one.
+            let hasManifest = ["document.json", "project.json"].contains {
+                files.fileExists(atPath: url.appendingPathComponent($0).path)
+            }
+            guard !hasManifest else { continue }
+            try? files.removeItem(at: url)
+        }
+    }
+
     func inventory() throws -> Inventory {
         try makeDirectory(root)
+        sweepStaleStaging()
         let children = try files.contentsOfDirectory(
             at: root,
             includingPropertiesForKeys: [.isDirectoryKey],
@@ -314,6 +342,12 @@ actor FilmyPhotoStore {
         return document
     }
 
+    /// Sidecar holding the Photos placeholder identifier between creation and
+    /// linking. A separate file keeps the manifest format unchanged.
+    func photosReceiptURL(for id: UUID) -> URL {
+        directory(id).appendingPathComponent("photos-pending.txt")
+    }
+
     func linkPhotosAsset(_ assetIdentifier: String, to id: UUID) throws {
         var document = try loadDocument(id)
         document.photosAssetIdentifier = assetIdentifier
@@ -393,6 +427,7 @@ actor FilmyPhotoStore {
         guard files.fileExists(atPath: root.path) else {
             return Listing(photos: [], unreadableCount: 0)
         }
+        sweepStaleStaging()
         let directories = try files.contentsOfDirectory(
             at: root,
             includingPropertiesForKeys: [.isDirectoryKey],
@@ -626,13 +661,9 @@ actor FilmyPhotoStore {
         guard !exporting.contains(id) else {
             throw FilmyPhotoStoreError.originalExportInProgress
         }
-        let location = directory(id)
-        if files.fileExists(atPath: location.appendingPathComponent("project.json").path) {
-            _ = try load(id)
-        } else {
-            _ = try loadDocument(id)
-        }
-        try files.removeItem(at: location)
+        // No load/validation: a corrupt or unsupported project must stay
+        // deletable. The directory name is derived from a UUID only.
+        try files.removeItem(at: directory(id))
     }
 
     private static func legacySettings(for options: ProCaptureOptions) -> ProCaptureSettings {
@@ -695,7 +726,8 @@ actor FilmyPhotoStore {
         #else
         try data.write(to: url, options: .atomic)
         #endif
-        try protect(url)
+        // The atomic write above already applied the protection class.
+        try? protect(url)
     }
 
     private func protect(_ url: URL) throws {

@@ -396,6 +396,9 @@ final class FilmyCameraUITests: XCTestCase {
         scrollToHittable(back, in: app)
         assertMinimumHitTarget(back, named: "Cancel recipe editing")
         back.tap()
+        let discard = app.buttons["Discard"]
+        XCTAssertTrue(discard.waitForExistence(timeout: 5))
+        discard.tap()
         XCTAssertTrue(waitForDisappearance(back, timeout: 5))
 
         openRecipeDetail(for: "classic-chrome", in: app, tuneLabel: "Tune Muted Color")
@@ -728,7 +731,7 @@ final class FilmyCameraUITests: XCTestCase {
 
         app.terminate()
         let cacheApp = makeApplication()
-        cacheApp.launchArguments = ["-selectedRecipeID", "g7x-compact"]
+        cacheApp.launchArguments = ["-selectedRecipeID", "g7x-compact", "-cameraGestureHintSeen.v1", "YES"]
         cacheApp.launch()
         app = cacheApp
         defer { cacheApp.terminate() }
@@ -821,7 +824,7 @@ final class FilmyCameraUITests: XCTestCase {
 
         for recipeID in recipeIDs {
             let recipeApp = makeApplication()
-            recipeApp.launchArguments = ["-hasCompletedRecipeFirstOnboarding", "YES", "-selectedRecipeID", recipeID, "-captureFinish", "photo"]
+            recipeApp.launchArguments = ["-hasCompletedRecipeFirstOnboarding", "YES", "-selectedRecipeID", recipeID, "-captureFinish", "photo", "-cameraGestureHintSeen.v1", "YES"]
             recipeApp.launch()
             recipeApp.tap()
 

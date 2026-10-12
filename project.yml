@@ -94,11 +94,6 @@ targets:
     configFiles:
       Debug: Config/Monetization.Debug.xcconfig
       Release: Config/Monetization.Release.xcconfig
-    entitlements:
-      path: FilmyCamera/FilmyCamera.entitlements
-      properties:
-        com.apple.developer.applesignin:
-          - Default
     dependencies:
       - package: Firebase
         product: FirebaseCore

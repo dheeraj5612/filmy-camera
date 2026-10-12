@@ -174,10 +174,12 @@ struct PhotoCaptureAssembly: Sendable {
     var raw: Data?
     var liveMovieURL: URL?
     var failed = false
+    /// Live Photo movie errored; the still is delivered without a movie.
+    var liveMovieFailed = false
 
     var isComplete: Bool {
         !failed && processed?.isEmpty == false
             && (!settings.format.retainsRAW || raw?.isEmpty == false)
-            && (!settings.livePhoto || liveMovieURL != nil)
+            && (!settings.livePhoto || liveMovieURL != nil || liveMovieFailed)
     }
 }

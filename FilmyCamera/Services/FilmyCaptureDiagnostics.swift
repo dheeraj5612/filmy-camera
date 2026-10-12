@@ -163,9 +163,10 @@ enum FilmyCaptureDiagnostics {
             )
 
             if fileManager.fileExists(atPath: latest.path) {
-                try fileManager.removeItem(at: latest)
+                _ = try fileManager.replaceItemAt(latest, withItemAt: staging)
+            } else {
+                try fileManager.moveItem(at: staging, to: latest)
             }
-            try fileManager.moveItem(at: staging, to: latest)
             try setCompleteFileProtection(at: latest, fileManager: fileManager)
             return true
         } catch {

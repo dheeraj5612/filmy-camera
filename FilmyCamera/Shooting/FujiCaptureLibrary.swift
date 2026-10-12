@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 struct FujiCameraPreset: Codable, Equatable, Sendable {
     var cameraPosition = "back"
@@ -114,6 +115,15 @@ struct FujiPendingExport: Codable, Identifiable, Equatable, Sendable {
     let label: String
 }
 
+/// A library folder whose record.json is missing, undecodable, or from an
+/// unsupported version. Its media stays on disk; it is listed, never deleted.
+struct FujiUnreadableEntry: Equatable, Identifiable, Sendable {
+    let id: UUID
+    let collection: String
+    let folder: URL
+    let reason: String
+}
+
 /// Durable, atomic originals and export outbox. No automatic eviction of user
 /// originals or failed Photos writes. A manifest is written LAST, so a process
 /// death cannot publish an entry whose image is missing.
@@ -205,6 +215,52 @@ actor FujiCaptureLibrary {
 
     func markExported(_ record: FujiPendingExport) throws {
         try fileManager.removeItem(at: directory("outbox", id: record.id))
+    }
+
+    /// Original folders that `originals()` cannot list. Files are kept for repair.
+    func unreadableOriginals() throws -> [FujiUnreadableEntry] {
+        try unreadable(in: "originals") { data in
+            (try? JSONDecoder().decode(FujiOriginalRecord.self, from: data))?.version == 1
+        }
+    }
+
+    /// Outbox folders that `pendingExports()` cannot list. Files are kept for repair.
+    func unreadableExports() throws -> [FujiUnreadableEntry] {
+        try unreadable(in: "outbox") { data in
+            (try? JSONDecoder().decode(FujiPendingExport.self, from: data)) != nil
+        }
+    }
+
+    private func unreadable(in collection: String, accepts: (Data) -> Bool) throws -> [FujiUnreadableEntry] {
+        let folder = root.appendingPathComponent(collection, isDirectory: true)
+        guard fileManager.fileExists(atPath: folder.path) else { return [] }
+        let entries = try fileManager.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey], options: .skipsHiddenFiles)
+        var result: [FujiUnreadableEntry] = []
+        for entry in entries {
+            guard let id = UUID(uuidString: entry.lastPathComponent) else { continue }
+            let manifest = entry.appendingPathComponent("record.json")
+            let reason: String
+            if !fileManager.fileExists(atPath: manifest.path) {
+                // enqueue/retain write the manifest last; skip an in-flight folder.
+                let modified = (try? entry.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+                let age: TimeInterval = modified.map { -$0.timeIntervalSinceNow } ?? .infinity
+                if age < 60 { continue }
+                reason = "missing record.json"
+            } else if let data = try? Data(contentsOf: manifest), accepts(data) {
+                continue
+            } else {
+                reason = "undecodable or unsupported record.json"
+            }
+            Logger(subsystem: "com.filmycamera", category: "FujiCaptureLibrary")
+                .error("Unreadable \(collection, privacy: .public) entry \(id.uuidString, privacy: .public): \(reason, privacy: .public)")
+            result.append(FujiUnreadableEntry(id: id, collection: collection, folder: entry, reason: reason))
+        }
+        return result
+    }
+
+    /// Sidecar for the Photos export receipt of one outbox entry.
+    func receiptURL(_ record: FujiPendingExport) -> URL {
+        directory("outbox", id: record.id).appendingPathComponent("photos-pending.txt")
     }
 
     private func records<T: Decodable>(_ type: T.Type, in collection: String) throws -> [T] {

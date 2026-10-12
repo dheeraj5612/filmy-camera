@@ -178,6 +178,7 @@ struct CameraScreen: View {
     @State private var isShowingManualControls = false
     @State private var isShowingLiveAdjustments = false
     @State private var isShowingLookDrawer = false
+    @AppStorage("cameraGestureHintSeen.v1") private var gestureHintSeen = false
     @State private var originalPreviewOverride: Bool?
     @GestureState private var isHoldingOriginalPreview = false
     @State private var isShowingLookLibrary = false
@@ -399,7 +400,10 @@ struct CameraScreen: View {
         .onChange(of: camera.zoomFactor) { _, _ in shooting.invalidatePreview() }
         .onChange(of: viewModel.selectedRecipe) { _, _ in shooting.invalidatePreview() }
         .onChange(of: shooting.settings.showsNaturalPreview) { _, _ in originalPreviewOverride = nil }
-        .onChange(of: shooting.isBusy) { _, busy in if busy { countdown.cancel(); blinkShutter() } }
+        .onChange(of: shooting.isBusy, initial: true) { _, busy in
+            viewModel.isFujiBusy = busy
+            if busy { countdown.cancel(); blinkShutter() }
+        }
         .onChange(of: membership.hasFullAccess) { _, premium in
             if !premium {
                 isShowingLiveAdjustments = false
@@ -533,6 +537,7 @@ struct CameraScreen: View {
         // the foreground.
         .onDisappear {
             camera.setSceneAutoViewfinderActive(false)
+            viewModel.isFujiBusy = false
             shooting.attach(camera: camera, viewModel: viewModel, active: false)
             countdown.cancel()
             assists.stop()
@@ -773,7 +778,7 @@ struct CameraScreen: View {
 
             if camera.isRunning && !isReviewing {
                 FocusAssistOverlay(camera: camera, size: size,
-                                   topClearance: overlaysTopBar ? (viewfinderChromeHeights[.top] ?? 54) + 8 : 8)
+                                   topClearance: focusAssistTopClearance)
             }
             if let focusPoint {
                 // The tap gesture reports locations in the frame's own space,
@@ -923,6 +928,7 @@ struct CameraScreen: View {
                         if !isPinching {
                             isPinching = true
                             pinchStartZoom = camera.zoomFactor
+                            dismissGestureHint()
                         }
                         camera.setZoom(pinchStartZoom * scale)
                     }
@@ -965,6 +971,7 @@ struct CameraScreen: View {
               ) else { return }
         viewModel.select(recipe: recipe)
         HapticFeedback.play(.selection)
+        dismissGestureHint()
         #endif
     }
 
@@ -1047,12 +1054,17 @@ struct CameraScreen: View {
                     value: camera.zoomFactor,
                     minZoom: camera.minZoomFactor,
                     maxZoom: camera.maxZoomFactor,
-                    onSelect: camera.setZoom,
+                    onSelect: { factor in
+                        dismissGestureHint()
+                        camera.setZoom(factor)
+                    },
                     onAdjust: { direction in
                         let delta: CGFloat = direction == .increment ? 0.5 : -0.5
                         camera.setZoom(camera.zoomFactor + delta)
                     }
                 )
+                .frame(maxWidth: .infinity)
+                .overlay(alignment: .top) { gestureHintOverlay }
                 .opacity(camera.isRunning || isViewfinderChromePreview ? 1 : 0)
                 .disabled((!camera.isRunning && !isViewfinderChromePreview)
                     || shooting.settings.lockPrimeLens || shooting.settingsLocked)
@@ -1113,6 +1125,7 @@ struct CameraScreen: View {
                     onApply: applySmartRecipe, onUndo: undoSmartRecipe
                 )
                 Spacer(minLength: 0)
+                g7ProfileBadge
                 activeCaptureIndicators
 
                 if !isLive {
@@ -1124,6 +1137,31 @@ struct CameraScreen: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private var g7ProfileBadge: some View {
+        #if !G7_APP
+        if isCompactDigitalMode, isLive, !dynamicTypeSize.isAccessibilitySize {
+            Button {
+                toggleLookDrawer()
+            } label: {
+                Text("G7 X")
+                    .font(.system(.caption2, design: .rounded).weight(.bold))
+                    .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+                    .foregroundStyle(FilmyTheme.accent)
+                    .padding(.horizontal, 9)
+                    .frame(minHeight: FilmyTheme.minimumHitTarget)
+                    .background(Color.black.opacity(0.68), in: Capsule())
+                    .overlay { Capsule().stroke(FilmyTheme.accent.opacity(0.36), lineWidth: 1) }
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.pressable)
+            .accessibilityIdentifier("g7x-profile-badge")
+            .accessibilityLabel("G7 X Compact profile")
+            .accessibilityHint("Opens the looks drawer")
+        }
+        #endif
     }
 
     @ViewBuilder
@@ -1145,14 +1183,14 @@ struct CameraScreen: View {
                         Text(String(format: "%+.1f EV", camera.exposureBias))
                     }
                     if camera.isFocusExposureLocked {
-                        Label("AE/AF", systemImage: "lock.fill")
+                        Label("AE/AF LOCK", systemImage: "lock.fill")
                             .labelStyle(.titleAndIcon)
                     }
                     if camera.manualControls.isAnyManualModeEnabled {
                         Text("MANUAL")
                     }
                 }
-                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .font(.system(.caption2, design: .rounded).weight(.bold))
                 .foregroundStyle(FilmyTheme.accent)
                 .padding(.horizontal, 9)
                 .frame(minHeight: FilmyTheme.minimumHitTarget)
@@ -1160,11 +1198,25 @@ struct CameraScreen: View {
                 .overlay { Capsule().stroke(FilmyTheme.accent.opacity(0.36), lineWidth: 1) }
             }
             .buttonStyle(.pressable)
+            .contextMenu {
+                if hasExposureBiasToReset {
+                    Button("Reset exposure") { camera.setExposureBias(0) }
+                }
+            }
+            .accessibilityActions {
+                if hasExposureBiasToReset {
+                    Button("Reset exposure") { camera.setExposureBias(0) }
+                }
+            }
             .accessibilityIdentifier("camera-active-adjustments")
             .accessibilityLabel("Active camera adjustments")
             .accessibilityValue(activeCaptureIndicatorValue)
             .accessibilityHint("Shows the camera controls")
         }
+    }
+
+    private var hasExposureBiasToReset: Bool {
+        abs(camera.exposureBias) >= 0.05 && camera.manualControls.exposureMode == .auto
     }
 
     private var activeCaptureIndicatorValue: String {
@@ -1287,7 +1339,10 @@ struct CameraScreen: View {
                     cameraSwitchButton
                         .disabled(camera.availableCameraPositions.count < 2)
                     Text("Flip")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.caption2.weight(.medium))
+                        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                         .foregroundStyle(FilmyTheme.secondary)
                         .accessibilityHidden(true)
                 }
@@ -1410,6 +1465,13 @@ struct CameraScreen: View {
             .accessibilityIdentifier("live-recipe-adjustments")
             .accessibilityHint("Adjust the look while watching the live camera preview")
         }
+    }
+
+    private var focusAssistTopClearance: CGFloat {
+        let barHeight: CGFloat = viewfinderChromeHeights[.top] ?? 54
+        let base: CGFloat = overlaysTopBar ? barHeight + 8 : 8
+        let compareHeight: CGFloat = max(56, cameraHitTarget)
+        return base + compareHeight + 8
     }
 
     private var originalPreviewButton: some View {
@@ -1710,7 +1772,10 @@ struct CameraScreen: View {
             VStack(spacing: 3) {
                 RollThumbnail(asset: photoLibrary.galleryAssets.first, photoLibrary: photoLibrary)
                 Text("Roll")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.caption2.weight(.medium))
+                    .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                     .foregroundStyle(FilmyTheme.secondary)
             }
             .frame(width: 64, height: 64)
@@ -1799,7 +1864,7 @@ struct CameraScreen: View {
         .accessibilityIdentifier(
             isCompactDigitalMode ? "g7x-capture-controls" : "camera-utility-rail"
         )
-        .accessibilityHint("Swipe horizontally for additional camera controls")
+        .accessibilityLabel(isCompactDigitalMode ? "Compact camera controls" : "Camera controls")
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 
@@ -1809,7 +1874,8 @@ struct CameraScreen: View {
             isShowingManualControls = true
         } label: {
             Label("Pro", systemImage: "slider.horizontal.3")
-                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .font(.system(.caption2, design: .rounded).weight(.bold))
+                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
                 .foregroundStyle(camera.manualControls.isAnyManualModeEnabled ? FilmyTheme.background : .white)
                 .padding(.horizontal, 12)
                 .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.toolControlHeight)
@@ -1852,8 +1918,9 @@ struct CameraScreen: View {
         }
         .buttonStyle(.pressable)
         .accessibilityIdentifier(accessibilityIdentifier)
-        .accessibilityLabel(showGrid ? "Hide composition grid" : "Show composition grid")
+        .accessibilityLabel("Composition grid")
         .accessibilityValue(showGrid ? "On" : "Off")
+        .accessibilityAddTraits(.isToggle)
     }
 
     // MARK: - State
@@ -1981,6 +2048,8 @@ struct CameraScreen: View {
         }
 #endif
         guard canTriggerShutter else { return }
+        HapticFeedback.play(.capture)
+        dismissGestureHint()
         closeControlDrawers()
         if captureDelay == .off {
             performShutterCapture()
@@ -1990,6 +2059,62 @@ struct CameraScreen: View {
                 performShutterCapture()
             }
         }
+    }
+
+    private static var gestureHintSuppressed: Bool {
+        let process = ProcessInfo.processInfo
+        return process.arguments.contains { $0.hasPrefix("-ui-testing") } || process.environment["XCTestConfigurationFilePath"] != nil
+    }
+
+    private var gestureHintText: String {
+        #if G7_APP
+        return "Pinch to zoom"
+        #else
+        return "Swipe for looks \u{00B7} Pinch to zoom"
+        #endif
+    }
+
+    private var showsGestureHint: Bool {
+        !gestureHintSeen && !Self.gestureHintSuppressed && camera.isRunning && !isReviewing
+    }
+
+    @ViewBuilder
+    private var gestureHintOverlay: some View {
+        if showsGestureHint {
+            Text(gestureHintText)
+                .font(.system(.caption, design: .rounded).weight(.semibold))
+                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+                .foregroundStyle(FilmyTheme.primary)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(Color.black.opacity(0.68), in: Capsule())
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 16)
+                .frame(maxWidth: .infinity)
+                .alignmentGuide(.top) { dimensions in dimensions[.bottom] + 8 }
+                .transition(gestureHintTransition)
+                .allowsHitTesting(false)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(gestureHintText)
+                .accessibilityIdentifier("camera-gesture-hint")
+                .task {
+                    try? await Task.sleep(for: .seconds(8))
+                    guard !Task.isCancelled else { return }
+                    dismissGestureHint()
+                }
+        }
+    }
+
+    private var gestureHintTransition: AnyTransition {
+        if reduceMotion { return AnyTransition.opacity }
+        return AnyTransition.opacity.combined(with: AnyTransition.move(edge: .bottom))
+    }
+
+    private func dismissGestureHint() {
+        guard !gestureHintSeen else { return }
+        withAnimation(.easeOut(duration: 0.2)) { gestureHintSeen = true }
     }
 
     private func performShutterCapture() {
@@ -2328,6 +2453,28 @@ extension CameraScreen {
     private func updateCompositionAssists() {
         assists.configure(camera: camera, options: assistOptions, active: isCameraVisibleForAssists)
     }
+    private var captureSetupBadgeText: String? {
+        var parts: [String] = []
+        if captureAspect != .viewfinder { parts.append(captureAspect.title) }
+        if captureDelay != .off { parts.append(captureDelay.title) }
+        return parts.isEmpty ? nil : parts.joined(separator: " ")
+    }
+
+    @ViewBuilder
+    private var captureSetupBadge: some View {
+        if let text = captureSetupBadgeText {
+            Text(text)
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .foregroundStyle(FilmyTheme.accent)
+                .lineLimit(1)
+                .fixedSize()
+                .padding(.horizontal, 4)
+                .background(Color.black.opacity(0.72), in: Capsule())
+                .offset(y: 5)
+                .accessibilityHidden(true)
+        }
+    }
+
     private var captureSetupButton: some View {
         Button {
             closeControlDrawers()
@@ -2338,6 +2485,7 @@ extension CameraScreen {
                 .foregroundStyle(captureDelay == .off ? FilmyTheme.primary : FilmyTheme.accent)
                 .frame(width: cameraHitTarget, height: cameraHitTarget)
                 .background { ChromeShapeBackground(shape: Circle()) }
+                .overlay(alignment: .bottom) { captureSetupBadge }
                 .contentShape(Circle())
         }
         .buttonStyle(.pressable)

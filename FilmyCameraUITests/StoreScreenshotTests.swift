@@ -223,7 +223,7 @@ final class StoreScreenshotTests: XCTestCase {
         app?.terminate()
         app = XCUIApplication()
         // -ui-testing is intentionally absent because it denies Photos reads.
-        app.launchArguments = ["-selectedRecipeID", recipeID]
+        app.launchArguments = ["-selectedRecipeID", recipeID, "-cameraGestureHintSeen.v1", "YES"]
         app.launch()
 
         // A generic app-center tap selects a look in the interactive chooser.
