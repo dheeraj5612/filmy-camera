@@ -61,10 +61,10 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
         })
         observers.append(NotificationCenter.default.addObserver(forName: AVCaptureSession.interruptionEndedNotification, object: session, queue: nil) { [weak self] _ in
             self?.queue.async { [weak self] in
-                guard let self, pausedByInterruption, !state.phase.isBusy else { return }
-                pausedByInterruption = false
+                guard let self, self.pausedByInterruption, !self.state.phase.isBusy else { return }
+                self.pausedByInterruption = false
                 // The model reopens only while foregrounded, reusing its permission and microphone path.
-                emit(.requestedMode(state.mode))
+                self.emit(.requestedMode(self.state.mode))
             }
         })
         observers.append(NotificationCenter.default.addObserver(forName: ProcessInfo.thermalStateDidChangeNotification,
