@@ -3,7 +3,15 @@ import Foundation
 // Public client identifiers only. Never ship provider private keys or service
 // accounts. Prices and introductory offers come from StoreKit, not these files.
 enum MonetizationConfiguration {
-    static var isEnabled: Bool { value("FilmyMonetizationEnabled").uppercased() == "YES" }
+    static var isEnabled: Bool {
+        #if DEBUG
+        // UI tests can prove the Release rule (no paywall, ad, sign-in or quota surface).
+        if isAutomatedTest, ProcessInfo.processInfo.arguments.contains("-ui-testing-monetization-off") {
+            return false
+        }
+        #endif
+        return value("FilmyMonetizationEnabled").uppercased() == "YES"
+    }
 
     static func value(_ key: String) -> String {
         let value = (Bundle.main.object(forInfoDictionaryKey: key) as? String ?? "")

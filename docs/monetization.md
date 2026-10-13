@@ -83,7 +83,7 @@ xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera \
   CODE_SIGNING_ALLOWED=NO test
 ```
 
-Hosted unit/UI tests use isolated in-memory quota and no live auth/ads. Existing camera tests default to a Debug-only Pro fixture so they continue testing the camera rather than a paywall. `-ui-testing-monetization-free` explicitly exercises the free UI. These launch arguments do not grant access in Release. StoreKit integration tests explicitly opt out of the fixture and exercise StoreKit Test transactions, including trial eligibility, purchase, restore, renewal, refund, expiry, failure and pending approval.
+Hosted unit/UI tests use isolated in-memory quota and no live auth/ads. Existing camera tests default to a Debug-only Pro fixture so they continue testing the camera rather than a paywall. `-ui-testing-monetization-free` explicitly exercises the free UI. `-ui-testing-monetization-off` is Debug-only, needs an automated-test launch, turns the monetization surface off for that launch, and has no effect in Release. These launch arguments do not grant access in Release. StoreKit integration tests explicitly opt out of the fixture and exercise StoreKit Test transactions, including trial eligibility, purchase, restore, renewal, refund, expiry, failure and pending approval.
 
 Before release, also validate real-device Apple/Google sign-in/deletion, Google consent (EEA/non-EEA and revoked choices), banner no-fill/offline behavior, trial-to-paid updates while viewing an ad, Apple sandbox restores across devices/reinstall, offline entitlement launch, billing grace/retry, localization, Dynamic Type/VoiceOver, and no change to saved-photo access after expiry. CI alone cannot validate publisher credentials, ad revenue, or App Store approval.
 

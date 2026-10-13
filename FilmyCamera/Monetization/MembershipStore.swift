@@ -17,7 +17,23 @@ final class MembershipStore: ObservableObject {
     }
 
     static let shared = MembershipStore()
-    @Published private(set) var access: Access = .checking
+    @Published private(set) var access: Access = .checking {
+        didSet {
+            // A purchase or restore message describes the previous state; drop
+            // it when membership flips between premium and not premium, or
+            // leaves the unavailable state it was reported under.
+            let wasPremium: Bool
+            if case .premium = oldValue { wasPremium = true } else { wasPremium = false }
+            let nowPremium: Bool
+            if case .premium = access { nowPremium = true } else { nowPremium = false }
+            let wasUnavailable: Bool
+            if case .unavailable = oldValue { wasUnavailable = true } else { wasUnavailable = false }
+            let nowUnavailable: Bool
+            if case .unavailable = access { nowUnavailable = true } else { nowUnavailable = false }
+            if wasPremium != nowPremium { purchaseMessage = nil }
+            if wasUnavailable && !nowUnavailable { purchaseMessage = nil }
+        }
+    }
     @Published private(set) var remainingPhotos = MembershipPolicy.dailyPhotoLimit
     @Published private(set) var product: Product?
     @Published private(set) var eligibleForOneMonthTrial = false
@@ -37,6 +53,7 @@ final class MembershipStore: ObservableObject {
     private var productTask: Task<Void, Never>?
     private var testing = false
     private var started = false
+    private var unavailableRetries = 0
 
     init(persistence: (any PhotoQuotaPersistence)? = nil, useStoreKitForTesting: Bool = false,
          monetizationEnabled: Bool = MonetizationConfiguration.isEnabled) {
@@ -100,7 +117,7 @@ final class MembershipStore: ObservableObject {
         }
         await refresh()
         // Resolve trial labeling without delaying the initial paid unlock.
-        if isPremium { await loadProduct(); await refresh() }
+        if isPremium { await loadProduct(reportingFailure: false); await refresh() }
     }
 
     func refresh() async {
@@ -157,7 +174,7 @@ final class MembershipStore: ObservableObject {
         // Grace is not inferred from a local boolean or an expired receipt.
         // Both the transaction and renewal info must be verified.
         if needsGraceCheck && bestExpiry == nil {
-            if product == nil { await loadProduct() }
+            if product == nil { await loadProduct(reportingFailure: false) }
             do {
                 if let subscription = product?.subscription {
                     for status in try await subscription.status where status.state == .inGracePeriod {
@@ -173,6 +190,7 @@ final class MembershipStore: ObservableObject {
         }
         expiryTask?.cancel()
         if let bestExpiry {
+            unavailableRetries = 0
             access = .premium(until: bestExpiry, trial: bestIsTrial)
             expiryTask = Task { [weak self] in
                 do { try await Task.sleep(for: .seconds(max(1, bestExpiry.timeIntervalSinceNow))) }
@@ -180,7 +198,20 @@ final class MembershipStore: ObservableObject {
                 await self?.refresh()
             }
         } else {
-            access = sawUnverified ? .unavailable : .free
+            if sawUnverified {
+                access = .unavailable
+                // Bounded backoff so a transient failure heals without a user action.
+                let exponent = Double(unavailableRetries)
+                let delay = min(300.0, 5.0 * pow(3.0, exponent))
+                unavailableRetries += 1
+                expiryTask = Task { [weak self] in
+                    do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+                    await self?.refresh()
+                }
+            } else {
+                unavailableRetries = 0
+                access = .free
+            }
         }
     }
 
@@ -190,16 +221,16 @@ final class MembershipStore: ObservableObject {
             && offer.period.value == 1 && offer.periodCount == 1
     }
 
-    func loadProduct() async {
+    func loadProduct(reportingFailure: Bool = true) async {
         guard monetizationEnabled, !testing else { return }
         if let productTask { await productTask.value; return }
-        let task = Task<Void, Never> { [weak self] in await self?.fetchProduct() }
+        let task = Task<Void, Never> { [weak self] in await self?.fetchProduct(reportingFailure: reportingFailure) }
         productTask = task
         await task.value
         productTask = nil
     }
 
-    private func fetchProduct() async {
+    private func fetchProduct(reportingFailure: Bool) async {
         isLoadingProduct = true
         defer { isLoadingProduct = false }
         do {
@@ -211,17 +242,21 @@ final class MembershipStore: ObservableObject {
                   subscription.subscriptionPeriod.value == 1 else {
                 product = nil
                 eligibleForOneMonthTrial = false
-                purchaseMessage = "Subscriptions are unavailable right now. You can keep using the free camera."
+                if reportingFailure {
+                    purchaseMessage = "Subscriptions are unavailable right now. You can keep using the free camera."
+                }
                 return
             }
             product = monthly
             let eligible = await subscription.isEligibleForIntroOffer
             eligibleForOneMonthTrial = isConfiguredFreeTrial && eligible
-            purchaseMessage = nil
+            if reportingFailure { purchaseMessage = nil }
         } catch {
             product = nil
             eligibleForOneMonthTrial = false
-            purchaseMessage = "Could not load the App Store price. Check your connection and try again."
+            if reportingFailure {
+                purchaseMessage = "Could not load the App Store price. Check your connection and try again."
+            }
         }
     }
 

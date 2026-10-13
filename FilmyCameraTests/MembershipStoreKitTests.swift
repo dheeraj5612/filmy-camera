@@ -15,21 +15,25 @@ final class MembershipStoreKitTests: XCTestCase {
         return session
     }
 
-    private func store() async -> MembershipStore {
-        let store = MembershipStore(persistence: MemoryPhotoQuotaPersistence(), useStoreKitForTesting: true)
+    private func store(persistence: MemoryPhotoQuotaPersistence = MemoryPhotoQuotaPersistence()) async -> MembershipStore {
+        let store = MembershipStore(persistence: persistence, useStoreKitForTesting: true)
         await store.start()
         return store
     }
 
-    private func waitForPremium(_ expected: Bool, in store: MembershipStore) async throws {
+    private func waitForPremium(_ expected: Bool, in store: MembershipStore, logIterations: Bool = false) async throws {
         // StoreKit Test publishes externally initiated purchases, refunds and
         // renewals asynchronously. Keep reconciling Apple's signed state until
         // the requested transition arrives, with a bounded CI-safe timeout.
-        for _ in 0..<100 {
+        let clock = ContinuousClock()
+        let start = clock.now
+        for i in 0..<100 {
             await store.refresh()
+            if logIterations { print("waitForPremium iteration \(i) \(start.duration(to: clock.now))") }
             if store.isPremium == expected { return }
             try await Task.sleep(for: .milliseconds(100))
         }
+        XCTFail("timed out waiting for premium == \(expected), access \(store.access), after \(start.duration(to: clock.now))")
     }
 
     func testLocalizedMonthlyProductHasExactlyOneMonthFreeTrial() async throws {
@@ -70,6 +74,10 @@ final class MembershipStoreKitTests: XCTestCase {
         await store.restore()
         try await waitForPremium(true, in: store)
         XCTAssertTrue(store.isPremium, store.purchaseMessage ?? "Restore did not find purchase")
+        // StoreKit Test can publish the purchase after the first restore returns,
+        // so the outcome text is pinned on a restore that runs once it is visible.
+        await store.restore()
+        XCTAssertEqual(store.purchaseMessage, "Your subscription is restored.")
     }
 
     func testRefundRevokesPremium() async throws {
@@ -89,14 +97,22 @@ final class MembershipStoreKitTests: XCTestCase {
         let session = try session()
         defer { session.clearTransactions() }
         let transaction = try await session.buyProduct(identifier: MonetizationConfiguration.monthlyProductID)
-        let store = await store()
+        let persistence = MemoryPhotoQuotaPersistence()
+        var seeded = DailyPhotoQuota(now: Date())
+        for _ in 0..<3 { _ = seeded.reserve(at: Date()) }
+        let seededDay = seeded.day
+        persistence.quota = seeded
+        let store = await store(persistence: persistence)
+        XCTAssertEqual(store.remainingPhotos, 7)
         await store.refresh()
         XCTAssertTrue(store.isPremium)
         try session.disableAutoRenewForTransaction(identifier: XCTUnwrap(UInt(exactly: transaction.id)))
         try session.expireSubscription(productIdentifier: MonetizationConfiguration.monthlyProductID)
-        try await waitForPremium(false, in: store)
+        try await waitForPremium(false, in: store, logIterations: true)
         XCTAssertFalse(store.isPremium)
-        XCTAssertEqual(store.remainingPhotos, 10)
+        // The expiry wait has taken about ten minutes on hosted runners; a day rollover in that window refills the allowance.
+        if persistence.quota?.day == seededDay { XCTAssertEqual(store.remainingPhotos, 7) }
+        else { XCTAssertEqual(store.remainingPhotos, 10) }
     }
 
     func testTrialConvertsToPaidRenewal() async throws {
@@ -112,10 +128,16 @@ final class MembershipStoreKitTests: XCTestCase {
         // trial period ending and the renewal arriving it can report no
         // entitlement at all. Wait for the paid renewal itself: leaving the
         // trial is not enough, because that gap also reads as "not a trial".
+        let clock = ContinuousClock()
+        let start = clock.now
+        var renewed = false
         for _ in 0..<100 {
             await store.refresh()
-            if store.isPremium && !store.isTrial { break }
+            if store.isPremium && !store.isTrial { renewed = true; break }
             try await Task.sleep(for: .milliseconds(100))
+        }
+        if !renewed {
+            XCTFail("timed out waiting for the paid renewal, access \(store.access), after \(start.duration(to: clock.now))")
         }
         XCTAssertTrue(store.isPremium)
         XCTAssertFalse(store.isTrial)

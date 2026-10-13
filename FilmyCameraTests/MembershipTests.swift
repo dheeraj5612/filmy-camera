@@ -333,4 +333,68 @@ final class MembershipStoreTests: XCTestCase {
         XCTAssertFalse(store.allowsRecipe("classic-chrome"))
         XCTAssertTrue(store.allowsRecipe("g7x-compact"))
     }
+
+    private func exhaustedQuota(secondsFromNow offset: TimeInterval) -> DailyPhotoQuota {
+        let anchor = Date().addingTimeInterval(offset)
+        var quota = DailyPhotoQuota(now: anchor)
+        for _ in 0..<MembershipPolicy.dailyPhotoLimit { _ = quota.reserve(at: anchor) }
+        return quota
+    }
+
+    func testStoreAppliesDayRolloverToLoadedRecordAndPersistsIt() {
+        let persistence = MemoryPhotoQuotaPersistence()
+        persistence.quota = exhaustedQuota(secondsFromNow: -172_800)
+        let store = MembershipStore(persistence: persistence, monetizationEnabled: true)
+        XCTAssertEqual(store.remainingPhotos, MembershipPolicy.dailyPhotoLimit)
+        XCTAssertEqual(persistence.quota?.used, 0)
+    }
+
+    func testStoreKeepsFutureAnchoredRecordFrozenAndPersistsHealCountdown() {
+        let persistence = MemoryPhotoQuotaPersistence()
+        persistence.quota = exhaustedQuota(secondsFromNow: 172_800)
+        let store = MembershipStore(persistence: persistence, monetizationEnabled: true)
+        XCTAssertEqual(store.remainingPhotos, 0)
+        store.setAccessForTesting(.free)
+        XCTAssertNil(store.reserveCapture())
+        XCTAssertEqual(store.remainingPhotos, 0)
+        XCTAssertNotNil(persistence.quota?.rollbackHeal)
+    }
+
+    func testFailedRefundSaveReportsNoticeAndKeepsCharge() throws {
+        let persistence = FailingPersistence()
+        let store = MembershipStore(persistence: persistence, monetizationEnabled: true)
+        store.setAccessForTesting(.free)
+        let permit = try XCTUnwrap(store.reserveCapture())
+        XCTAssertNil(store.notice)
+        persistence.failSave = true
+        store.finishCapture(permit, succeeded: false)
+        XCTAssertNotNil(store.notice)
+        XCTAssertEqual(store.remainingPhotos, MembershipPolicy.dailyPhotoLimit - 1)
+    }
+
+    func testPurchaseMessageClearsOnlyWhenPremiumStateFlips() {
+        let store = MembershipStore(persistence: MemoryPhotoQuotaPersistence())
+        let later = Date().addingTimeInterval(3_600)
+        store.setAccessForTesting(.free)
+        store.purchaseMessage = "awaiting approval"
+        store.setAccessForTesting(.unavailable)
+        XCTAssertEqual(store.purchaseMessage, "awaiting approval")
+        store.setAccessForTesting(.premium(until: later, trial: false))
+        XCTAssertNil(store.purchaseMessage)
+        store.purchaseMessage = "restored"
+        store.setAccessForTesting(.premium(until: later.addingTimeInterval(60), trial: false))
+        XCTAssertEqual(store.purchaseMessage, "restored")
+        store.setAccessForTesting(.free)
+        XCTAssertNil(store.purchaseMessage)
+    }
+
+    func testPurchaseMessageClearsWhenLeavingUnavailable() {
+        let store = MembershipStore(persistence: MemoryPhotoQuotaPersistence())
+        store.setAccessForTesting(.free)
+        store.purchaseMessage = "receipt could not be verified"
+        store.setAccessForTesting(.unavailable)
+        XCTAssertEqual(store.purchaseMessage, "receipt could not be verified")
+        store.setAccessForTesting(.free)
+        XCTAssertNil(store.purchaseMessage)
+    }
 }
