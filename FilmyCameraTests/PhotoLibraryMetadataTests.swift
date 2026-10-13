@@ -1,3 +1,4 @@
+import Combine
 import CoreGraphics
 import Foundation
 import ImageIO
@@ -396,6 +397,40 @@ final class PhotoLibraryMetadataTests: XCTestCase {
         XCTAssertEqual(Set(service.metadataByAssetIdentifier.keys), Set(all.suffix(3)))
         // Drain the queued persistence write before the defer restores the keys.
         service.flushPersistence()
+    }
+
+    @MainActor
+    func testUndecodableMetadataEntryDoesNotDiscardTheIndex() throws {
+        let key = "filmyCamera.savedFrameMetadata"
+        let saved = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let saved { UserDefaults.standard.set(saved, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) }
+        }
+        let entry = SavedFrameMetadata(recipe: FilmRecipe.builtIns[0],
+                                       capturedAt: Date(timeIntervalSince1970: 1_754_000_000))
+        let encoded = try JSONEncoder().encode(entry)
+        var broken = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        var recipe = try XCTUnwrap(broken["recipe"] as? [String: Any])
+        recipe["filmBase"] = "futureBase"
+        broken["recipe"] = recipe
+        let good = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded))
+        let blob = try JSONSerialization.data(withJSONObject: ["good-entry": good, "future-entry": broken])
+        UserDefaults.standard.set(blob, forKey: key)
+        let service = PhotoLibraryService()
+        XCTAssertEqual(Set(service.metadataByAssetIdentifier.keys), ["good-entry"])
+        service.flushPersistence()
+    }
+
+    @MainActor
+    func testUnchangedAuthorizationRefreshDoesNotPublish() {
+        let service = PhotoLibraryService()
+        service.refreshAuthorizationStatuses()
+        var emissions = 0
+        let cancellable = service.objectWillChange.sink { emissions += 1 }
+        service.refreshAuthorizationStatuses()
+        service.refreshAuthorizationStatuses()
+        cancellable.cancel()
+        XCTAssertEqual(emissions, 0)
     }
 
     func testReadWriteAuthorizationAllowsFullAndLimitedAccess() {

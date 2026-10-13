@@ -12,6 +12,13 @@ struct SavedFrameMetadata: Codable, Hashable, Sendable {
     let capturedAt: Date
 }
 
+private struct LossySavedFrameMetadata: Decodable {
+    let value: SavedFrameMetadata?
+    init(from decoder: Decoder) throws {
+        value = try? SavedFrameMetadata(from: decoder)
+    }
+}
+
 struct LocalSavedFrame: Identifiable, Hashable, Sendable {
     let assetIdentifier: String
     let pixelWidth: Int
@@ -1013,12 +1020,14 @@ final class PhotoLibraryService: ObservableObject {
         )
     }
 
-    private func refreshAuthorizationStatuses() {
-        let previousReadStatus = authorizationStatus
-        let previousAddStatus = addOnlyAuthorizationStatus
-        authorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-        addOnlyAuthorizationStatus = PHPhotoLibrary.authorizationStatus(for: .addOnly)
-        if authorizationStatus != previousReadStatus || addOnlyAuthorizationStatus != previousAddStatus {
+    func refreshAuthorizationStatuses() {
+        let read = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        let add = PHPhotoLibrary.authorizationStatus(for: .addOnly)
+        let changed = read != authorizationStatus || add != addOnlyAuthorizationStatus
+        // @Published emits on every assignment, so only assign real changes.
+        if read != authorizationStatus { authorizationStatus = read }
+        if add != addOnlyAuthorizationStatus { addOnlyAuthorizationStatus = add }
+        if changed {
             invalidateThumbnailCache()
         }
     }
@@ -2006,10 +2015,11 @@ final class PhotoLibraryService: ObservableObject {
 
     private static func loadMetadata(forKey key: String) -> [String: SavedFrameMetadata] {
         guard let data = UserDefaults.standard.data(forKey: key),
-              let metadata = try? JSONDecoder().decode([String: SavedFrameMetadata].self, from: data) else {
+              let entries = try? JSONDecoder().decode([String: LossySavedFrameMetadata].self, from: data) else {
             return [:]
         }
-        return metadata
+        // An entry this build cannot decode is skipped, not allowed to drop the whole index.
+        return entries.compactMapValues { $0.value }
     }
 
     private func addToAppAlbum(

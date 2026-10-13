@@ -248,6 +248,10 @@ final class FilmyPhotoStoreTests: XCTestCase {
         XCTAssertNil(FilmyPhotosExporter.exportLocation(original: bare, rendition: tagged, taggingEnabled: false))
         let ownLocation = FilmyPhotosExporter.exportLocation(original: otherTagged, rendition: tagged, taggingEnabled: false)
         XCTAssertEqual(ownLocation?.coordinate.latitude ?? 0, 30, accuracy: 0.0001)
+        // A re-developed (bare) current rendition falls back to an older tagged revision.
+        let older = FilmyPhotosExporter.exportLocation(original: bare, renditions: [bareToo, tagged], taggingEnabled: true)
+        XCTAssertEqual(older?.coordinate.latitude ?? 0, 20, accuracy: 0.0001)
+        XCTAssertNil(FilmyPhotosExporter.exportLocation(original: bare, renditions: [bareToo, tagged], taggingEnabled: false))
     }
 
     func testContentEditingInputFailureNamesICloudDownload() {

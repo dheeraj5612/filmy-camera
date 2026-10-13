@@ -146,10 +146,18 @@ enum FilmyPhotosExporter {
         // For stills, original + RAW companion + rendered edit are committed
         // in one PhotoKit transaction and require only add-only permission.
         let taggingEnabled: Bool = UserDefaults.standard.object(forKey: "locationTaggingEnabled.v1") as? Bool ?? true
+        // Current rendition first; older revisions only supply GPS a re-developed rendition lacks.
+        var locationRenditions: [URL] = [rendition]
+        if taggingEnabled {
+            for older in document.revisions.dropLast().reversed() {
+                if let url = try? await store.renditionURL(id, revisionID: older.id) { locationRenditions.append(url) }
+            }
+        }
+        let candidates = locationRenditions
         let createChanges: @Sendable () -> Void = {
             let request = PHAssetCreationRequest.forAsset()
             request.creationDate = document.capturedAt
-            request.location = Self.exportLocation(original: original, rendition: rendition, taggingEnabled: taggingEnabled)
+            request.location = Self.exportLocation(original: original, renditions: candidates, taggingEnabled: taggingEnabled)
             request.addResource(with: .photo, fileURL: original, options: nil)
             if let raw { request.addResource(with: .alternatePhoto, fileURL: raw, options: nil) }
             if let movie { request.addResource(with: .pairedVideo, fileURL: movie, options: nil) }
@@ -187,6 +195,16 @@ enum FilmyPhotosExporter {
     /// The original's own location is kept regardless; the rendition's is used only while tagging is on.
     nonisolated static func exportLocation(original: URL, rendition: URL, taggingEnabled: Bool) -> CLLocation? {
         PhotoLibraryService.location(fromURL: original) ?? (taggingEnabled ? PhotoLibraryService.location(fromURL: rendition) : nil)
+    }
+
+    /// Same as above, trying each rendition in order (current revision first).
+    nonisolated static func exportLocation(original: URL, renditions: [URL], taggingEnabled: Bool) -> CLLocation? {
+        if let own = PhotoLibraryService.location(fromURL: original) { return own }
+        guard taggingEnabled else { return nil }
+        for url in renditions {
+            if let found = PhotoLibraryService.location(fromURL: url) { return found }
+        }
+        return nil
     }
 
     /// Maps a failed content-editing-input request to the error the user sees.
