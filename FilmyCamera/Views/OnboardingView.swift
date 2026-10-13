@@ -26,11 +26,12 @@ struct OnboardingView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .caption) private var selectionIconWidth: CGFloat = 16
     @State private var chosenRecipeID: String?
+    @State private var featuredAnchorID: String?
     @State private var isShowingOriginal = false
 
     private var selectedRecipeID: String { chosenRecipeID ?? initialRecipeID }
     private var featuredRecipes: [FilmRecipe] {
-        OnboardingStore.featuredRecipes(from: recipes, selectedRecipeID: initialRecipeID)
+        OnboardingStore.featuredRecipes(from: recipes, selectedRecipeID: featuredAnchorID ?? initialRecipeID)
     }
     private var previewRecipe: FilmRecipe? {
         recipes.first { $0.id == selectedRecipeID } ?? recipes.first
@@ -222,6 +223,7 @@ struct OnboardingView: View {
 
         return Button {
             guard !selected else { return }
+            if featuredAnchorID == nil { featuredAnchorID = initialRecipeID }
             chosenRecipeID = recipe.id
             isShowingOriginal = false
             HapticFeedback.play(.selection)

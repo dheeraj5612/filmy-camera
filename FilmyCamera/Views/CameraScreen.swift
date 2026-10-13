@@ -420,6 +420,11 @@ struct CameraScreen: View {
         .onChange(of: isCameraVisibleForAssists && !countdown.state.isActive, initial: true) { _, active in
             camera.setSceneAutoViewfinderActive(active)
         }
+        .onChange(of: countdown.state.remaining) { old, new in
+            guard countdown.state.isActive, new > 0 else { return }
+            let message = old == 0 ? "Photo in \(new) seconds" : "\(new)"
+            UIAccessibility.post(notification: .announcement, argument: message)
+        }
         .onChange(of: captureAspect) { _, _ in countdown.cancel(); assists.stop(); shooting.invalidatePreview(); updateCompositionAssists() }
         .onChange(of: canTriggerShutter) { _, enabled in
             if !enabled {
@@ -600,22 +605,30 @@ struct CameraScreen: View {
         }
         .padding(14)
         .viewfinderChrome(RoundedRectangle(cornerRadius: 16))
+        .dynamicTypeSize(.xSmall ... .accessibility1)
         .accessibilityIdentifier("capture-save-recovery")
     }
 
     @ViewBuilder
     private var captureRecoveryActions: some View {
-        Button("Retry save") { viewModel.saveReview(photoLibrary: photoLibrary) }
-            .frame(minHeight: 44)
-            .accessibilityIdentifier("capture-save-retry")
-        if viewModel.saveErrorRequiresSettings {
-            Button("Photos Settings", action: openSystemSettings)
-                .frame(minHeight: 44)
-                .accessibilityIdentifier("capture-save-settings")
+        Button {
+            viewModel.saveReview(photoLibrary: photoLibrary)
+        } label: {
+            Text("Retry save").frame(minHeight: 44)
         }
-        Button("Discard", role: .destructive) { isConfirmingCaptureDiscard = true }
-            .frame(minHeight: 44)
-            .accessibilityIdentifier("capture-save-discard")
+        .accessibilityIdentifier("capture-save-retry")
+        if viewModel.saveErrorRequiresSettings {
+            Button(action: openSystemSettings) {
+                Text("Photos Settings").frame(minHeight: 44)
+            }
+            .accessibilityIdentifier("capture-save-settings")
+        }
+        Button(role: .destructive) {
+            isConfirmingCaptureDiscard = true
+        } label: {
+            Text("Discard").frame(minHeight: 44)
+        }
+        .accessibilityIdentifier("capture-save-discard")
     }
 
     // MARK: - Shells
@@ -956,6 +969,10 @@ struct CameraScreen: View {
 
     private func switchCameraFromPreview() {
         guard canTriggerShutter, !isPinching, !shooting.settings.lockPrimeLens, !shooting.isComposing, camera.availableCameraPositions.count > 1 else { return }
+        switchCamera()
+    }
+
+    private func switchCamera() {
         focusPoint = nil
         focusNormalizedPoint = nil
         HapticFeedback.play(.selection)
@@ -1043,7 +1060,7 @@ struct CameraScreen: View {
                     onClose: { isShowingLiveAdjustments = false }
                 )
             }
-            if isShowingTools && !isShowingLiveAdjustments {
+            if isShowingTools && !isShowingLiveAdjustments && !hidesToolsForRecoveryPlaceholder {
                 toolStrip(minWidth: width - 24)
             }
 
@@ -1058,7 +1075,7 @@ struct CameraScreen: View {
                     maxZoom: camera.maxZoomFactor,
                     onSelect: { factor in
                         dismissGestureHint()
-                        camera.setZoom(factor)
+                        camera.setZoom(factor, reseedTracking: true)
                     },
                     onAdjust: { direction in
                         let delta: CGFloat = direction == .increment ? 0.5 : -0.5
@@ -1177,6 +1194,7 @@ struct CameraScreen: View {
                 }
                 withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.82)) {
                     isShowingLookDrawer = false
+                    isShowingLiveAdjustments = false
                     isShowingTools = true
                 }
             } label: {
@@ -1193,6 +1211,8 @@ struct CameraScreen: View {
                     }
                 }
                 .font(.system(.caption2, design: .rounded).weight(.bold))
+                .minimumScaleFactor(0.7)
+                .lineLimit(1)
                 .foregroundStyle(FilmyTheme.accent)
                 .padding(.horizontal, 9)
                 .frame(minHeight: FilmyTheme.minimumHitTarget)
@@ -1256,8 +1276,7 @@ struct CameraScreen: View {
 
     private var cameraSwitchButton: some View {
         Button {
-            HapticFeedback.play(.selection)
-            camera.toggleCameraPosition()
+            switchCamera()
         } label: {
             Image(systemName: "arrow.triangle.2.circlepath.camera")
                 .font(.system(size: 15, weight: .bold))
@@ -1293,6 +1312,11 @@ struct CameraScreen: View {
         .accessibilityHint("Shows camera preferences")
     }
 
+    /// What the toggle reports: the rail is suppressed over a recovery placeholder.
+    private var isToolRailVisible: Bool {
+        isShowingTools && !hidesToolsForRecoveryPlaceholder
+    }
+
     private var toolsToggle: some View {
         Button {
             withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.82)) {
@@ -1302,19 +1326,19 @@ struct CameraScreen: View {
                 isShowingTools.toggle()
             }
         } label: {
-            Image(systemName: isShowingTools ? "xmark" : "slider.horizontal.3")
+            Image(systemName: isToolRailVisible ? "xmark" : "slider.horizontal.3")
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(isShowingTools ? FilmyTheme.accent : .white)
+                .foregroundStyle(isToolRailVisible ? FilmyTheme.accent : .white)
                 .frame(width: cameraHitTarget, height: cameraHitTarget)
                 .background { ChromeShapeBackground(shape: Circle()) }
                 .contentShape(Circle())
         }
         .buttonStyle(.pressable)
         .accessibilityIdentifier("camera-chrome-toggle")
-        .accessibilityValue(isShowingTools ? "Expanded" : "Collapsed")
-        .accessibilityLabel(isShowingTools ? "Hide camera controls" : "Show camera controls")
+        .accessibilityValue(isToolRailVisible ? "Expanded" : "Collapsed")
+        .accessibilityLabel(isToolRailVisible ? "Hide camera controls" : "Show camera controls")
         .accessibilityHint(
-            isShowingTools
+            isToolRailVisible
                 ? "Return to the viewfinder-first camera layout"
                 : "Reveal exposure, zoom, and camera controls"
         )
@@ -1601,9 +1625,14 @@ struct CameraScreen: View {
                         .submitLabel(.done)
                         .accessibilityIdentifier("camera-looks-search")
                     if !quickRecipeQuery.isEmpty {
-                        Button("Clear", systemImage: "xmark.circle.fill") { quickRecipeQuery = "" }
-                            .labelStyle(.iconOnly)
-                            .frame(minWidth: 44, minHeight: 44)
+                        Button {
+                            quickRecipeQuery = ""
+                        } label: {
+                            Label("Clear", systemImage: "xmark.circle.fill")
+                                .labelStyle(.iconOnly)
+                                .frame(minWidth: 44, minHeight: 44)
+                                .contentShape(Rectangle())
+                        }
                     }
                 }
                 .font(.subheadline)
@@ -1928,6 +1957,17 @@ struct CameraScreen: View {
 
     private var shouldShowCameraEmptyState: Bool {
         !camera.isRunning
+    }
+
+    /// The rail would cover the placeholder's only recovery action.
+    private var hidesToolsForRecoveryPlaceholder: Bool {
+        if isViewfinderChromePreview || camera.isRunning { return false }
+        switch camera.availability {
+        case .interrupted, .needsRecovery, .unavailable, .permissionDenied:
+            return true
+        default:
+            return false
+        }
     }
 
     private var isImporting: Bool {
