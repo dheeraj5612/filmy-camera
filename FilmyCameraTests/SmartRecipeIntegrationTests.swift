@@ -19,6 +19,24 @@ final class SmartRecipeIntegrationTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testStoreOptionsAreEmptyWithoutSnapshotAndSnapshotOptionsRepeat() throws {
+        let suite = "SmartRecipeIntegrationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SmartRecipeStore(defaults: defaults)
+        XCTAssertTrue(store.options.isEmpty)
+        store.setIntent(.vivid)
+        XCTAssertTrue(store.options.isEmpty)
+
+        let context = try XCTUnwrap(CGContext(data: nil, width: 2, height: 2, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        let snapshot = SmartRecipeSnapshot(id: UUID(), scene: SmartScene(kind: .people, evidence: 0.8, metrics: .init(), hasFaces: true),
+            image: try XCTUnwrap(context.makeImage()), catalog: FilmRecipe.builtIns, favoriteIDs: [], usedVision: false)
+        XCTAssertEqual(snapshot.options(intent: .balanced).map(\.id), snapshot.options(intent: .balanced).map(\.id))
+        XCTAssertFalse(snapshot.options(intent: .balanced).isEmpty)
+    }
+
     func testProjectionUsesEffectiveRecipeControls() {
         var recipe = FilmRecipe.builtIns[0]
         recipe.contrast = 0.94

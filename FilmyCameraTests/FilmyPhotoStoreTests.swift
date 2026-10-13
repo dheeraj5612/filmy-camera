@@ -1,6 +1,8 @@
 import CoreImage
+import CoreLocation
 import Foundation
 import ImageIO
+import Photos
 import XCTest
 @testable import FilmyCamera
 
@@ -211,6 +213,51 @@ final class FilmyPhotoStoreTests: XCTestCase {
         XCTAssertEqual(updated.revisionForEditing(UUID())?.output, laterSettings)
         XCTAssertEqual(updated.currentRevision?.id, updated.revisionForEditing(nil)?.id)
     }
+    private func writeJPEG(_ data: Data, gps: [String: Any]?, to url: URL) throws {
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(data as CFData, nil))
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, "public.jpeg" as CFString, 1, nil))
+        var properties: [String: Any] = [:]
+        if let gps { properties[kCGImagePropertyGPSDictionary as String] = gps }
+        CGImageDestinationAddImageFromSource(destination, source, 0, properties as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+    }
+
+    func testExportLocationFallsBackToRenditionAndPrefersOriginal() throws {
+        let directory = root()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let data = try fixture()
+        func gps(_ latitude: Double) -> [String: Any] {
+            [kCGImagePropertyGPSLatitude as String: latitude, kCGImagePropertyGPSLatitudeRef as String: "N",
+             kCGImagePropertyGPSLongitude as String: 10.0, kCGImagePropertyGPSLongitudeRef as String: "E"]
+        }
+        let bare = directory.appendingPathComponent("bare.jpg")
+        let bareToo = directory.appendingPathComponent("bare2.jpg")
+        let tagged = directory.appendingPathComponent("tagged.jpg")
+        let otherTagged = directory.appendingPathComponent("other.jpg")
+        try writeJPEG(data, gps: nil, to: bare)
+        try writeJPEG(data, gps: nil, to: bareToo)
+        try writeJPEG(data, gps: gps(20), to: tagged)
+        try writeJPEG(data, gps: gps(30), to: otherTagged)
+
+        let fallback = FilmyPhotosExporter.exportLocation(original: bare, rendition: tagged, taggingEnabled: true)
+        XCTAssertEqual(fallback?.coordinate.latitude ?? 0, 20, accuracy: 0.0001)
+        XCTAssertNil(FilmyPhotosExporter.exportLocation(original: bare, rendition: bareToo, taggingEnabled: true))
+        let preferred = FilmyPhotosExporter.exportLocation(original: otherTagged, rendition: tagged, taggingEnabled: true)
+        XCTAssertEqual(preferred?.coordinate.latitude ?? 0, 30, accuracy: 0.0001)
+        XCTAssertNil(FilmyPhotosExporter.exportLocation(original: bare, rendition: tagged, taggingEnabled: false))
+        let ownLocation = FilmyPhotosExporter.exportLocation(original: otherTagged, rendition: tagged, taggingEnabled: false)
+        XCTAssertEqual(ownLocation?.coordinate.latitude ?? 0, 30, accuracy: 0.0001)
+    }
+
+    func testContentEditingInputFailureNamesICloudDownload() {
+        let network = NSError(domain: PHPhotosErrorDomain, code: PHPhotosError.Code.networkAccessRequired.rawValue)
+        XCTAssertEqual(FilmyPhotosExporter.inputFailure(info: [PHContentEditingInputErrorKey: network]), .iCloudDownloadRequired)
+        XCTAssertEqual(FilmyPhotosExporter.inputFailure(info: [PHContentEditingInputResultIsInCloudKey: NSNumber(value: true)]),
+                       .iCloudDownloadRequired)
+        XCTAssertEqual(FilmyPhotosExporter.inputFailure(info: [:]), .writeFailed)
+    }
+
     func testReceiptDecisionAdoptsOnlyResolvingIdentifiers() {
         XCTAssertEqual(PhotosExportReceipt.decision(pending: nil) { _ in true }, .create)
         XCTAssertEqual(PhotosExportReceipt.decision(pending: "A/L0/001") { _ in true }, .adopt("A/L0/001"))

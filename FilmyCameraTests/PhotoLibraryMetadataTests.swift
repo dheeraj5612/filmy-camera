@@ -167,6 +167,49 @@ final class PhotoLibraryMetadataTests: XCTestCase {
         XCTAssertTrue(PhotoLibrarySaveError.writeFailed.localizedDescription.localizedCaseInsensitiveContains("retry"))
     }
 
+    @MainActor
+    func testDocumentSaveErrorMappingKeepsExporterAndStorageCauses() {
+        let exporterError = FilmyPhotosExporter.ExportError.unsupportedOutput
+        XCTAssertEqual(PhotoLibraryService.saveError(for: exporterError),
+                       .exportFailed(exporterError.errorDescription ?? ""))
+        XCTAssertEqual(PhotoLibraryService.saveError(for: exporterError).localizedDescription,
+                       exporterError.errorDescription)
+        XCTAssertEqual(PhotoLibraryService.saveError(for: FilmyPhotosExporter.ExportError.accessDenied), .accessDenied)
+        let diskFull = NSError(domain: PHPhotosErrorDomain, code: 3305)
+        XCTAssertEqual(PhotoLibraryService.saveError(for: diskFull), .insufficientStorage)
+        XCTAssertTrue(PhotoLibrarySaveError.insufficientStorage.localizedDescription.localizedCaseInsensitiveContains("space"))
+        XCTAssertEqual(PhotoLibraryService.saveError(for: NSError(domain: "other", code: 1)), .writeFailed)
+        let cocoaFull = NSError(domain: NSCocoaErrorDomain, code: NSFileWriteOutOfSpaceError)
+        XCTAssertEqual(PhotoLibraryService.saveError(for: cocoaFull), .insufficientStorage)
+        let posixFull = NSError(domain: NSPOSIXErrorDomain, code: Int(ENOSPC))
+        XCTAssertEqual(PhotoLibraryService.saveError(for: posixFull), .insufficientStorage)
+        let wrappedFull = NSError(domain: NSCocoaErrorDomain, code: NSFileWriteUnknownError,
+                                  userInfo: [NSUnderlyingErrorKey: posixFull])
+        XCTAssertEqual(PhotoLibraryService.saveError(for: wrappedFull), .insufficientStorage)
+        XCTAssertEqual(PhotoLibraryService.saveError(for: FilmyPhotosExporter.ExportError.writeFailed, assetLinked: false), .writeFailed)
+        XCTAssertEqual(PhotoLibraryService.saveError(for: FilmyPhotosExporter.ExportError.writeFailed, assetLinked: true),
+                       .exportFailed(FilmyPhotosExporter.ExportError.writeFailed.errorDescription ?? ""))
+    }
+
+    func testFailedDocumentSaveOwnsLinkedAssetOnlyWhenWarranted() {
+        typealias Export = FilmyPhotosExporter.ExportError
+        let decide = PhotoLibraryService.assetToOwnAfterFailure
+        let photosError = NSError(domain: PHPhotosErrorDomain, code: 3300)
+        XCTAssertEqual(decide(Export.writeFailed, "A", "A", []), "A")
+        XCTAssertEqual(decide(Export.writeFailed, nil, "A", []), "A")
+        XCTAssertEqual(decide(photosError, nil, "A", []), "A")
+        XCTAssertEqual(decide(Export.iCloudDownloadRequired, nil, "A", []), "A")
+        XCTAssertNil(decide(photosError, "A", "A", []))
+        XCTAssertNil(decide(Export.busy, "A", "A", []))
+        XCTAssertNil(decide(Export.missingAsset, "A", "A", []))
+        XCTAssertNil(decide(Export.missingAsset, nil, "A", []))
+        XCTAssertNil(decide(Export.externalEdit, "A", "A", []))
+        XCTAssertNil(decide(Export.writeFailed, nil, nil, []))
+        XCTAssertNil(decide(photosError, nil, nil, []))
+        XCTAssertNil(decide(Export.writeFailed, nil, "A", ["A"]))
+        XCTAssertNil(decide(photosError, nil, "A", ["A"]))
+    }
+
     func testCachedFrameDimensionsComeFromFullResolutionJPEG() throws {
         let colorSpace = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
         let context = try XCTUnwrap(CGContext(
@@ -351,6 +394,8 @@ final class PhotoLibraryMetadataTests: XCTestCase {
         service.forgetSavedAssets([])
         XCTAssertEqual(PhotoLibraryAssetOwnership.load(), kept)
         XCTAssertEqual(Set(service.metadataByAssetIdentifier.keys), Set(all.suffix(3)))
+        // Drain the queued persistence write before the defer restores the keys.
+        service.flushPersistence()
     }
 
     func testReadWriteAuthorizationAllowsFullAndLimitedAccess() {

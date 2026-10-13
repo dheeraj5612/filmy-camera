@@ -164,9 +164,15 @@ enum PhotoLibraryServiceError: LocalizedError, Sendable {
 enum PhotoLibrarySaveError: LocalizedError, Equatable, Sendable {
     case accessDenied
     case writeFailed
+    case insufficientStorage
+    case exportFailed(String)
 
     var errorDescription: String? {
         switch self {
+        case .insufficientStorage:
+            return "Not enough storage to save this frame. Free some space, then retry the save."
+        case .exportFailed(let message):
+            return message
         case .accessDenied:
             return "Photo access is needed to save this frame. Enable Photos access in Settings, then try again."
         case .writeFailed:
@@ -624,6 +630,7 @@ final class PhotoLibraryService: ObservableObject {
     private var thumbnailCacheGeneration: UInt64 = 0
     private var memoryWarningObserver: MemoryWarningObservation?
     private var lifecycleObservation: LifecycleObservation?
+    private var foregroundObservation: LifecycleObservation?
     private let defaultsGate: DefaultsWriteGate
     private var persistenceGeneration: UInt64 = 0
     private var metadataDirty = false
@@ -686,6 +693,14 @@ final class PhotoLibraryService: ObservableObject {
             lifecycleTokens.append(token)
         }
         lifecycleObservation = LifecycleObservation(tokens: lifecycleTokens)
+        // The camera tab has no scenePhase refresh of its own, so frames deleted
+        // or edited in Photos while backgrounded would keep showing there.
+        let foregroundToken = NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refresh() }
+        }
+        foregroundObservation = LifecycleObservation(tokens: [foregroundToken])
     }
 
     /// Coalesces metadata and resource-index writes: mutations within one
@@ -1067,7 +1082,6 @@ final class PhotoLibraryService: ObservableObject {
                 }
 
                 self.addToAppAlbum(assetIdentifier: assetIdentifier) { albumSaved in
-                    self.refresh()
                     // The image is already safely in Photos if album organization
                     // fails. Do not report a false save failure or ask the user to
                     // retry and create a duplicate asset.
@@ -1168,21 +1182,82 @@ final class PhotoLibraryService: ObservableObject {
             return
         }
         Task { @MainActor in
+            let linkedBefore = (try? await FilmyPhotoStore.shared.loadDocument(documentID))?.photosAssetIdentifier
             do {
                 let assetID = try await FilmyPhotosExporter.save(documentID)
                 await rememberSavedAsset(assetID, metadata: SavedFrameMetadata(recipe: recipe, capturedAt: capturedAt),
                                          imageData: imageData, image: image)
-                refreshAuthorizationStatuses()
                 refresh()
                 completion(.success(()))
                 if PhotoLibraryAuthorizationPolicy.canManageCollections(authorizationStatus) {
-                    addToAppAlbum(assetIdentifier: assetID) { [weak self] _ in self?.refresh() }
+                    addToAppAlbum(assetIdentifier: assetID) { _ in }
                 }
             } catch {
-                if case FilmyPhotosExporter.ExportError.accessDenied = error { completion(.failure(.accessDenied)) }
-                else { completion(.failure(.writeFailed)) }
+                // The asset may already exist and be linked with only its edit
+                // missing. Own it so the Roll shows it and it can be deleted.
+                let linkedAfter = (try? await FilmyPhotoStore.shared.loadDocument(documentID))?.photosAssetIdentifier
+                let owned = savedAssetIdentifiers
+                var failure = Self.saveError(for: error, assetLinked: !(linkedAfter ?? "").isEmpty)
+                if let linked = Self.assetToOwnAfterFailure(
+                    error: error, linkedBefore: linkedBefore, linkedAfter: linkedAfter,
+                    owned: Set(owned)
+                ) {
+                    await rememberSavedAsset(linked, metadata: SavedFrameMetadata(recipe: recipe, capturedAt: capturedAt),
+                                             imageData: imageData, image: image)
+                    refresh()
+                    if failure == .writeFailed {
+                        let text = FilmyPhotosExporter.ExportError.writeFailed.errorDescription ?? ""
+                        failure = .exportFailed(text)
+                    }
+                }
+                completion(.failure(failure))
             }
         }
+    }
+
+    /// Identifier of a linked, ungraded asset a failed document save should
+    /// register as owned, or nil. Decided on the link, not the error case:
+    /// register when the capture is linked, not already owned, and either the
+    /// edit failed outright or this attempt created the link (and the failure
+    /// is not a missing asset). An unchanged link on busy, missing or
+    /// externally edited assets is not ours to own.
+    nonisolated static func assetToOwnAfterFailure(
+        error: Error, linkedBefore: String?, linkedAfter: String?, owned: Set<String>
+    ) -> String? {
+        guard let linked = linkedAfter, !linked.isEmpty, !owned.contains(linked) else { return nil }
+        var isWriteFailed = false
+        var isMissingAsset = false
+        if let export = error as? FilmyPhotosExporter.ExportError {
+            if case .writeFailed = export { isWriteFailed = true }
+            if case .missingAsset = export { isMissingAsset = true }
+        }
+        if isWriteFailed { return linked }
+        let newlyLinked = linked != linkedBefore
+        return newlyLinked && !isMissingAsset ? linked : nil
+    }
+
+    static func saveError(for error: Error, assetLinked: Bool = true) -> PhotoLibrarySaveError {
+        if let export = error as? FilmyPhotosExporter.ExportError {
+            if case .accessDenied = export { return .accessDenied }
+            // With no linked asset there is nothing to update, so the exporter's "retry to update the same asset" text would mislead.
+            if case .writeFailed = export, !assetLinked { return .writeFailed }
+            return .exportFailed(export.errorDescription ?? PhotoLibrarySaveError.writeFailed.errorDescription ?? "")
+        }
+        let nsError = error as NSError
+        if nsError.domain == PHPhotosErrorDomain, nsError.code == PHPhotosError.Code.notEnoughSpace.rawValue {
+            return .insufficientStorage
+        }
+        if isDiskFull(nsError) { return .insufficientStorage }
+        if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError, isDiskFull(underlying) {
+            return .insufficientStorage
+        }
+        return .writeFailed
+    }
+
+    private static func isDiskFull(_ error: NSError) -> Bool {
+        if error.domain == NSCocoaErrorDomain { return error.code == NSFileWriteOutOfSpaceError }
+        if error.domain == NSPOSIXErrorDomain { return error.code == Int(ENOSPC) }
+        return false
     }
 
     func metadata(for asset: PHAsset) -> SavedFrameMetadata? {
@@ -1461,7 +1536,7 @@ final class PhotoLibraryService: ObservableObject {
         let fetched = result.objects(at: IndexSet(integersIn: 0..<result.count))
         let assetsByIdentifier = Dictionary(uniqueKeysWithValues: fetched.map { ($0.localIdentifier, $0) })
         let accessibleIdentifiers = identifiers.filter { assetsByIdentifier[$0] != nil }
-        if reconcileMissing && accessibleIdentifiers != identifiers {
+        if reconcileMissing && PHPhotoLibrary.shared().unavailabilityReason == nil && accessibleIdentifiers != identifiers {
             savedAssetIdentifiers = accessibleIdentifiers
             pruneMetadata(keeping: accessibleIdentifiers)
             pruneResources(keeping: accessibleIdentifiers)

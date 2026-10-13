@@ -1,5 +1,6 @@
 @preconcurrency import Photos
 import CoreImage
+import CoreLocation
 import Foundation
 import ImageIO
 import UniformTypeIdentifiers
@@ -67,7 +68,7 @@ enum FilmyPhotosExporter {
     private static var exporting: Set<UUID> = []
 
     enum ExportError: LocalizedError {
-        case accessDenied, busy, missingAsset, unsupportedOutput, writeFailed, externalEdit
+        case accessDenied, busy, missingAsset, unsupportedOutput, writeFailed, externalEdit, iCloudDownloadRequired
         var errorDescription: String? {
             switch self {
             case .accessDenied: "Photos access is needed for this export. Your Filmy original is safe."
@@ -76,6 +77,7 @@ enum FilmyPhotosExporter {
             case .unsupportedOutput: "Photos cannot preserve this format in an edited asset on this device. The Filmy version is safe."
             case .writeFailed: "Photos could not finish this edit. Its original and your Filmy version are safe; retry to update the same asset."
             case .externalEdit: "Another app edited this Photos asset. Export a new copy to keep those edits."
+            case .iCloudDownloadRequired: "The original is in iCloud and could not be downloaded. Connect to the internet, then retry. Your Filmy version is safe."
             }
         }
     }
@@ -143,10 +145,11 @@ enum FilmyPhotosExporter {
         let adjustmentBox = Box(adjustment)
         // For stills, original + RAW companion + rendered edit are committed
         // in one PhotoKit transaction and require only add-only permission.
+        let taggingEnabled: Bool = UserDefaults.standard.object(forKey: "locationTaggingEnabled.v1") as? Bool ?? true
         let createChanges: @Sendable () -> Void = {
             let request = PHAssetCreationRequest.forAsset()
             request.creationDate = document.capturedAt
-            request.location = PhotoLibraryService.location(fromURL: original)
+            request.location = Self.exportLocation(original: original, rendition: rendition, taggingEnabled: taggingEnabled)
             request.addResource(with: .photo, fileURL: original, options: nil)
             if let raw { request.addResource(with: .alternatePhoto, fileURL: raw, options: nil) }
             if let movie { request.addResource(with: .pairedVideo, fileURL: movie, options: nil) }
@@ -180,6 +183,24 @@ enum FilmyPhotosExporter {
         return assetID
     }
 
+    /// The sensor original carries no GPS; the rendition does when location tagging allowed it.
+    /// The original's own location is kept regardless; the rendition's is used only while tagging is on.
+    nonisolated static func exportLocation(original: URL, rendition: URL, taggingEnabled: Bool) -> CLLocation? {
+        PhotoLibraryService.location(fromURL: original) ?? (taggingEnabled ? PhotoLibraryService.location(fromURL: rendition) : nil)
+    }
+
+    /// Maps a failed content-editing-input request to the error the user sees.
+    nonisolated static func inputFailure(info: [AnyHashable: Any]) -> ExportError {
+        if let error = info[PHContentEditingInputErrorKey] as? NSError, error.domain == PHPhotosErrorDomain {
+            let networkCodes = [PHPhotosError.Code.networkAccessRequired.rawValue, PHPhotosError.Code.networkError.rawValue]
+            if networkCodes.contains(error.code) { return .iCloudDownloadRequired }
+        }
+        if (info[PHContentEditingInputResultIsInCloudKey] as? NSNumber)?.boolValue == true {
+            return .iCloudDownloadRequired
+        }
+        return .writeFailed
+    }
+
     private static func hiddenInclusiveFetchOptions() -> PHFetchOptions {
         let options = PHFetchOptions()
         options.includeHiddenAssets = true
@@ -201,9 +222,9 @@ enum FilmyPhotosExporter {
         }
         options.canHandleAdjustmentData = canHandle
         let input: PHContentEditingInput = try await withCheckedThrowingContinuation { continuation in
-            let completion: @Sendable (PHContentEditingInput?, [AnyHashable: Any]) -> Void = { input, _ in
+            let completion: @Sendable (PHContentEditingInput?, [AnyHashable: Any]) -> Void = { input, info in
                 if let input { continuation.resume(returning: input) }
-                else { continuation.resume(throwing: ExportError.writeFailed) }
+                else { continuation.resume(throwing: inputFailure(info: info)) }
             }
             asset.requestContentEditingInput(with: options, completionHandler: completion)
         }

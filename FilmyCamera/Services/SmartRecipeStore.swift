@@ -180,7 +180,15 @@ final class SmartRecipeStore: ObservableObject {
         if !isEnabled { status = .off }
     }
     deinit { if let handlerID { camera?.removeFrameHandler(handlerID) } }
-    var options: [SmartRecipeOption] { snapshot?.options(intent: intent) ?? [] }
+    /// Snapshots are immutable, so (snapshot id, intent) fully keys the ranking.
+    private var optionsCache: (id: UUID, intent: SmartRecipeIntent, value: [SmartRecipeOption])?
+    var options: [SmartRecipeOption] {
+        guard let snapshot else { return [] }
+        if let cache = optionsCache, cache.id == snapshot.id, cache.intent == intent { return cache.value }
+        let value = snapshot.options(intent: intent)
+        optionsCache = (id: snapshot.id, intent: intent, value: value)
+        return value
+    }
 
     func setEnabled(_ enabled: Bool) {
         guard isEnabled != enabled else { return }
