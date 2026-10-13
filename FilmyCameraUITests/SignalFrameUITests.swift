@@ -152,7 +152,7 @@ final class SignalFrameUITests: XCTestCase {
         XCTAssertFalse(app.buttons["recipe-g7x-compact"].exists)
         tapWhenStable(app.buttons["recipe-provia-standard"], in: app)
         waitForCamera(app)
-        XCTAssertTrue(app.buttons["recipe-menu"].label.contains("Provia Standard"))
+        XCTAssertTrue(app.buttons["recipe-menu"].label.contains("Natural Standard"))
         waitForValue("Favorite", of: app.buttons["camera-favorite-look"], app: app)
     }
 
