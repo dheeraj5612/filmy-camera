@@ -58,6 +58,12 @@ private struct CaptureModesDetail: View {
                 if let error = model.errorMessage { Text(error).font(.caption).foregroundStyle(.orange) }
             }
             Section("Developed files") {
+                if model.exporting || model.state.phase == .processing {
+                    HStack(spacing: 12) {
+                        ProgressView()
+                        Text(model.exporting ? "Exporting to Photos" : model.state.message)
+                    }.accessibilityElement(children: .combine)
+                }
                 if outputs.isEmpty { Text("No developed file yet. Your originals below are still available.").foregroundStyle(.secondary) }
                 ForEach(outputs, id: \.self) { url in
                     ShareLink(item: url) { Label(url.lastPathComponent, systemImage: "square.and.arrow.up") }

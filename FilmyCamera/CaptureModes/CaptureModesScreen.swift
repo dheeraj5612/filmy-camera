@@ -61,7 +61,11 @@ struct CaptureModesScreen: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Back") {
                         closing = true
-                        Task { await model.close(); onClose() }
+                        Task {
+                            await model.close()
+                            UIApplication.shared.isIdleTimerDisabled = false
+                            onClose()
+                        }
                     }.disabled(!releasedLegacyCamera || !model.canClose || closing)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -95,12 +99,21 @@ struct CaptureModesScreen: View {
                 importReference(item)
             }
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active, releasedLegacyCamera { model.activate(); consumeLaunch() }
-                else if phase != .active { model.deactivate(); cancelReference() }
+                if phase == .active, releasedLegacyCamera {
+                    model.activate(); consumeLaunch()
+                    updateIdleTimer(sceneActive: true)
+                } else if phase != .active {
+                    UIApplication.shared.isIdleTimerDisabled = false
+                    model.deactivate(); cancelReference()
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in model.updateOrientation() }
             .onReceive(NotificationCenter.default.publisher(for: CaptureModesLaunch.notification)) { _ in consumeLaunch() }
-            .onChange(of: model.state.phase) { _, phase in if phase == .ready { consumeLaunch() } }
+            .onChange(of: model.state.phase) { old, phase in
+                updateIdleTimer(sceneActive: scenePhase == .active)
+                if phase == .ready { consumeLaunch() }
+                announcePhase(from: old, to: phase)
+            }
             .task {
                 UIDevice.current.beginGeneratingDeviceOrientationNotifications()
                 // No fixed delay, polling, or competing session starts.
@@ -109,6 +122,7 @@ struct CaptureModesScreen: View {
                 releasedLegacyCamera = true
                 if let requested = CaptureModesLaunch.take() { model.requestedMode = requested }
                 if UIApplication.shared.applicationState == .active { model.activate() }
+                updateIdleTimer(sceneActive: UIApplication.shared.applicationState == .active)
                 loadReference()
             }
             .onDisappear {
@@ -189,12 +203,14 @@ struct CaptureModesScreen: View {
                         Text("Zoom \(model.state.zoom, specifier: "%.1f")×")
                         Slider(value: Binding(get: { model.state.zoom }, set: model.engine.setZoom), in: 1...max(1.01, model.state.maximumZoom))
                             .accessibilityLabel("Zoom")
+                            .accessibilityValue(String(format: "%.1f times", model.state.zoom))
                     }
                     if model.state.maximumExposure > model.state.minimumExposure {
                         Text("Exposure \(model.state.exposure, specifier: "%+.1f") EV")
                         Slider(value: Binding(get: { model.state.exposure }, set: model.engine.setExposure),
                                in: model.state.minimumExposure...model.state.maximumExposure)
                             .accessibilityLabel("Exposure compensation")
+                            .accessibilityValue(String(format: "%+.1f EV", model.state.exposure))
                     }
                 }
                 if model.requestedMode.isVideo {
@@ -230,8 +246,10 @@ struct CaptureModesScreen: View {
                     if !referenceSplit {
                         Text("Overlay opacity")
                         Slider(value: $referenceOpacity, in: 0...1).accessibilityLabel("Reference opacity")
+                            .accessibilityValue("\(Int((referenceOpacity * 100).rounded())) percent")
                         Text("Reference scale")
                         Slider(value: $referenceScale, in: 0.5...2).accessibilityLabel("Reference scale")
+                            .accessibilityValue("\(Int((referenceScale * 100).rounded())) percent")
                     }
                     Button("Remove reference", role: .destructive) {
                         cancelReference()
@@ -246,17 +264,26 @@ struct CaptureModesScreen: View {
         }.tint(.white)
     }
 
+    private var stoppable: Bool {
+        CaptureModesPolicy.isStoppable(phase: model.state.phase, scanning: model.state.scanning)
+    }
+
+    private func updateIdleTimer(sceneActive: Bool) {
+        UIApplication.shared.isIdleTimerDisabled = CaptureModesPolicy.keepsScreenAwake(
+            sceneActive: sceneActive, cameraReleased: releasedLegacyCamera, closing: closing, phase: model.state.phase)
+    }
+
     private var shutterBar: some View {
         HStack(spacing: 22) {
             VStack(spacing: 2) {
                 if model.state.phase == .recording { Text(String(format: "%d:%02d", model.state.seconds / 60, model.state.seconds % 60)) }
-                else if model.state.phase == .capturing { Text("\(model.state.frameCount)") }
+                else if model.state.phase == .capturing, !model.state.scanning { Text("\(model.state.frameCount)") }
                 else { Text(model.state.mode.title).lineLimit(2) }
             }.font(.caption.monospacedDigit()).frame(maxWidth: .infinity)
             CaptureModesShutter(enabled: model.canShoot,
                 canHold: model.state.mode == .burst && model.state.phase == .ready,
-                isRecording: model.state.phase == .recording || model.state.phase == .capturing,
-                label: model.state.phase == .recording || model.state.phase == .capturing ? "Stop capture" : "Capture \(model.state.mode.title)",
+                isRecording: stoppable,
+                label: stoppable ? "Stop capture" : "Capture \(model.state.mode.title)",
                 tap: model.shutter, beginHold: model.beginBurstHold, endHold: model.endBurstHold)
                 .frame(width: 76, height: 76)
             VStack(spacing: 4) {
@@ -282,6 +309,12 @@ struct CaptureModesScreen: View {
 
     private var cameraDenied: Bool {
         AVCaptureDevice.authorizationStatus(for: .video) == .denied
+    }
+
+    private func announcePhase(from old: CaptureModesPhase, to phase: CaptureModesPhase) {
+        guard scenePhase == .active, !closing, old != phase, old != .configuring, model.analysis == nil else { return }
+        guard phase == .recording || phase == .processing || phase == .ready || phase == .stopped || phase == .unavailable else { return }
+        UIAccessibility.post(notification: .announcement, argument: model.state.message)
     }
 
     private func consumeLaunch() {

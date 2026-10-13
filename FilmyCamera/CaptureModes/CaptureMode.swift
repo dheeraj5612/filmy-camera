@@ -108,6 +108,7 @@ struct CaptureModesState: Sendable {
     var minimumExposure: Double = -2
     var maximumExposure: Double = 2
     var focusLocked = false
+    var scanning = false
     var warning: String?
 }
 
@@ -154,6 +155,23 @@ enum CaptureModesPolicy {
     static let maximumPanoramaHeight: Double = 12_000
     static let registrationLongEdge: Double = 1_536
     static let minimumFreeBytes: Int64 = 1_000_000_000
+
+    static func microphoneNotice(isVideo: Bool, wantsMicrophone: Bool, audioAllowed: Bool, alreadyShown: Bool) -> (show: Bool, shown: Bool) {
+        var shown = alreadyShown
+        if !wantsMicrophone || audioAllowed { shown = false }
+        if isVideo, wantsMicrophone, !audioAllowed, !shown { return (true, true) }
+        return (false, shown)
+    }
+
+    /// The shutter offers Stop only for work the user can end: a recording or a frame sequence, not the one-shot scene read.
+    static func isStoppable(phase: CaptureModesPhase, scanning: Bool) -> Bool {
+        phase == .recording || (phase == .capturing && !scanning)
+    }
+
+    /// The display stays awake only while the workspace is usable; a denied or paused camera lets it sleep.
+    static func keepsScreenAwake(sceneActive: Bool, cameraReleased: Bool, closing: Bool, phase: CaptureModesPhase) -> Bool {
+        sceneActive && cameraReleased && !closing && phase != .unavailable && phase != .stopped
+    }
 
     static func supportsMacro(minimumFocusDistance: Int, autofocus: Bool) -> Bool {
         autofocus && minimumFocusDistance > 0 && minimumFocusDistance <= 50

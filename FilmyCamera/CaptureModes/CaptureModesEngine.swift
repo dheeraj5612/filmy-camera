@@ -413,8 +413,8 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
                     let name = String(format: "original-%03d.%@", index, packet.isHEIF ? "heic" : "jpg")
                     try packet.data.write(to: CaptureMediaStore.file(name, in: id), options: .atomic)
                     record.originals.append(name)
-                    try CaptureMediaStore.persist(record)
                     media = record
+                    try CaptureMediaStore.persist(record)
                     if state.mode == .portrait, !packet.hasDepth { throw CaptureModesError.unavailable("No depth was delivered. The original is retained. Try a well-lit subject farther from the lens.") }
                     guard sequence?.completeFrame(index) == true else { return }
                     state.frameCount = record.originals.count
@@ -516,6 +516,7 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
         queue.async { [self] in
             guard state.phase == .ready, !state.mode.isVideo else { return }
             state.phase = .capturing
+            state.scanning = true
             state.message = "Reading text, codes, and scene labels on device"
             publish()
             let delegate = ModesPhotoDelegate { [weak self] result in
@@ -569,7 +570,7 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
             session.stopRunning()
         }
         if sequence?.shouldFinish == true { finishSequence() }
-        if photoDelegate == nil, processing == nil, !movie.isRecording, !pendingMovieValidation { state.phase = .stopped }
+        if photoDelegate == nil, processing == nil, !movie.isRecording, !pendingMovieValidation { state.phase = .stopped; state.scanning = false }
         state.message = reason
         publish()
     }
@@ -586,6 +587,7 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
     }
 
     private func settle() {
+        state.scanning = false
         if let next = pendingConfiguration, wantsRunning {
             pendingConfiguration = nil
             configureOnQueue(mode: next.0, microphone: next.1)
@@ -784,8 +786,8 @@ extension CaptureModesEngine: AVCaptureFileOutputRecordingDelegate {
             }
             record.originals = [outputFileURL.lastPathComponent]
             if early { record.notes.append("Recording stopped early; the original was kept.") }
-            try CaptureMediaStore.persist(record)
             media = record
+            try CaptureMediaStore.persist(record)
             if wantsRunning { process(record) }
             else {
                 emit(.saved(record)); media = nil

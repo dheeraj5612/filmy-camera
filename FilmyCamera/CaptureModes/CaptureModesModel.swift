@@ -18,6 +18,8 @@ final class CaptureModesModel: ObservableObject {
     private var permissionTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
     private var requestID = UUID()
+    private var microphoneNoticeShown = false
+    private var cameraBlockedMessage: String?
     let recipes: [FilmRecipe]
     private let launchRecipe: FilmRecipe
 
@@ -35,7 +37,7 @@ final class CaptureModesModel: ObservableObject {
     }
 
     var canShoot: Bool {
-        foreground && interactionAllowed && !requestingPermission && !exporting
+        foreground && interactionAllowed && !requestingPermission && !exporting && !state.scanning
             && [.ready, .capturing, .recording].contains(state.phase)
     }
     var canConfigure: Bool { foreground && !requestingPermission && !state.phase.isBusy && !exporting }
@@ -65,10 +67,13 @@ final class CaptureModesModel: ObservableObject {
             if status == .notDetermined { cameraAllowed = await AVCaptureDevice.requestAccess(for: .video) }
             guard !Task.isCancelled, foreground, requestID == id else { return }
             guard cameraAllowed else {
+                let blocked = "Enable Camera access in Settings to use capture modes."
+                cameraBlockedMessage = blocked
                 state.phase = .unavailable
-                state.message = "Enable Camera access in Settings to use capture modes."
+                state.message = blocked
                 return
             }
+            cameraBlockedMessage = nil
             var audioAllowed = false
             if mode.isVideo, wantsMicrophone {
                 let audioStatus = AVCaptureDevice.authorizationStatus(for: .audio)
@@ -76,7 +81,9 @@ final class CaptureModesModel: ObservableObject {
                 if audioStatus == .notDetermined { audioAllowed = await AVCaptureDevice.requestAccess(for: .audio) }
             }
             guard !Task.isCancelled, foreground, requestID == id else { return }
-            if mode.isVideo, wantsMicrophone, !audioAllowed {
+            let notice = CaptureModesPolicy.microphoneNotice(isVideo: mode.isVideo, wantsMicrophone: wantsMicrophone, audioAllowed: audioAllowed, alreadyShown: microphoneNoticeShown)
+            microphoneNoticeShown = notice.shown
+            if notice.show {
                 errorMessage = "Microphone access is disabled. Video will record silently; enable Microphone access in Settings to include audio."
             }
             updateOrientation()
@@ -158,7 +165,12 @@ final class CaptureModesModel: ObservableObject {
     private func receive(_ event: CaptureModesEvent) {
         switch event {
         case .state(let value):
-            state = value
+            var next = value
+            if let blocked = cameraBlockedMessage, state.phase != .processing, next.phase == .stopped || next.phase == .unavailable {
+                next.phase = .unavailable
+                next.message = blocked
+            }
+            state = next
         case .saved:
             refresh()
         case .failed(let message):

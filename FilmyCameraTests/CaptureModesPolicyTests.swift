@@ -88,6 +88,42 @@ final class CaptureModesPolicyTests: XCTestCase {
         XCTAssertTrue(CaptureModesPolicy.isSafeFilename("original-000.heic"))
     }
 
+    func testMicrophoneNoticeShowsOncePerDenial() {
+        let first = CaptureModesPolicy.microphoneNotice(isVideo: true, wantsMicrophone: true, audioAllowed: false, alreadyShown: false)
+        XCTAssertTrue(first.show && first.shown)
+        let repeated = CaptureModesPolicy.microphoneNotice(isVideo: true, wantsMicrophone: true, audioAllowed: false, alreadyShown: true)
+        XCTAssertFalse(repeated.show)
+        XCTAssertTrue(repeated.shown)
+        let granted = CaptureModesPolicy.microphoneNotice(isVideo: true, wantsMicrophone: true, audioAllowed: true, alreadyShown: true)
+        XCTAssertFalse(granted.show || granted.shown)
+        let unwanted = CaptureModesPolicy.microphoneNotice(isVideo: true, wantsMicrophone: false, audioAllowed: false, alreadyShown: true)
+        XCTAssertFalse(unwanted.show || unwanted.shown)
+        let photo = CaptureModesPolicy.microphoneNotice(isVideo: false, wantsMicrophone: true, audioAllowed: false, alreadyShown: true)
+        XCTAssertFalse(photo.show)
+        XCTAssertTrue(photo.shown)
+    }
+
+    func testStopIsOfferedOnlyForStoppableWork() {
+        XCTAssertTrue(CaptureModesPolicy.isStoppable(phase: .recording, scanning: false))
+        XCTAssertFalse(CaptureModesPolicy.isStoppable(phase: .capturing, scanning: true))
+        XCTAssertTrue(CaptureModesPolicy.isStoppable(phase: .capturing, scanning: false))
+        for idle in [CaptureModesPhase.ready, .processing, .stopped] {
+            XCTAssertFalse(CaptureModesPolicy.isStoppable(phase: idle, scanning: false))
+        }
+    }
+
+    func testScreenStaysAwakeOnlyWhileTheWorkspaceIsUsable() {
+        for usable in [CaptureModesPhase.configuring, .ready, .capturing, .recording, .processing] {
+            XCTAssertTrue(CaptureModesPolicy.keepsScreenAwake(sceneActive: true, cameraReleased: true, closing: false, phase: usable))
+        }
+        for dead in [CaptureModesPhase.unavailable, .stopped] {
+            XCTAssertFalse(CaptureModesPolicy.keepsScreenAwake(sceneActive: true, cameraReleased: true, closing: false, phase: dead))
+        }
+        XCTAssertFalse(CaptureModesPolicy.keepsScreenAwake(sceneActive: false, cameraReleased: true, closing: false, phase: .ready))
+        XCTAssertFalse(CaptureModesPolicy.keepsScreenAwake(sceneActive: true, cameraReleased: false, closing: false, phase: .ready))
+        XCTAssertFalse(CaptureModesPolicy.keepsScreenAwake(sceneActive: true, cameraReleased: true, closing: true, phase: .ready))
+    }
+
     func testPhotosReceiptRequiresEveryOutput() {
         var media = CaptureMedia(id: UUID(), mode: .burst, createdAt: Date(), recipeName: "Test")
         XCTAssertFalse(media.isExported)
