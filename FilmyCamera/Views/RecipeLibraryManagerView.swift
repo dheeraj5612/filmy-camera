@@ -177,7 +177,7 @@ struct RecipeLibraryManagerView: View {
             NavigationLink {
                 RecipePackDetailView(preferences: $preferences, pack: pack,
                                      recipes: recipes.filter { RecipeCatalog.packID(for: $0) == pack.id },
-                                     selectedRecipeID: selectedRecipeID, onSelect: onSelect)
+                                     selectedRecipeID: selectedRecipeID, onSelect: onSelect, undoState: $undoState)
             } label: {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(pack.title).font(.headline)
@@ -204,9 +204,10 @@ struct RecipeLibraryManagerView: View {
     }
 
     private func change(_ edit: (inout RecipeLibraryPreferences) -> Void) {
-        undoState = preferences
         var updated = preferences
         edit(&updated)
+        guard updated != preferences else { return }
+        undoState = preferences
         preferences = updated
         HapticFeedback.play(.selection)
     }
@@ -237,7 +238,7 @@ private struct RecipePackDetailView: View {
     let selectedRecipeID: String
     let onSelect: (FilmRecipe) -> Void
     @State private var query = ""
-    @State private var undoState: RecipeLibraryPreferences?
+    @Binding var undoState: RecipeLibraryPreferences?
     @AppStorage("favoriteRecipeIDs.v1") private var favoriteData = Data()
 
     private var favorites: Set<String> { LookLibraryIndex.favorites(from: favoriteData) }
@@ -294,9 +295,10 @@ private struct RecipePackDetailView: View {
     }
 
     private func change(_ edit: (inout RecipeLibraryPreferences) -> Void) {
-        undoState = preferences
         var updated = preferences
         edit(&updated)
+        guard updated != preferences else { return }
+        undoState = preferences
         preferences = updated
         HapticFeedback.play(.selection)
     }
@@ -312,6 +314,11 @@ private struct RecipeManagementRow: View {
     @State private var showingSource = false
     @AppStorage("favoriteRecipeIDs.v1") private var favoriteData = Data()
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var selectionValue: String {
+        if recipe.id != selectedRecipeID { return "" }
+        return enabled ? "Current look" : "Current look, hidden from quick menu"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -338,6 +345,8 @@ private struct RecipeManagementRow: View {
                 .buttonStyle(.borderless)
                 .accessibilityIdentifier("manage-select-\(recipe.id)")
                 .accessibilityLabel("Use \(recipe.name)")
+                .accessibilityValue(selectionValue)
+                .accessibilityAddTraits(recipe.id == selectedRecipeID ? .isSelected : [])
                 Toggle("\(recipe.name) in quick menu", isOn: Binding(get: { enabled }, set: onToggle))
                     .labelsHidden()
                     .frame(minWidth: 52, minHeight: 48)

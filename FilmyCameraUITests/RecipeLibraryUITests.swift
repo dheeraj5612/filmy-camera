@@ -58,11 +58,29 @@ final class RecipeLibraryUITests: XCTestCase {
         app.buttons["recipe-manager-actions"].tap()
         app.buttons["recipe-hide-all"].tap()
         XCTAssertEqual(try activeCounts().enabled, 0)
+        // A repeated no-op Hide all must not replace the real Undo snapshot.
+        app.buttons["recipe-manager-actions"].tap()
+        app.buttons["recipe-hide-all"].tap()
+        XCTAssertEqual(try activeCounts().enabled, 0)
         app.buttons["recipe-manager-undo"].tap()
         XCTAssertEqual(try activeCounts().enabled, all.total)
         XCTAssertFalse(app.buttons["recipe-manager-undo"].exists)
         app.buttons["recipe-manager-actions"].tap()
         app.buttons["recipe-hide-all"].tap()
+        // Undo after a pack edit reverts that edit, not the earlier Hide all.
+        let packPredicate = NSPredicate(
+            format: "identifier BEGINSWITH 'recipe-pack-' AND NOT identifier BEGINSWITH 'recipe-pack-toggle-'")
+        let pack = app.buttons.matching(packPredicate).firstMatch
+        XCTAssertTrue(pack.waitForExistence(timeout: 5))
+        pack.tap()
+        let rowToggle = app.switches.matching(NSPredicate(format: "identifier BEGINSWITH 'manage-toggle-'")).firstMatch
+        XCTAssertTrue(rowToggle.waitForExistence(timeout: 5))
+        rowToggle.tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.buttons["recipe-manager-undo"].waitForExistence(timeout: 5))
+        XCTAssertEqual(try activeCounts().enabled, 1)
+        app.buttons["recipe-manager-undo"].tap()
+        XCTAssertEqual(try activeCounts().enabled, 0)
         app.buttons["recipe-manager-done"].tap()
         XCTAssertTrue(app.staticTexts["camera-looks-empty"].waitForExistence(timeout: 5))
         attach("recipe-popup-empty-with-packs-recovery")

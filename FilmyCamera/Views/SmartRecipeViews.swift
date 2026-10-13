@@ -10,11 +10,12 @@ struct SmartRecipeEntryPoint: View {
     let onApply: (String) -> Void
     let onUndo: () -> Void
     var body: some View {
+        let top = store.options.first
         HStack(spacing: 0) {
             Button(action: onOpen) {
                 HStack(spacing: 5) {
                     Image(systemName: "sparkles")
-                    Text(store.options.first?.recipe.name ?? store.status.title).lineLimit(1)
+                    Text(top?.recipe.name ?? store.status.title).lineLimit(1)
                 }
                 .font(.caption2.weight(.semibold))
                 .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
@@ -23,7 +24,7 @@ struct SmartRecipeEntryPoint: View {
                 .contentShape(Rectangle())
             }
             .accessibilityLabel("Smart look suggestions")
-            .accessibilityValue(store.options.first?.recipe.name ?? store.status.title)
+            .accessibilityValue(top?.recipe.name ?? store.status.title)
             .accessibilityHint("Compare three scene-matched recipes. Suggestions never change your look automatically.")
             .accessibilityIdentifier("smart-recipes-open")
             if store.undo?.appliedID == selectedID {
@@ -32,7 +33,7 @@ struct SmartRecipeEntryPoint: View {
                     .disabled(!canApply)
                     .accessibilityLabel("Undo smart look")
                     .accessibilityIdentifier("smart-recipes-undo")
-            } else if let option = store.options.first, option.id != selectedID {
+            } else if let option = top, option.id != selectedID {
                 Button("Apply") { onApply(option.id) }
                     .frame(minWidth: 44, minHeight: 44)
                     .disabled(!canApply)
@@ -66,6 +67,7 @@ struct SmartRecipeSheet: View {
         return snapshot?.options(intent: store.intent) ?? []
     }
     var body: some View {
+        let options = self.options
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {

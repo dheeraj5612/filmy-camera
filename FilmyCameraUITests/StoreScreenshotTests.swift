@@ -423,6 +423,13 @@ final class LookLibraryUITests: XCTestCase {
         XCTAssertFalse(app.buttons["look-library-clear-search"].exists,
                        "The clear action must disappear when the query is empty")
         XCTAssertEqual(app.buttons["look-filter-all"].value as? String, "Selected")
+        let results = app.scrollViews["look-library-results"]
+        for _ in 0..<3 { results.swipeUp() }
+        search.tap()
+        search.typeText("G7 X Compact")
+        let firstCard = app.buttons["library-recipe-g7x-compact"]
+        XCTAssertTrue(firstCard.waitForExistence(timeout: 5))
+        XCTAssertTrue(firstCard.isHittable, "A query change must scroll the results back to the top")
         app.buttons["look-library-close"].tap()
         XCTAssertTrue(app.buttons["recipe-menu"].label.contains("G7 X Compact"))
     }

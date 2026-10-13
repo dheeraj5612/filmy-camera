@@ -598,6 +598,7 @@ struct RecipeDetailView: View {
                 }
         }
         .accessibilityElement(children: .contain)
+        .accessibilityAction(.escape) { requestCancel() }
         .sheet(isPresented: $showingSourceSettings) { RecipeSourceSheet(recipe: draft) }
     }
 
@@ -711,6 +712,15 @@ struct RecipeDetailView: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(recipe.name). \(recipe.descriptor). Reference \(recipe.filmBase.officialName)")
+        .accessibilityValue(heroStateDescription)
+        .accessibilityIdentifier("recipe-detail-hero")
+    }
+
+    private var heroStateDescription: String {
+        var states: [String] = []
+        if isSelected { states.append("Active") }
+        if draft != originalRecipe { states.append("Edited") }
+        return states.joined(separator: ", ")
     }
 
     private var identity: some View {
@@ -1063,7 +1073,7 @@ struct RecipeDetailView: View {
             }
         case .color:
             VStack(spacing: 14) {
-                if draft.filmBase.monochromeFilter == nil {
+                if draft.filmBase.monochromeFilter == nil && draft.filmBase != .sepia {
                     RecipeSliderRow(title: "Color", value: binding(\.saturation), range: 0...2, format: "%.2f")
                     RecipeChoiceRow(title: "Color Chrome", selection: colorChromeLevelBinding) {
                         ForEach(FilmRecipe.ColorChromeLevel.allCases, id: \.self) { level in
@@ -1321,7 +1331,7 @@ private struct RecipeSliderRow: View {
                 })
                     .tint(FilmyTheme.accent)
                     .accessibilityLabel(title)
-                    .accessibilityValue(String(format: format, value))
+                    .accessibilityValue(Self.displayText(format: format, value: value))
             } else {
                 Slider(value: $value, in: range, onEditingChanged: { isEditing in
                     if !isEditing {
@@ -1330,10 +1340,21 @@ private struct RecipeSliderRow: View {
                 })
                     .tint(FilmyTheme.accent)
                     .accessibilityLabel(title)
-                    .accessibilityValue(String(format: format, value))
+                    .accessibilityValue(Self.displayText(format: format, value: value))
             }
         }
         .frame(minHeight: 52, alignment: .center)
+    }
+
+    /// A small negative value rounds to "-0.0"; show it as the true zero it reads as.
+    static func displayText(format: String, value: Double) -> String {
+        let text = String(format: format, value)
+        guard text.hasPrefix("-") else { return text }
+        let hasNonZeroDigit = text.contains(where: { "123456789".contains($0) })
+        if hasNonZeroDigit { return text }
+        let rest = String(text.dropFirst())
+        if format.contains("%+") { return "+" + rest }
+        return rest
     }
 
     @ViewBuilder
@@ -1360,7 +1381,7 @@ private struct RecipeSliderRow: View {
     }
 
     private var valueLabel: some View {
-        Text(String(format: format, value))
+        Text(Self.displayText(format: format, value: value))
             .font(FilmyTheme.metadataFont)
             .foregroundStyle(FilmyTheme.secondary)
             .monospacedDigit()
@@ -1498,29 +1519,35 @@ struct LookLibraryView: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("look-library-result-count")
 
-                ScrollView(showsIndicators: false) {
-                    if results.isEmpty {
-                        emptyResults
-                    } else {
-                        LazyVGrid(
-                            columns: singleColumn
-                                ? [GridItem(.flexible())]
-                                : [GridItem(.adaptive(minimum: 150, maximum: 270), spacing: 14)],
-                            alignment: .leading,
-                            spacing: 16
-                        ) {
-                            ForEach(results) { recipe in
-                                lookCard(recipe, favorites: favorites)
+                ScrollViewReader { proxy in
+                    ScrollView(showsIndicators: false) {
+                        VStack(spacing: 0) {
+                            Color.clear.frame(height: 0).id("look-library-top")
+                            if results.isEmpty {
+                                emptyResults
+                            } else {
+                                LazyVGrid(
+                                    columns: singleColumn
+                                        ? [GridItem(.flexible())]
+                                        : [GridItem(.adaptive(minimum: 150, maximum: 270), spacing: 14)],
+                                    alignment: .leading,
+                                    spacing: 16
+                                ) {
+                                    ForEach(results) { recipe in
+                                        lookCard(recipe, favorites: favorites)
+                                    }
+                                }
+                                .padding(.horizontal, 22)
+                                .padding(.top, 4)
+                                .padding(.bottom, 28)
                             }
                         }
-                        .padding(.horizontal, 22)
-                        .padding(.top, 4)
-                        .padding(.bottom, 28)
                     }
+                    .scrollDismissesKeyboard(.interactively)
+                    .accessibilityIdentifier("look-library-results")
+                    .onChange(of: query) { _, _ in proxy.scrollTo("look-library-top", anchor: .top) }
+                    .onChange(of: filter) { _, _ in proxy.scrollTo("look-library-top", anchor: .top) }
                 }
-                .scrollDismissesKeyboard(.interactively)
-                .id("\(filter.rawValue):\(query)")
-                .accessibilityIdentifier("look-library-results")
             }
             .frame(maxWidth: 960)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

@@ -59,6 +59,9 @@ final class ComprehensiveSettingsTests: XCTestCase {
         exerciseSlider("Sharpness", app)
         expandSection("Finish", app)
         exerciseSlider("Vignette", app)
+        let hero = app.descendants(matching: .any)["recipe-detail-hero"]
+        XCTAssertTrue(hero.exists)
+        XCTAssertTrue((hero.value as? String ?? "").contains("Edited"), "Hero must report the edited draft")
         finishRecipeEditor(app, attachmentName: "combined-recipe-editor-settings-modified")
     }
 
@@ -182,6 +185,27 @@ final class ComprehensiveSettingsTests: XCTestCase {
         reveal(app.buttons["Reset recipe controls"], app).tap()
         XCTAssertTrue(app.buttons["Done editing Neutral Monochrome"].waitForExistence(timeout: 5))
         app.buttons["Done editing Neutral Monochrome"].tap()
+    }
+
+    func testSepiaEditorHidesNoOpColorControls() {
+        continueAfterFailure = false
+        let app = makeApp()
+        #if targetEnvironment(simulator)
+        app.launchArguments = ["-ui-testing", "-selectedRecipeID", "sepia-archive"]
+        #else
+        app.launchArguments = ["-ui-testing-real-roll", "-selectedRecipeID", "sepia-archive"]
+        #endif
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 20))
+        app.buttons["recipe-menu"].tap()
+        let tune = app.buttons["Tune Sepia Archive"]
+        XCTAssertTrue(tune.waitForExistence(timeout: 5))
+        tune.tap()
+        XCTAssertTrue(app.staticTexts["Monochrome recipe"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.sliders["Color"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["recipe-choice-Color Chrome"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["fx-blue-control"].exists)
     }
 
     func testPhysicalEveryAspectAndTimerCapturesThenFrontCameraReturnsLive() throws {
