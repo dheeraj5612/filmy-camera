@@ -15,4 +15,8 @@ let package = Package(name: "SceneAutoCore", targets: [
     .testTarget(name: "SceneAutoCoreTests", dependencies: ["SceneAutoCore"])
 ])
 SWIFT
-swift test --package-path "$work" -j 2
+expected="$(grep -cE 'func[[:space:]]+test[A-Za-z0-9_]*[[:space:]]*\(' "$work/Tests/SceneAutoCoreTests/SceneAutoPolicyTests.swift" || true)"
+[[ "$expected" -gt 0 ]] || { echo 'No tests found' >&2; exit 1; }
+log="$work/swift-test.log"
+swift test --package-path "$work" -j 2 2>&1 | tee "$log"
+grep -Fq "Executed ${expected} tests, with 0 failures" "$log" || { echo "Expected ${expected} executed tests" >&2; exit 1; }

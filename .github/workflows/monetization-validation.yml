@@ -21,6 +21,11 @@ on:
       - 'Config/Monetization*'
       - 'StoreKit/**'
       - 'scripts/monetization/**'
+      - 'project.yml'
+      - 'FilmyCamera/Info.plist'
+      - 'FilmyCamera/*.entitlements'
+      - 'FilmyCamera/Resources/PrivacyInfo.xcprivacy'
+      - 'scripts/testing/test_*.py'
   workflow_dispatch:
 permissions:
   contents: read

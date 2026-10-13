@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -98,7 +99,10 @@ def inventory(root=ROOT, manifest_path=MANIFEST):
                 match = re.search(r"\bclass\s+(\w+)\s*:\s*XCTestCase\b", line)
                 if match and not line.lstrip().startswith("//"):
                     current_class = match.group(1)
-                match = re.match(r"\s*func\s+(test\w+)\s*\(", line)
+                match = re.match(
+                    r"\s*(?:@\w+(?:\([^)]*\))?\s+)*"
+                    r"(?:(?:override|final|public|open|internal|nonisolated)\s+)*"
+                    r"func\s+(test\w+)\s*\(", line)
                 if not match:
                     continue
                 class_id = f"{target}/{current_class}"
@@ -218,7 +222,7 @@ def fixture_test_environment(inherited=None):
 def build_input_digest(root=ROOT):
     paths = [root / "project.yml", root / "FilmyCamera.xcodeproj/project.pbxproj"]
     for directory in ("FilmyCamera", "FilmyCameraTests", "FilmyCameraUITests",
-                      "FilmyCamera.xcodeproj/xcshareddata"):
+                      "FilmyCamera.xcodeproj/xcshareddata", "Config", "StoreKit"):
         paths += [path for path in (root / directory).rglob("*")
                   if path.is_file() and not any(part.startswith(".") for part in path.relative_to(root).parts)]
     digest = hashlib.sha256()
@@ -445,10 +449,25 @@ def summarize_result(result, exit_code):
     command = ["xcrun", "xcresulttool", "get", "test-results", "summary", "--path", str(result), "--format", "json"]
     summary = json.loads(subprocess.check_output(command, text=True))
     passed, failed, skipped = (summary.get(key, 0) for key in ("passedTests", "failedTests", "skippedTests"))
-    return {"status": "passed" if exit_code == 0 and passed > 0 and failed == 0 else "failed",
-            "passed": passed, "failed": failed, "skipped": skipped, "exitCode": exit_code,
-            "testFailures": summary.get("testFailures", []),
-            "devicesAndConfigurations": summary.get("devicesAndConfigurations", [])}
+    status = "passed" if exit_code == 0 and passed > 0 and failed == 0 else "failed"
+    result_summary = {"status": status,
+                      "passed": passed, "failed": failed, "skipped": skipped, "exitCode": exit_code,
+                      "xcodebuildExitCode": exit_code,
+                      "testFailures": summary.get("testFailures", []),
+                      "devicesAndConfigurations": summary.get("devicesAndConfigurations", [])}
+    if exit_code != 0 and failed == 0 and passed > 0:
+        result_summary["reason"] = (f"xcodebuild exited {exit_code} although the result bundle "
+                                    f"reports {passed} passed, 0 failed")
+        # xcodebuild can exit 133 after every test passed on iOS 27 simulators.
+        # 133 is the shell encoding of SIGTRAP (128+5); Popen reports the same
+        # event as -5. Trust the bundle only when it says Passed with nothing
+        # skipped or failed.
+        if (exit_code in (133, -signal.SIGTRAP) and summary.get("result") == "Passed" and skipped == 0
+                and not summary.get("testFailures")):
+            result_summary["status"] = "passed"
+            result_summary["exitCodeOverridden"] = True
+            del result_summary["reason"]
+    return result_summary
 
 
 def require_complete_run(phase, selectors, summary):
@@ -549,6 +568,8 @@ def run_isolated_photos_methods(command, selectors, result, output, environment,
             "testFailures": case_summary.get("testFailures", []),
             "devicesAndConfigurations": case_summary.get("devicesAndConfigurations", []),
         })
+        if case_summary.get("exitCodeOverridden"):
+            case_results[-1]["exitCodeOverridden"] = True
         case_logs.append(logs)
 
     aggregate_log = output / f"filmycamera-{phase}-test.log"
@@ -577,7 +598,7 @@ def run_isolated_photos_methods(command, selectors, result, output, environment,
     reasons = [case["reason"] for case in case_results if case["reason"]]
     if merge_error:
         reasons.append(merge_error)
-    return {
+    aggregate_summary = {
         "status": "passed" if aggregate_exit_code == 0 else "failed",
         "passed": sum(case["passed"] for case in case_results),
         "failed": sum(case["failed"] for case in case_results),
@@ -590,7 +611,10 @@ def run_isolated_photos_methods(command, selectors, result, output, environment,
         ],
         "mergedResultBundle": result.name if merge_error is None else None,
         "caseResults": case_results,
-    }, aggregate_exit_code
+    }
+    if any(case.get("exitCodeOverridden") for case in case_results):
+        aggregate_summary["exitCodeOverridden"] = True
+    return aggregate_summary, aggregate_exit_code
 
 
 def run_photos_permission_bootstrap(command, output, environment):
@@ -735,6 +759,8 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    # Route SIGTERM through SystemExit so run_logged and simulator cleanup run.
+    signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(143))
     try:
         sys.exit(main())
     except (ValueError, subprocess.CalledProcessError) as error:

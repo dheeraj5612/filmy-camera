@@ -13,7 +13,7 @@ python3 scripts/testing/run.py ci \
   --destination 'platform=iOS Simulator,id=YOUR_SIMULATOR_UUID'
 ```
 
-`ci` builds once, then executes every deterministic test without rebuilding between phases. `core` runs unit and integration tests; `unit`, `integration`, and `e2e` select narrower groups. The `e2e` lane includes UI cases compiled only for the simulator. The physical `device` lane excludes those cases while retaining every platform-independent UI acceptance, so selected and reported counts remain exact on both platforms. Lanes default to the Debug configuration, except `store-media`, which defaults to Release so screenshots exercise the free shipping configuration. Store media uses the dedicated `FilmyCameraStoreMedia` Release scheme, containing the app and UI test target without the unit test target. Release test products enable testability; distribution archives retain their separate release settings. Pass `--configuration Debug` or `--configuration Release` to override that default. Reuse products built by this runner with `--skip-build --derived-data PATH` and the same configuration; the build stamp records the scheme and rejects products from another scheme or configuration. A source/resource/project digest and Xcode/coverage stamp reject stale or unverified products. After changing Swift source or project membership, rebuild first.
+`ci` builds once, then executes every deterministic test without rebuilding between phases. `core` runs unit and integration tests; `unit`, `integration`, and `e2e` select narrower groups. The `e2e` lane includes UI cases compiled only for the simulator. The physical `device` lane excludes those cases while retaining every platform-independent UI acceptance, so selected and reported counts remain exact on both platforms. Lanes default to the Debug configuration, except `store-media`, which defaults to Release so screenshots exercise the free shipping configuration. Store media uses the dedicated `FilmyCameraStoreMedia` Release scheme, containing the app and UI test target without the unit test target. Release test products enable testability; distribution archives retain their separate release settings. Pass `--configuration Debug` or `--configuration Release` to override that default. Reuse products built by this runner with `--skip-build --derived-data PATH` and the same configuration; the build stamp records the scheme and rejects products from another scheme or configuration. A source/resource/project digest (which also covers `Config/` and `StoreKit/`) and Xcode/coverage stamp reject stale or unverified products. After changing Swift source or project membership, rebuild first. An xcodebuild SIGTRAP exit (133, or -5 from Popen) is accepted only when the result bundle says Passed with zero failed and zero skipped and the selected-count check holds; the summary then carries `exitCodeOverridden` and `xcodebuildExitCode`. SIGTERM makes run.py exit 143 after its cleanup.
 
 ```sh
 python3 scripts/testing/run.py core \
@@ -117,9 +117,9 @@ The deterministic suite does not inject every PhotoKit service-level interleavin
 `RecipeLibraryTests` and `RecipeLibraryPersistenceTests` belong to the unit lane;
 `RecipeLibraryUITests` belongs to e2e and the iPhone/iPad screenshot workflow.
 `RecipeControlEffectTests` includes source-camera MG-axis polarity across all
-render qualities. The catalog acceptance workflow requires 167 passed cases,
+render qualities. The catalog acceptance workflow requires 182 passed cases,
 including two cases that enumerate all 595 sourced looks and 20 camera foundations
-in addition to the 128 original per-look cases. Counted tests and counted recipes
+in addition to the 142 per-look cases (36 legacy plus 106 original ids). Counted tests and counted recipes
 are deliberately different. See `docs/recipe-library-and-fidelity.md`.
 
 ```sh

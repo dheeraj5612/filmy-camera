@@ -58,7 +58,8 @@ packages or Swift package dependencies are used.
 python3 scripts/testing/check_policy_regressions.py --mutation-checks
 ```
 
-The checker copies current production policies and the current two XCTest files
+The checker copies current production policies (including the Foundation-only
+`GallerySectioning.swift` model) and the current two XCTest files
 into an owned temporary Swift package. On Linux only, it removes the unavailable
 CoreGraphics import in that copy; Foundation supplies the geometry types. It does
 not edit the repository. The printed evidence directory contains source SHA-256

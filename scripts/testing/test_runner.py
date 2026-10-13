@@ -91,6 +91,29 @@ class SuiteRoutingTests(unittest.TestCase):
             manifest.write_text(json.dumps({"classes": {"FilmyCameraTests/Example": "unit"}, "overrides": {}}))
             self.assertEqual(run.inventory(root, manifest), {"FilmyCameraTests/Example/testCallback": "unit"})
 
+    def test_attribute_prefixed_test_declarations_are_inventoried(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "FilmyCameraTests").mkdir()
+            (root / "FilmyCameraTests/Example.swift").write_text(
+                "final class Example: XCTestCase {\n"
+                "    @MainActor func testA() {}\n"
+                "    @available(iOS 17, *) func testB() {}\n"
+                "    private func testHelper() {}\n"
+                "    static func testStatic() {}\n}\n")
+            manifest = root / "suites.json"
+            manifest.write_text(json.dumps({"classes": {"FilmyCameraTests/Example": "unit"}, "overrides": {}}))
+            self.assertEqual(run.inventory(root, manifest), {
+                "FilmyCameraTests/Example/testA": "unit",
+                "FilmyCameraTests/Example/testB": "unit"})
+
+    def test_same_line_main_actor_test_is_in_real_inventory(self):
+        self.assertIn(
+            "FilmyCameraTests/ExpandedCreativeCatalogTests/testNewCameraStylePersistsCustomControlsAcrossRelaunch",
+            run.inventory(),
+            "this id pins the inventory regex for a `@MainActor func test...` declared on one line; "
+            "if the test method was renamed or removed, update or drop this pin")
+
     def test_inherited_opt_ins_cannot_enable_photos_or_benchmarks_in_ci(self):
         env = run.test_environment("core", {
             "TEST_RUNNER_FILMY_RUN_PHOTOS_WRITE": "1", "FILMY_RUN_PERF": "1", "PATH": "/test/bin"})
@@ -416,6 +439,74 @@ class SuiteRoutingTests(unittest.TestCase):
             self.assertEqual(summary["status"], "failed")
             self.assertEqual(summary["exitCode"], 65)
 
+    def _run_sigtrap_core(self, passed):
+        test_ids = {f"FilmyCameraTests/Example/testCase{index}": "unit" for index in range(1, 3)}
+        payload = {"result": "Passed", "passedTests": passed, "failedTests": 0, "skippedTests": 0}
+
+        def command_output(command, **_):
+            if command[:2] == ["xcodebuild", "-version"]:
+                return "Xcode test"
+            if command[:3] == ["git", "rev-parse", "HEAD"]:
+                return "head\n"
+            if command[:3] == ["git", "status", "--porcelain"]:
+                return ""
+            if command[:3] == ["xcrun", "xcresulttool", "get"]:
+                return json.dumps(payload)
+            self.fail(f"Unexpected command: {command}")
+
+        def execute(command, *_):
+            Path(command[command.index("-resultBundlePath") + 1]).mkdir(parents=True)
+            return 133
+
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(run, "inventory", return_value=test_ids), \
+                patch.object(run, "build_input_digest", return_value="digest"), \
+                patch.object(run, "validate_build_stamp"), \
+                patch.object(run, "run_logged", side_effect=execute), \
+                patch.object(run.subprocess, "check_output", side_effect=command_output), \
+                contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            output = Path(directory) / "results"
+            code = run.main([
+                "unit",
+                "--destination", "platform=iOS Simulator,id=reference",
+                "--derived-data", str(Path(directory) / "derived"),
+                "--output-dir", str(output),
+                "--skip-build",
+            ])
+            summary = json.loads((output / "filmycamera-unit-summary.json").read_text())
+        return code, summary
+
+    def test_sigtrap_exit_is_accepted_when_bundle_passed_and_count_matches(self):
+        code, summary = self._run_sigtrap_core(passed=2)
+        self.assertEqual(code, 0)
+        self.assertTrue(summary["exitCodeOverridden"])
+        self.assertEqual(summary["xcodebuildExitCode"], 133)
+
+    def test_sigtrap_exit_fails_when_passed_count_is_short_of_selectors(self):
+        code, summary = self._run_sigtrap_core(passed=1)
+        self.assertNotEqual(code, 0)
+        self.assertEqual(summary["status"], "failed")
+
+    def test_isolated_photos_aggregate_carries_exit_code_override(self):
+        selectors = ["FilmyCameraUITests/Example/testA", "FilmyCameraUITests/Example/testB"]
+        summaries = [
+            {"status": "passed", "passed": 1, "failed": 0, "skipped": 0, "exitCodeOverridden": True},
+            {"status": "passed", "passed": 1, "failed": 0, "skipped": 0},
+        ]
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(run, "run_logged", return_value=0), \
+                patch.object(run, "summarize_result", side_effect=summaries), \
+                patch.object(run.subprocess, "check_call"):
+            output = Path(directory)
+            summary, code = run.run_isolated_photos_methods(
+                ["xcodebuild"], selectors, output / "Merged.xcresult", output, {}, "photos-e2e",
+            )
+        self.assertEqual(code, 0)
+        self.assertTrue(summary["exitCodeOverridden"])
+        self.assertTrue(summary["caseResults"][0]["exitCodeOverridden"])
+        self.assertNotIn("exitCodeOverridden", summary["caseResults"][1])
+
     def test_photos_methods_run_once_in_isolated_invocations_and_aggregate(self):
         tests = {
             f"FilmyCameraUITests/NormalPhotoFlowTests/testCase{index}": "photos-e2e"
@@ -701,7 +792,11 @@ class EvidenceTests(unittest.TestCase):
             (root / "FilmyCameraTests").mkdir()
             (root / "FilmyCamera.xcodeproj").mkdir()
             previous = run.build_input_digest(root)
+            (root / "Config").mkdir()
+            (root / "StoreKit").mkdir()
             for relative, value in (("FilmyCameraTests/New.swift", "func testNew() {}"),
+                                    ("Config/Monetization.Debug.xcconfig", "FILMY_MONETIZATION_ENABLED = YES"),
+                                    ("StoreKit/Filmy.storekit", "{}"),
                                     ("FilmyCameraTests/fixture.jpg", "image"),
                                     ("FilmyCamera.xcodeproj/project.pbxproj", "target membership"),
                                     ("FilmyCameraTests/New.swift", "func testChanged() {}")):
@@ -717,6 +812,41 @@ class EvidenceTests(unittest.TestCase):
     def test_zero_tests_cannot_pass_despite_successful_xcode_exit(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(run.subprocess, "check_output", return_value='{"passedTests":0}'):
             self.assertEqual(run.summarize_result(Path(directory), 0)["status"], "failed")
+
+    def _summarize_with_bundle(self, code, payload):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(run.subprocess, "check_output", return_value=json.dumps(payload)):
+            return run.summarize_result(Path(directory), code)
+
+    def test_exit_133_with_passing_bundle_is_passed_and_flagged(self):
+        for code in (133, -5):
+            with self.subTest(code=code):
+                summary = self._summarize_with_bundle(code, {"passedTests": 3, "failedTests": 0, "result": "Passed"})
+                self.assertEqual(summary["status"], "passed")
+                self.assertTrue(summary["exitCodeOverridden"])
+                self.assertEqual(summary["exitCode"], code)
+                self.assertEqual(summary["xcodebuildExitCode"], code)
+
+    def test_other_signal_exits_with_passing_bundle_stay_failed(self):
+        for code in (-9, 65):
+            with self.subTest(code=code):
+                summary = self._summarize_with_bundle(code, {"passedTests": 3, "failedTests": 0, "result": "Passed"})
+                self.assertEqual(summary["status"], "failed")
+
+    def test_exit_133_never_hides_failures_zero_tests_or_unknown_result(self):
+        for payload in ({"passedTests": 3, "failedTests": 1, "result": "Failed"},
+                        {"passedTests": 0, "failedTests": 0, "result": "Passed"},
+                        {"passedTests": 3, "failedTests": 0},
+                        {"passedTests": 3, "failedTests": 0, "skippedTests": 1, "result": "Passed"}):
+            with self.subTest(payload=payload):
+                for code in (133, -5):
+                    self.assertEqual(self._summarize_with_bundle(code, payload)["status"], "failed")
+
+    def test_other_nonzero_exit_stays_failed_with_reason(self):
+        summary = self._summarize_with_bundle(65, {"passedTests": 3, "failedTests": 0, "result": "Passed"})
+        self.assertEqual(summary["status"], "failed")
+        self.assertIn("xcodebuild exited 65", summary["reason"])
+        self.assertEqual(summary["xcodebuildExitCode"], 65)
 
     def test_skipped_prerequisite_is_failure_in_routine_ci(self):
         summary = {"status": "passed", "passed": 1, "failed": 0, "skipped": 1}

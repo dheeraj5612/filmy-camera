@@ -13,7 +13,7 @@ def xcconfig_value(name, text):
     for line in text.splitlines():
         key, sep, rest = line.partition("=")
         if sep and key.strip() == name:
-            value = rest.strip()
+            value = rest.split("//")[0].strip()
     return value
 
 def main():
@@ -26,8 +26,14 @@ def main():
     assert SIGN_IN_ENTITLEMENT not in release_entitlements
     debug_cfg = (ROOT / "Config/Monetization.Debug.xcconfig").read_text()
     release_cfg = (ROOT / "Config/Monetization.Release.xcconfig").read_text()
+    for line in release_cfg.splitlines():
+        key = line.partition("=")[0].strip()
+        assert not key.startswith(("FILMY_MONETIZATION_ENABLED[", "FILMY_ADS_ENABLED[", "FILMY_LEGAL_READY[")), line
     assert xcconfig_value("CODE_SIGN_ENTITLEMENTS", debug_cfg) == "FilmyCamera/FilmyCamera.entitlements"
-    monetized_release = xcconfig_value("FILMY_MONETIZATION_ENABLED", release_cfg) == "YES"
+    # The app compares the uppercased value; Xcode drops trailing // comments.
+    release_flag = (xcconfig_value("FILMY_MONETIZATION_ENABLED", release_cfg) or "").upper()
+    assert release_flag in ("YES", "NO"), release_flag
+    monetized_release = release_flag == "YES"
     expected_release_entitlements = "FilmyCamera/FilmyCamera.entitlements" if monetized_release else "FilmyCamera/FilmyCamera.Release.entitlements"
     assert xcconfig_value("CODE_SIGN_ENTITLEMENTS", release_cfg) == expected_release_entitlements
     assert "CODE_SIGN_ENTITLEMENTS" not in (ROOT / "project.yml").read_text()
@@ -57,8 +63,8 @@ def main():
     assert subscription["introductoryOffer"]["paymentMode"] == "free"
     assert subscription["introductoryOffer"]["subscriptionPeriod"] == "P1M"
     release = (ROOT / "Config/Monetization.Release.xcconfig").read_text()
-    assert "FILMY_ADS_ENABLED = NO" in release
-    assert "FILMY_LEGAL_READY = NO" in release
+    assert xcconfig_value("FILMY_ADS_ENABLED", release) == "NO"
+    assert xcconfig_value("FILMY_LEGAL_READY", release) == "NO"
     config = (ROOT / "FilmyCamera/Monetization/MonetizationConfiguration.swift").read_text()
     assert "#if !DEBUG" in config and 'contains("3940256099942544")' in config
     assert "#if DEBUG" in config

@@ -17,7 +17,7 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCES = ("GalleryPagingPolicy.swift", "ReviewComparisonState.swift", "PhotoFinish.swift")
+SOURCES = ("GalleryPagingPolicy.swift", "GallerySectioning.swift", "ReviewComparisonState.swift", "PhotoFinish.swift")
 TESTS = ("GalleryPagingPolicyTests.swift", "ReviewComparisonStateTests.swift")
 MUTATIONS = (
     ("unbounded-retention", "GalleryPagingPolicy.swift",
@@ -37,7 +37,7 @@ MUTATIONS = (
 )
 PACKAGE = '''// swift-tools-version: 6.0
 import PackageDescription
-let package = Package(name: "FilmyPolicyValidation", targets: [
+let package = Package(name: "FilmyPolicyValidation", platforms: [.macOS(.v13)], targets: [
     .target(name: "FilmyCamera"),
     .testTarget(name: "FilmyCameraTests", dependencies: ["FilmyCamera"])
 ])
