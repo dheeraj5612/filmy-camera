@@ -66,7 +66,13 @@ final class SignalFrameUITests: XCTestCase {
         XCTAssertGreaterThan(clearCache.frame.width, 180)
         XCTAssertFalse(app.staticTexts["250 MB"].exists, "Do not present the cache budget as measured usage")
         snapshot("signal-frame-settings-storage-largest-text")
-        app.buttons["settings-back-to-camera"].tap()
+        let backToCamera = app.buttons["settings-back-to-camera"]
+        backToCamera.tap()
+        // A loaded simulator can drop a tap sent while the page settles from
+        // the drag above; tap once more if Settings is still showing.
+        if !app.buttons["recipe-menu"].waitForExistence(timeout: 3), backToCamera.exists, backToCamera.isHittable {
+            backToCamera.tap()
+        }
         XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 10))
 
         app.terminate()
