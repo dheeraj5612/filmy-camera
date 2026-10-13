@@ -108,12 +108,13 @@ final class MembershipStoreKitTests: XCTestCase {
         await store.refresh()
         XCTAssertTrue(store.isTrial)
         try session.forceRenewalOfSubscription(productIdentifier: MonetizationConfiguration.monthlyProductID)
-        // StoreKit Test publishes the renewal asynchronously. Poll the signed
-        // entitlement briefly so the assertion checks the renewal, not the
-        // pre-renewal transaction still being surfaced by the test service.
-        for _ in 0..<20 {
+        // StoreKit Test publishes the renewal asynchronously, and between the
+        // trial period ending and the renewal arriving it can report no
+        // entitlement at all. Wait for the paid renewal itself: leaving the
+        // trial is not enough, because that gap also reads as "not a trial".
+        for _ in 0..<100 {
             await store.refresh()
-            if !store.isTrial { break }
+            if store.isPremium && !store.isTrial { break }
             try await Task.sleep(for: .milliseconds(100))
         }
         XCTAssertTrue(store.isPremium)
