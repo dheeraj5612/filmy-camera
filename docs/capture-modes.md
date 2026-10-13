@@ -42,7 +42,7 @@ Local authoring checks actually completed:
 - Foundation-only policy executable: **399 assertions passed**. Covers every sequence limit, one-in-flight behavior, cancellation, wrong/duplicate callbacks, macro eligibility, geometry budgets, unsafe URLs, filenames, export receipts, and manifest round trips.
 - Swift frontend syntax parsing of all new app and test files passed. This is not SDK typechecking.
 - Integration-script anchor, permission, and idempotence checks passed.
-- Added **11 policy XCTest cases and 7 processing/persistence XCTest cases**, including invalid input, thumbnail/reference bounds, identity registration, stationary-panorama rejection, durable manifests, and unfinished-movie rejection. These require the native test run; adding tests does not mean they have executed successfully.
+- Added **11 policy XCTest cases and 11 processing/persistence XCTest cases**, including invalid input, thumbnail/reference bounds, identity registration, stationary-panorama rejection, durable manifests, and unfinished-movie rejection. These require the native test run; adding tests does not mean they have executed successfully.
 
 To rerun portable checks or deliberately regenerate the project:
 

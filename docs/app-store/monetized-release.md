@@ -33,6 +33,6 @@ Capture must be reviewed on a physical device. Existing saved photos and already
 | Consent and privacy options | UMP, before ad requests; privacy choices exposed when required | Publish applicable AdMob messages and test them |
 | Quota | Device-local Keychain, no quota server | Explain daily budget and device-local nature |
 
-No Firebase Analytics or Crashlytics dependency is added. Core/Auth and Google's sign-in/ads SDKs still have their own data behavior. The app privacy manifest now declares account fields; third-party manifests must be included in Xcode's aggregate review.
+No Firebase Analytics or Crashlytics dependency is added. Core/Auth and Google's sign-in/ads SDKs still have their own data behavior. The app privacy manifest declares no collected data types in the free Release. Before a monetized build, add the account and advertising entries listed under "Required before any monetized build" in docs/app-store/app-privacy.md (scripts/monetization/validate.py enforces them); third-party manifests must also be included in Xcode's aggregate review.
 
 The owner must publish an updated policy covering these services, purposes, retention, deletion and contact routes. The implementation does not modify the separate legal-site repository. Also review app age rating, advertising declarations, child-audience policy and developer app-ads.txt setup. Only then enable `FILMY_LEGAL_READY` and live ads in the ignored Release configuration.

@@ -17,9 +17,9 @@ This update uses the explicit free-release configuration (`FILMY_MONETIZATION_EN
 - [ ] Complete iPhone portrait/large-text and iPad acceptance, plus available physical-camera checks; record any remaining hardware coverage.
 - [ ] Validate and upload the exact archive, confirm Apple processing, and submit matching listing/media for review.
 
-The current build 15 candidate carries the consolidated camera and gallery corrections while preserving the refreshed opaque app icon. Its source changes and generated icon provenance are documented in [the icon record](app-store/icon/README.md). Build 12 has already uploaded and finished processing; its distribution binary retains the earlier icon.
+The earlier build 15 candidate (superseded by the 1.0.2 build 28 update above) carries the consolidated camera and gallery corrections while preserving the refreshed opaque app icon. Its source changes and generated icon provenance are documented in [the icon record](app-store/icon/README.md). Build 12 has already uploaded and finished processing; its distribution binary retains the earlier icon.
 
-## Build 15 release gates
+## Build 15 release gates (superseded; historical)
 
 - [x] Integrate the refreshed opaque 1024-pixel icon and consistently increment both project representations to build 15. Preserve the old design and new generated master/prompts outside application resources.
 - [ ] Complete the consolidated camera/gallery corrections and physical acceptance on the connected iPad. Existing simulator evidence and generic signed-device compilation remain historical diagnostics; they do not replace the required latest-OS iPad run.

@@ -28,7 +28,7 @@ For a code walkthrough, begin with [`FilmyCamera/ContentView.swift`](FilmyCamera
 - Camera-first SwiftUI UI in the shape of an iPhone camera: a letterboxed 4:3 viewfinder on a black body, flash and camera switch in the top bar, Apple-style zoom presets over the frame, a film-strip recipe rail with renderer-backed swatches, a Roll thumbnail and Tune beside the shutter, Liquid Glass chrome on iOS 26 (material fallback earlier), persistent tuning, a recipe detail sheet, import review, and a three-column contact-sheet Roll with zoom gestures.
 - Optional semantic haptics for shutter, recipe and camera selections, focus, editor commits, discards, saves, and failures.
 - Flash sits beside zoom in the on-screen controls and in Settings, and the last explicit choice is remembered; the G7 X profile renders flash frames with subject/ambient separation.
-- Failed starts and runtime errors reconnect with backoff, and interruptions explain the cause (background, another app, multitasking, heat). The session supports iPad Split View and stays warm during review and quick tab switches to reduce restart work when returning to the viewfinder.
+- Failed starts and runtime errors reconnect with backoff, and interruptions explain the cause (background, another app, multitasking, heat). The app declares full screen only (`UIRequiresFullScreen`), so on iPadOS versions that honor the key (17 and 18; deprecated from iPadOS 26, not verified there) Split View and Slide Over are not offered; the session still enables multitasking camera access where the OS supports it and explains the interruption if one occurs. It stays warm during review and quick tab switches to reduce restart work when returning to the viewfinder.
 - The film pipeline compiles off the main thread while the session configures, and photo cache maintenance runs after the first frame.
 - iPhone and iPad hardware controls for front/back switching and available-lens selection, with simulator-safe preview behavior.
 - Expandable Pro controls for coupled manual ISO and shutter, sensor white balance by Kelvin and tint, and manual focus on supported hardware. The panel reports applied device values, disables still flash during manual exposure, offers one Reset Auto action, and can switch from a virtual camera to an eligible physical lens when advanced controls require it.
@@ -63,10 +63,10 @@ The app requires iOS 17 or later. Camera and Photos permissions are requested on
 
 ## Filmy Pro, accounts, and advertising
 
-This candidate adds a 10-photo daily free tier, three starter looks, native monthly App Store subscriptions with an eligible one-month trial, optional Apple/Google sign-in, and AdMob banners outside the camera. Trial and paid access unlock Pro and remove ads. Existing saved images remain accessible. No watermark is added.
+Dormant in Release (`FILMY_MONETIZATION_ENABLED = NO`; enabled only in Debug builds): the monetized candidate adds a 10-photo daily free tier, three starter looks, native monthly App Store subscriptions with an eligible one-month trial, optional Apple/Google sign-in, and AdMob banners outside the camera. Trial and paid access unlock Pro and remove ads. Existing saved images remain accessible. No watermark is added.
 
 The product target is an exceptional film-simulation and G7X-inspired camera with additional capture and editing tools in a premium monthly subscription. Price, trial duration, and the exact feature split remain open. See the [premium camera vision](docs/premium-camera-vision.md) for the staged feature and quality targets and the [monetization roadmap](docs/monetization-roadmap.md) for future access and export proposals. Subscription restrictions and watermarking are not enabled in the current launch; RAW capture/development is now implemented in the Q shooting system with hardware validation pending; general HDR output remains roadmap work.
-Production activation still requires App Store Connect products, Firebase provider configuration, AdMob publisher IDs/consent messages, and reviewed legal disclosures. Release purchases and ads fail closed until configured. See the [implementation and setup guide](docs/monetization.md) and [monetized release checklist](docs/app-store/monetized-release.md). The [older roadmap](docs/monetization-roadmap.md) is historical; RAW/HDR and other capabilities are not implied by the new paywall.
+Production activation still requires App Store Connect products, Firebase provider configuration, AdMob publisher IDs/consent messages, and reviewed legal disclosures. The shipping Release build starts no purchases, accounts or ads and never gates capture or save; a monetized Release needs the steps in docs/monetization.md and docs/app-store/monetized-release.md. See the [implementation and setup guide](docs/monetization.md) and [monetized release checklist](docs/app-store/monetized-release.md). The [older roadmap](docs/monetization-roadmap.md) is historical; RAW/HDR and other capabilities are not implied by the new paywall.
 
 ## Rendering note
 
@@ -99,6 +99,6 @@ notes](docs/smart-recipes.md).
 ## Pro capture and persistent originals
 
 Capability-gated resolution, RAW/ProRAW, HEIF/P3, HDR highlight preservation,
-silent original Live Photos, exposure priority, focus aids and a persistent
+original Live Photos (audio is off by default and opt-in), exposure priority, focus aids and a persistent
 non-destructive photo library are documented in
 [Pro camera features and limitations](docs/PRO_CAMERA_FEATURES.md).
