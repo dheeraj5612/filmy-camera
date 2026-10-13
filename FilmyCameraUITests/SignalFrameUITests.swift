@@ -66,13 +66,12 @@ final class SignalFrameUITests: XCTestCase {
         XCTAssertGreaterThan(clearCache.frame.width, 180)
         XCTAssertFalse(app.staticTexts["250 MB"].exists, "Do not present the cache budget as measured usage")
         snapshot("signal-frame-settings-storage-largest-text")
+        // XCUITest taps a corner of the frame when it judges the centre
+        // covered, which it does once Settings content has scrolled under the
+        // bar. Tap that corner on purpose: the whole frame has to respond,
+        // not only the capsule drawn inside it.
         let backToCamera = app.buttons["settings-back-to-camera"]
-        backToCamera.tap()
-        // A loaded simulator can drop a tap sent while the page settles from
-        // the drag above; tap once more if Settings is still showing.
-        if !app.buttons["recipe-menu"].waitForExistence(timeout: 3), backToCamera.exists, backToCamera.isHittable {
-            backToCamera.tap()
-        }
+        backToCamera.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.02)).tap()
         XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 10))
 
         app.terminate()

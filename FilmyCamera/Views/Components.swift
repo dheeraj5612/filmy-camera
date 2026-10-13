@@ -196,7 +196,9 @@ struct BackToCameraButton: View {
                 .overlay {
                     Capsule().stroke(FilmyTheme.lineStrong, lineWidth: 1)
                 }
-                .contentShape(Capsule())
+                // The whole frame responds, not only the drawn capsule: at
+                // large text the capsule's corners are a wide dead zone.
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Back to camera")
