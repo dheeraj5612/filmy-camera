@@ -1,0 +1,15 @@
+#include "Monetization.xcconfig"
+// Preserve the free app until the paid release has completed provider setup.
+FILMY_MONETIZATION_ENABLED = NO
+// Free Release: no Sign in with Apple entitlement. The URL scheme slot resolves to the
+// bundle identifier (valid, inert) instead of a placeholder or an empty scheme.
+// A monetized Release must switch to FilmyCamera.entitlements and set a real REVERSED_CLIENT_ID.
+CODE_SIGN_ENTITLEMENTS = FilmyCamera/FilmyCamera.Release.entitlements
+FILMY_GOOGLE_REVERSED_CLIENT_ID = $(PRODUCT_BUNDLE_IDENTIFIER)
+// Shipping remains fail-closed until the owner supplies real publisher IDs and
+// publishes/reviews the updated privacy disclosures. See docs/monetization.md.
+FILMY_ADS_ENABLED = NO
+FILMY_ADMOB_APP_ID = ca-app-pub-3940256099942544~1458002511
+FILMY_ADMOB_BANNER_ID =
+FILMY_LEGAL_READY = NO
+#include? "Monetization.Local.Release.xcconfig"

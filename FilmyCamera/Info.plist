@@ -18,18 +18,62 @@
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>$(FILMY_GOOGLE_REVERSED_CLIENT_ID)</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>FilmyAdMobBannerID</key>
+	<string>$(FILMY_ADMOB_BANNER_ID)</string>
+	<key>FilmyAdsEnabled</key>
+	<string>$(FILMY_ADS_ENABLED)</string>
+	<key>FilmyLegalReady</key>
+	<string>$(FILMY_LEGAL_READY)</string>
+	<key>FilmyMonetizationEnabled</key>
+	<string>$(FILMY_MONETIZATION_ENABLED)</string>
+	<key>FilmyMonthlyProductID</key>
+	<string>$(FILMY_MONTHLY_PRODUCT_ID)</string>
+	<key>FilmyPrivacyPolicyURL</key>
+	<string>$(FILMY_PRIVACY_POLICY_URL)</string>
+	<key>FilmyTermsURL</key>
+	<string>$(FILMY_TERMS_URL)</string>
+	<key>FirebaseAnalyticsCollectionEnabled</key>
+	<false/>
+	<key>GADApplicationIdentifier</key>
+	<string>$(FILMY_ADMOB_APP_ID)</string>
+	<key>GADDelayAppMeasurementInit</key>
+	<true/>
+	<key>GOOGLE_ANALYTICS_DEFAULT_ALLOW_AD_PERSONALIZATION_SIGNALS</key>
+	<false/>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSCameraUsageDescription</key>
-	<string>Filmy Camera uses the camera to preview and capture photos with your selected film recipe.</string>
+	<string>Filmy Camera uses the camera to preview and capture photos and videos, and to read text or codes when requested.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Filmy Camera adds your location to photos you capture so you can see where they were taken.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Filmy Camera records microphone audio only when you enable audio for a video or Live Photo.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>Filmy Camera uses device orientation only to display the optional horizon level. Motion data is not saved or uploaded.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Filmy Camera saves finished photos to your Photos library automatically when you take a picture, or when you save an edited import.</string>
+	<string>Filmy Camera saves finished photos and videos to your photo library.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Filmy Camera lets you choose existing photos to apply film recipes and reads frames saved by Filmy Camera for the in-app Roll.</string>
+	<key>SKAdNetworkItems</key>
+	<array>
+		<dict>
+			<key>SKAdNetworkIdentifier</key>
+			<string>cstr6suwn9.skadnetwork</string>
+		</dict>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>
@@ -44,6 +88,9 @@
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 </dict>
 </plist>

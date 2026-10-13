@@ -111,7 +111,7 @@ jobs:
     # The 128-look renderer suite, full UI suite, and isolated Photos flows run
     # sequentially. Hosted runs can spend over 45 minutes reaching the final
     # Photos flows; keep enough bounded time to finish and retain evidence.
-    timeout-minutes: 65
+    timeout-minutes: 120
     # Xcode 16.4 ships iOS 18.5 on the hosted runner. Keep one stable lane so
     # the required `build-and-test` check name does not become a matrix suffix.
     env:
@@ -542,7 +542,7 @@ jobs:
           set -euo pipefail
 
           bash -n scripts/ci/*.sh scripts/release/*.sh
-          shellcheck --severity=warning scripts/ci/*.sh scripts/release/*.sh
+          shellcheck -x --severity=warning scripts/ci/*.sh scripts/release/*.sh
           bash scripts/release/test-private-temp.sh
           bash scripts/release/test-macho-uuid-validation.sh
           scripts/release/validate-store-metadata.sh --final

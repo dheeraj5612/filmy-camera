@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-archive_path="${1:-${FILMY_ARCHIVE_PATH:-}}"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+root_dir="$(cd "${script_dir}/../.." && pwd)"
+# shellcheck source=scripts/release/app-config.sh
+source "${root_dir}/scripts/release/app-config.sh"
+archive_path="${1:-${FILMY_ARCHIVE_PATH:-${release_app_archive_default}}}"
 if [[ -z "${archive_path}" ]]; then
-  echo "Usage: $0 /path/to/FilmyCamera.xcarchive" >&2
+  echo "Usage: $0 /path/to/${release_app_bundle_name}.xcarchive" >&2
   exit 64
 fi
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-root_dir="$(cd "${script_dir}/../.." && pwd)"
 project_spec="${root_dir}/project.yml"
 expected_team="$(sed -n 's/^[[:space:]]*DEVELOPMENT_TEAM:[[:space:]]*\([^[:space:]]*\)[[:space:]]*$/\1/p' "${project_spec}" | head -n 1)"
 source_sha_path=""
@@ -29,7 +31,7 @@ source_revision="$(git -C "${root_dir}" rev-parse --verify HEAD 2>/dev/null)" ||
   exit 1
 }
 
-source_sha_path="${archive_path}/FilmyCamera.source-sha"
+source_sha_path="${archive_path}/${release_app_provenance_file}"
 [[ -f "${source_sha_path}" ]] || {
   echo "Archive has no source revision provenance" >&2
   exit 1
@@ -41,9 +43,9 @@ archive_source_revision="$(<"${source_sha_path}")"
   exit 1
 }
 
-app_path="${archive_path}/Products/Applications/FilmyCamera.app"
+app_path="${archive_path}/Products/Applications/${release_app_bundle_name}.app"
 info_plist="${app_path}/Info.plist"
-dsym_path="${archive_path}/dSYMs/FilmyCamera.app.dSYM"
+dsym_path="${archive_path}/dSYMs/${release_app_dsym_name}"
 profile_plist=""
 
 cleanup() {
@@ -54,7 +56,7 @@ cleanup() {
 trap cleanup EXIT
 
 if [[ ! -d "${app_path}" || ! -f "${info_plist}" ]]; then
-  echo "Archive does not contain FilmyCamera.app: ${archive_path}" >&2
+  echo "Archive does not contain ${release_app_bundle_name}.app: ${archive_path}" >&2
   exit 1
 fi
 
@@ -114,15 +116,25 @@ print_uuid_records() {
 }
 
 bundle_id="$(plist_value CFBundleIdentifier)"
+display_name="$(plist_value CFBundleDisplayName || true)"
 version="$(plist_value CFBundleShortVersionString)"
 build="$(plist_value CFBundleVersion)"
 executable_name="$(plist_value CFBundleExecutable || true)"
 
 expected_version="$(sed -n 's/^[[:space:]]*MARKETING_VERSION:[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' "${project_spec}" | head -n 1)"
 expected_build="$(sed -n 's/^[[:space:]]*CURRENT_PROJECT_VERSION:[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' "${project_spec}" | head -n 1)"
+if [[ "${release_app_variant}" == "g7" ]]; then
+  expected_version="1.0"
+  expected_build="1"
+fi
 
-[[ "${bundle_id}" == "com.dheeraj.filmycamera" ]] || {
+[[ "${bundle_id}" == "${release_app_bundle_id}" ]] || {
   echo "Unexpected bundle identifier: ${bundle_id}" >&2
+  exit 1
+}
+
+[[ "${display_name}" == "${release_app_display_name}" ]] || {
+  echo "Unexpected app display name: ${display_name:-missing} (expected ${release_app_display_name})" >&2
   exit 1
 }
 

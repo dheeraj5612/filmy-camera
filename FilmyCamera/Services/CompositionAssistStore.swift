@@ -62,6 +62,7 @@ final class CompositionAssistStore: ObservableObject {
         var zebras = false
         var peaking = false
         var level = false
+        var digitalCrop: Double = 1
         var usesFrames: Bool { histogram || zebras || peaking }
     }
     private struct Output: @unchecked Sendable {
@@ -138,7 +139,8 @@ final class CompositionAssistStore: ObservableObject {
         let width = max(1, Int((viewport.width * scale).rounded(.down)))
         let height = max(1, Int((viewport.height * scale).rounded(.down)))
         let bounds = CGRect(x: 0, y: 0, width: width, height: height)
-        let framed = CameraFrameLayout.aspectFill(image, in: bounds)
+        let cropped = FujiImageProcessor.crop(image, factor: options.digitalCrop)
+        let framed = CameraFrameLayout.aspectFill(cropped, in: bounds)
         var rgba = [UInt8](repeating: 0, count: width * height * 4)
         let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
         FilmRenderer.sharedContext.render(framed, toBitmap: &rgba, rowBytes: width * 4,

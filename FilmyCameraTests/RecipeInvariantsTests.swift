@@ -34,7 +34,7 @@ final class RecipeInvariantsTests: XCTestCase {
     private var previousRecipeOverrides: Data?
 
     func testRendererVersionTracksCurrentParametricPipeline() {
-        XCTAssertEqual(FilmRecipe.rendererVersion, "core-image-parametric-v19")
+        XCTAssertEqual(FilmRecipe.rendererVersion, "core-image-parametric-v20")
     }
 
     override func setUp() {
@@ -85,7 +85,8 @@ final class RecipeInvariantsTests: XCTestCase {
         XCTAssertEqual(FilmRecipe.expandedInternetRecipeIDs.count, 18)
         XCTAssertEqual(Set(FilmRecipe.expandedInternetRecipeIDs).count, 18)
         XCTAssertEqual(FilmRecipe.legacyBuiltIns.count, 36)
-        XCTAssertEqual(FilmRecipe.builtIns.count, 128)
+        XCTAssertEqual(FilmRecipe.builtIns.count, 163 + RecipeCatalog.records.count)
+        XCTAssertGreaterThanOrEqual(RecipeCatalog.records.count, 500)
 
         let builtInIDs = Set(FilmRecipe.builtIns.map(\.id))
         XCTAssertTrue(Set(FilmRecipe.expandedInternetRecipeIDs).isSubset(of: builtInIDs))
@@ -276,6 +277,10 @@ final class RecipeInvariantsTests: XCTestCase {
                 XCTAssertEqual(recipe.provenance.source, .publicCanonDocumentation, recipe.id)
                 XCTAssertEqual(recipe.provenance.calibration, .notCalibratedToCanonHardware, recipe.id)
                 XCTAssertEqual(recipe.provenance.references, FilmRecipe.g7XPublicReferences, recipe.id)
+            case .publicAppleDocumentation:
+                XCTAssertEqual(recipe.provenance.source, .publicAppleDocumentation, recipe.id)
+                XCTAssertEqual(recipe.provenance.calibration, .notCalibratedToAppleHardware, recipe.id)
+                XCTAssertEqual(recipe.provenance.references, FilmRecipe.ogIPhonePublicReferences, recipe.id)
             case .publicOfficialDocumentation:
                 XCTAssertEqual(recipe.provenance.source, .publicOfficialDocumentation, recipe.id)
                 XCTAssertEqual(recipe.provenance.calibration, .notCalibratedToFujifilmHardware, recipe.id)
@@ -285,7 +290,12 @@ final class RecipeInvariantsTests: XCTestCase {
                 XCTAssertEqual(recipe.provenance.references, FilmRecipe.fujifilmCreatorRecipeReferences, recipe.id)
             case .publicCommunityRecipe:
                 XCTAssertEqual(recipe.provenance.calibration, .notCalibratedToFujifilmHardware, recipe.id)
-                XCTAssertEqual(recipe.provenance.references, FilmRecipe.communityRecipeReferences, recipe.id)
+                if recipe.provenance.cameraSource?.publisher == .filmRecipes {
+                    XCTAssertEqual(recipe.provenance.references,
+                                   FilmRecipe.fujifilmPublicReferences + [.filmRecipesLibrary], recipe.id)
+                } else {
+                    XCTAssertEqual(recipe.provenance.references, FilmRecipe.communityRecipeReferences, recipe.id)
+                }
             case .originalCreativeDesign:
                 XCTAssertEqual(recipe.provenance, FilmRecipe.creativeProvenance, recipe.id)
                 XCTAssertTrue(FilmRecipe.originalCreativeRecipeIDs.contains(recipe.id))
@@ -723,8 +733,8 @@ final class RecipeInvariantsTests: XCTestCase {
 
 final class ExpandedCreativeCatalogTests: XCTestCase {
     func testOriginalCollectionsContainEveryAuthoredRecipe() {
-        let expected: [FilmRecipe.Collection: Int] = [.negative:16, .slide:10, .cinema:12, .instant:8, .digital:16, .experimental:6, .monochrome:24]
-        XCTAssertEqual(FilmRecipe.originalCreativeLooks.count, 92)
+        let expected: [FilmRecipe.Collection: Int] = [.negative:23, .slide:14, .cinema:12, .instant:8, .digital:16, .experimental:6, .monochrome:27]
+        XCTAssertEqual(FilmRecipe.originalCreativeLooks.count, 106)
         XCTAssertEqual(Array(FilmRecipe.builtIns.prefix(36)), FilmRecipe.legacyBuiltIns)
         for (collection,count) in expected {
             XCTAssertEqual(FilmRecipe.originalCreativeLooks.filter { $0.creativeCollection == collection }.count, count)
@@ -759,7 +769,7 @@ final class ExpandedCreativeCatalogTests: XCTestCase {
     }
     func testFamilySearchAndFiltersResolveTheExpandedCatalog() {
         XCTAssertEqual(LookLibraryIndex.results(in: FilmRecipe.builtIns, query: "", filter: .compact, favorites: []).count, 17)
-        XCTAssertEqual(LookLibraryIndex.results(in: FilmRecipe.builtIns, query: "cinema", filter: .cinema, favorites: []).count, 12)
+        XCTAssertEqual(LookLibraryIndex.results(in: FilmRecipe.originalCreativeLooks, query: "cinema", filter: .cinema, favorites: []).count, 12)
         XCTAssertEqual(LookLibraryIndex.results(in: FilmRecipe.builtIns, query: "CCD Daylight", filter: .all, favorites: []).map(\.id), ["digital-ccd-daylight"])
         XCTAssertEqual(LookLibraryIndex.results(in: FilmRecipe.builtIns, query: "", filter: .instant, favorites: []).count, 8)
     }

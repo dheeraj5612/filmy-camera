@@ -95,6 +95,9 @@ final class FilmyCameraUITests: XCTestCase {
                       "The presented Pro controls must settle at a hittable 44pt target")
         assertMinimumHitTarget(done, named: "Done with Pro controls")
 
+        XCTAssertTrue(app.descendants(matching: .any)["pro-resolution"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["pro-format"].exists)
+
         #if targetEnvironment(simulator)
         XCTAssertTrue(app.descendants(matching: .any)["manual-controls-unavailable"].exists)
         XCTAssertFalse(app.sliders["manual-iso-slider"].exists,
@@ -115,10 +118,13 @@ final class FilmyCameraUITests: XCTestCase {
         exposure.tap()
         let iso = app.sliders["manual-iso-slider"]
         XCTAssertTrue(iso.waitForExistence(timeout: 8))
-        scrollToHittable(iso, in: app)
         XCTAssertTrue(waitUntil(timeout: 5, condition: { iso.isEnabled }))
+        scrollToHittable(iso, in: app)
         iso.adjust(toNormalizedSliderPosition: 0.25)
         XCTAssertTrue(waitUntil(timeout: 5, condition: { iso.isEnabled }))
+        let whiteBalanceSection = app.buttons["manual-section-whiteBalance"]
+        scrollToHittable(whiteBalanceSection, in: app)
+        whiteBalanceSection.tap()
         let whiteBalance = app.buttons["manual-white-balance-manual"]
         if whiteBalance.isEnabled {
             scrollToHittable(whiteBalance, in: app)
@@ -129,8 +135,10 @@ final class FilmyCameraUITests: XCTestCase {
 
         attachScreenshot(named: "pro-controls-portrait")
         XCUIDevice.shared.orientation = .landscapeLeft
-        XCTAssertTrue(waitUntil(timeout: 10) { app.frame.height >= app.frame.width },
-                      "The portrait-locked app must retain portrait geometry after rotation")
+        XCTAssertTrue(waitUntil(timeout: 10) {
+            UIDevice.current.userInterfaceIdiom == .pad
+                ? app.frame.width > app.frame.height : app.frame.height >= app.frame.width
+        }, "Pro controls must follow the device-specific orientation contract")
         XCTAssertTrue(waitForStableHittableFrame(done, timeout: 8),
                       "Pro controls must remain dismissible at 44pt after rotation")
         assertMinimumHitTarget(done, named: "Landscape Done with Pro controls")
@@ -140,14 +148,22 @@ final class FilmyCameraUITests: XCTestCase {
         scrollToHittable(reset, in: app)
         XCTAssertTrue(waitUntil(timeout: 5, condition: { reset.isEnabled }))
         reset.tap()
-        XCTAssertTrue(waitUntil(timeout: 8, condition: {
-            app.buttons["manual-exposure-auto"].value as? String == "Selected"
-                && app.buttons["manual-white-balance-auto"].value as? String == "Selected"
-                && app.buttons["manual-focus-auto"].value as? String == "Selected"
-        }))
+        for (section, automatic) in [
+            ("exposure", "manual-exposure-auto"),
+            ("whiteBalance", "manual-white-balance-auto"),
+            ("focus", "manual-focus-auto")
+        ] {
+            let selector = app.buttons["manual-section-\(section)"]
+            scrollToHittable(selector, in: app)
+            selector.tap()
+            XCTAssertTrue(waitUntil(timeout: 8) {
+                app.buttons[automatic].value as? String == "Selected"
+            }, "Reset must restore automatic control for \(section)")
+        }
         #endif
         done.tap()
-        XCTAssertFalse(app.buttons["manual-controls-done"].exists)
+        XCTAssertTrue(waitUntil(timeout: 5) { !app.buttons["manual-controls-done"].exists },
+                      "Done must finish dismissing the Pro controls sheet")
         XCUIDevice.shared.orientation = .portrait
         XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 5))
         #if !targetEnvironment(simulator)
@@ -173,6 +189,8 @@ final class FilmyCameraUITests: XCTestCase {
         ).firstMatch
         assertMinimumHitTarget(classicChrome, named: "Muted Color recipe")
         classicChrome.tap()
+
+        reopenRecipeDrawerAfterSelection(in: app)
 
         let details = app.buttons["Tune Muted Color"]
         assertMinimumHitTarget(details, named: "Tune recipe")
@@ -256,10 +274,20 @@ final class FilmyCameraUITests: XCTestCase {
         let selectedRecipe = compactApp.buttons["recipe-g7x-compact"]
         assertMinimumAccessibilityFrame(selectedRecipe, named: "G7 X recipe")
         assertContained(selectedRecipe, in: compactApp, named: "G7 X recipe")
-        let film = compactApp.buttons["recipe-classic-chrome"]
-        assertMinimumHitTarget(film, named: "Muted Color recipe")
-        film.tap()
-        XCTAssertTrue(compactApp.buttons["Tune Muted Color"].waitForExistence(timeout: 5))
+        // Stay within the compact-profile rail. Reaching into another nested
+        // horizontal rail makes XCTest try to scroll the outer drawer instead.
+        let alternate = compactApp.buttons["recipe-digital-ccd-daylight"]
+        scrollToHittable(alternate, in: compactApp)
+        assertMinimumHitTarget(alternate, named: "CCD Daylight recipe")
+        alternate.tap()
+        XCTAssertTrue(compactApp.buttons["recipe-menu"].waitForExistence(timeout: 5))
+        XCTAssertTrue(compactApp.buttons["recipe-menu"].label.contains("CCD Daylight"))
+        XCTAssertTrue(waitUntil(timeout: 5) {
+            !compactApp.descendants(matching: .any)["recipe-drawer"].exists
+        }, "Selecting a look must dismiss the picker")
+
+        openRecipeDrawer(in: compactApp)
+        XCTAssertTrue(compactApp.buttons["Tune CCD Daylight"].waitForExistence(timeout: 5))
         #if targetEnvironment(simulator)
         // iPadOS 26 Simulator can report the first tile of a nested row as
         // non-hittable despite correct visible bounds and working taps.
@@ -274,11 +302,15 @@ final class FilmyCameraUITests: XCTestCase {
         assertMinimumHitTarget(selectedRecipe, named: "G7 X recipe")
         selectedRecipe.tap()
         #endif
-        XCTAssertTrue(compactApp.buttons["Tune G7 X Compact"].waitForExistence(timeout: 5),
-                      "Tapping the visible G7 X tile must select its camera profile")
-        XCTAssertEqual(selectedRecipe.value as? String, "Selected")
+        XCTAssertTrue(compactApp.buttons["recipe-menu"].label.contains("G7 X Compact"))
+        XCTAssertTrue(waitUntil(timeout: 5) {
+            !compactApp.descendants(matching: .any)["recipe-drawer"].exists
+        }, "Selecting a look must dismiss the picker")
 
+        openRecipeDrawer(in: compactApp)
         let tune = compactApp.buttons["Tune G7 X Compact"]
+        XCTAssertTrue(tune.waitForExistence(timeout: 5),
+                      "The selected G7 X profile must expose its tuning control")
         assertMinimumHitTarget(tune, named: "Tune G7 X profile")
         tune.tap()
 
@@ -352,6 +384,7 @@ final class FilmyCameraUITests: XCTestCase {
         // row. Verify reachability and actual adjustment; the 44pt button
         // geometry helper does not describe a native slider's touch behavior.
         XCTAssertTrue(exposure.waitForExistence(timeout: 5))
+        scrollIntoView(exposure, in: app, downward: false)
         XCTAssertTrue(exposure.isEnabled && exposure.isHittable)
         let originalValue = try XCTUnwrap(exposure.value as? String)
         exposure.adjust(toNormalizedSliderPosition: originalValue.contains("-") ? 0.9 : 0.1)
@@ -362,8 +395,12 @@ final class FilmyCameraUITests: XCTestCase {
         )
 
         let back = app.buttons["recipe-back-to-camera"]
+        scrollToHittable(back, in: app)
         assertMinimumHitTarget(back, named: "Cancel recipe editing")
         back.tap()
+        let discard = app.buttons["Discard"]
+        XCTAssertTrue(discard.waitForExistence(timeout: 5))
+        discard.tap()
         XCTAssertTrue(waitForDisappearance(back, timeout: 5))
 
         openRecipeDetail(for: "classic-chrome", in: app, tuneLabel: "Tune Muted Color")
@@ -372,7 +409,9 @@ final class FilmyCameraUITests: XCTestCase {
             originalValue,
             "Leaving recipe details with Back must discard the draft"
         )
-        app.buttons["recipe-back-to-camera"].tap()
+        let secondBack = app.buttons["recipe-back-to-camera"]
+        scrollToHittable(secondBack, in: app)
+        secondBack.tap()
     }
 
     func testRecipeEditorResetAndApplyPersistsBuiltInValues() throws {
@@ -380,6 +419,7 @@ final class FilmyCameraUITests: XCTestCase {
 
         let exposure = app.sliders["Exposure"]
         XCTAssertTrue(exposure.waitForExistence(timeout: 5))
+        scrollIntoView(exposure, in: app, downward: false)
         XCTAssertTrue(exposure.isEnabled && exposure.isHittable)
         let originalValue = try XCTUnwrap(exposure.value as? String)
         exposure.adjust(toNormalizedSliderPosition: 0.9)
@@ -470,8 +510,7 @@ final class FilmyCameraUITests: XCTestCase {
         let unavailablePreview = app.descendants(matching: .any)["camera-placeholder"]
         // Simulator camera sessions expose the unavailable placeholder, while
         // a physical iPad exposes the live preview. Either visible surface is
-        // the app content whose geometry proves the portrait policy; the
-        // containing scene may resize under TN3192.
+        // the app content that must remain visible across rotation.
         let cameraSurface = livePreview.waitForExistence(timeout: 2)
             ? livePreview
             : unavailablePreview
@@ -493,18 +532,82 @@ final class FilmyCameraUITests: XCTestCase {
         )
         defer { XCUIDevice.shared.orientation = .portrait }
         #if !targetEnvironment(simulator)
-        XCTAssertTrue(waitForLiveShutter(in: app), "The portrait-locked preview must render fresh frames")
+        XCTAssertTrue(waitForLiveShutter(in: app), "The rotated preview must render fresh frames")
         #endif
 
-        guard let visibleWindow = app.windows.allElementsBoundByIndex.first(where: { $0.exists && $0.isHittable }) else {
-            XCTFail("The portrait camera shell must expose a visible app window after rotation")
+        let isPad = UIDevice.current.userInterfaceIdiom == .pad
+        var previousWindowFrame: CGRect?
+        var stableWindowSamples = 0
+        let windowReachedExpectedOrientation = waitUntil(timeout: 10) {
+            guard let window = app.windows.allElementsBoundByIndex.first(where: {
+                $0.exists && $0.isHittable
+            }) else { return false }
+            let frame = window.frame
+            let reachedOrientation = isPad
+                ? frame.width > frame.height && abs(frame.minX) < 1 && abs(frame.minY) < 1
+                : frame.height > frame.width
+            guard reachedOrientation else {
+                previousWindowFrame = nil
+                stableWindowSamples = 0
+                return false
+            }
+            if let previousWindowFrame,
+               abs(frame.minX - previousWindowFrame.minX) < 0.25,
+               abs(frame.minY - previousWindowFrame.minY) < 0.25,
+               abs(frame.width - previousWindowFrame.width) < 0.25,
+               abs(frame.height - previousWindowFrame.height) < 0.25 {
+                stableWindowSamples += 1
+            } else {
+                stableWindowSamples = 1
+            }
+            previousWindowFrame = frame
+            return stableWindowSamples >= 3
+        }
+        XCTAssertTrue(
+            windowReachedExpectedOrientation,
+            isPad
+                ? "The visible iPad app window must finish rotating to landscape"
+                : "The visible iPhone app window must remain portrait after device rotation"
+        )
+        guard windowReachedExpectedOrientation,
+              let visibleWindow = app.windows.allElementsBoundByIndex.first(where: {
+                  $0.exists && $0.isHittable
+              }) else {
             return
         }
         let windowFrame = visibleWindow.frame
-        XCTAssertTrue(
-            UIDevice.current.userInterfaceIdiom == .pad || windowFrame.height > windowFrame.width,
-            "The visible app window must remain portrait after device rotation on iPhone"
-        )
+        if isPad {
+            let grip = app.buttons["camera-grip-toggle"]
+            XCTAssertTrue(waitForStableHittableFrame(grip, timeout: 8, within: visibleWindow))
+            let initialValue = grip.value as? String
+            let initialX = grip.frame.midX
+            grip.tap()
+            let gripMoved = {
+                let candidate = self.app.buttons["camera-grip-toggle"]
+                return candidate.exists
+                    && candidate.value as? String != initialValue
+                    && abs(candidate.frame.midX - initialX) > windowFrame.width / 2
+            }
+            var changedGrip = waitUntil(timeout: 8, condition: gripMoved)
+            // XCTest can lose the first synthesized tap while the simulator is
+            // settling from rotation. Retry only when app state did not change;
+            // never double-toggle a control that moved incompletely.
+            if !changedGrip,
+               app.buttons["camera-grip-toggle"].value as? String == initialValue {
+                let retryGrip = app.buttons["camera-grip-toggle"]
+                if waitForStableHittableFrame(retryGrip, timeout: 4, within: visibleWindow) {
+                    retryGrip.tap()
+                    changedGrip = waitUntil(timeout: 8, condition: gripMoved)
+                }
+            }
+            XCTAssertTrue(changedGrip, "Changing grip must move the capture controls to the opposite edge")
+            attachScreenshot(named: "camera-landscape-mirrored-grip")
+            let mirroredGrip = app.buttons["camera-grip-toggle"]
+            mirroredGrip.tap()
+            XCTAssertTrue(waitUntil(timeout: 8) {
+                self.app.buttons["camera-grip-toggle"].value as? String == initialValue
+            })
+        }
         let currentLook = app.buttons["recipe-menu"]
         let roll = app.buttons["roll-tab"]
         let importPhoto = app.buttons["import-photo"]
@@ -525,7 +628,7 @@ final class FilmyCameraUITests: XCTestCase {
             assertContained(element, in: visibleWindow, named: name)
         }
         XCTAssertFalse(app.buttons["camera-tab"].exists)
-        attachScreenshot(named: "camera-portrait-locked")
+        attachScreenshot(named: "camera-rotated")
         openRecipeDrawer(in: app)
         let tune = app.buttons["Tune Muted Color"]
         let close = app.buttons["recipe-drawer-close"]
@@ -534,7 +637,7 @@ final class FilmyCameraUITests: XCTestCase {
         assertContained(tune, in: visibleWindow, named: "Tune")
         assertContained(close, in: visibleWindow, named: "Close picker")
         XCTAssertFalse(tune.frame.intersects(close.frame))
-        attachScreenshot(named: "camera-portrait-locked-look-drawer")
+        attachScreenshot(named: "camera-rotated-look-drawer")
         close.tap()
         XCTAssertFalse(app.descendants(matching: .any)["recipe-picker"].exists)
     }
@@ -630,7 +733,7 @@ final class FilmyCameraUITests: XCTestCase {
 
         app.terminate()
         let cacheApp = makeApplication()
-        cacheApp.launchArguments = ["-selectedRecipeID", "g7x-compact"]
+        cacheApp.launchArguments = ["-selectedRecipeID", "g7x-compact", "-cameraGestureHintSeen.v1", "YES"]
         cacheApp.launch()
         app = cacheApp
         defer { cacheApp.terminate() }
@@ -723,7 +826,7 @@ final class FilmyCameraUITests: XCTestCase {
 
         for recipeID in recipeIDs {
             let recipeApp = makeApplication()
-            recipeApp.launchArguments = ["-hasCompletedRecipeFirstOnboarding", "YES", "-selectedRecipeID", recipeID, "-captureFinish", "photo"]
+            recipeApp.launchArguments = ["-hasCompletedRecipeFirstOnboarding", "YES", "-selectedRecipeID", recipeID, "-captureFinish", "photo", "-cameraGestureHintSeen.v1", "YES"]
             recipeApp.launch()
             recipeApp.tap()
 
@@ -871,7 +974,10 @@ final class FilmyCameraUITests: XCTestCase {
         shutter.tap()
         assertAutomaticSave(in: rollApp)
         XCUIDevice.shared.orientation = .landscapeLeft
-        XCTAssertTrue(waitUntil(timeout: 5) { rollApp.frame.height > rollApp.frame.width })
+        XCTAssertTrue(waitUntil(timeout: 10) {
+            UIDevice.current.userInterfaceIdiom == .pad
+                ? rollApp.frame.width > rollApp.frame.height : rollApp.frame.height > rollApp.frame.width
+        })
 
         let openRoll = rollApp.buttons["roll-tab"]
         XCTAssertTrue(openRoll.waitForExistence(timeout: 10))
@@ -1161,6 +1267,7 @@ final class FilmyCameraUITests: XCTestCase {
         ).firstMatch
         assertMinimumHitTarget(mutedColor, named: "Muted Color recipe")
         mutedColor.tap()
+        reopenRecipeDrawerAfterSelection(in: app)
 
         let tune = app.buttons["Tune Muted Color"]
         assertMinimumHitTarget(tune, named: "Open recipe detail")
@@ -1249,11 +1356,20 @@ final class FilmyCameraUITests: XCTestCase {
         let recipe = target.buttons["recipe-\(recipeID)"]
         assertMinimumHitTarget(recipe, named: recipeID + " recipe")
         recipe.tap()
+        reopenRecipeDrawerAfterSelection(in: target)
 
         let tune = target.buttons[tuneLabel]
         assertMinimumHitTarget(tune, named: tuneLabel)
         tune.tap()
         XCTAssertTrue(target.staticTexts["Recipe controls"].waitForExistence(timeout: 5))
+    }
+
+    /// Choosing a look dismisses the picker; reopen it to reach the tuning control.
+    private func reopenRecipeDrawerAfterSelection(in target: XCUIApplication) {
+        XCTAssertTrue(waitUntil(timeout: 5) {
+            !target.descendants(matching: .any)["recipe-drawer"].exists
+        }, "Selecting a look must dismiss the picker")
+        openRecipeDrawer(in: target)
     }
 
     private func makeApplication() -> XCUIApplication {
@@ -1266,6 +1382,11 @@ final class FilmyCameraUITests: XCTestCase {
         let drawer = target.descendants(matching: .any)["recipe-drawer"]
         if !drawer.exists {
             let currentLook = target.buttons["recipe-menu"]
+            guard waitForStableHittableFrame(currentLook, timeout: 5, within: target) else {
+                attachScreenshot(named: "look-picker-button-not-stable")
+                XCTFail("Current look must have a stable on-screen hit target before opening")
+                return
+            }
             assertMinimumHitTarget(currentLook, named: "Current look")
             if target.frame.width >= 700 {
                 // AssistiveTouch can overlap the center of this edge-column
@@ -1330,6 +1451,78 @@ final class FilmyCameraUITests: XCTestCase {
         }
     }
 
+    private func waitForStableVisibleFrame(
+        _ element: XCUIElement,
+        in viewport: XCUIElement,
+        timeout: TimeInterval
+    ) -> Bool {
+        var previous: CGRect?
+        var stableSamples = 0
+        return waitUntil(timeout: timeout) {
+            guard element.exists else { previous = nil; stableSamples = 0; return false }
+            let frame = element.frame.intersection(viewport.frame).intersection(app.frame)
+            guard frame.width >= 44, frame.height >= 44 else {
+                previous = nil
+                stableSamples = 0
+                return false
+            }
+            if let previous,
+               abs(frame.minX - previous.minX) < 1,
+               abs(frame.minY - previous.minY) < 1,
+               abs(frame.width - previous.width) < 1,
+               abs(frame.height - previous.height) < 1 {
+                stableSamples += 1
+            } else {
+                stableSamples = 1
+            }
+            previous = frame
+            return stableSamples >= 2
+        }
+    }
+
+    private func waitForSettledPreviewGeometry(
+        _ preview: XCUIElement,
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) -> Bool {
+        var previousPreview: CGRect?
+        var previousApp: CGRect?
+        var stableSamples = 0
+        return waitUntil(timeout: timeout) {
+            guard preview.exists else {
+                previousPreview = nil
+                previousApp = nil
+                stableSamples = 0
+                return false
+            }
+            let previewFrame = preview.frame
+            let appFrame = app.frame
+            guard previewFrame.width > 0, previewFrame.height > 0,
+                  appFrame.width > 0, appFrame.height > 0 else {
+                previousPreview = nil
+                previousApp = nil
+                stableSamples = 0
+                return false
+            }
+            if let oldPreview = previousPreview, let oldApp = previousApp,
+               abs(previewFrame.minX - oldPreview.minX) < 1,
+               abs(previewFrame.minY - oldPreview.minY) < 1,
+               abs(previewFrame.width - oldPreview.width) < 1,
+               abs(previewFrame.height - oldPreview.height) < 1,
+               abs(appFrame.minX - oldApp.minX) < 1,
+               abs(appFrame.minY - oldApp.minY) < 1,
+               abs(appFrame.width - oldApp.width) < 1,
+               abs(appFrame.height - oldApp.height) < 1 {
+                stableSamples += 1
+            } else {
+                stableSamples = 1
+            }
+            previousPreview = previewFrame
+            previousApp = appFrame
+            return stableSamples >= 3
+        }
+    }
+
     private func assertMinimumAccessibilityFrame(_ element: XCUIElement, named: String) {
         XCTAssertTrue(element.waitForExistence(timeout: 5), named + " should exist")
         XCTAssertGreaterThanOrEqual(element.frame.width, 44, named + " needs a 44pt width")
@@ -1382,7 +1575,10 @@ final class FilmyCameraUITests: XCTestCase {
         // the accessibility tree. Scroll the active Pro sheet explicitly.
         let manualControlsScroll = app.scrollViews["manual-controls-scroll"]
         let scrollView = manualControlsScroll.exists ? manualControlsScroll : app.scrollViews.firstMatch
-        for _ in 0..<20 {
+        for attempt in 0..<20 {
+            if manualControlsScroll.exists, element.elementType == .slider {
+                print("Pro scroll attempt \(attempt): exists=\(element.exists) enabled=\(element.isEnabled) hittable=\(element.isHittable) control=\(element.frame) scroll=\(scrollView.frame) app=\(app.frame)")
+            }
             if element.exists, element.isHittable {
                 let viewport = scrollView.exists ? scrollView.frame.intersection(app.frame) : app.frame
                 // A partly exposed button can report hittable while its center
@@ -1401,6 +1597,13 @@ final class FilmyCameraUITests: XCTestCase {
             } else {
                 (scrollView.exists ? scrollView : app).swipeUp(velocity: .slow)
             }
+        }
+        if !element.exists || !element.isHittable {
+            attachScreenshot(named: "scroll-control-unreachable")
+            let diagnostic = XCTAttachment(string: app.debugDescription)
+            diagnostic.name = "Unreachable control hierarchy: \(element.identifier)"
+            diagnostic.lifetime = .keepAlways
+            add(diagnostic)
         }
         XCTAssertTrue(element.exists && element.isHittable, "The requested control must scroll into view")
     }
@@ -1504,6 +1707,30 @@ final class FilmyCameraUITests: XCTestCase {
         return ready
     }
 
+    private func waitForHardwareShutterReadiness(in target: XCUIApplication, timeout: TimeInterval = 10) -> Bool {
+        let status = target.descendants(matching: .any)["camera-hardware-shutter-status"]
+        var statusValue = "Hardware shutter status absent"
+        let ready = waitUntil(timeout: timeout) {
+            guard status.exists, let value = status.value as? String else { return false }
+            statusValue = value
+            return value.split(separator: ";").contains { $0 == "ready=true" }
+        }
+        if !ready {
+            attachHardwareShutterStatus(in: target, fallback: statusValue)
+            attachScreenshot(named: "hardware-shutter-not-ready")
+        }
+        return ready
+    }
+
+    private func attachHardwareShutterStatus(in target: XCUIApplication, fallback: String = "Hardware shutter status absent") {
+        let status = target.descendants(matching: .any)["camera-hardware-shutter-status"]
+        let value = status.exists ? String(describing: status.value) : fallback
+        let attachment = XCTAttachment(string: value)
+        attachment.name = "hardware-shutter-status"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     private func requiresLiveCamera(in target: XCUIApplication) -> Bool {
         #if targetEnvironment(simulator)
         return false
@@ -1514,7 +1741,12 @@ final class FilmyCameraUITests: XCTestCase {
         #endif
     }
 
-    private func assertAutomaticSave(in target: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+    private func assertAutomaticSave(
+        in target: XCUIApplication,
+        attachHardwareShutterStatusOnFailure: Bool = false,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
         let saved = target.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Saved with '")).firstMatch
         let review = target.descendants(matching: .any)["review-screen"]
         var showedReview = false
@@ -1526,6 +1758,9 @@ final class FilmyCameraUITests: XCTestCase {
                 if button.exists { button.tap(); break }
             }
             return false
+        }
+        if attachHardwareShutterStatusOnFailure && (showedReview || !completed) {
+            attachHardwareShutterStatus(in: target)
         }
         XCTAssertFalse(showedReview, "Shutter captures must never open Retake/Save review", file: file, line: line)
         XCTAssertTrue(completed, "Capture must be acknowledged by Photos without a Save tap", file: file, line: line)
@@ -1548,6 +1783,20 @@ final class FilmyCameraUITests: XCTestCase {
     func testBackgroundingAndForegroundingRestoresTheViewfinder() throws {
         XCTAssertTrue(waitForCameraShell(in: app), "The camera shell should be up before backgrounding")
         let isPhysical = requiresLiveCamera(in: app)
+        if isPhysical { XCTAssertTrue(waitForLiveShutter(in: app, timeout: 10)) }
+        if !isPhysical {
+            app.terminate()
+            app.launchArguments += ["-ui-testing-viewfinder-chrome"]
+            app.launch()
+            XCTAssertTrue(waitForCameraShell(in: app))
+        }
+        let tools = app.buttons["camera-chrome-toggle"]
+        XCTAssertTrue(tools.waitForExistence(timeout: 5))
+        if tools.value as? String == "Collapsed" { tools.tap() }
+        let controls = ["roll-tab", "settings-tab", "camera-switch-control", "exposure-control"]
+            .map { app.descendants(matching: .any).matching(identifier: $0).firstMatch }
+        for control in controls { XCTAssertTrue(control.waitForExistence(timeout: 5)) }
+        let originalFrames = controls.map { $0.frame }
 
         for round in 1...2 {
             XCUIDevice.shared.press(.home)
@@ -1558,6 +1807,19 @@ final class FilmyCameraUITests: XCTestCase {
                 waitForCameraShell(in: app),
                 "Round \(round): the camera shell must come back after foregrounding"
             )
+            // Sample the controls immediately after activation as well as
+            // after the preview settles, so a session restart cannot reflow
+            // the utility rail or the surrounding camera shell.
+            for _ in 0..<3 {
+                for (control, original) in zip(controls, originalFrames) {
+                    XCTAssertTrue(control.exists)
+                    let restored = control.frame
+                    XCTAssertEqual(restored.minY, original.minY, accuracy: 1,
+                                   "Round \(round): \(control.identifier) moved vertically")
+                    XCTAssertEqual(restored.minX, original.minX, accuracy: 1,
+                                   "Round \(round): \(control.identifier) moved horizontally")
+                }
+            }
             if isPhysical {
                 XCTAssertTrue(
                     waitForLiveShutter(in: app, timeout: 10),
@@ -1609,21 +1871,30 @@ final class FilmyCameraUITests: XCTestCase {
         var selectedRecipes = Set<String>()
         for _ in 0..<3 {
             for identifier in candidates {
+                if !app.descendants(matching: .any)["recipe-picker"].exists {
+                    openRecipeDrawer(in: app)
+                }
                 let swatch = app.buttons[identifier]
                 // A horizontal rail intentionally exposes partial cards.
                 // Tap a stable visible region inside the picker's viewport,
                 // avoiding XCTest's automatic scroll-to-center on clipped
                 // cards and excluding rows hidden under the drawer footer.
-                guard swatch.exists, swatch.isHittable,
-                      waitForStableHittableFrame(swatch, timeout: 2) else { continue }
+                // During a drawer transition XCTest can expose a valid frame
+                // before it has installed an activation point. Waiting on
+                // isHittable in that interval produces a false AX failure.
+                guard swatch.exists,
+                      waitForStableVisibleFrame(swatch, in: picker, timeout: 3) else { continue }
                 let visible = swatch.frame.intersection(picker.frame).intersection(app.frame)
                 guard visible.width >= 44, visible.height >= 44 else { continue }
+                let previousLook = app.buttons["recipe-menu"].label
                 swatch.coordinate(withNormalizedOffset: .zero)
                     .withOffset(CGVector(dx: visible.midX - swatch.frame.minX,
                                          dy: visible.midY - swatch.frame.minY))
                     .tap()
-                XCTAssertTrue(waitUntil(timeout: 2) { swatch.value as? String == "Selected" },
-                              "Tapping \(identifier) must select that recipe")
+                XCTAssertTrue(waitUntil(timeout: 5) {
+                    !app.descendants(matching: .any)["recipe-drawer"].exists
+                        && app.buttons["recipe-menu"].label != previousLook
+                }, "Tapping \(identifier) must update the current look and dismiss the picker")
                 selectedRecipes.insert(identifier)
                 taps += 1
             }
@@ -1631,7 +1902,6 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(taps, 6, "The look drawer should expose several recipes to switch between")
         XCTAssertGreaterThanOrEqual(selectedRecipes.count, 2,
                                     "Rapid switching must exercise distinct recipes")
-        app.buttons["recipe-drawer-close"].tap()
         XCTAssertTrue(waitForCameraShell(in: app, timeout: 5), "The shell must survive rapid recipe switching")
         if isPhysical {
             XCTAssertTrue(waitForLiveShutter(in: app, timeout: 5), "The viewfinder must stay live while switching recipes")
@@ -1699,7 +1969,14 @@ final class FilmyCameraUITests: XCTestCase {
         let preview = app.descendants(matching: .any)["camera-preview"]
         XCTAssertTrue(preview.waitForExistence(timeout: 5))
         XCTAssertGreaterThan(preview.frame.height, 0)
-        XCTAssertTrue(app.frame.contains(preview.frame))
+        let previewSettled = waitForSettledPreviewGeometry(preview, in: app, timeout: 5)
+        if !previewSettled {
+            add(XCTAttachment(string: "app=\(app.frame)\npreview=\(preview.frame)"))
+            attachScreenshot(named: "square-preview-geometry-not-settled")
+        }
+        XCTAssertTrue(previewSettled, "Square preview and app window must settle before geometry assertions")
+        XCTAssertTrue(app.frame.insetBy(dx: -2, dy: -2).contains(preview.frame),
+                      "The settled square preview must remain fully visible in the app window")
         XCTAssertEqual(preview.frame.width / preview.frame.height, 1, accuracy: 0.01)
         let histogram = app.descendants(matching: .any).matching(
             NSPredicate(format: "label BEGINSWITH 'Preview luminance histogram.'")
@@ -1753,10 +2030,18 @@ final class FilmyCameraUITests: XCTestCase {
         try skipUnlessPhotosWritesAreAllowed()
         guard #available(iOS 18.0, *) else { throw XCTSkip("Hardware shutter events require iOS 18 or later") }
         XCTAssertTrue(waitForLiveShutter(in: app))
+        guard waitForHardwareShutterReadiness(in: app) else {
+            XCTFail("Hardware shutter must be ready before pressing volume buttons")
+            return
+        }
         for (button, name) in [(XCUIDevice.Button.volumeUp, "volume-up"), (.volumeDown, "volume-down")] {
             XCTAssertTrue(waitForSavedToastToDisappear(in: app), "\(name): prior save toast must clear")
+            guard waitForHardwareShutterReadiness(in: app) else {
+                XCTFail("\(name): hardware shutter must be ready before pressing")
+                return
+            }
             XCUIDevice.shared.press(button)
-            assertAutomaticSave(in: app)
+            assertAutomaticSave(in: app, attachHardwareShutterStatusOnFailure: true)
             XCTAssertTrue(waitForLiveShutter(in: app), "\(name) must save and leave a live preview")
         }
         #endif

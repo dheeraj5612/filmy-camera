@@ -96,8 +96,12 @@ final class HistogramInteractionTests: XCTestCase {
 
         XCUIDevice.shared.orientation = .landscapeLeft
         XCTAssertTrue(
-            waitUntil { self.app.frame.height > self.app.frame.width },
-            "The camera is portrait locked and must retain portrait geometry after device rotation"
+            waitUntil {
+                UIDevice.current.userInterfaceIdiom == .pad
+                    ? self.app.frame.width > self.app.frame.height
+                    : self.app.frame.height > self.app.frame.width
+            },
+            "The camera must follow the native iPad landscape or iPhone portrait orientation contract after rotation"
         )
         XCTAssertTrue(
             waitForStableContainedFrame(histogram, in: preview),

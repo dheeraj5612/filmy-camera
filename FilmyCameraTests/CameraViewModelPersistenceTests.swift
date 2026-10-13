@@ -20,6 +20,26 @@ final class CameraViewModelPersistenceTests: XCTestCase {
         XCTAssertEqual(warmed.colorChrome, 0.8)
     }
 
+    func testOverrideForUnknownRecipeIDSurvivesInitAndPersist() throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let unknown = FilmRecipe(id: "zz-unknown", name: "Unknown", subtitle: "Retired")
+        let known = FilmRecipe.builtIns[1]
+        defaults.set(try JSONEncoder().encode([unknown.id: unknown]),
+                     forKey: CameraViewModel.recipeOverridesKey)
+
+        let viewModel = CameraViewModel(defaults: defaults)
+        var edited = known
+        edited.contrast = 1.3
+        viewModel.update(recipe: edited)
+
+        let stored = try JSONDecoder().decode(
+            [String: FilmRecipe].self,
+            from: try XCTUnwrap(defaults.data(forKey: CameraViewModel.recipeOverridesKey))
+        )
+        XCTAssertNotNil(stored[unknown.id])
+    }
+
     func testInvalidSelectedRecipeIDIsNormalizedAndRewritten() throws {
         let (defaults, suiteName) = try makeDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
