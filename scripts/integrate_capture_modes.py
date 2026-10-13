@@ -51,7 +51,7 @@ def main() -> None:
         CAMERA.write_text(camera.rstrip() + "\n" + SUSPEND)
     descriptions = {
         "NSCameraUsageDescription": "Filmy Camera uses the camera to preview and capture photos and videos, and to read text or codes when requested.",
-        "NSMicrophoneUsageDescription": "Filmy Camera records microphone audio only when you enable audio for a video or Live Photo.",
+        "NSMicrophoneUsageDescription": "Filmy Camera records microphone audio with your videos unless you turn off Record microphone audio, and with Live Photos when you turn on Live Photo audio.",
         "NSPhotoLibraryAddUsageDescription": "Filmy Camera saves finished photos and videos to your photo library.",
     }
     project = PROJECT.read_text()
