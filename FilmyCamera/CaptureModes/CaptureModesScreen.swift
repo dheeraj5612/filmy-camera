@@ -289,7 +289,7 @@ struct CaptureModesScreen: View {
             VStack(spacing: 4) {
                 if model.state.phase == .processing {
                     ProgressView()
-                    Button("Pause") { model.engine.pause(reason: "Processing paused. Retry it from Captures.") }.font(.caption)
+                    Button("Pause") { model.engine.pause(reason: model.state.scanning ? "Scene reading stopped. Reopen the mode to read the scene again." : "Processing paused. Retry it from Captures.") }.font(.caption)
                 } else if model.state.phase == .unavailable || model.state.phase == .stopped {
                     if cameraDenied {
                         Button("Open Settings") {

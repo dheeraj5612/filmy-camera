@@ -67,7 +67,8 @@ final class CaptureModesModel: ObservableObject {
             if status == .notDetermined { cameraAllowed = await AVCaptureDevice.requestAccess(for: .video) }
             guard !Task.isCancelled, foreground, requestID == id else { return }
             guard cameraAllowed else {
-                let blocked = "Enable Camera access in Settings to use capture modes."
+                let restrictedText = "Camera access is restricted on this device by Screen Time or device management. Capture modes cannot open until it is allowed."
+                let blocked = status == .restricted ? restrictedText : "Enable Camera access in Settings to use capture modes."
                 cameraBlockedMessage = blocked
                 state.phase = .unavailable
                 state.message = blocked
@@ -153,6 +154,7 @@ final class CaptureModesModel: ObservableObject {
 
     func export(_ media: CaptureMedia) {
         guard !exporting, !state.phase.isBusy else { return }
+        errorMessage = nil
         exporting = true
         Task { [weak self] in
             guard let self else { return }

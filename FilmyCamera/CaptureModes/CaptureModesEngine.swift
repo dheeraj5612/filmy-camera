@@ -364,14 +364,13 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
 
     func focus(_ point: CGPoint) {
         queue.async { [self] in
-            let video = state.mode.isVideo
             // Spatial recording keeps its stereo focus: every control is off there (see publish()).
             guard state.phase == .ready || (state.mode == .filmVideo && state.phase == .recording), let device else { return }
             do {
                 try device.lockForConfiguration()
                 defer { device.unlockForConfiguration() }
                 if device.isFocusPointOfInterestSupported { device.focusPointOfInterest = point }
-                if video, device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
+                if device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
                 else if device.isFocusModeSupported(.autoFocus) { device.focusMode = .autoFocus }
                 if device.isExposurePointOfInterestSupported { device.exposurePointOfInterest = point }
                 if device.isExposureModeSupported(.continuousAutoExposure) { device.exposureMode = .continuousAutoExposure }

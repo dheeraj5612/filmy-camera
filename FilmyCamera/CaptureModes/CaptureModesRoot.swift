@@ -33,6 +33,9 @@ struct CaptureModesRoot: View {
                         } label: {
                             Label("Capture modes", systemImage: "camera.aperture")
                                 .font(.subheadline.weight(.semibold))
+                                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
                                 .frame(maxWidth: .infinity, minHeight: 44)
                         }
                         .buttonStyle(.plain)

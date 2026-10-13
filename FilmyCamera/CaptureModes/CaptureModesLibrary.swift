@@ -71,7 +71,7 @@ private struct CaptureModesDetail: View {
                 Button(media.isExported ? "Exported to Photos" : "Export developed files to Photos") { model.export(media) }
                     .disabled(media.outputs.isEmpty || media.isExported || model.exporting || model.state.phase.isBusy)
                 if media.status == .originalsOnly {
-                    Button("Retry processing from originals") { model.engine.retry(media) }
+                    Button("Retry processing from originals") { model.errorMessage = nil; model.engine.retry(media) }
                         .disabled(model.exporting || model.state.phase.isBusy)
                 }
             }
@@ -152,8 +152,10 @@ struct CaptureSceneResults: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(value).textSelection(.enabled)
                             ShareLink(item: value) { Label("Share code", systemImage: "square.and.arrow.up") }
+                                .buttonStyle(.borderless)
                             if let url = CaptureModesPolicy.safeWebURL(value) {
                                 Button("Review web link") { pendingURL = url }
+                                    .buttonStyle(.borderless)
                             }
                         }
                     }
