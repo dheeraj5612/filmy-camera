@@ -14,6 +14,8 @@ struct FujiSequenceRequest: Sendable {
     let finish: PhotoFinish
     let grainSeed: UInt32
     let shutterUptime: TimeInterval
+    /// Preview-buffer orientation when `viewport` was read; nil keeps the viewport as is.
+    var previewRotationAngle: CGFloat? = nil
 }
 
 @MainActor
@@ -236,7 +238,8 @@ final class FujiShootingController: ObservableObject {
         let request = multipleRequest ?? FujiSequenceRequest(settings: settings.normalized(), recipe: viewModel.selectedRecipe,
             filmRecipes: settings.filmRecipeIDs.compactMap { id in viewModel.recipes.first { $0.id == id } },
             viewport: camera.previewViewportSize, finish: PhotoFinish(rawValue: defaults.string(forKey: "captureFinish") ?? "") ?? .photo,
-            grainSeed: camera.previewGrainSeed, shutterUptime: ProcessInfo.processInfo.systemUptime)
+            grainSeed: camera.previewGrainSeed, shutterUptime: ProcessInfo.processInfo.systemUptime,
+            previewRotationAngle: camera.previewRotationAngle)
         do { _ = try FujiCapturePlan.make(request.settings) }
         catch { errorMessage = error.localizedDescription; return }
         guard ProcessInfo.processInfo.thermalState != .critical else { errorMessage = "Let the device cool before shooting."; return }
@@ -321,7 +324,8 @@ final class FujiShootingController: ObservableObject {
                     ? "Multiple exposure layer \(multipleCount + 1)/\(settings.multipleExposureCount)"
                     : "\(settings.drive.title) \(index + 1)/\(plan.steps.count)"
                 let record = originalRecord(dataIsRAW: frame.rawData != nil, request: request, recipe: request.recipe,
-                    capturedAt: frame.capturedAt, step: step, exposure: frame.exposure, label: label)
+                    capturedAt: frame.capturedAt, step: step, exposure: frame.exposure, label: label,
+                    stillData: frame.processedData)
                 try await library.retainOriginal(data, record: record)
                 try Task.checkCancellation()
                 if let expected = exposures[index], step.dynamicRange != .dr100 || settings.drive == .aeBracket {
@@ -487,13 +491,20 @@ final class FujiShootingController: ObservableObject {
     }
 
     private func originalRecord(dataIsRAW: Bool, request: FujiSequenceRequest, recipe: FilmRecipe, capturedAt: Date,
-                                step: FujiCaptureStep, exposure: FujiExposure?, label: String) -> FujiOriginalRecord {
-        FujiOriginalRecord(id: UUID(), capturedAt: capturedAt, isRAW: dataIsRAW, sourceFilename: dataIsRAW ? "source.dng" : "source.jpg",
+                                step: FujiCaptureStep, exposure: FujiExposure?, label: String,
+                                stillData: Data? = nil) -> FujiOriginalRecord {
+        // Live frames are cropped in the still's axes; pre-shot frames (no stillData) stay preview-shaped.
+        let viewport: CGSize = stillData.map {
+            CameraFrameLayout.stillViewport(request.viewport,
+                stillPixelSize: CameraFrameLayout.orientedPixelSize(of: $0),
+                previewRotationAngle: request.previewRotationAngle)
+        } ?? request.viewport
+        return FujiOriginalRecord(id: UUID(), capturedAt: capturedAt, isRAW: dataIsRAW, sourceFilename: dataIsRAW ? "source.dng" : "source.jpg",
             sequenceID: request.id, dynamicRange: step.dynamicRange,
             captureExposure: exposure.map { FujiExposureRecord(iso: $0.iso, seconds: $0.seconds, bracketOffset: step.exposureOffset,
                                                                protectedStops: step.dynamicRange.protectionStops) },
             recipe: recipe, adjustment: .init(), cropFactor: request.settings.digitalCrop,
-            viewportWidth: request.viewport.width, viewportHeight: request.viewport.height, label: label)
+            viewportWidth: viewport.width, viewportHeight: viewport.height, label: label)
     }
 
     func export(_ data: Data, recipe: FilmRecipe, capturedAt: Date, label: String, photoLibrary: any PhotoSaving,

@@ -339,6 +339,31 @@ final class FujiShootingTests: XCTestCase {
         XCTAssertEqual(driver.counts.restores, 1)
     }
 
+    func testSidewaysFrameRecordStoresStillAxisViewport() async throws {
+        func storedViewport(_ viewport: CGSize, angle: CGFloat?) async throws -> CGSize {
+            let root = temporaryRoot()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let library = FujiCaptureLibrary(root: root)
+            let controller = FujiShootingController(library: library)
+            let driver = FujiTestDriver(data: jpeg())
+            let saver = FujiTestSaver(driver: driver, failSave: true)
+            var sequence = request(.init())
+            sequence = FujiSequenceRequest(settings: sequence.settings, recipe: sequence.recipe, filmRecipes: sequence.filmRecipes,
+                viewport: viewport, finish: .photo, grainSeed: 1, shutterUptime: 0, previewRotationAngle: angle)
+            do { try await controller.run(sequence, driver: driver, photoLibrary: saver) } catch {}
+            let originals = try await library.originals()
+            XCTAssertEqual(originals.count, 1)
+            let record = try XCTUnwrap(originals.first)
+            return CGSize(width: record.viewportWidth, height: record.viewportHeight)
+        }
+        let sideways = try await storedViewport(CGSize(width: 3, height: 4), angle: 90)
+        XCTAssertEqual(sideways, CGSize(width: 4, height: 3))
+        let rotatingUI = try await storedViewport(CGSize(width: 3, height: 4), angle: 0)
+        XCTAssertEqual(rotatingUI, CGSize(width: 3, height: 4))
+        let unchanged = try await storedViewport(CGSize(width: 4, height: 3), angle: nil)
+        XCTAssertEqual(unchanged, CGSize(width: 4, height: 3))
+    }
+
     func testFailedBurstSaveQueuesEveryFrameForRetryAndKeepsOriginals() async throws {
         let root = temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }

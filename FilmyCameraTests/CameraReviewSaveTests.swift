@@ -197,6 +197,59 @@ final class CameraReviewSaveTests: XCTestCase {
         )
     }
 
+    func testSidewaysCaptureBakesStillViewportIntoGeometryAndSavesWideFrame() async throws {
+        func develop(
+            viewport: CGSize?, angle: CGFloat?
+        ) async throws -> (geometry: CGSize, saved: CGSize) {
+            let (defaults, suiteName) = try makeDefaults()
+            defer { defaults.removePersistentDomain(forName: suiteName) }
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let store = FilmyPhotoStore(root: root)
+            let model = CameraViewModel(defaults: defaults, photoStore: store)
+            let saver = ControlledPhotoSaver()
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            let image = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 30), format: format).image { context in
+                UIColor.orange.setFill()
+                context.fill(CGRect(x: 0, y: 0, width: 40, height: 30))
+            }
+            let photo = try captureSourcePhoto(data: XCTUnwrap(image.jpegData(compressionQuality: 0.9)))
+            let result: Bool
+            if let viewport {
+                result = await model.developCapturedPhotoForTesting(
+                    photo, recipe: model.selectedRecipe, camera: CameraService(), photoLibrary: saver,
+                    viewport: viewport, previewRotationAngle: angle
+                )
+            } else {
+                result = await model.developCapturedPhotoForTesting(
+                    photo, recipe: model.selectedRecipe, camera: CameraService(), photoLibrary: saver
+                )
+            }
+            XCTAssertTrue(result)
+            for _ in 0..<200 where saver.requests.isEmpty { try await Task.sleep(for: .milliseconds(50)) }
+            let request = try XCTUnwrap(saver.requests.last)
+            let data = try XCTUnwrap(request.imageData)
+            let saved = try XCTUnwrap(CameraFrameLayout.orientedPixelSize(of: data))
+            let inventory = try await store.inventory()
+            let geometry = try XCTUnwrap(inventory.documents.first).geometry
+            saver.completeLast(with: .success(()))
+            return (CGSize(width: geometry.viewportWidth, height: geometry.viewportHeight), saved)
+        }
+
+        let portraitViewport = CGSize(width: 393, height: 524)
+        let sideways = try await develop(viewport: portraitViewport, angle: 90)
+        XCTAssertEqual(sideways.geometry, CGSize(width: 524, height: 393))
+        XCTAssertEqual(sideways.saved, CGSize(width: 40, height: 30))
+
+        let unknownAngle = try await develop(viewport: portraitViewport, angle: nil)
+        XCTAssertEqual(unknownAngle.geometry, portraitViewport)
+        XCTAssertEqual(unknownAngle.saved, CGSize(width: 22, height: 30))
+
+        let defaults = try await develop(viewport: nil, angle: nil)
+        XCTAssertEqual(defaults.geometry, CGSize(width: 100, height: 100))
+    }
+
     func testFailedOriginalWriteKeepsRetryableCaptureAndRetryIsExplicit() async throws {
         let (defaults, suiteName) = try makeDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }

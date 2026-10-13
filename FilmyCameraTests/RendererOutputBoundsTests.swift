@@ -2042,6 +2042,85 @@ final class RendererOutputBoundsTests: XCTestCase {
         XCTAssertEqual(landscapeCrop.midY, source.midY, accuracy: 0.001)
     }
 
+    func testStillViewportTransposesOnlyWhenStillAxesDifferFromPreviewBuffer() {
+        func resolved(_ viewport: CGSize, _ still: CGSize?, _ angle: CGFloat?) -> CGSize {
+            CameraFrameLayout.stillViewport(viewport, stillPixelSize: still, previewRotationAngle: angle)
+        }
+        let phone = CGSize(width: 393, height: 524)
+        let wide = CGSize(width: 4032, height: 3024)
+        let tall = CGSize(width: 3024, height: 4032)
+        let phoneWide = CGSize(width: 524, height: 393)
+
+        XCTAssertEqual(resolved(phone, wide, 90), phoneWide)
+        XCTAssertEqual(resolved(phone, tall, 90), phone)
+        XCTAssertEqual(resolved(phone, tall, 270), phone)
+        XCTAssertEqual(resolved(phone, wide, 270), phoneWide)
+        XCTAssertEqual(resolved(phone, wide, -90), phoneWide)
+        XCTAssertEqual(resolved(phone, wide, 450), phoneWide)
+        XCTAssertEqual(resolved(phone, wide, 89.5), phoneWide)
+
+        let pad = CGSize(width: 1024, height: 768)
+        XCTAssertEqual(resolved(pad, wide, 0), pad)
+        XCTAssertEqual(resolved(pad, wide, 180), pad)
+        XCTAssertEqual(resolved(CGSize(width: 768, height: 1024), tall, 90), CGSize(width: 768, height: 1024))
+        XCTAssertEqual(resolved(CGSize(width: 820, height: 1094), wide, 90), CGSize(width: 1094, height: 820))
+        XCTAssertEqual(resolved(pad, tall, 0), CGSize(width: 768, height: 1024))
+        XCTAssertEqual(resolved(CGSize(width: 375, height: 1024), wide, 0), CGSize(width: 375, height: 1024))
+
+        for angle in [nil, CGFloat.nan, CGFloat.infinity, 45, CGFloat.greatestFiniteMagnitude] as [CGFloat?] {
+            XCTAssertEqual(resolved(phone, wide, angle), phone)
+        }
+        for still in [nil, CGSize.zero, CGSize(width: 3000, height: 3000)] as [CGSize?] {
+            XCTAssertEqual(resolved(phone, still, 90), phone)
+        }
+        XCTAssertEqual(resolved(.zero, wide, 90), .zero)
+        let infinite = CGSize(width: 393, height: CGFloat.infinity)
+        XCTAssertEqual(resolved(infinite, wide, 90), infinite)
+        let square = CGSize(width: 500, height: 500)
+        XCTAssertEqual(resolved(square, wide, 90), square)
+    }
+
+    func testSidewaysStillCropKeepsTheFieldOfViewTheScreenShowed() {
+        let wideSource = CGRect(x: 0, y: 0, width: 4032, height: 3024)
+        let strip = CameraFrameLayout.aspectFillCrop(sourceExtent: wideSource, targetSize: CGSize(width: 393, height: 524))
+        XCTAssertEqual(strip.width, 2268, accuracy: 0.01)
+        XCTAssertEqual(strip.height, 3024, accuracy: 0.01)
+        XCTAssertEqual(strip.minX, 882, accuracy: 0.01)
+
+        let baked = CameraFrameLayout.stillViewport(
+            CGSize(width: 393, height: 524),
+            stillPixelSize: wideSource.size,
+            previewRotationAngle: 90
+        )
+        XCTAssertEqual(baked, CGSize(width: 524, height: 393))
+        let wide = CameraFrameLayout.aspectFillCrop(sourceExtent: wideSource, targetSize: baked)
+        XCTAssertEqual(wide.minX, 0, accuracy: 0.01)
+        XCTAssertEqual(wide.minY, 0, accuracy: 0.01)
+        XCTAssertEqual(wide.width, 4032, accuracy: 0.01)
+        XCTAssertEqual(wide.height, 3024, accuracy: 0.01)
+
+        let fullBleed = CameraFrameLayout.aspectFillCrop(sourceExtent: wideSource, targetSize: CGSize(width: 852, height: 393))
+        XCTAssertEqual(fullBleed.width, 4032, accuracy: 0.01)
+        XCTAssertEqual(fullBleed.height, 1859.83, accuracy: 0.01)
+        XCTAssertEqual(fullBleed.minY, 582.08, accuracy: 0.01)
+
+        let tallSource = CGRect(x: 0, y: 0, width: 3024, height: 4032)
+        let parity = CameraFrameLayout.aspectFillCrop(sourceExtent: tallSource, targetSize: CGSize(width: 393, height: 852))
+        XCTAssertEqual(parity.width, 1859.83, accuracy: 0.01)
+        XCTAssertEqual(parity.height, 4032, accuracy: 0.01)
+        let portraitHeld = CameraFrameLayout.aspectFillCrop(sourceExtent: tallSource, targetSize: CGSize(width: 393, height: 524))
+        XCTAssertEqual(portraitHeld.minX, 0, accuracy: 0.01)
+        XCTAssertEqual(portraitHeld.minY, 0, accuracy: 0.01)
+        XCTAssertEqual(portraitHeld.width, 3024, accuracy: 0.01)
+        XCTAssertEqual(portraitHeld.height, 4032, accuracy: 0.01)
+
+        let image = CIImage(color: CIColor(red: 0.2, green: 0.4, blue: 0.6)).cropped(to: CGRect(x: 0, y: 0, width: 400, height: 300))
+        let proWide = ProPhotoOutput.framedSource(image, viewportSize: CGSize(width: 524, height: 393), resolution: .mp12)
+        XCTAssertEqual(proWide.extent, CGRect(x: 0, y: 0, width: 400, height: 300))
+        let proStrip = ProPhotoOutput.framedSource(image, viewportSize: CGSize(width: 393, height: 524), resolution: .mp12)
+        XCTAssertEqual(proStrip.extent, CGRect(x: 0, y: 0, width: 224, height: 300))
+    }
+
     func testAspectFillImageExtentMatchesTargetForEverySourceShape() {
         let sources = [
             CGRect(x: 0, y: 0, width: 4000, height: 3000),

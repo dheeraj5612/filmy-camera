@@ -575,6 +575,7 @@ final class CameraViewModel: ObservableObject {
         let photo: CameraService.CapturedPhoto
         let recipe: FilmRecipe
         let finish: PhotoFinish
+        /// Crop target in the delivered still's own axes (see `stillViewport`).
         let viewport: CGSize
         let drawable: CGSize
         let grainSeed: UInt32
@@ -625,6 +626,8 @@ final class CameraViewModel: ObservableObject {
             return
         }
         let viewportSize = camera.previewViewportSize
+        // Preview-buffer orientation at shutter; paired with the viewport above.
+        let previewRotationAngleAtShutter = camera.previewRotationAngle
         // Use the drawable the viewfinder really rendered into: its scale
         // comes from the window's screen (which can differ from the main
         // screen on an external display) and it is bounded by the pixel
@@ -679,9 +682,13 @@ final class CameraViewModel: ObservableObject {
                     return
                 }
 
+                let stillViewport = Self.stillViewport(
+                    for: capturedPhoto, viewport: viewportSize,
+                    previewRotationAngle: previewRotationAngleAtShutter
+                )
                 succeeded = await self.developCapture(
                     CapturedWork(photo: capturedPhoto, recipe: recipe, finish: finish,
-                                 viewport: viewportSize, drawable: previewDrawableSize, grainSeed: grainSeed,
+                                 viewport: stillViewport, drawable: previewDrawableSize, grainSeed: grainSeed,
                                  dateStampEnabled: dateStampEnabled,
                                  dateStampText: dateStampEnabled
                                     ? G7DateStampRenderer.dateText(
@@ -708,16 +715,34 @@ final class CameraViewModel: ObservableObject {
         return status
     }
 
+    /// Converts the preview-axes viewport into the delivered still's axes,
+    /// measured from the still's own bytes. Returns the viewport unchanged
+    /// when the still or the angle cannot be classified.
+    private nonisolated static func stillViewport(
+        for photo: CameraService.CapturedPhoto,
+        viewport: CGSize,
+        previewRotationAngle: CGFloat?
+    ) -> CGSize {
+        CameraFrameLayout.stillViewport(
+            viewport,
+            stillPixelSize: CameraFrameLayout.orientedPixelSize(of: photo.fileData),
+            previewRotationAngle: previewRotationAngle
+        )
+    }
+
     func developCapturedPhotoForTesting(
         _ photo: CameraService.CapturedPhoto,
         recipe: FilmRecipe,
         camera: CameraService,
         photoLibrary: any PhotoSaving,
+        viewport: CGSize = CGSize(width: 100, height: 100),
+        previewRotationAngle: CGFloat? = nil,
         renderOverride: (@Sendable () -> RenderedPhoto?)? = nil
     ) async -> Bool {
         let work = CapturedWork(
             photo: photo, recipe: recipe, finish: .photo,
-            viewport: CGSize(width: 100, height: 100), drawable: CGSize(width: 100, height: 100),
+            viewport: Self.stillViewport(for: photo, viewport: viewport, previewRotationAngle: previewRotationAngle),
+            drawable: CGSize(width: 100, height: 100),
             grainSeed: 1, dateStampEnabled: false, dateStampText: nil
         )
         isCapturing = true
