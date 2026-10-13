@@ -204,6 +204,11 @@ ipa_uuid_records="$(macho_uuid_records "${ipa_executable_path}" "IPA app executa
 [[ -f "${app_path}/PrivacyInfo.xcprivacy" ]] || {
   die "IPA is missing PrivacyInfo.xcprivacy"
 }
+if [[ "${release_app_variant}" == "filmy" ]]; then
+  python3 "${root_dir}/scripts/monetization/sdk_gate.py" app --expect free "${app_path}" || {
+    die "IPA app carries Firebase, Google Sign-In, Google Mobile Ads or UMP residue"
+  }
+fi
 [[ -f "${app_path}/embedded.mobileprovision" ]] || {
   die "IPA has no embedded provisioning profile"
 }

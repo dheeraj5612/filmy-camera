@@ -307,6 +307,7 @@
 		B2D9E4F2B8B9F073CCD7EE73 /* SmartRecipeViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartRecipeViews.swift; sourceTree = "<group>"; };
 		B3588E469B6096B1E148A8DA /* ProPhotoEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProPhotoEncoder.swift; sourceTree = "<group>"; };
 		B9371851D50986E6A32A85A5 /* ProCaptureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProCaptureTests.swift; sourceTree = "<group>"; };
+		BD98F23F887189DDD3A1C42D /* Info.Monetized.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.Monetized.plist; sourceTree = "<group>"; };
 		BEEB5D8A13949EE626C3F118 /* CaptureModesEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureModesEngine.swift; sourceTree = "<group>"; };
 		C2E9A15C80F9345FFEE2F001 /* CameraManualControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraManualControls.swift; sourceTree = "<group>"; };
 		C2F0913587D09FEB4D0E8E14 /* RendererOutputBoundsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RendererOutputBoundsTests.swift; sourceTree = "<group>"; };
@@ -550,6 +551,7 @@
 		4F52F0F5AC3DCAC8953A19D9 /* Config */ = {
 			isa = PBXGroup;
 			children = (
+				BD98F23F887189DDD3A1C42D /* Info.Monetized.plist */,
 				52DCD57CAD80F1ADF9811134 /* Monetization.Debug.xcconfig */,
 				35E89121AC73A46BF5151D47 /* Monetization.Release.xcconfig */,
 				3DFF071A026A3FD3019DD0D5 /* Monetization.xcconfig */,
@@ -988,14 +990,14 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				INFOPLIST_FILE = FilmyCamera/Info.plist;
+				INFOPLIST_FILE = "$(FILMY_INFOPLIST_FILE)";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				OTHER_LDFLAGS = (
 					"$(inherited)",
-					"-ObjC",
+					"$(FILMY_MONETIZATION_LDFLAGS)",
 				);
 				SDKROOT = iphoneos;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -1014,14 +1016,14 @@
 				FILMY_APP_CODE_SIGN_IDENTITY = "Apple Development";
 				FILMY_APP_CODE_SIGN_STYLE = Automatic;
 				FILMY_APP_PROVISIONING_PROFILE_SPECIFIER = "";
-				INFOPLIST_FILE = FilmyCamera/Info.plist;
+				INFOPLIST_FILE = "$(FILMY_INFOPLIST_FILE)";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				OTHER_LDFLAGS = (
 					"$(inherited)",
-					"-ObjC",
+					"$(FILMY_MONETIZATION_LDFLAGS)",
 				);
 				PROVISIONING_PROFILE_SPECIFIER = "$(FILMY_APP_PROVISIONING_PROFILE_SPECIFIER)";
 				SDKROOT = iphoneos;

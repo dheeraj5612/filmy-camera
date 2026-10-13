@@ -1,3 +1,4 @@
+#if FILMY_MONETIZATION_SDKS
 @preconcurrency import AuthenticationServices
 import Combine
 import CryptoKit
@@ -238,3 +239,32 @@ private final class AppleReauthorization: NSObject,
         pending?.resume(with: result)
     }
 }
+#else
+@preconcurrency import AuthenticationServices
+import Combine
+import Foundation
+
+/// SDK-free stub: the free Release build links no sign-in SDK.
+@MainActor
+final class AuthenticationStore: ObservableObject {
+    struct Identity: Equatable, Sendable {
+        let uid: String
+        let name: String?
+        let email: String?
+    }
+
+    static let shared = AuthenticationStore()
+    let identity: Identity? = nil
+    let isConfigured = false
+    let isWorking = false
+    @Published var message: String?
+
+    func prepareApple(_ request: ASAuthorizationAppleIDRequest) {}
+    func completeApple(_ result: Result<ASAuthorization, Error>) async {}
+    func signInWithGoogle() async {}
+    func handle(_ url: URL) -> Bool { false }
+    func signOut() {}
+    func checkAppleCredential() async {}
+    func deleteAccount() async {}
+}
+#endif

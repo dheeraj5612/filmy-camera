@@ -1,3 +1,4 @@
+#if FILMY_MONETIZATION_SDKS
 import Combine
 @preconcurrency import GoogleMobileAds
 import SwiftUI
@@ -202,3 +203,30 @@ private struct AdMobBannerView: UIViewRepresentable {
         banner.removeFromSuperview()
     }
 }
+#else
+import Combine
+import SwiftUI
+
+/// SDK-free stub: the free Release build links no advertising SDK.
+@MainActor
+final class AdvertisingStore: ObservableObject {
+    static let shared = AdvertisingStore()
+    let isReady = false
+    let requiresPrivacyOptions = false
+    let revision = 0
+    let retry = 0
+    @Published var message: String?
+
+    func showPrivacyOptions() async {}
+    func refreshPrivacyOptions() async {}
+    func accessChanged() {}
+    func prepare() async {}
+}
+
+@MainActor
+struct MonetizationBanner: View {
+    var body: some View {
+        VStack(spacing: 0) {}
+    }
+}
+#endif

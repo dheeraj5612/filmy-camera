@@ -67,6 +67,9 @@ jobs:
           python3 scripts/release/validate-sdk.py --app-info \
             "${RUNNER_TEMP}/FilmyReleaseSDK/Build/Products/Release-iphoneos/FilmyCamera.app/Info.plist" \
             | tee "${RUNNER_TEMP}/release-sdk/built-app-sdk-check.txt"
+          python3 scripts/monetization/sdk_gate.py app --expect free \
+            "${RUNNER_TEMP}/FilmyReleaseSDK/Build/Products/Release-iphoneos/FilmyCamera.app" \
+            | tee "${RUNNER_TEMP}/release-sdk/sdk-gate.txt"
 
       - name: Compile all physical-device test branches without running them
         run: |

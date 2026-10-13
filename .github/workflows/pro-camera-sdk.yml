@@ -57,6 +57,9 @@ jobs:
               tail -120 "$RUNNER_TEMP/pro-camera/device-build.log"
               exit 1
             }
+          python3 scripts/monetization/sdk_gate.py app --expect free \
+            "$RUNNER_TEMP/ProCameraDevice/Build/Products/Release-iphoneos/FilmyCamera.app" \
+            | tee "$RUNNER_TEMP/pro-camera/sdk-gate.txt"
       - name: Run every method in the capture and retention regression suites
         run: |
           python3 - <<'PY'

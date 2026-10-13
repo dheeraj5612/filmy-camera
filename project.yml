@@ -91,6 +91,10 @@ targets:
     platform: iOS
     sources:
       - path: FilmyCamera
+        excludes:
+          - Info.plist
+      - path: FilmyCamera/Info.plist
+        buildPhase: none
     configFiles:
       Debug: Config/Monetization.Debug.xcconfig
       Release: Config/Monetization.Release.xcconfig
@@ -112,7 +116,8 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1,2"
         SWIFT_EMIT_LOC_STRINGS: YES
-        OTHER_LDFLAGS: ["$(inherited)", "-ObjC"]
+        OTHER_LDFLAGS: ["$(inherited)", "$(FILMY_MONETIZATION_LDFLAGS)"]
+        INFOPLIST_FILE: "$(FILMY_INFOPLIST_FILE)"
         SWIFT_OBJC_BRIDGING_HEADER: FilmyCamera/FilmyCamera-Bridging-Header.h
       configs:
         Release:
@@ -132,17 +137,6 @@ targets:
         FilmyLegalReady: "$(FILMY_LEGAL_READY)"
         FilmyMonetizationEnabled: "$(FILMY_MONETIZATION_ENABLED)"
         FilmyAdsEnabled: "$(FILMY_ADS_ENABLED)"
-        FilmyAdMobBannerID: "$(FILMY_ADMOB_BANNER_ID)"
-        GADApplicationIdentifier: "$(FILMY_ADMOB_APP_ID)"
-        GADDelayAppMeasurementInit: true
-        FirebaseAnalyticsCollectionEnabled: false
-        GOOGLE_ANALYTICS_DEFAULT_ALLOW_AD_PERSONALIZATION_SIGNALS: false
-        CFBundleURLTypes:
-          - CFBundleTypeRole: Editor
-            CFBundleURLSchemes:
-              - "$(FILMY_GOOGLE_REVERSED_CLIENT_ID)"
-        SKAdNetworkItems:
-          - SKAdNetworkIdentifier: cstr6suwn9.skadnetwork
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         NSMotionUsageDescription: Filmy Camera uses device orientation only to display the optional horizon level. Motion data is not saved or uploaded.

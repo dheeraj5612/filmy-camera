@@ -1,6 +1,8 @@
 import AuthenticationServices
 import StoreKit
+#if FILMY_MONETIZATION_SDKS
 import GoogleSignInSwift
+#endif
 import SwiftUI
 import UIKit
 
@@ -333,9 +335,11 @@ struct AccountSettingsSection: View {
                 .signInWithAppleButtonStyle(.white)
                 .frame(height: 48).clipShape(RoundedRectangle(cornerRadius: 8))
                 .disabled(authentication.isWorking)
+#if FILMY_MONETIZATION_SDKS
                 GoogleSignInButton { Task { await authentication.signInWithGoogle() } }
                 .frame(height: 48).disabled(authentication.isWorking)
                 .accessibilityIdentifier("membership-google-sign-in")
+#endif
             } else {
                 Text("Account sign-in is not available in this build. Guest access and App Store purchases do not require it.")
                     .font(.footnote).foregroundStyle(.secondary)

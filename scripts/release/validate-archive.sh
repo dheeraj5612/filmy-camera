@@ -167,10 +167,11 @@ if [[ "${release_app_variant}" == "filmy" ]]; then
     echo "Release archive must ship with FilmyAdsEnabled=NO (found: ${built_ads:-missing}); check Config/Monetization.Local.Release.xcconfig" >&2
     exit 1
   }
-  [[ "${built_admob_app_id}" =~ ^ca-app-pub-[0-9]{16}~[0-9]{10}$ ]] || {
-    echo "Release archive has a malformed GADApplicationIdentifier: ${built_admob_app_id:-missing}" >&2
+  [[ -z "${built_admob_app_id}" ]] || {
+    echo "Release archive must not carry GADApplicationIdentifier (found: ${built_admob_app_id})" >&2
     exit 1
   }
+  python3 "${root_dir}/scripts/monetization/sdk_gate.py" app --expect free "${app_path}" || exit 1
 fi
 
 [[ -f "${app_path}/embedded.mobileprovision" ]] || {
