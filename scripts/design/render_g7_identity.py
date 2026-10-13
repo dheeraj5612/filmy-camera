@@ -24,10 +24,17 @@ POLYGONS = (
 )
 
 
+def srgb_profile() -> bytes:
+    profile = bytearray(ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes())
+    # Bytes 24-35 are the ICC creation date; zeroed so PNGs are reproducible.
+    profile[24:36] = bytes(12)
+    return bytes(profile)
+
+
 def render():
     ASSETS.mkdir(parents=True, exist_ok=True)
     DOCS.mkdir(parents=True, exist_ok=True)
-    profile = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+    profile = srgb_profile()
     entries = []
     for filename, background, ink, appearance in VARIANTS:
         icon = Image.new("RGB", (4096, 4096), background)
@@ -41,11 +48,11 @@ def render():
         if appearance:
             entry["appearances"] = [{"appearance": "luminosity", "value": appearance}]
         entries.append(entry)
-    (ASSETS / "Contents.json").write_text(json.dumps({"images": entries, "info": {"author": "xcode", "version": 1}}, indent=2) + "\n")
-    (ASSETS.parent / "Contents.json").write_text('{"info":{"author":"xcode","version":1}}\n')
+    (ASSETS / "Contents.json").write_text(json.dumps({"images": entries, "info": {"author": "xcode", "version": 1}}, indent=2) + "\n", encoding="utf-8")
+    (ASSETS.parent / "Contents.json").write_text('{"info":{"author":"xcode","version":1}}\n', encoding="utf-8")
     paths = "".join('<polygon fill="' + ("#63FF9A" if index == 1 else "#D6FFE2") + '" points="' + " ".join(f"{x},{y}" for x, y in polygon) + '"/>' for index, polygon in enumerate(POLYGONS))
-    (DOCS / "icon-master.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"><title>G7X Camera Signal Frame icon</title><path fill="#090909" d="M0 0h1024v1024H0z"/><g transform="translate(92 128) scale(24)">' + paths + '</g></svg>\n')
-    (DOCS / "README.md").write_text("# G7 identity\n\nOriginal vector G 7 X monogram using Filmy's Signal Frame square terminals and 32-unit construction. G7 has a dark #090909 background, pastel mint #D6FFE2 G/X and neon green #63FF9A 7. Dark mode uses neon on black. Source: `scripts/design/render_g7_identity.py`. Run `python3 scripts/design/render_g7_identity.py` to export opaque 1024px standard, dark and tinted icons. iOS applies the corner mask. Filmy's existing icon is unchanged.\n")
+    (DOCS / "icon-master.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"><title>G7X Camera Signal Frame icon</title><path fill="#090909" d="M0 0h1024v1024H0z"/><g transform="translate(92 128) scale(24)">' + paths + '</g></svg>\n', encoding="utf-8")
+    (DOCS / "README.md").write_text("# G7 identity\n\nOriginal vector G 7 X monogram using Filmy's Signal Frame square terminals and 32-unit construction. G7 has a dark #090909 background, pastel mint #D6FFE2 G/X and neon green #63FF9A 7. Dark mode uses neon on black. Source: `scripts/design/render_g7_identity.py`. Run `python3 scripts/design/render_g7_identity.py` to export opaque 1024px standard, dark and tinted icons. iOS applies the corner mask. Filmy's existing icon is unchanged.\n", encoding="utf-8")
 
 if __name__ == "__main__":
     render()

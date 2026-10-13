@@ -10,13 +10,13 @@ import argparse
 import hashlib
 import json
 import re
+import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import urllib.robotparser
 from pathlib import Path
-from bs4 import BeautifulSoup
 
 AGENT = "FilmyRecipeResearch/1.0 (+https://github.com/dheeraj5612/filmy-camera)"
 ROOTS = {
@@ -35,6 +35,17 @@ KEYS = (
 )
 PATTERN = re.compile(r"(?<!\w)(" + "|".join(re.escape(k) for k in sorted(KEYS, key=len, reverse=True)) + r")\s*:\s*", re.I)
 
+def put_setting(settings, key, value):
+    # A repeated label with a different value must not silently collapse:
+    # keep it under an unknown key so normalization quarantines the record.
+    if key not in settings or settings[key] == value:
+        settings[key] = value
+        return
+    n = 1
+    while f"{key} (conflicting duplicate {n})" in settings:
+        n += 1
+    settings[f"{key} (conflicting duplicate {n})"] = value
+
 def text(node):
     return re.sub(r"\s+", " ", node.get_text(" ", strip=True)).strip()
 
@@ -45,9 +56,10 @@ def setting_blocks(root):
         for row in table.find_all("tr"):
             cells = row.find_all(["td", "th"])
             if len(cells) >= 2:
-                key = text(cells[0]).rstrip(":")
-                settings[key] = " | ".join(text(c) for c in cells[1:])[:180]
-        if len(settings) >= 5 and any(k.lower() == "film simulation" for k in settings):
+                key = text(cells[0]).rstrip(":")[:100]
+                put_setting(settings, key, " | ".join(text(c) for c in cells[1:])[:180])
+        distinct = [k for k in settings if " (conflicting duplicate " not in k]
+        if len(distinct) >= 5 and any(k.lower() == "film simulation" for k in distinct):
             # Keep unknown table fields so normalization can quarantine them,
             # instead of silently losing camera controls.
             blocks.append(settings)
@@ -62,11 +74,25 @@ def setting_blocks(root):
         prefix = line[:matches[0].start()].strip()
         if prefix and len(prefix) < 60:
             settings["Film Simulation"] = prefix
+        seeded = "Film Simulation" in settings
         for i, match in enumerate(matches):
             end = matches[i + 1].start() if i + 1 < len(matches) else len(line)
-            settings[match.group(1)] = line[match.end():end].strip()[:180]
+            value = line[match.end():end].strip()[:180]
+            if seeded and match.group(1) == "Film Simulation":
+                # The first explicit label replaces the prefix guess in place.
+                settings["Film Simulation"] = value
+                seeded = False
+            else:
+                put_setting(settings, match.group(1), value)
         blocks.append(settings)
     return blocks
+
+class _AllowlistRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        parts = urllib.parse.urlsplit(newurl)
+        if parts.scheme != "https" or parts.netloc not in ROOTS:
+            raise ValueError("Redirect outside source allowlist")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 class Fetcher:
     def __init__(self, delay):
@@ -95,20 +121,23 @@ class Fetcher:
         time.sleep(max(0, self.delay - (time.monotonic() - self.last)))
         self.last = time.monotonic()
         request = urllib.request.Request(url, headers={"User-Agent": AGENT})
-        with urllib.request.urlopen(request, timeout=35) as response:
-            if urllib.parse.urlsplit(response.url).netloc not in ROOTS:
+        opener = urllib.request.build_opener(_AllowlistRedirects)
+        with opener.open(request, timeout=35) as response:
+            final = urllib.parse.urlsplit(response.url)
+            if final.scheme != "https" or final.netloc not in ROOTS:
                 raise ValueError("Redirect outside source allowlist")
             payload = response.read(3_000_001)
             if len(payload) > 3_000_000:
                 raise ValueError("Page exceeds research byte limit")
             return payload
 
-def main():
+def main(argv=None):
+    from bs4 import BeautifulSoup
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=Path("public-settings-staging.json"))
     parser.add_argument("--delay", type=float, default=1.0)
     parser.add_argument("--limit", type=int, default=800)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     fetch = Fetcher(max(0.75, args.delay))
     candidates = {}
     failures = []
@@ -130,10 +159,16 @@ def main():
                     candidates[url]["indexes"].append(index)
             except Exception as error:
                 failures.append({"url": index, "reason": str(error)})
-    output = {"schemaVersion": 1, "records": [], "failures": failures, "candidateCount": len(candidates)}
+    if not candidates:
+        for failure in failures:
+            print(f"{failure['url']}: {failure['reason']}", file=sys.stderr)
+        sys.exit(f"No candidate pages found; {len(failures)} index failures. Not writing {args.output}")
+    output = {"schemaVersion": 1, "records": [], "failures": failures, "candidateCount": len(candidates),
+              "complete": False}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     print(f"Found {len(candidates)} unique public pages", flush=True)
-    for number, (url, candidate) in enumerate(list(candidates.items())[:max(0, min(args.limit, 900))]):
+    selected = list(candidates.items())[:max(0, min(args.limit, 900))]
+    for number, (url, candidate) in enumerate(selected):
         try:
             payload = fetch.get(url)
             soup = BeautifulSoup(payload, "html.parser")
@@ -154,9 +189,12 @@ def main():
             output["failures"].append({"url": url, "reason": str(error)})
         if number % 20 == 0:
             print(f"{number + 1}/{len(candidates)} pages; {len(output['records'])} candidate records", flush=True)
-            args.output.write_text(json.dumps(output, ensure_ascii=False, indent=2))
-    args.output.write_text(json.dumps(output, ensure_ascii=False, indent=2))
+            args.output.write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
+    output["complete"] = len(selected) == len(candidates)
+    args.output.write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"Saved {len(output['records'])} records; {len(output['failures'])} review items", flush=True)
+    if not output["records"]:
+        sys.exit(f"No records collected; see failures in {args.output}")
 
 if __name__ == "__main__":
     main()

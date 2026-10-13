@@ -17,6 +17,9 @@ import unicodedata
 from urllib.parse import urlsplit
 
 MAPPING_VERSION = 1
+ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_OUTPUT = ROOT / 'FilmyCamera/Resources/RecipeCatalog.json'
+DEFAULT_REPORT = ROOT / 'docs/recipe-catalog-audit.json'
 BASES = {
     'classic chrome':'classicChrome', 'classic negative':'classicNegative', 'classic neg':'classicNegative',
     'eterna bleach bypass':'eternaBleachBypass', 'eterna/cinema':'eterna', 'eterna':'eterna',
@@ -140,6 +143,13 @@ def normalize(record):
     publisher = {'film.recipes':'filmRecipes','fujixweekly.com':'fujiXWeekly'}.get(host)
     if publisher is None or urlsplit(record['url']).scheme != 'https':
         raise ValueError('Source not allowlisted')
+    for field, pattern in (('retrievedOn', r'[0-9]{4}-[0-9]{2}-[0-9]{2}'), ('sourceSHA256', r'[0-9a-f]{64}')):
+        field_value = record[field]
+        if not isinstance(field_value, str) or not re.fullmatch(pattern, field_value):
+            raise ValueError(f'Invalid {field}')
+    source_name = record['name']
+    if not isinstance(source_name, str) or not source_name.strip() or len(source_name.strip().encode('utf-8')) > 224:
+        raise ValueError('Invalid source name length')
     values = canonical_settings(record['settings'])
     notes = []
     base = parse_base(values['base'], notes)
@@ -235,13 +245,20 @@ def build(data):
                 mappingVersion=MAPPING_VERSION,calibration='Not calibrated to camera hardware; source settings are not pixel-match evidence.')
     return {'schemaVersion':1,'records':accepted},report
 
-def main(argv=None):
+def make_parser():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('staging',type=Path)
-    parser.add_argument('--output',type=Path,default=Path('FilmyCamera/Resources/RecipeCatalog.json'))
-    parser.add_argument('--report',type=Path,default=Path('docs/recipe-catalog-audit.json'))
-    args=parser.parse_args(argv)
-    catalog,report=build(json.loads(args.staging.read_text(encoding='utf-8')))
+    parser.add_argument('--output',type=Path,default=DEFAULT_OUTPUT)
+    parser.add_argument('--report',type=Path,default=DEFAULT_REPORT)
+    parser.add_argument('--allow-incomplete',action='store_true',help='accept a staging file marked incomplete')
+    return parser
+
+def main(argv=None):
+    args=make_parser().parse_args(argv)
+    staging=json.loads(args.staging.read_text(encoding='utf-8'))
+    if staging.get('complete') is False and not args.allow_incomplete:
+        sys.exit('Staging file is an incomplete or truncated crawl; refusing to replace the catalog')
+    catalog,report=build(staging)
     if not catalog['records']:
         sys.exit('No records accepted; refusing to overwrite catalog and report')
     outputs=[(args.output,catalog),(args.report,report)]
@@ -249,7 +266,7 @@ def main(argv=None):
     try:
         for (path,data),temp in zip(outputs,temps):
             path.parent.mkdir(parents=True,exist_ok=True)
-            temp.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+            temp.write_text(json.dumps(data,ensure_ascii=False,indent=2,allow_nan=False)+'\n',encoding='utf-8')
         for (path,_),temp in zip(outputs,temps):
             os.replace(temp,path)
     finally:

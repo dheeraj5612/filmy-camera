@@ -3,13 +3,22 @@ import contextlib
 import copy
 import hashlib
 import io
+import importlib.util
 import json
+import os
 from pathlib import Path
+import sys
 import tempfile
 import unittest
+import urllib.error
+import urllib.request
 import normalize_catalog as catalog
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / 'scripts/design'))
+import collect_public_settings as collect
+HAS_BS4 = importlib.util.find_spec('bs4') is not None
+HAS_PIL = importlib.util.find_spec('PIL') is not None
 
 class RecipeNormalizationTests(unittest.TestCase):
     def setUp(self):
@@ -184,6 +193,191 @@ class RecipeNormalizationTests(unittest.TestCase):
             self.assertEqual(json.loads(report.read_text(encoding='utf-8'))['accepted'], 1)
             self.assertEqual(sorted(p.name for p in output.parent.iterdir()), ['catalog.json', 'report.json'])
             self.assertEqual(output.read_bytes(), (json.dumps(written, ensure_ascii=False, indent=2) + '\n').encode('utf-8'))
+
+    def test_invalid_hash_date_and_name_length_are_quarantined(self):
+        bad = [('retrievedOn', None), ('retrievedOn', '2026-9-1'), ('retrievedOn', float('nan')),
+               ('sourceSHA256', None), ('sourceSHA256', 'abc'), ('sourceSHA256', 'z' * 64),
+               ('name', '\u6f22' * 90)]
+        for field, value in bad:
+            with self.subTest(field=field, value=repr(value)):
+                raw = self.raw(self.gold)
+                raw[field] = value
+                result, report = catalog.build({'records': [raw]})
+                self.assertEqual(len(result['records']), 0)
+                self.assertEqual(len(report['rejected']), 1)
+
+    def test_name_length_boundary_is_224_bytes(self):
+        for size, accepted in ((224, 1), (225, 0)):
+            with self.subTest(size=size):
+                raw = self.raw(self.gold)
+                raw['name'] = 'a' * size
+                result, report = catalog.build({'records': [raw]})
+                self.assertEqual((len(result['records']), len(report['rejected'])), (accepted, 1 - accepted))
+
+    def test_main_rejects_nan_without_touching_outputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            staging, output, report = tmp / 'staging.json', tmp / 'catalog.json', tmp / 'report.json'
+            staging.write_text('{"candidateCount": NaN, "records": [' + json.dumps(self.raw(self.gold)) + ']}', encoding='utf-8')
+            output.write_text('keep-catalog', encoding='utf-8')
+            report.write_text('keep-report', encoding='utf-8')
+            with contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaises(ValueError):
+                    catalog.main([str(staging), '--output', str(output), '--report', str(report)])
+            self.assertEqual(output.read_text(encoding='utf-8'), 'keep-catalog')
+            self.assertEqual(report.read_text(encoding='utf-8'), 'keep-report')
+            self.assertEqual(sorted(p.name for p in tmp.iterdir()), ['catalog.json', 'report.json', 'staging.json'])
+
+    def test_conflicting_duplicate_setting_is_rejected(self):
+        raw = self.raw(self.gold)
+        raw['settings']['Highlight (conflicting duplicate 1)'] = '-2'
+        result, report = catalog.build({'records': [raw]})
+        self.assertEqual((len(result['records']), len(report['rejected'])), (0, 1))
+
+    def test_main_refuses_incomplete_staging_and_default_paths_are_anchored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            staging, output, report = tmp / 'staging.json', tmp / 'catalog.json', tmp / 'report.json'
+            staging.write_text(json.dumps({'records': [self.raw(self.gold)], 'complete': False}), encoding='utf-8')
+            output.write_text('keep-catalog', encoding='utf-8')
+            with self.assertRaises(SystemExit) as raised:
+                catalog.main([str(staging), '--output', str(output), '--report', str(report)])
+            self.assertIn('incomplete', str(raised.exception.code))
+            self.assertEqual(output.read_text(encoding='utf-8'), 'keep-catalog')
+            self.assertFalse(report.exists())
+            with contextlib.redirect_stdout(io.StringIO()):
+                catalog.main([str(staging), '--output', str(output), '--report', str(report), '--allow-incomplete'])
+            self.assertEqual(json.loads(report.read_text(encoding='utf-8'))['accepted'], 1)
+            previous = Path.cwd()
+            os.chdir(tmp)
+            try:
+                args = catalog.make_parser().parse_args(['x'])
+            finally:
+                os.chdir(previous)
+            self.assertEqual(args.output, ROOT / 'FilmyCamera/Resources/RecipeCatalog.json')
+            self.assertEqual(args.report, ROOT / 'docs/recipe-catalog-audit.json')
+            self.assertTrue(args.output.is_absolute() and args.report.is_absolute())
+
+class CollectorTests(unittest.TestCase):
+    def test_put_setting_keeps_conflicting_repeats_under_numbered_keys(self):
+        settings = {}
+        collect.put_setting(settings, 'Highlight', '+1')
+        collect.put_setting(settings, 'Highlight', '+1')
+        self.assertEqual(settings, {'Highlight': '+1'})
+        collect.put_setting(settings, 'Highlight', '-2')
+        collect.put_setting(settings, 'Highlight', '0')
+        self.assertEqual(settings['Highlight (conflicting duplicate 1)'], '-2')
+        self.assertEqual(settings['Highlight (conflicting duplicate 2)'], '0')
+        self.assertEqual(settings['Highlight'], '+1')
+
+    def test_same_host_https_redirect_is_followed(self):
+        handler = collect._AllowlistRedirects()
+        req = urllib.request.Request('https://fujixweekly.com/a')
+        followed = handler.redirect_request(req, None, 302, 'Found', {}, 'https://fujixweekly.com/b')
+        self.assertEqual(followed.full_url, 'https://fujixweekly.com/b')
+
+    def test_redirects_leaving_the_https_allowlist_are_refused(self):
+        handler = collect._AllowlistRedirects()
+        for target in ('https://evil.example/', 'http://fujixweekly.com/x', 'https://www.fujixweekly.com/x'):
+            with self.subTest(target=target):
+                with self.assertRaises(ValueError):
+                    handler.redirect_request(None, None, 302, 'Found', {}, target)
+
+    @unittest.skipUnless(HAS_BS4, 'bs4 missing')
+    def test_conflicting_duplicate_settings_are_kept_for_quarantine(self):
+        from bs4 import BeautifulSoup
+        rows = ''.join(f'<tr><td>{k}</td><td>{v}</td></tr>' for k, v in (
+            ('Film Simulation', 'Classic Chrome'), ('Dynamic Range', 'DR200'), ('Highlight', '+1'),
+            ('Shadow', '-1'), ('Color', '+2'), ('Highlight', '-2'), ('Shadow', '-1')))
+        blocks = collect.setting_blocks(BeautifulSoup(f'<table>{rows}</table>', 'html.parser'))
+        self.assertEqual(len(blocks), 1)
+        self.assertEqual(blocks[0]['Highlight'], '+1')
+        self.assertEqual(blocks[0]['Highlight (conflicting duplicate 1)'], '-2')
+        self.assertEqual(sum(1 for k in blocks[0] if k.startswith('Shadow')), 1)
+        paragraph = ('<p>Classic Chrome Dynamic Range: DR200, Highlight: +1, Shadow: -1, Color: +2, '
+                     'White Balance: 5500K, White Balance: Auto</p>')
+        blocks = collect.setting_blocks(BeautifulSoup(paragraph, 'html.parser'))
+        self.assertEqual(blocks[0]['White Balance (conflicting duplicate 1)'], 'Auto')
+        labelled = ('<p>X-T3 recipe Film Simulation: Classic Chrome Dynamic Range: DR200 Highlight: +1 '
+                    'Shadow: -1 Color: +2 White Balance: Auto</p>')
+        blocks = collect.setting_blocks(BeautifulSoup(labelled, 'html.parser'))
+        self.assertEqual(blocks[0]['Film Simulation'], 'Classic Chrome')
+        self.assertFalse(any('(conflicting duplicate' in k for k in blocks[0]))
+        self.assertEqual(list(blocks[0])[0], 'Film Simulation')
+        repeated = labelled.replace('White Balance: Auto', 'White Balance: Auto Film Simulation: Velvia')
+        blocks = collect.setting_blocks(BeautifulSoup(repeated, 'html.parser'))
+        self.assertEqual(list(blocks[0])[0], 'Film Simulation')
+        self.assertEqual(blocks[0]['Film Simulation'], 'Classic Chrome')
+        self.assertEqual(blocks[0]['Film Simulation (conflicting duplicate 1)'], 'Velvia')
+        mixed = ('<table>' + ''.join(f'<tr><td>{k}</td><td>{v}</td></tr>' for k, v in (
+            ('Film Simulation', 'Classic Chrome'), ('Film Simulation', 'Velvia'), ('Highlight', '+1'),
+            ('Shadow', '-1'), ('Color', '+2'))) + '</table>'
+            '<p>Classic Chrome Dynamic Range: DR200, Highlight: +1, Shadow: -1, Color: +2, White Balance: Auto</p>')
+        blocks = collect.setting_blocks(BeautifulSoup(mixed, 'html.parser'))
+        self.assertEqual(len(blocks), 1)
+        self.assertIn('Dynamic Range', blocks[0])
+
+    @unittest.skipUnless(HAS_BS4, 'bs4 missing')
+    def test_main_exits_nonzero_without_overwriting_when_every_fetch_fails(self):
+        class Failing:
+            def __init__(self, delay):
+                pass
+            def get(self, url, robots=False):
+                raise urllib.error.URLError('offline')
+        original = collect.Fetcher
+        collect.Fetcher = Failing
+        self.addCleanup(setattr, collect, 'Fetcher', original)
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / 'o.json'
+            output.write_text('keep', encoding='utf-8')
+            with self.assertRaises(SystemExit) as raised:
+                collect.main(['--output', str(output)])
+            self.assertIn('No candidate pages found', str(raised.exception.code))
+            self.assertEqual(output.read_text(encoding='utf-8'), 'keep')
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                with self.assertRaises(SystemExit):
+                    collect.main(['--output', str(output)])
+            self.assertIn('offline', err.getvalue())
+
+    @unittest.skipUnless(HAS_BS4, 'bs4 missing')
+    def test_limit_truncated_crawl_is_marked_incomplete(self):
+        index = '<div class="entry-content">' + ''.join(
+            f'<a href="https://fujixweekly.com/2026/01/0{n}/r{n}/">Recipe {n}</a>' for n in (1, 2)) + '</div>'
+        class Stub:
+            def __init__(self, delay):
+                pass
+            def get(self, url, robots=False):
+                if '/20' in url:
+                    raise ValueError('Article content missing')
+                return index.encode()
+        original = collect.Fetcher
+        collect.Fetcher = Stub
+        self.addCleanup(setattr, collect, 'Fetcher', original)
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / 'o.json'
+            with contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    collect.main(['--output', str(output), '--limit', '1'])
+            data = json.loads(output.read_text(encoding='utf-8'))
+            self.assertIs(data['complete'], False)
+            self.assertEqual(data['candidateCount'], 2)
+            with contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    collect.main(['--output', str(output), '--limit', '5'])
+            self.assertIs(json.loads(output.read_text(encoding='utf-8'))['complete'], True)
+
+class IdentityRenderTests(unittest.TestCase):
+    @unittest.skipUnless(HAS_PIL, 'Pillow missing')
+    def test_icon_profile_is_reproducible(self):
+        import time
+        import render_identity
+        import render_g7_identity
+        for module in (render_identity, render_g7_identity):
+            with self.subTest(module=module.__name__):
+                first = module.srgb_profile()
+                time.sleep(1.1)
+                self.assertEqual(first, module.srgb_profile())
+                self.assertEqual(first[24:36], bytes(12))
 
 if __name__ == '__main__':
     unittest.main()
