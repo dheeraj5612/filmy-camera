@@ -48,8 +48,10 @@ final class CaptureModesModel: ObservableObject {
         open(requestedMode, resuming: true)
     }
 
-    func open(_ mode: CaptureMode, resuming: Bool = false) {
+    func open(_ requested: CaptureMode, resuming: Bool = false) {
         guard foreground, (resuming || !state.phase.isBusy), !requestingPermission else { return }
+        let supported = CaptureModesEngine.supportedModes.contains(requested)
+        let mode: CaptureMode = supported ? requested : .photo
         requestedMode = mode
         requestingPermission = true
         let id = UUID()
@@ -78,6 +80,7 @@ final class CaptureModesModel: ObservableObject {
                 errorMessage = "Microphone access is disabled. Video will record silently; enable Microphone access in Settings to include audio."
             }
             updateOrientation()
+            if !supported { errorMessage = "\(requested.title) is not available on this device. Photo opened instead." }
             engine.configure(mode: mode, microphone: audioAllowed)
         }
     }

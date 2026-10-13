@@ -314,12 +314,18 @@ enum CaptureImageProcessor {
         exporter.outputURL = destination
         exporter.outputFileType = .mov
         let box = ExportBox(exporter)
-        try await withTaskCancellationHandler {
-            try Task.checkCancellation()
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                box.start(continuation)
-            }
-        } onCancel: { box.cancel() }
+        do {
+            try await withTaskCancellationHandler {
+                try Task.checkCancellation()
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    box.start(continuation)
+                }
+            } onCancel: { box.cancel() }
+        } catch {
+            // A deliberate pause cancels the export; report it as cancellation, not as a failure.
+            if Task.isCancelled { throw CancellationError() }
+            throw error
+        }
         try Task.checkCancellation()
     }
 }

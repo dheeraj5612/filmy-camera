@@ -264,7 +264,13 @@ struct CaptureModesScreen: View {
                     ProgressView()
                     Button("Pause") { model.engine.pause(reason: "Processing paused. Retry it from Captures.") }.font(.caption)
                 } else if model.state.phase == .unavailable || model.state.phase == .stopped {
-                    Button("Reopen mode") { model.open(model.requestedMode) }.font(.caption)
+                    if cameraDenied {
+                        Button("Open Settings") {
+                            if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                        }.font(.caption).frame(minHeight: 44).accessibilityIdentifier("capture-modes-open-settings")
+                    } else {
+                        Button("Reopen mode") { model.open(model.requestedMode) }.font(.caption)
+                    }
                 } else {
                     Button { model.engine.inspectScene() } label: { Label("Read scene", systemImage: "text.viewfinder").font(.caption) }
                         .disabled(!model.canConfigure || model.state.mode.isVideo)
@@ -272,6 +278,10 @@ struct CaptureModesScreen: View {
                 }
             }.frame(maxWidth: .infinity)
         }.padding(.horizontal, 16).padding(.vertical, 10).background(.black)
+    }
+
+    private var cameraDenied: Bool {
+        AVCaptureDevice.authorizationStatus(for: .video) == .denied
     }
 
     private func consumeLaunch() {

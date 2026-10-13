@@ -205,6 +205,7 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
             state.maximumZoom = Double(min(selected.maxAvailableVideoZoomFactor, 10))
             state.minimumExposure = Double(selected.minExposureTargetBias)
             state.maximumExposure = Double(selected.maxExposureTargetBias)
+            state.exposure = Double(min(max(selected.exposureTargetBias, selected.minExposureTargetBias), selected.maxExposureTargetBias))
             state.zoom = Double(selected.videoZoomFactor)
             if #available(iOS 18.0, *) { installControls(selected) }
             session.commitConfiguration()
@@ -330,12 +331,15 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
 
     func focus(_ point: CGPoint) {
         queue.async { [self] in
-            guard state.phase == .ready, let device else { return }
+            let video = state.mode.isVideo
+            // Spatial recording keeps its stereo focus: every control is off there (see publish()).
+            guard state.phase == .ready || (state.mode == .filmVideo && state.phase == .recording), let device else { return }
             do {
                 try device.lockForConfiguration()
                 defer { device.unlockForConfiguration() }
                 if device.isFocusPointOfInterestSupported { device.focusPointOfInterest = point }
-                if device.isFocusModeSupported(.autoFocus) { device.focusMode = .autoFocus }
+                if video, device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
+                else if device.isFocusModeSupported(.autoFocus) { device.focusMode = .autoFocus }
                 if device.isExposurePointOfInterestSupported { device.exposurePointOfInterest = point }
                 if device.isExposureModeSupported(.continuousAutoExposure) { device.exposureMode = .continuousAutoExposure }
             } catch { emit(.failed(error.localizedDescription)) }
@@ -565,7 +569,7 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
             session.stopRunning()
         }
         if sequence?.shouldFinish == true { finishSequence() }
-        if photoDelegate == nil, processing == nil, !movie.isRecording { state.phase = .stopped }
+        if photoDelegate == nil, processing == nil, !movie.isRecording, !pendingMovieValidation { state.phase = .stopped }
         state.message = reason
         publish()
     }
@@ -674,13 +678,13 @@ extension CaptureModesEngine: AVCaptureFileOutputRecordingDelegate {
             && durationSeconds.isFinite && durationSeconds > 0
     }
 
-    private static func movieIsRecoverable(at url: URL) async -> Bool {
+    private static func movieIsRecoverable(at url: URL) async -> Bool? {
         let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
         let size: Int64 = (attributes?[.size] as? NSNumber)?.int64Value ?? 0
         guard size > 0 else { return false }
         // Unstructured race: a task group would still await a load that ignores
         // cancellation, and shutdown waits on this verdict.
-        return await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+        return await withCheckedContinuation { (continuation: CheckedContinuation<Bool?, Never>) in
             let gate = MovieValidationGate(continuation)
             let work = Task.detached {
                 let asset = AVURLAsset(url: url)
@@ -695,7 +699,7 @@ extension CaptureModesEngine: AVCaptureFileOutputRecordingDelegate {
             Task.detached {
                 try? await Task.sleep(nanoseconds: 15_000_000_000)
                 work.cancel()
-                gate.finish(false)
+                gate.finish(nil)
             }
         }
     }
@@ -703,11 +707,11 @@ extension CaptureModesEngine: AVCaptureFileOutputRecordingDelegate {
     /// Resumes the validation continuation exactly once, whichever side finishes first.
     private final class MovieValidationGate: @unchecked Sendable {
         private let lock = NSLock()
-        private var continuation: CheckedContinuation<Bool, Never>?
+        private var continuation: CheckedContinuation<Bool?, Never>?
 
-        init(_ continuation: CheckedContinuation<Bool, Never>) { self.continuation = continuation }
+        init(_ continuation: CheckedContinuation<Bool?, Never>) { self.continuation = continuation }
 
-        func finish(_ value: Bool) {
+        func finish(_ value: Bool?) {
             lock.lock()
             let pending = continuation
             continuation = nil
@@ -749,7 +753,7 @@ extension CaptureModesEngine: AVCaptureFileOutputRecordingDelegate {
             publish()
             Task.detached { [self] in
                 let ok = await CaptureModesEngine.movieIsRecoverable(at: outputFileURL)
-                queue.async { [self] in finishMovie(at: outputFileURL, recoverable: ok, early: true, message: message) }
+                queue.async { [self] in finishMovie(at: outputFileURL, recoverable: ok ?? false, early: true, message: message, unverified: ok == nil) }
             }
         }
     }
@@ -757,7 +761,7 @@ extension CaptureModesEngine: AVCaptureFileOutputRecordingDelegate {
     /// Single terminal handler per recording (AVFoundation calls didFinish once; the callback hops here
     /// exactly once). Recoverable recordings take the success path; others take fail(). The
     /// `originals.isEmpty` guard makes a repeated callback a no-op, so one capture never emits both.
-    private func finishMovie(at outputFileURL: URL, recoverable: Bool, early: Bool, message: String?) {
+    private func finishMovie(at outputFileURL: URL, recoverable: Bool, early: Bool, message: String?, unverified: Bool = false) {
         defer {
             if !wantsRunning, session.isRunning { session.stopRunning() }
             let waiters = shutdownWaiters; shutdownWaiters = []
@@ -769,7 +773,15 @@ extension CaptureModesEngine: AVCaptureFileOutputRecordingDelegate {
         movieTimer?.cancel(); movieTimer = nil; movieStart = nil
         guard var record = media, record.originals.isEmpty else { settle(); return }
         do {
-            guard recoverable else { throw CaptureModesError.unavailable(message ?? "Movie recording failed. Any recoverable original remains in Captures.") }
+            guard recoverable else {
+                // A validation timeout is unknown, not unplayable: keep the folder so retry() can decide.
+                if unverified {
+                    media = nil
+                    let reason = message ?? "Movie recording failed."
+                    throw CaptureModesError.unavailable("\(reason) The recording could not be checked; any recoverable original remains in Captures.")
+                }
+                throw CaptureModesError.unavailable(message ?? "Movie recording failed. Any recoverable original remains in Captures.")
+            }
             record.originals = [outputFileURL.lastPathComponent]
             if early { record.notes.append("Recording stopped early; the original was kept.") }
             try CaptureMediaStore.persist(record)

@@ -83,6 +83,40 @@ final class CaptureModesProcessingTests: XCTestCase {
         XCTAssertEqual(try CaptureMediaStore.load(id).originals, ["original-000.heic"])
     }
 
+    func testRecoverableOriginalsSkipsEmptyAndNonOriginalFilesInNameOrder() throws {
+        let id = UUID()
+        defer { try? CaptureMediaStore.delete(id) }
+        let bytes = Data([1, 2, 3])
+        try bytes.write(to: CaptureMediaStore.file("original-001.heic", in: id))
+        try bytes.write(to: CaptureMediaStore.file("original-000.heic", in: id))
+        try bytes.write(to: CaptureMediaStore.file("filmy-000.heic", in: id))
+        try Data().write(to: CaptureMediaStore.file("original-002.heic", in: id))
+        let media = CaptureMedia(id: id, mode: .burst, createdAt: Date(), recipeName: "Test")
+        let names = try CaptureMediaStore.recoverableOriginals(media).map(\.lastPathComponent)
+        XCTAssertEqual(names, ["original-000.heic", "original-001.heic"])
+    }
+
+    func testRecentToleratesADamagedSiblingManifest() throws {
+        let good = UUID()
+        let bad = UUID()
+        defer { try? CaptureMediaStore.delete(good); try? CaptureMediaStore.delete(bad) }
+        try CaptureMediaStore.persist(CaptureMedia(id: good, mode: .photo, createdAt: Date(), recipeName: "Test"))
+        try Data("not json".utf8).write(to: CaptureMediaStore.file("capture.json", in: bad))
+        let ids = try CaptureMediaStore.recent().map(\.id)
+        XCTAssertTrue(ids.contains(good))
+        XCTAssertFalse(ids.contains(bad))
+    }
+
+    func testRecipeSidecarRoundTrips() throws {
+        let id = UUID()
+        defer { try? CaptureMediaStore.delete(id) }
+        let recipe = FilmRecipe.builtIns[0]
+        try CaptureMediaStore.saveRecipe(recipe, in: id)
+        let loaded = try CaptureMediaStore.loadRecipe(in: id)
+        XCTAssertEqual(loaded.id, recipe.id)
+        XCTAssertEqual(loaded.name, recipe.name)
+    }
+
     func testUnfinalizedMoviesAreNotPromotedToDevelopedOrSpatial() async throws {
         for mode in [CaptureMode.filmVideo, .spatialVideo] {
             let id = UUID()
