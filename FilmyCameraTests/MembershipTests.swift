@@ -292,13 +292,27 @@ final class MembershipStoreTests: XCTestCase {
     }
 
     func testUnresolvedOrExpiredAccessCannotCaptureAndDoesNotShowAds() {
-        for access in [MembershipStore.Access.checking, .unavailable, .premium(until: .distantPast, trial: true)] {
+        for access in [MembershipStore.Access.checking, .premium(until: .distantPast, trial: true)] {
             let store = MembershipStore(persistence: MemoryPhotoQuotaPersistence())
             store.setAccessForTesting(access)
             XCTAssertFalse(store.isPremium)
             XCTAssertNil(store.reserveCapture())
             XCTAssertFalse(store.mayShowAds)
         }
+    }
+
+    func testUnavailableAccessUsesFreeAllowanceWithoutGrantingPro() {
+        let store = MembershipStore(persistence: MemoryPhotoQuotaPersistence())
+        store.setAccessForTesting(.unavailable)
+        for _ in 0..<MembershipPolicy.dailyPhotoLimit {
+            let permit = store.reserveCapture()
+            XCTAssertNotNil(permit?.chargedDay)
+        }
+        XCTAssertNil(store.reserveCapture())
+        XCTAssertNotNil(store.notice)
+        XCTAssertFalse(store.isPremium)
+        XCTAssertFalse(store.mayShowAds)
+        XCTAssertFalse(store.allowsRecipe("classic-chrome"))
     }
 
     func testStorageFailureBlocksInsteadOfResettingAllowance() {

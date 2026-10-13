@@ -153,7 +153,10 @@ struct MembershipPaywall: View {
                 .accessibilityIdentifier("membership-purchase")
                 if !membership.entitlementsResolved {
                     HStack {
-                        Text("Checking your membership status.").font(.footnote).foregroundStyle(.secondary)
+                        Text(membership.access == .unavailable
+                             ? "Membership status could not be confirmed. Try Restore Purchases."
+                             : "Checking your membership status.")
+                            .font(.footnote).foregroundStyle(.secondary)
                         Button("Retry") { Task { await membership.refresh() } }
                             .font(.footnote)
                     }
@@ -214,15 +217,36 @@ struct PremiumFeatureGate<Content: View>: View {
 
 struct MembershipStatusBar: View {
     @ObservedObject private var membership = MembershipStore.shared
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    private var allowanceCaption: some View {
+        // .unavailable shoots on the free allowance, so it shows the count too.
+        let showsCount = membership.entitlementsResolved || membership.access == .unavailable
+        return Text(showsCount ? "\(membership.remainingPhotos) of 10 photos left today" : "Checking App Store access")
+            .font(.caption.weight(.medium)).accessibilityIdentifier("membership-photo-allowance")
+    }
+
+    private var upgradeButton: some View {
+        Button("Go Pro") { MembershipPresentation.showPaywall() }
+            .font(.caption.bold()).frame(minHeight: 44).accessibilityIdentifier("membership-upgrade")
+    }
 
     var body: some View {
         if !membership.hasFullAccess {
-            HStack(spacing: 12) {
-                Text(membership.entitlementsResolved ? "\(membership.remainingPhotos) of 10 photos left today" : "Checking App Store access")
-                    .font(.caption.weight(.medium)).accessibilityIdentifier("membership-photo-allowance")
-                Spacer(minLength: 4)
-                Button("Go Pro") { MembershipPresentation.showPaywall() }
-                    .font(.caption.bold()).frame(minHeight: 44).accessibilityIdentifier("membership-upgrade")
+            Group {
+                if typeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 4) {
+                        allowanceCaption
+                        upgradeButton
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    HStack(spacing: 12) {
+                        allowanceCaption
+                        Spacer(minLength: 4)
+                        upgradeButton
+                    }
+                }
             }
             .padding(.horizontal, 20)
             .background(FilmyTheme.background)
@@ -235,6 +259,7 @@ struct AccountSettingsSection: View {
     @ObservedObject private var authentication = AuthenticationStore.shared
     @ObservedObject private var advertising = AdvertisingStore.shared
     @State private var isConfirmingDeletion = false
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -249,10 +274,15 @@ struct AccountSettingsSection: View {
                     .font(.callout).foregroundStyle(.secondary)
                 Button("Explore Filmy Pro") { MembershipPresentation.showPaywall() }.buttonStyle(.borderedProminent)
             }
-            HStack(spacing: 16) {
-                Button("Restore Purchases") { Task { await membership.restore() } }
-                    .disabled(membership.isWorking)
-                Button("Manage Subscription") { Task { await MembershipPresentation.manageSubscription() } }
+            let restoreButton = Button("Restore Purchases") { Task { await membership.restore() } }
+                .disabled(membership.isWorking)
+            let manageButton = Button("Manage Subscription") { Task { await MembershipPresentation.manageSubscription() } }
+            Group {
+                if typeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 8) { restoreButton; manageButton }
+                } else {
+                    HStack(spacing: 16) { restoreButton; manageButton }
+                }
             }
             .font(.footnote).frame(minHeight: 44)
             if let message = membership.purchaseMessage { Text(message).font(.footnote).foregroundStyle(.secondary) }
@@ -282,9 +312,14 @@ struct AccountSettingsSection: View {
         if let identity = authentication.identity {
             Text(identity.name ?? identity.email ?? "Signed in").font(.headline)
             if let email = identity.email, identity.name != nil { Text(email).font(.footnote).foregroundStyle(.secondary) }
-            HStack(spacing: 24) {
-                Button("Sign Out", action: authentication.signOut)
-                Button("Delete Account", role: .destructive) { isConfirmingDeletion = true }
+            let signOutButton = Button("Sign Out", action: authentication.signOut)
+            let deleteButton = Button("Delete Account", role: .destructive) { isConfirmingDeletion = true }
+            Group {
+                if typeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 8) { signOutButton; deleteButton }
+                } else {
+                    HStack(spacing: 24) { signOutButton; deleteButton }
+                }
             }
             .frame(minHeight: 44).disabled(authentication.isWorking)
         } else {

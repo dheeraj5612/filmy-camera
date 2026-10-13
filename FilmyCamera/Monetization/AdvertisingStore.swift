@@ -12,17 +12,34 @@ final class AdvertisingStore: ObservableObject {
     @Published private(set) var isReady = false
     @Published private(set) var requiresPrivacyOptions = false
     @Published private(set) var revision = 0
+    /// Bumped when a prepare() call arrived mid-attempt, so the live banner re-runs it.
+    @Published private(set) var retry = 0
     @Published var message: String?
     private var isPreparing = false
+    private var droppedCall = false
     private var didUpdateConsent = false
     private var didStartSDK = false
+
+    /// Ends an attempt and replays a prepare() call that arrived while it ran.
+    private func finishAttempt() {
+        isPreparing = false
+        if droppedCall {
+            droppedCall = false
+            retry += 1
+        }
+    }
 
     func prepare() async {
         guard !MonetizationConfiguration.isAutomatedTest,
               MonetizationConfiguration.adsConfigured,
-              MembershipStore.shared.mayShowAds, !isPreparing else { return }
+              MembershipStore.shared.mayShowAds else { return }
+        guard !isPreparing else {
+            // Do not lose the call: a cancelled attempt may still be unwinding.
+            droppedCall = true
+            return
+        }
         isPreparing = true
-        defer { isPreparing = false }
+        defer { finishAttempt() }
         if !didUpdateConsent {
             do {
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -31,10 +48,27 @@ final class AdvertisingStore: ObservableObject {
                         else { continuation.resume() }
                     }
                 }
-                didUpdateConsent = true
                 requiresPrivacyOptions = ConsentInformation.shared.privacyOptionsRequirementStatus == .required
-                guard MembershipStore.shared.mayShowAds else { return }
-                try await ConsentForm.loadAndPresentIfRequired(from: MembershipPresentation.topController)
+                // Never present over the camera after the banner host left the screen.
+                // Bailing out here leaves the form owed for the next visit.
+                guard !Task.isCancelled, MembershipStore.shared.mayShowAds,
+                      MembershipPresentation.scene != nil else { return }
+                if ConsentInformation.shared.consentStatus == .required {
+                    let form: ConsentForm = try await withCheckedThrowingContinuation { continuation in
+                        let completion: @Sendable (ConsentForm?, Error?) -> Void = { form, error in
+                            if let error { continuation.resume(throwing: error) }
+                            else if let form { continuation.resume(returning: form) }
+                            else { continuation.resume(throwing: CancellationError()) }
+                        }
+                        ConsentForm.load(with: completion)
+                    }
+                    // The load is network bound and ignores cancellation: re-check
+                    // with no suspension before presenting.
+                    guard !Task.isCancelled, MembershipStore.shared.mayShowAds,
+                          MembershipPresentation.scene != nil else { return }
+                    try await form.present(from: MembershipPresentation.topController)
+                }
+                didUpdateConsent = true
             } catch {
                 // Fail closed, even if a previous session had consent. The
                 // camera remains usable and a later visit can retry.
@@ -48,6 +82,7 @@ final class AdvertisingStore: ObservableObject {
             isReady = false
             return
         }
+        guard !Task.isCancelled else { return }
         if !didStartSDK {
             // Keep SDK startup serialized. Do not initialize any mediation SDK.
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
@@ -55,6 +90,7 @@ final class AdvertisingStore: ObservableObject {
             }
             didStartSDK = true
         }
+        guard !Task.isCancelled else { return }
         isReady = MembershipPolicy.showsAds(
             entitlementsResolved: MembershipStore.shared.entitlementsResolved,
             premium: MembershipStore.shared.isPremium,
@@ -68,7 +104,7 @@ final class AdvertisingStore: ObservableObject {
               MonetizationConfiguration.adsConfigured, !isPreparing, !didUpdateConsent else { return }
         guard MembershipStore.shared.isPremium else { return }
         isPreparing = true
-        defer { isPreparing = false }
+        defer { finishAttempt() }
         do {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 ConsentInformation.shared.requestConsentInfoUpdate(with: RequestParameters()) { error in
@@ -94,13 +130,19 @@ final class AdvertisingStore: ObservableObject {
         isPreparing = true
         isReady = false
         revision += 1 // Dispose any banner that was loaded under the old choices.
-        defer { isPreparing = false }
+        defer { finishAttempt() }
         do {
             try await ConsentForm.presentPrivacyOptionsForm(from: MembershipPresentation.topController)
             requiresPrivacyOptions = ConsentInformation.shared.privacyOptionsRequirementStatus == .required
             isReady = didStartSDK && MembershipStore.shared.mayShowAds && ConsentInformation.shared.canRequestAds
         } catch { message = "Privacy options could not be opened. Please try again." }
     }
+}
+
+private struct BannerKey: Hashable {
+    let access: MembershipStore.Access
+    let phase: ScenePhase
+    let retry: Int
 }
 
 @MainActor
@@ -123,9 +165,9 @@ struct MonetizationBanner: View {
                 .accessibilityIdentifier("free-tier-advertisement")
             }
         }
-        .task(id: membership.access) { await advertising.prepare() }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active { Task { await advertising.prepare() } }
+        .task(id: BannerKey(access: membership.access, phase: scenePhase, retry: advertising.retry)) {
+            guard scenePhase == .active else { return }
+            await advertising.prepare()
         }
     }
 }

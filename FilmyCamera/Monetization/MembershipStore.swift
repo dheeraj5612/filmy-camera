@@ -50,7 +50,7 @@ final class MembershipStore: ObservableObject {
                 ? .free : .premium(until: .distantFuture, trial: false)
         }
         #endif
-        refreshQuota()
+        if monetizationEnabled { refreshQuota() }
     }
 
     var isPremium: Bool {
@@ -267,7 +267,16 @@ final class MembershipStore: ObservableObject {
         do {
             try await AppStore.sync()
             await refresh()
-            purchaseMessage = isPremium ? "Your subscription is restored." : "No active subscription was found for this Apple Account."
+            let message: String
+            switch access {
+            case .premium where isPremium: message = "Your subscription is restored."
+            case .unavailable: message = "Your App Store receipt could not be verified. Try again later."
+            case .checking: message = "Your App Store access is still being checked. Try again shortly."
+            default: message = "No active subscription was found for this Apple Account."
+            }
+            purchaseMessage = message
+        } catch StoreKitError.userCancelled {
+            // The user dismissed the Apple Account prompt; nothing to report.
         } catch { purchaseMessage = "Purchases could not be restored. Check your Apple Account and connection, then try again." }
     }
 
@@ -290,7 +299,10 @@ final class MembershipStore: ObservableObject {
     }
 
     func reserveCapture() -> CapturePermit? {
-        guard entitlementsResolved else {
+        // A completed read that could not confirm Pro (.unavailable) falls back to the
+        // free allowance; .checking and expired premium stay blocked.
+        let mayUseFreeAllowance = entitlementsResolved || access == .unavailable
+        guard mayUseFreeAllowance else {
             notice = "Your App Store access is being checked. Please try again shortly."
             return nil
         }
@@ -305,7 +317,11 @@ final class MembershipStore: ObservableObject {
             return nil
         }
         guard let day = next.reserve(at: Date()) else {
-            MembershipPresentation.showPaywall(feature: .unlimitedPhotos)
+            if access == .unavailable {
+                notice = "Today's free photos are used up. Your App Store access could not be confirmed; try Restore Purchases in Account."
+            } else {
+                MembershipPresentation.showPaywall(feature: .unlimitedPhotos)
+            }
             return nil
         }
         do { try persistence.save(next) }

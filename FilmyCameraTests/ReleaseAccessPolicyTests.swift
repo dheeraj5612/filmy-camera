@@ -27,13 +27,35 @@ final class ReleaseAccessPolicyTests: XCTestCase {
         try persistence.save(exhausted)
         let store = MembershipStore(persistence: persistence, useStoreKitForTesting: true,
                                     monetizationEnabled: false)
-        XCTAssertEqual(store.remainingPhotos, 0)
+        XCTAssertEqual(store.remainingPhotos, MembershipPolicy.dailyPhotoLimit)
         for _ in 0..<20 {
             let permit = try XCTUnwrap(store.reserveCapture())
             XCTAssertNil(permit.chargedDay)
             store.finishCapture(permit, succeeded: true)
         }
         XCTAssertEqual(try persistence.load()?.remaining, 0)
+    }
+
+    private final class CountingPersistence: PhotoQuotaPersistence {
+        var calls = 0
+        func load() throws -> DailyPhotoQuota? { calls += 1; return nil }
+        func save(_ quota: DailyPhotoQuota) throws { calls += 1 }
+    }
+
+    func testFreeReleaseNeverTouchesQuotaStorage() async throws {
+        let persistence = CountingPersistence()
+        let store = MembershipStore(persistence: persistence, useStoreKitForTesting: true,
+                                    monetizationEnabled: false)
+        await store.start()
+        await store.refresh()
+        for index in 0..<6 {
+            let permit = try XCTUnwrap(store.reserveCapture())
+            XCTAssertNil(permit.chargedDay)
+            store.finishCapture(permit, succeeded: index % 2 == 0)
+        }
+        XCTAssertNil(store.notice)
+        for feature in PremiumFeature.allCases { XCTAssertTrue(store.require(feature)) }
+        XCTAssertEqual(persistence.calls, 0)
     }
 
     func testFreeReleaseDoesNotStartPurchaseOrRestoreWork() async {
