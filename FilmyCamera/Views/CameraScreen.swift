@@ -1922,7 +1922,6 @@ struct CameraScreen: View {
         .accessibilityIdentifier(accessibilityIdentifier)
         .accessibilityLabel("Composition grid")
         .accessibilityValue(showGrid ? "On" : "Off")
-        .accessibilityAddTraits(.isToggle)
     }
 
     // MARK: - State
