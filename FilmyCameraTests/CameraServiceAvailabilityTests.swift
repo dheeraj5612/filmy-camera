@@ -90,8 +90,8 @@ final class CameraServiceAvailabilityTests: XCTestCase {
 
         XCTAssertEqual(CameraService.videoRotationAngle(for: .portrait, fallbackViewSize: portraitSize), 90)
         XCTAssertEqual(CameraService.videoRotationAngle(for: .portraitUpsideDown, fallbackViewSize: portraitSize), 270)
-        XCTAssertEqual(CameraService.videoRotationAngle(for: .landscapeLeft, fallbackViewSize: portraitSize), 0)
-        XCTAssertEqual(CameraService.videoRotationAngle(for: .landscapeRight, fallbackViewSize: portraitSize), 180)
+        XCTAssertEqual(CameraService.videoRotationAngle(for: .landscapeLeft, fallbackViewSize: portraitSize), 180)
+        XCTAssertEqual(CameraService.videoRotationAngle(for: .landscapeRight, fallbackViewSize: portraitSize), 0)
         XCTAssertEqual(CameraService.videoRotationAngle(for: nil, fallbackViewSize: portraitSize), 90)
         XCTAssertEqual(
             CameraService.videoRotationAngle(
@@ -377,6 +377,52 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         XCTAssertEqual(
             CameraService.FlashMode.allCases,
             [.off, .auto, .on]
+        )
+    }
+
+    func testRefreshedFlashAvailabilityFollowsThermalChangeOnly() {
+        XCTAssertEqual(
+            CameraService.refreshedFlashAvailability(
+                current: .temporarilyUnavailable,
+                hasFlash: true,
+                supportedModeRawValues: [0, 1, 2],
+                flashAvailable: true
+            ),
+            .available
+        )
+        XCTAssertEqual(
+            CameraService.refreshedFlashAvailability(
+                current: .available,
+                hasFlash: true,
+                supportedModeRawValues: [0, 1, 2],
+                flashAvailable: false
+            ),
+            .temporarilyUnavailable
+        )
+        XCTAssertNil(
+            CameraService.refreshedFlashAvailability(
+                current: .available,
+                hasFlash: true,
+                supportedModeRawValues: [0, 1, 2],
+                flashAvailable: true
+            )
+        )
+        // A transiently empty supported set must not downgrade to unsupported.
+        XCTAssertNil(
+            CameraService.refreshedFlashAvailability(
+                current: .temporarilyUnavailable,
+                hasFlash: true,
+                supportedModeRawValues: [],
+                flashAvailable: true
+            )
+        )
+        XCTAssertNil(
+            CameraService.refreshedFlashAvailability(
+                current: .unsupported,
+                hasFlash: true,
+                supportedModeRawValues: [0, 1, 2],
+                flashAvailable: true
+            )
         )
     }
 

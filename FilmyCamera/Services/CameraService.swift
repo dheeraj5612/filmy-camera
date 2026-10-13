@@ -954,8 +954,11 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         switch interfaceOrientation {
         case .portrait: 90
         case .portraitUpsideDown: 270
-        case .landscapeLeft: 0
-        case .landscapeRight: 180
+        // Back camera: its unrotated sensor (0 degrees) is upright with the port on the right,
+        // which is UIInterfaceOrientationLandscapeRight (UIOrientation.h). Front sensors are
+        // mounted differently, so prefer a RotationCoordinator angle whenever a device is known.
+        case .landscapeLeft: 180
+        case .landscapeRight: 0
         case .unknown, .none:
             fallbackViewSize.width > fallbackViewSize.height ? 0 : 90
         @unknown default:
@@ -1045,6 +1048,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             guard self?.fujiLease == nil else { return }
             guard let self else { return }
             self.disableSceneAutoOnQueue()
+            self.rereadFlashAvailabilityOnQueue()
             let manualExposureActive = self.isManualExposureActiveOrRequested
             guard manualExposureActive || self.flashAvailabilityState != .unsupported else {
                 return
@@ -1752,6 +1756,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private func resetManualControlsToAutoOnQueue() {
         guard let device = activeDevice() else {
             desiredManualExposure = .auto
+            priorityExposureRequest = nil
+            publishOnMain { [weak self] in self?.exposureProgram = .automatic }
             desiredManualWhiteBalance = .auto
             desiredManualFocus = .auto
             flashModeBeforeManualExposure = nil
@@ -1767,6 +1773,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             isApplyingManualWhiteBalance = false
             isApplyingManualFocus = false
             desiredManualExposure = .auto
+            priorityExposureRequest = nil
+            publishOnMain { [weak self] in self?.exposureProgram = .automatic }
             desiredManualWhiteBalance = .auto
             desiredManualFocus = .auto
             restoreAutomaticMeteringOnQueue(for: device)
@@ -2864,6 +2872,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                         if !self.session.isRunning {
                             self.session.startRunning()
                         }
+                        self.rereadFlashAvailabilityOnQueue()
                         self.publishStartOutcomeOnQueue(running: self.session.isRunning && !self.session.isInterrupted)
                     }
                 }
@@ -3967,7 +3976,41 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         }
     }
 
+    /// Picks up a thermal change in `isFlashAvailable` that happened after the
+    /// last capability refresh. Only the availability state is updated: the
+    /// selection and scene monitoring are left alone.
+    static func refreshedFlashAvailability(
+        current: FlashAvailability,
+        hasFlash: Bool,
+        supportedModeRawValues: Set<Int>,
+        flashAvailable: Bool
+    ) -> FlashAvailability? {
+        guard current != .unsupported else { return nil }
+        let availability = resolveFlashAvailability(
+            hasFlash: hasFlash,
+            supportedModeRawValues: supportedModeRawValues,
+            flashAvailable: flashAvailable
+        )
+        guard availability != .unsupported, availability != current else { return nil }
+        return availability
+    }
+
+    private func rereadFlashAvailabilityOnQueue() {
+        guard let device = activeDevice(),
+              let availability = Self.refreshedFlashAvailability(
+                current: flashAvailabilityState,
+                hasFlash: device.hasFlash,
+                supportedModeRawValues: supportedFlashModeRawValuesOnQueue(),
+                flashAvailable: device.isFlashAvailable
+              ) else {
+            return
+        }
+        flashAvailabilityState = availability
+        publishFlashAvailability(availability)
+    }
+
     private func setFlashModeOnQueue(_ mode: FlashMode) {
+        rereadFlashAvailabilityOnQueue()
         if isManualExposureActiveOrRequested {
             guard mode == .off else {
                 publishStatus("Flash requires Auto exposure.")
@@ -5295,9 +5338,11 @@ extension CameraService {
                         let point = Self.captureDevicePoint(fromRotatedPreviewPoint: CGPoint(x: rect.midX, y: 1 - rect.midY), rotationAngle: rotation, mirrored: mirrored)
                         self.applyTrackedFocusOnQueue(point)
                     }
+                    let status = update.state == .lost ? "Subject lost. Tap to reacquire." : "Tracking subject"
                     self.publishOnMain { [weak self] in
-                        self?.trackedSubjectRectangle = update.rectangle
-                        self?.subjectTrackingStatus = update.state == .lost ? "Subject lost. Tap to reacquire." : "Tracking subject"
+                        guard let self else { return }
+                        if self.trackedSubjectRectangle != update.rectangle { self.trackedSubjectRectangle = update.rectangle }
+                        if self.subjectTrackingStatus != status { self.subjectTrackingStatus = status }
                     }
                 }
             }
@@ -5305,8 +5350,10 @@ extension CameraService {
             sessionQueue.async { [weak self] in
                 guard let self, self.trackingGeneration == generation, self.trackingRequested, let device = self.activeDevice() else { return }
                 let acquired = NativeCameraControls.subjectAcquired(device)
+                let status = acquired ? "Native subject tracking" : "Searching for subject. Tap to select."
                 self.publishOnMain { [weak self] in
-                    self?.subjectTrackingStatus = acquired ? "Native subject tracking" : "Searching for subject. Tap to select."
+                    guard let self else { return }
+                    if self.subjectTrackingStatus != status { self.subjectTrackingStatus = status }
                 }
             }
         }
