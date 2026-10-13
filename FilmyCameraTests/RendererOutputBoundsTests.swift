@@ -1016,10 +1016,9 @@ final class RendererOutputBoundsTests: XCTestCase {
         let context = CIContext(options: FilmRenderer.testContextOptions)
         var referenceRGB: [Float]?
         for sourceAlpha in [1.0, 0.35] {
-            // Make the non-opaque fixture explicitly premultiplied, matching
-            // the representation used by Core Image pixel buffers.
+            // CIImage(color:) is already premultiplied, matching the
+            // representation used by Core Image pixel buffers.
             let input = CIImage(color: CIColor(red: 0.42, green: 0.18, blue: 0.76, alpha: sourceAlpha))
-                .premultiplyingAlpha()
                 .cropped(to: extent)
             let pixels = renderFloatPixels(
                 FilmRenderer.opaqueImage(from: input),
@@ -1042,6 +1041,34 @@ final class RendererOutputBoundsTests: XCTestCase {
                 referenceRGB = Array(pixels.prefix(3))
             }
         }
+    }
+
+    func testOpaqueCopyOfPremultipliedCGImageRecoversStraightColor() throws {
+        // Straight (0.8, 0.4, 0.2) at alpha 0.5, stored premultiplied.
+        var bytes = [UInt8]()
+        for _ in 0..<16 { bytes += [102, 51, 26, 128] }
+        let data = Data(bytes)
+        let provider = try XCTUnwrap(CGDataProvider(data: data as CFData))
+        let colorSpace = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+        let cgImage = try XCTUnwrap(CGImage(
+            width: 4, height: 4, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: 16,
+            space: colorSpace, bitmapInfo: bitmapInfo, provider: provider,
+            decode: nil, shouldInterpolate: false, intent: .defaultIntent
+        ))
+        let extent = CGRect(x: 0, y: 0, width: 4, height: 4)
+        let context = CIContext(options: FilmRenderer.testContextOptions)
+        let pixels = renderFloatPixels(
+            FilmRenderer.opaqueImage(from: CIImage(cgImage: cgImage)),
+            extent: extent,
+            context: context
+        )
+
+        XCTAssertEqual(pixels.count, 64)
+        XCTAssertEqual(pixels[0], 0.8, accuracy: 0.01)
+        XCTAssertEqual(pixels[1], 0.4, accuracy: 0.01)
+        XCTAssertEqual(pixels[2], 0.2, accuracy: 0.01)
+        XCTAssertEqual(pixels[3], 1, accuracy: 0.001)
     }
 
     func testFilmBaseChangesRenderedColorEvenWithSharedNumericControls() {
@@ -2013,6 +2040,80 @@ final class RendererOutputBoundsTests: XCTestCase {
         XCTAssertEqual(landscapeCrop.width / landscapeCrop.height, 844 / 390, accuracy: 0.0001)
         XCTAssertEqual(landscapeCrop.midX, source.midX, accuracy: 0.001)
         XCTAssertEqual(landscapeCrop.midY, source.midY, accuracy: 0.001)
+    }
+
+    func testAspectFillImageExtentMatchesTargetForEverySourceShape() {
+        let sources = [
+            CGRect(x: 0, y: 0, width: 4000, height: 3000),
+            CGRect(x: 0, y: 0, width: 3000, height: 4000),
+            CGRect(x: 0, y: 0, width: 2000, height: 2000),
+            CGRect(x: 100, y: 50, width: 400, height: 300)
+        ]
+        let targets = [
+            CGRect(x: 0, y: 0, width: 390, height: 844),
+            CGRect(x: 20, y: 30, width: 390, height: 844)
+        ]
+        for source in sources {
+            let image = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 1))
+                .cropped(to: source)
+            for target in targets {
+                let extent = CameraFrameLayout.aspectFill(image, in: target).extent
+                XCTAssertEqual(extent.minX, target.minX, accuracy: 0.01)
+                XCTAssertEqual(extent.minY, target.minY, accuracy: 0.01)
+                XCTAssertEqual(extent.width, target.width, accuracy: 0.01)
+                XCTAssertEqual(extent.height, target.height, accuracy: 0.01)
+            }
+        }
+    }
+
+    func testAspectFillReturnsSourceForDegenerateTargetsAndSources() {
+        let source = CGRect(x: 0, y: 0, width: 400, height: 300)
+        let image = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 1))
+            .cropped(to: source)
+        let targets = [
+            CGRect(x: 0, y: 0, width: 0, height: 100),
+            CGRect(x: 0, y: 0, width: 100, height: 0),
+            CGRect(x: 0, y: 0, width: CGFloat.nan, height: 100)
+        ]
+        for target in targets {
+            XCTAssertEqual(CameraFrameLayout.aspectFill(image, in: target).extent, source)
+        }
+
+        let empty = CIImage.empty()
+        let emptyResult = CameraFrameLayout.aspectFill(empty, in: CGRect(x: 0, y: 0, width: 100, height: 100))
+        XCTAssertEqual(emptyResult.extent, empty.extent)
+    }
+
+    func testAspectFillCentresTheCropInTheTarget() {
+        let left = CIImage(color: CIColor(red: 1, green: 0, blue: 0, alpha: 1))
+            .cropped(to: CGRect(x: 0, y: 0, width: 200, height: 300))
+        let right = CIImage(color: CIColor(red: 0, green: 0, blue: 1, alpha: 1))
+            .cropped(to: CGRect(x: 200, y: 0, width: 200, height: 300))
+        let split = right.composited(over: left)
+        let target = CGRect(x: 0, y: 0, width: 100, height: 200)
+        let context = CIContext(options: FilmRenderer.testContextOptions)
+        let pixels = renderFloatPixels(
+            CameraFrameLayout.aspectFill(split, in: target),
+            extent: target,
+            context: context
+        )
+        let width = Int(target.width)
+        let row = Int(target.height) / 2
+        func pixel(_ column: Int) -> (red: Float, blue: Float, alpha: Float) {
+            let index = (row * width + column) * 4
+            return (pixels[index], pixels[index + 2], pixels[index + 3])
+        }
+
+        // The source boundary is its midpoint, so it lands at target.midX.
+        let belowBoundary = Int(target.midX) - 2
+        let aboveBoundary = Int(target.midX) + 1
+        XCTAssertGreaterThan(pixel(belowBoundary).red, 0.9)
+        XCTAssertLessThan(pixel(belowBoundary).blue, 0.1)
+        XCTAssertGreaterThan(pixel(aboveBoundary).blue, 0.9)
+        XCTAssertLessThan(pixel(aboveBoundary).red, 0.1)
+        for column in [0, width - 1] {
+            XCTAssertEqual(pixel(column).alpha, 1, accuracy: 0.001)
+        }
     }
 
     private func colorSkinRecipes() throws -> [FilmRecipe] {

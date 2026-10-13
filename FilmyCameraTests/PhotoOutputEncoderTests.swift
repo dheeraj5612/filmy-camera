@@ -1,3 +1,4 @@
+import CoreImage
 import CoreLocation
 import CoreGraphics
 import Foundation
@@ -26,6 +27,34 @@ final class PhotoOutputEncoderTests: XCTestCase {
         XCTAssertEqual(gps[kCGImagePropertyGPSSpeedRef as String] as? String, "K")
         XCTAssertEqual(gps[kCGImagePropertyGPSDateStamp as String] as? String, "2023:11:14")
         XCTAssertNotNil(gps[kCGImagePropertyGPSTimeStamp as String])
+    }
+
+    func testHEIFAndHDRFilesKeepGPSAndProvenance() throws {
+        let image = CIImage(color: CIColor(red: 0.8, green: 0.2, blue: 0.1))
+            .cropped(to: CGRect(x: 0, y: 0, width: 64, height: 48))
+        let location = CLLocation(latitude: 37.33, longitude: -122.03)
+        for dynamicRange in ProCaptureSettings.DynamicRange.allCases {
+            var settings = ProCaptureSettings()
+            settings.format = .heif
+            settings.dynamicRange = dynamicRange
+            let result = ProPhotoOutput.encode(image, sourceData: Data(), capturedAt: Date(timeIntervalSince1970: 1_700_000_000),
+                recipe: FilmRecipe.builtIns[0], settings: settings, location: location)
+#if targetEnvironment(simulator)
+            guard let data = result else { throw XCTSkip("The simulator does not provide this HEIF encoder; verify on device") }
+#else
+            let data = try XCTUnwrap(result)
+#endif
+            let source = try XCTUnwrap(CGImageSourceCreateWithData(data as CFData, nil))
+            let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any])
+            let gps = try XCTUnwrap(properties[kCGImagePropertyGPSDictionary as String] as? [String: Any])
+            XCTAssertEqual((gps[kCGImagePropertyGPSLatitude as String] as? NSNumber)?.doubleValue ?? 0, 37.33, accuracy: 0.001)
+            XCTAssertEqual((gps[kCGImagePropertyGPSLongitude as String] as? NSNumber)?.doubleValue ?? 0, 122.03, accuracy: 0.001)
+            XCTAssertEqual(gps[kCGImagePropertyGPSLatitudeRef as String] as? String, "N")
+            XCTAssertEqual(gps[kCGImagePropertyGPSLongitudeRef as String] as? String, "W")
+            let exif = try XCTUnwrap(properties[kCGImagePropertyExifDictionary as String] as? [String: Any])
+            XCTAssertNotNil(exif[kCGImagePropertyExifDateTimeOriginal as String])
+            XCTAssertNotNil(exif[kCGImagePropertyExifUserComment as String])
+        }
     }
 
     @MainActor
