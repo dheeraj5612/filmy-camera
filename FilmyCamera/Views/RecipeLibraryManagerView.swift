@@ -116,11 +116,12 @@ struct RecipeLibraryManagerView: View {
                             .accessibilityIdentifier("recipe-manager-active-count")
                         Spacer()
                         if let undoState {
-                            Button("Undo") {
+                            Button {
                                 preferences = undoState
                                 self.undoState = nil
+                            } label: {
+                                Text("Undo").frame(minWidth: 48, minHeight: 44).contentShape(Rectangle())
                             }
-                            .frame(minWidth: 48, minHeight: 44)
                             .accessibilityIdentifier("recipe-manager-undo")
                         }
                     }
@@ -255,14 +256,17 @@ private struct RecipePackDetailView: View {
                 Text("\(preferences.enabledCount(in: pack)) of \(pack.recipeIDs.count) in your quick menu")
                     .font(.subheadline.weight(.semibold)).monospacedDigit()
                 HStack {
-                    Button("Enable pack") { change { $0.setPack(pack, enabled: true) } }
+                    Button { change { $0.setPack(pack, enabled: true) } } label: {
+                        Text("Enable pack").frame(minHeight: 44).contentShape(Rectangle())
+                    }
                         .accessibilityIdentifier("recipe-pack-enable")
                     Spacer()
-                    Button("Hide pack") { change { $0.setPack(pack, enabled: false) } }
+                    Button { change { $0.setPack(pack, enabled: false) } } label: {
+                        Text("Hide pack").frame(minHeight: 44).contentShape(Rectangle())
+                    }
                         .accessibilityIdentifier("recipe-pack-hide")
                 }
                 .buttonStyle(.borderless)
-                .frame(minHeight: 44)
             }
             Section {
                 ForEach(results) { recipe in

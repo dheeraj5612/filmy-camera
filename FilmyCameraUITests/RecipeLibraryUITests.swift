@@ -91,6 +91,16 @@ final class RecipeLibraryUITests: XCTestCase {
         XCTAssertEqual(app.buttons["recipe-menu"].label, before)
         openManager()
         XCTAssertEqual(try activeCounts().enabled, 0)
+        // Hidden everywhere, the current look must still be selected and say so.
+        app.segmentedControls.buttons["Recipes"].firstMatch.tap()
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("Muted Color")
+        let current = app.buttons["manage-select-classic-chrome"]
+        XCTAssertTrue(current.waitForExistence(timeout: 8))
+        XCTAssertEqual(current.value as? String, "Current look, hidden from quick menu")
+        XCTAssertTrue(current.isSelected, "The current look keeps the selected trait while hidden")
     }
 
     func testSearchIndividualVisibilityAndPublishedSourceDetails() throws {

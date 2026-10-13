@@ -847,6 +847,8 @@ struct RecipeDetailView: View {
             ForEach(draft.controlSummary, id: \.0) { control in
                 VStack(alignment: .leading, spacing: 5) {
                     Eyebrow(text: control.0.uppercased())
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                        .minimumScaleFactor(0.6)
 
                     Text(control.1)
                         .font(.system(.subheadline, design: .rounded).weight(.bold))
@@ -1152,6 +1154,7 @@ struct RecipeDetailView: View {
                         Text(level.displayName).tag(level)
                     }
                 }
+                .disabled(draft.grainEffectLevel == .off)
                 RecipeSliderRow(title: "Vignette", value: binding(\.vignette), range: 0...1, format: "%.2f")
                 RecipeSliderRow(title: "Halation", value: binding(\.halation), range: 0...1, format: "%.2f")
             }
@@ -1545,8 +1548,13 @@ struct LookLibraryView: View {
                     }
                     .scrollDismissesKeyboard(.interactively)
                     .accessibilityIdentifier("look-library-results")
-                    .onChange(of: query) { _, _ in proxy.scrollTo("look-library-top", anchor: .top) }
-                    .onChange(of: filter) { _, _ in proxy.scrollTo("look-library-top", anchor: .top) }
+                    .onChange(of: query) { _, _ in
+                        // Scroll after the new result set has laid out, or the offset lands mid-list.
+                        DispatchQueue.main.async { proxy.scrollTo("look-library-top", anchor: .top) }
+                    }
+                    .onChange(of: filter) { _, _ in
+                        DispatchQueue.main.async { proxy.scrollTo("look-library-top", anchor: .top) }
+                    }
                 }
             }
             .frame(maxWidth: 960)

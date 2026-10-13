@@ -25,6 +25,18 @@ struct SettingsView: View {
     @AppStorage("locationTaggingEnabled.v1") private var locationTaggingEnabled = true
     @AppStorage("mirrorFrontPhotos.v1") private var mirrorFrontPhotos = true
     @AppStorage("g7x.dateStamp.enabled") private var dateStampEnabled = false
+    // Camera-screen keys that Reset camera settings restores. Defaults match CameraScreen and CaptureSetupView.
+    @AppStorage("captureDelay") private var captureDelay = CaptureDelay.off
+    @AppStorage("captureAspect") private var captureAspect = CaptureAspect.viewfinder
+    @AppStorage("captureFinish") private var captureFinish = PhotoFinish.photo
+    @AppStorage("compositionGuide") private var compositionGuide = CompositionGuide.thirds
+    @AppStorage("showHistogram") private var showHistogram = false
+    @AppStorage("showZebras") private var showZebras = false
+    @AppStorage("showFocusPeaking") private var showFocusPeaking = false
+    @AppStorage("showHorizonLevel") private var showHorizonLevel = false
+    @AppStorage(HistogramPlacement.horizontalPreferenceKey) private var histogramPositionX = 0.0
+    @AppStorage(HistogramPlacement.verticalPreferenceKey) private var histogramPositionY = 0.0
+    @AppStorage("cameraGestureHintSeen.v1") private var gestureHintSeen = false
 
     var body: some View {
         NavigationStack {
@@ -73,7 +85,7 @@ struct SettingsView: View {
             Button("Reset", role: .destructive, action: resetCameraSettings)
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("Timer, aspect, guides, assists, grid, haptics, selfie mirroring and date stamp return to defaults. Your photos and looks are not changed.")
+            Text("Timer, aspect, photo finish, guides, assists, histogram position, grid, haptics, selfie mirroring and date stamp return to defaults. Your photos and looks are not changed.")
         }
         .accessibilityAction(.escape, onBackToCamera)
         .onAppear { refreshPermissionState() }
@@ -694,18 +706,22 @@ struct SettingsView: View {
         photoLibrary.refresh()
     }
 
-    private static let cameraSettingKeys: [String] = [
-        "showGrid", "hapticsEnabled", "captureDelay", "captureAspect",
-        "compositionGuide", "showHistogram", "showZebras", "showFocusPeaking",
-        "showHorizonLevel", "mirrorFrontPhotos.v1", "g7x.dateStamp.enabled",
-        "cameraGestureHintSeen.v1"
-    ]
-
     private func resetCameraSettings() {
-        let defaults = UserDefaults.standard
-        for key in Self.cameraSettingKeys {
-            defaults.removeObject(forKey: key)
-        }
+        showGrid = true
+        hapticsEnabled = true
+        mirrorFrontPhotos = true
+        dateStampEnabled = false
+        captureDelay = .off
+        captureAspect = .viewfinder
+        captureFinish = .photo
+        compositionGuide = .thirds
+        showHistogram = false
+        showZebras = false
+        showFocusPeaking = false
+        showHorizonLevel = false
+        histogramPositionX = 0
+        histogramPositionY = 0
+        gestureHintSeen = false
         HapticFeedback.play(.discard)
         didResetCameraSettings = true
         UIAccessibility.post(notification: .announcement, argument: "Camera settings reset.")

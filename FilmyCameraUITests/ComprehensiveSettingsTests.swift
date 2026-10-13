@@ -158,6 +158,55 @@ final class ComprehensiveSettingsTests: XCTestCase {
                        "Settings and Capture setup must share the grid preference")
     }
 
+    func testResetCameraSettingsRestoresCaptureSetupAndSettingsToggles() {
+        continueAfterFailure = false
+        let app = makeApp()
+        app.launch()
+        defer { app.terminate() }
+        openSetup(app)
+        choose("capture-delay-picker", "5s", app)
+        choose("capture-aspect-picker", "3:2", app)
+        choose("capture-finish-picker", "Instant Print", app)
+        setToggle(reveal(app.switches["capture-zebras-toggle"], app), "1")
+        closeSetup(app)
+        app.buttons["settings-tab"].tap()
+        setToggle(reveal(app.switches["Framing grid"], app), "0")
+        setToggle(reveal(app.switches["Haptic feedback"], app), "0")
+        setToggle(reveal(app.switches["Mirror front camera"], app), "0")
+        setToggle(reveal(app.switches["Date stamp"], app), "1")
+        reveal(app.buttons["settings-reset-camera"], app).tap()
+        let confirm = app.buttons["Reset"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.tap()
+        XCTAssertTrue(app.staticTexts["Camera settings reset."].waitForExistence(timeout: 5))
+        XCTAssertEqual(reveal(app.switches["Framing grid"], app).value as? String, "1")
+        XCTAssertEqual(reveal(app.switches["Haptic feedback"], app).value as? String, "1")
+        XCTAssertEqual(reveal(app.switches["Mirror front camera"], app).value as? String, "1")
+        XCTAssertEqual(reveal(app.switches["Date stamp"], app).value as? String, "0")
+        app.buttons["settings-back-to-camera"].tap()
+        XCTAssertTrue(app.buttons["capture-setup-open"].waitForExistence(timeout: 20))
+        XCTAssertEqual(app.buttons["capture-setup-open"].value as? String, "Timer Off, Fit screen")
+        openSetup(app)
+        assertChoice(reveal(app.descendants(matching: .any)["capture-delay-picker"], app), "Off")
+        assertChoice(reveal(app.descendants(matching: .any)["capture-aspect-picker"], app), "Fit screen")
+        assertChoice(reveal(app.descendants(matching: .any)["capture-finish-picker"], app), "Photo")
+        XCTAssertEqual(reveal(app.switches["capture-zebras-toggle"], app).value as? String, "0")
+        closeSetup(app)
+    }
+
+    func testGrainSizeIsDisabledWhileGrainEffectIsOff() {
+        let app = openRecipeEditor(recipeID: "classic-chrome", tuneTitle: "Tune Muted Color")
+        defer { app.terminate() }
+
+        expandSection("Finish", app)
+        choose("recipe-choice-Grain Effect", "Off", app)
+        let size = reveal(app.descendants(matching: .any)["recipe-choice-Grain Size"], app,
+                          requireHittable: false, diagnosticName: "recipe-choice-Grain Size")
+        XCTAssertFalse(size.isEnabled, "Grain Size changes nothing while Grain Effect is Off")
+        choose("recipe-choice-Grain Effect", "Weak", app)
+        XCTAssertTrue(size.isEnabled)
+    }
+
     func testMonochromeEditorAxesChangeAndReset() {
         continueAfterFailure = false
         let app = makeApp()

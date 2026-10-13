@@ -424,10 +424,20 @@ final class LookLibraryUITests: XCTestCase {
                        "The clear action must disappear when the query is empty")
         XCTAssertEqual(app.buttons["look-filter-all"].value as? String, "Selected")
         let results = app.scrollViews["look-library-results"]
+        let firstCard = app.buttons["library-recipe-g7x-compact"]
+        for _ in 0..<3 { results.swipeUp() }
+        XCTAssertFalse(firstCard.isHittable, "The results must be scrolled away from the top")
+        // A filter change must also return to the top. Film has hundreds of
+        // looks, so the offset is not clamped by a short result list.
+        app.buttons["look-filter-film"].tap()
+        for _ in 0..<3 { results.swipeUp() }
+        app.buttons["look-filter-all"].tap()
+        let atTop = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == true"), object: firstCard)
+        XCTAssertEqual(XCTWaiter.wait(for: [atTop], timeout: 5), .completed,
+                       "A filter change must scroll the results back to the top")
         for _ in 0..<3 { results.swipeUp() }
         search.tap()
         search.typeText("G7 X Compact")
-        let firstCard = app.buttons["library-recipe-g7x-compact"]
         XCTAssertTrue(firstCard.waitForExistence(timeout: 5))
         XCTAssertTrue(firstCard.isHittable, "A query change must scroll the results back to the top")
         app.buttons["look-library-close"].tap()

@@ -28,14 +28,16 @@ struct SmartRecipeEntryPoint: View {
             .accessibilityHint("Compare three scene-matched recipes. Suggestions never change your look automatically.")
             .accessibilityIdentifier("smart-recipes-open")
             if store.undo?.appliedID == selectedID {
-                Button("Undo", action: onUndo)
-                    .frame(minWidth: 44, minHeight: 44)
+                Button(action: onUndo) {
+                    Text("Undo").frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                }
                     .disabled(!canApply)
                     .accessibilityLabel("Undo smart look")
                     .accessibilityIdentifier("smart-recipes-undo")
             } else if let option = top, option.id != selectedID {
-                Button("Apply") { onApply(option.id) }
-                    .frame(minWidth: 44, minHeight: 44)
+                Button { onApply(option.id) } label: {
+                    Text("Apply").frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                }
                     .disabled(!canApply)
                     .accessibilityLabel("Apply \(option.recipe.name)")
                     .accessibilityIdentifier("smart-recipes-quick-apply")
