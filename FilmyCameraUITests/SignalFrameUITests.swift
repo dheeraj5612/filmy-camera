@@ -377,7 +377,8 @@ final class SignalFrameUITests: XCTestCase {
             previousFrame = frame
             return stableSamples >= 2 && app.frame.contains(frame)
         }, object: nil)
-        let result = XCTWaiter.wait(for: [settled], timeout: 8)
+        // Each sample costs three queries; a loaded CI simulator fits only ~3 in 8 s.
+        let result = XCTWaiter.wait(for: [settled], timeout: 20)
         if result != .completed { failureEvidence("control-not-settled", app: app) }
         XCTAssertEqual(result, .completed, "Control must settle before tapping", file: file, line: line)
         guard result == .completed else { return }

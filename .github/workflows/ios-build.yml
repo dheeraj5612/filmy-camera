@@ -288,10 +288,26 @@ jobs:
         run: |
           # Release the first simulator's memory before booting the Photos fixture device.
           xcrun simctl shutdown "${DEVICE_ID}"
+          # Sample the app while the lane runs: a hung save leaves its
+          # main-thread stack in the logs artifact instead of only a UI timeout.
+          (
+            n=0
+            while [ "${n}" -lt 90 ] && sleep 30; do
+              pid="$(pgrep -f 'FilmyCamera\.app/FilmyCamera( |$)' | head -1 || true)"
+              [ -n "${pid}" ] || continue
+              n=$((n + 1))
+              sample "${pid}" 1 -mayDie \
+                -file "${RUNNER_TEMP}/filmycamera-photos-e2e-sample-${n}.log" >/dev/null 2>&1 || true
+            done
+          ) &
+          sampler=$!
+          status=0
           python3 scripts/testing/run.py photos-e2e --skip-build \
             --destination "${DESTINATION}" \
             --derived-data "${RUNNER_TEMP}/FilmyCameraDerivedData" \
-            --output-dir "${RUNNER_TEMP}"
+            --output-dir "${RUNNER_TEMP}" || status=$?
+          kill "${sampler}" 2>/dev/null || true
+          exit "${status}"
 
       - name: Compile physical-device test branches when requested
         if: github.event_name == 'workflow_dispatch' && inputs.include_device_build
