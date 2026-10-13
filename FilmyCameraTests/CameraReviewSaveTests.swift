@@ -1,4 +1,7 @@
+import CoreMedia
 import CoreImage
+import CoreLocation
+import ImageIO
 import UIKit
 import XCTest
 @testable import FilmyCamera
@@ -180,6 +183,131 @@ final class CameraReviewSaveTests: XCTestCase {
         XCTAssertTrue(saver.requests.isEmpty)
         XCTAssertTrue(model.isReviewingImport)
         XCTAssertTrue(model.reviewImage === original)
+    }
+
+    private func captureSourcePhoto(data: Data? = nil) throws -> CameraService.CapturedPhoto {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 30)).image { context in
+            UIColor.orange.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 40, height: 30))
+        }
+        let bytes = try data ?? XCTUnwrap(image.jpegData(compressionQuality: 0.9))
+        return CameraService.CapturedPhoto(
+            fileData: bytes, capturedAt: Date(timeIntervalSince1970: 1_800_000_000),
+            dimensions: CMVideoDimensions(width: 40, height: 30)
+        )
+    }
+
+    func testFailedOriginalWriteKeepsRetryableCaptureAndRetryIsExplicit() async throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data([0]).write(to: root)
+        let model = CameraViewModel(defaults: defaults, photoStore: FilmyPhotoStore(root: root))
+        let saver = ControlledPhotoSaver()
+        let camera = CameraService()
+
+        let first = await model.developCapturedPhotoForTesting(
+            try captureSourcePhoto(), recipe: model.selectedRecipe, camera: camera, photoLibrary: saver
+        )
+        XCTAssertFalse(first)
+        XCTAssertFalse(model.isCapturing)
+        XCTAssertEqual(model.toastStyle, .error)
+        XCTAssertTrue(saver.requests.isEmpty)
+
+        try FileManager.default.removeItem(at: root)
+        model.capture(camera: camera, photoLibrary: saver)
+        XCTAssertTrue(model.isCapturing)
+        XCTAssertEqual(model.toastStyle, .info)
+        XCTAssertEqual(model.toastMessage, "Saving your earlier photo. No new photo is taken.")
+        for _ in 0..<200 where saver.requests.isEmpty { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(saver.requests.count, 1)
+        XCTAssertFalse(model.isCapturing)
+        saver.completeLast(with: .success(()))
+        XCTAssertFalse(model.hasPendingCapture)
+    }
+
+    func testUndevelopableCaptureRetainsOriginalAndReleasesShutter() async throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CameraViewModel(defaults: defaults, photoStore: FilmyPhotoStore(root: root))
+        let saver = ControlledPhotoSaver()
+        let source = try captureSourcePhoto()
+        // Recognised as JPEG by the store, but cut off before the first
+        // start-of-frame marker: header segments only, no dimensions and no
+        // scan data, so no decoder on any OS can produce pixels.
+        let bytes = [UInt8](source.fileData)
+        XCTAssertEqual(bytes[0], 0xFF)
+        XCTAssertEqual(bytes[1], 0xD8)
+        var keptCount = 2
+        while keptCount + 4 <= bytes.count {
+            let marker = bytes[keptCount + 1]
+            let isStartOfFrame = marker == 0xC0 || marker == 0xC1 || marker == 0xC2
+            if bytes[keptCount] != 0xFF || isStartOfFrame { break }
+            let segmentLength = (Int(bytes[keptCount + 2]) << 8) | Int(bytes[keptCount + 3])
+            keptCount += 2 + segmentLength
+        }
+        XCTAssertLessThan(keptCount, bytes.count)
+        let truncated = Data(bytes.prefix(keptCount))
+        XCTAssertNotNil(FilmyPhotoStore.imageExtension(truncated))
+        XCTAssertNil(CameraViewModel.render(
+            sourceData: truncated, recipe: model.selectedRecipe,
+            viewportSize: CGSize(width: 100, height: 100),
+            previewDrawableSize: CGSize(width: 100, height: 100),
+            capturedAt: source.capturedAt, flashFired: false, grainSeed: 1,
+            outputSettings: .legacy
+        ))
+        let camera = CameraService()
+
+        let result = await model.developCapturedPhotoForTesting(
+            try captureSourcePhoto(data: truncated), recipe: model.selectedRecipe,
+            camera: camera, photoLibrary: saver
+        )
+        XCTAssertFalse(result)
+        XCTAssertFalse(model.isCapturing)
+        XCTAssertEqual(model.toastStyle, .error)
+        XCTAssertEqual(
+            model.toastMessage,
+            "Original retained in Filmy originals. Open it there to retry developing this look."
+        )
+        XCTAssertTrue(saver.requests.isEmpty)
+
+        model.capture(camera: camera, photoLibrary: saver)
+        for _ in 0..<100 where model.isCapturing { try await Task.sleep(nanoseconds: 10_000_000) }
+        XCTAssertFalse(model.isCapturing)
+        XCTAssertNotEqual(model.toastMessage, "Saving your earlier photo. No new photo is taken.")
+    }
+
+    func testDevelopedCaptureCarriesShutterLocationAsGPS() async throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = CameraViewModel(defaults: defaults, photoStore: FilmyPhotoStore(root: root))
+        let saver = ControlledPhotoSaver()
+        let source = try captureSourcePhoto()
+        let photo = CameraService.CapturedPhoto(
+            fileData: source.fileData, capturedAt: source.capturedAt, dimensions: source.dimensions,
+            location: CLLocation(latitude: 37.5, longitude: -122.25)
+        )
+
+        let result = await model.developCapturedPhotoForTesting(
+            photo, recipe: model.selectedRecipe, camera: CameraService(), photoLibrary: saver
+        )
+        XCTAssertTrue(result)
+        for _ in 0..<200 where saver.requests.isEmpty { try await Task.sleep(for: .milliseconds(50)) }
+        let request = try XCTUnwrap(saver.requests.last)
+        let data = try XCTUnwrap(request.imageData)
+        let imageSource = try XCTUnwrap(CGImageSourceCreateWithData(data as CFData, nil))
+        let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [String: Any])
+        let gps = try XCTUnwrap(properties[kCGImagePropertyGPSDictionary as String] as? [String: Any])
+        XCTAssertEqual(gps[kCGImagePropertyGPSLatitude as String] as? Double ?? 0, 37.5, accuracy: 0.0001)
+        XCTAssertEqual(gps[kCGImagePropertyGPSLatitudeRef as String] as? String, "N")
+        XCTAssertEqual(gps[kCGImagePropertyGPSLongitude as String] as? Double ?? 0, 122.25, accuracy: 0.0001)
+        XCTAssertEqual(gps[kCGImagePropertyGPSLongitudeRef as String] as? String, "W")
+        saver.completeLast(with: .success(()))
     }
 
     private func capturedPhoto() throws -> CameraViewModel.RenderedPhoto {

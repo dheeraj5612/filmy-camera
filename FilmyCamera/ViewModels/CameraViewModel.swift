@@ -344,14 +344,17 @@ final class CameraViewModel: ObservableObject {
     private let reviewFullRenderer: ReviewFullRenderer
     private let reviewOriginalRenderer: ReviewOriginalRenderer
     private var pendingPhotoSaver: (any PhotoSaving)?
+    private let photoStore: FilmyPhotoStore
 
     init(
         defaults: UserDefaults = .standard,
         reviewPreviewRenderer: ReviewPreviewRenderer? = nil,
         reviewFullRenderer: ReviewFullRenderer? = nil,
-        reviewOriginalRenderer: ReviewOriginalRenderer? = nil
+        reviewOriginalRenderer: ReviewOriginalRenderer? = nil,
+        photoStore: FilmyPhotoStore = .shared
     ) {
         self.defaults = defaults
+        self.photoStore = photoStore
         libraryPreferences = .decode(defaults.data(forKey: RecipeLibraryPreferences.storageKey))
         self.reviewPreviewRenderer = reviewPreviewRenderer ?? { source, recipe, finish in
             Self.renderReviewPreview(source: source, recipe: recipe, finish: finish)
@@ -583,6 +586,7 @@ final class CameraViewModel: ObservableObject {
         guard !isCapturing, !isImporting, !isSaving, reviewImage == nil else { return }
         let captureStartedAt = ContinuousClock.now
         if let pendingOriginalRetention {
+            showToast("Saving your earlier photo. No new photo is taken.", style: .info)
             isCapturing = true
             Task {
                 await developCapture(
@@ -689,6 +693,21 @@ final class CameraViewModel: ObservableObject {
         }
     }
 
+    func developCapturedPhotoForTesting(
+        _ photo: CameraService.CapturedPhoto,
+        recipe: FilmRecipe,
+        camera: CameraService,
+        photoLibrary: any PhotoSaving
+    ) async -> Bool {
+        let work = CapturedWork(
+            photo: photo, recipe: recipe, finish: .photo,
+            viewport: CGSize(width: 100, height: 100), drawable: CGSize(width: 100, height: 100),
+            grainSeed: 1, dateStampEnabled: false, dateStampText: nil
+        )
+        isCapturing = true
+        return await developCapture(work, captureStartedAt: ContinuousClock.now, camera: camera, photoLibrary: photoLibrary)
+    }
+
     private func developCapture(
         _ work: CapturedWork,
         captureStartedAt: ContinuousClock.Instant,
@@ -700,7 +719,7 @@ final class CameraViewModel: ObservableObject {
         let grainSeed = work.grainSeed
         let document: FilmyPhotoDocument
         do {
-            document = try await FilmyPhotoStore.shared.create(
+            document = try await photoStore.create(
                 processed: work.photo.fileData, raw: work.photo.rawFileData,
                 liveMovieURL: work.photo.livePhotoMovieURL, capturedAt: work.photo.capturedAt,
                 geometry: .init(viewportWidth: work.viewport.width, viewportHeight: work.viewport.height,
@@ -725,6 +744,7 @@ final class CameraViewModel: ObservableObject {
                     sourceData: work.photo.fileData, recipe: recipe,
                     viewportSize: work.viewport, previewDrawableSize: work.drawable,
                     capturedAt: work.photo.capturedAt, flashFired: work.photo.flashFired,
+                    location: work.photo.location,
                     grainSeed: grainSeed, finish: finish, outputSettings: work.photo.outputSettings,
                     dateStampEnabled: work.dateStampEnabled, dateStampText: work.dateStampText
                 )
@@ -736,7 +756,7 @@ final class CameraViewModel: ObservableObject {
             return false
         }
         do {
-            try await FilmyPhotoStore.shared.addRevision(
+            try await photoStore.addRevision(
                 document.id, expectedRevisionID: firstRevision.id, recipe: recipe, finish: finish,
                 settings: work.photo.outputSettings, renderedData: renderedPhoto.data
             )

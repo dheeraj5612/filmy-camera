@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreLocation
 import CoreImage
 import ImageIO
 import UIKit
@@ -315,6 +316,34 @@ final class CameraViewModelRenderingTests: XCTestCase {
         )
     }
 #endif
+
+    func testCaptureRenderWritesShutterLocationAsGPS() throws {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 30)).image { context in
+            UIColor.orange.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 40, height: 30))
+        }
+        let source = try XCTUnwrap(image.jpegData(compressionQuality: 0.9))
+        let recipe = FilmRecipe.builtIns[0]
+        let location = CLLocation(latitude: 37.5, longitude: -122.25)
+
+        func gps(_ location: CLLocation?) throws -> [String: Any]? {
+            let rendered = try XCTUnwrap(CameraViewModel.render(
+                sourceData: source, recipe: recipe, viewportSize: CGSize(width: 40, height: 30),
+                previewDrawableSize: CGSize(width: 40, height: 30), capturedAt: Date(timeIntervalSince1970: 1_800_000_000),
+                flashFired: false, location: location, grainSeed: 1
+            ))
+            let imageSource = try XCTUnwrap(CGImageSourceCreateWithData(rendered.data as CFData, nil))
+            let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [String: Any])
+            return properties[kCGImagePropertyGPSDictionary as String] as? [String: Any]
+        }
+
+        let tagged = try XCTUnwrap(gps(location))
+        XCTAssertEqual(tagged[kCGImagePropertyGPSLatitude as String] as? Double ?? 0, 37.5, accuracy: 0.0001)
+        XCTAssertEqual(tagged[kCGImagePropertyGPSLatitudeRef as String] as? String, "N")
+        XCTAssertEqual(tagged[kCGImagePropertyGPSLongitude as String] as? Double ?? 0, 122.25, accuracy: 0.0001)
+        XCTAssertEqual(tagged[kCGImagePropertyGPSLongitudeRef as String] as? String, "W")
+        XCTAssertNil(try gps(nil))
+    }
 
     @MainActor
     private func makeViewModel() throws -> CameraViewModel {
