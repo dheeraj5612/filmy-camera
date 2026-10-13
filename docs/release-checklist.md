@@ -157,6 +157,8 @@ Do not describe the rendering as camera-exact or claim G7 X superiority without 
 
 Run from a clean checkout of the source being archived. Use the recorded source revision when validating any existing archive; do not restamp an older build from a later documentation or test commit.
 
+Prerequisites: Xcode 26 or later (iOS 26+ SDK) selected; the pinned XcodeGen 2.45.4 at `.ci/xcodegen/bin/xcodegen` or an absolute `FILMY_XCODEGEN_PATH` (SHA-256 verified by the script); set `FILMY_CODE_SIGN_STYLE`, `FILMY_CODE_SIGN_IDENTITY` and `FILMY_PROVISIONING_PROFILE_SPECIFIER` together for an Apple Distribution identity and App Store profile (the default Release signing is Apple Development, which `validate-archive.sh` rejects); `--allow-provisioning-updates` (optionally with `FILMY_ASC_KEY_ID`, `FILMY_ASC_ISSUER_ID` and `FILMY_ASC_KEY_PATH`) only lets Xcode contact Apple while archiving.
+
 ```sh
 scripts/release/archive-device.sh
 scripts/release/validate-archive.sh build/FilmyCamera.xcarchive
@@ -168,6 +170,6 @@ scripts/release/validate-ipa.sh \
 scripts/release/prepare-upload.sh --upload --export-path build/upload-export
 ```
 
-The check mode is read-only. Export and upload require explicit modes plus valid external signing/App Store credentials. Never commit certificates, profiles, API keys, or upload credentials.
+The check mode is read-only (nothing is exported or uploaded) but exits non-zero unless the project preflight passes, the archive exists and passes `validate-archive.sh`, an Apple Distribution certificate and an App Store profile are installed, final store metadata and store media validate, and `FILMY_ASC_KEY_ID`, `FILMY_ASC_ISSUER_ID` and `FILMY_ASC_KEY_PATH` are set and valid (key file outside the repository, owner-only permissions). Export and upload require explicit modes plus valid external signing/App Store credentials. Never commit certificates, profiles, API keys, or upload credentials.
 
 Archive and export destinations must be fresh. Upload performs a new export, so it needs a separate empty directory after a local export. For subsequent releases, set `FILMY_ARCHIVE_PATH`, pass that path as the positional argument to `validate-archive.sh`, and pass it through `--archive` to `prepare-upload.sh` and `validate-ipa.sh`. Replace each export directory with a fresh destination.

@@ -30,8 +30,6 @@ Use manual ISO, shutter speed, sensor white balance, and focus on supported came
 EDIT AND KEEP
 Import photos at full resolution up to 40 MP with their framing preserved. Revisit your photos in Roll, compare the original, and re-edit. Add an optional Instant Print border that keeps the whole photo inside a white frame.
 
-Organize your Roll with favorites, filter frames by film or digital-style looks, and sort by newest, oldest, or look name. Browse photos in your chosen order and favorite or unfavorite frames from the grid or photo view.
-
 Keep available camera, lens, exposure, and capture-time metadata with your photos. Imported photos retain their location information. You can also choose to add location to new captures by granting location permission.
 
 MADE FOR THE MOMENT

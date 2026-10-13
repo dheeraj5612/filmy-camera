@@ -2,7 +2,7 @@
 
 ## Delivered catalog
 
-The catalog contains **743 selectable looks in 19 packs**: **595 source-linked public camera recipes**, **20 Camera Foundations**, and **128 preserved original Filmy looks**. Public-source research considered 655 unique recipe pages; 60 were quarantined because settings or required capture methods could not be interpreted safely. The 595 accepted recipes comprise **319 Film Recipes** entries and **276 Fuji X Weekly** entries. There are 594 distinct normalized control sets; one pair of separately published recipes shares the same primary camera settings. Both retain their source identity. Camera foundations and authored Filmy looks are counted separately, not represented as discovered Internet recipes.
+The catalog contains **758 selectable looks in 19 packs**: **595 source-linked public camera recipes**, **20 Camera Foundations**, and **143 preserved original Filmy looks**. Public-source research considered 655 unique recipe pages; 60 were quarantined because settings or required capture methods could not be interpreted safely. The 595 accepted recipes comprise **319 Film Recipes** entries and **276 Fuji X Weekly** entries. There are 594 distinct normalized control sets; one pair of separately published recipes shares the same primary camera settings. Both retain their source identity. Camera foundations and authored Filmy looks are counted separately, not represented as discovered Internet recipes.
 
 The sources include Kodak, Fujifilm, Ilford, Agfa, cinema, slide, instant, negative, and monochrome *recipe interpretations*. These names do not establish calibrated spectral emulation of the named physical film stock. The app includes no proprietary Fujifilm LUTs, firmware, source photographs, or copied article prose.
 
@@ -35,7 +35,7 @@ Source settings are factual controls. Article copyright, creator attribution, re
 
 ## Audit of all 128 existing looks
 
-`original-recipe-audit.csv` inventories every original ID and its base, origin label, and additional finishing controls. The original catalog includes 92 authored creative designs, 17 public-mode-inspired looks, 11 official-recipe-inspired looks, seven community-recipe-inspired looks, and one Canon-inspired compact look. None carries measured hardware calibration.
+`original-recipe-audit.csv` inventories every original ID that existed at the audit (128 of the current 143) and its base, origin label, and additional finishing controls. The audited catalog includes 92 authored creative designs, 17 public-mode-inspired looks, 11 official-recipe-inspired looks, seven community-recipe-inspired looks, and one Canon-inspired compact look. None carries measured hardware calibration.
 
 The audit found **94** original looks with a nonzero exposure adjustment, **96** with halation, **126** with vignette, **114** with grain, and **94** with an additional blue-response adjustment. These are authored creative choices, not necessarily errors, but make those presets unsuitable as neutral camera-mode references. Their IDs and numeric controls are preserved to avoid breaking saved edits or changing the meaning of an old recipe. Shared renderer corrections do change affected rendered pixels, and renderer metadata is therefore bumped from v19 to **v20**.
 
@@ -69,6 +69,6 @@ A genuine camera-match acceptance gate needs owned matched captures: a color tar
 
 ## Verification
 
-Portable tests validate retained source facts, normalization, stable identity, duplicate handling, malformed settings, bounds, monochrome axes, and the catalog hash. Foundation-only Swift execution additionally verifies all 743 actual model instances, every editor control's bounds, Codable round trips, source completeness, pack partitioning and all/none/mixed membership. These checks do not compile the iOS UI or exercise Core Image.
+Portable tests validate retained source facts, normalization, stable identity, duplicate handling, malformed settings, bounds, monochrome axes, and the catalog hash. Foundation-only Swift execution additionally verifies all 758 actual model instances, every editor control's bounds, Codable round trips, source completeness, pack partitioning and all/none/mixed membership. These checks do not compile the iOS UI or exercise Core Image.
 
 The mandatory macOS catalog workflow now runs **167 XCTest cases**, including new model/persistence and directional-control cases. Two catalog cases loop across all 595 sourced recipes and all 20 foundations; together with the original 128 cases they exercise every look on an app-owned daylight image, synthetic color chart and low-light fixture, with preview/photo processing, encoded JPEG export and provenance/privacy checks. Per-recipe contact sheets are retained as CI artifacts. The iPhone/iPad UI evidence workflow adds pack management, all/none/undo, persistence, individual search switches, source details and actual simulator screenshots. Workflow definitions are not evidence of success; inspect the PR's result bundles and screenshots before claiming a passed iOS validation or merging.
