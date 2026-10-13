@@ -204,8 +204,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/testing/check_policy_regressions.py --mutation-checks \
-            --output-dir "${RUNNER_TEMP}/policy-regressions"
+          if ! python3 scripts/testing/check_policy_regressions.py --mutation-checks \
+            --output-dir "${RUNNER_TEMP}/policy-regressions"; then
+            for log in "${RUNNER_TEMP}"/policy-regressions/*.log; do
+              [ -f "${log}" ] || continue
+              echo "==> ${log}" >&2
+              tail -n 200 "${log}" >&2
+            done
+            exit 1
+          fi
           bash scripts/testing/test-scene-auto-core.sh
 
       - name: Select an available iPhone simulator
@@ -570,7 +577,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          bash -n scripts/ci/*.sh scripts/release/*.sh
+          for script in scripts/ci/*.sh scripts/release/*.sh; do bash -n "${script}"; done
           shellcheck -x --severity=warning scripts/ci/*.sh scripts/release/*.sh
           bash scripts/release/test-private-temp.sh
           bash scripts/release/test-macho-uuid-validation.sh

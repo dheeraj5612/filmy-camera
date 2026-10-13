@@ -451,7 +451,7 @@ def summarize_result(result, exit_code):
         return {"status": "failed", "reason": "XCTest did not produce a result bundle", "exitCode": exit_code}
     command = ["xcrun", "xcresulttool", "get", "test-results", "summary", "--path", str(result), "--format", "json"]
     try:
-        summary = json.loads(subprocess.check_output(command, text=True, timeout=120))
+        summary = json.loads(subprocess.check_output(command, text=True, timeout=600))
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError, ValueError) as error:
         # json.JSONDecodeError is a ValueError. Report instead of aborting with exit 2.
         return {"status": "failed", "passed": 0, "failed": 0, "skipped": 0, "exitCode": exit_code,
@@ -475,6 +475,9 @@ def summarize_result(result, exit_code):
             result_summary["status"] = "passed"
             result_summary["exitCodeOverridden"] = True
             del result_summary["reason"]
+    if (result_summary["status"] == "failed" and exit_code == 0 and passed == 0 and failed == 0
+            and "reason" not in result_summary):
+        result_summary["reason"] = f"No test passed ({skipped} skipped)"
     return result_summary
 
 
@@ -508,6 +511,8 @@ def require_complete_run(phase, selectors, summary):
         # xcresult summaries with only an intentional skip have no passedTests,
         # so summarize_result cannot classify them as successful on its own.
         summary["status"] = "passed"
+        # Drop the all-skipped failure explanation: the skip is intentional here.
+        summary.pop("reason", None)
     actual_count = sum(summary.get(key, 0) for key in ("passed", "failed", "skipped"))
     if actual_count != len(selectors):
         reason = (f"Selected {len(selectors)} tests but XCTest reported {actual_count}; "
@@ -645,9 +650,11 @@ def run_photos_permission_bootstrap(command, output, environment):
     bootstrap_environment["TEST_RUNNER_FILMY_RUN_PHOTOS_PERMISSION_BOOTSTRAP"] = "1"
     code = run_logged(bootstrap_command, log, bootstrap_environment)
     summary = summarize_result(result, code)
-    if (code != 0 or summary.get("status") != "passed"
+    if (summary.get("status") != "passed"
             or summary.get("passed") != 1 or summary.get("failed", 0)
             or summary.get("skipped", 0)):
+        if summary.get("reason"):
+            print(f"reason: {summary['reason']}", file=sys.stderr)
         raise PhaseFailure(code or 1)
     return summary
 

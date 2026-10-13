@@ -58,6 +58,8 @@ packages or Swift package dependencies are used.
 python3 scripts/testing/check_policy_regressions.py --mutation-checks
 ```
 
+CI (`ios-build.yml`) runs `check_policy_regressions.py --mutation-checks` and `test-scene-auto-core.sh`.
+
 The checker copies current production policies (including the Foundation-only
 `GallerySectioning.swift` model) and the current two XCTest files
 into an owned temporary Swift package. On Linux only, it removes the unavailable

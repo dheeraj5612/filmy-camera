@@ -441,10 +441,10 @@ class SuiteRoutingTests(unittest.TestCase):
                 patch.object(run, "run_logged", return_value=65), \
                 patch.object(run, "summarize_result", return_value={
                     "status": "failed", "passed": 0, "failed": 1,
-                    "skipped": 0, "exitCode": 65,
+                    "skipped": 0, "exitCode": 65, "reason": "synthetic failure",
                 }), patch.object(run.subprocess, "check_output", side_effect=command_output), \
                 contextlib.redirect_stdout(io.StringIO()), \
-                contextlib.redirect_stderr(io.StringIO()):
+                contextlib.redirect_stderr(io.StringIO()) as captured_stderr:
             output = Path(directory) / "results"
             code = run.main([
                 "photos-e2e",
@@ -455,6 +455,7 @@ class SuiteRoutingTests(unittest.TestCase):
             ])
 
             self.assertEqual(code, 65)
+            self.assertIn("reason: synthetic failure", captured_stderr.getvalue())
             summary = json.loads(
                 (output / "filmycamera-photos-e2e-summary.json").read_text()
             )
@@ -880,12 +881,80 @@ class EvidenceTests(unittest.TestCase):
         self.assertIn("target membership", summary["reason"])
 
     def test_unreadable_result_bundle_is_failed_summary(self):
-        for effect, value in ((subprocess.CalledProcessError(1, "xcresulttool"), None), (None, "not json")):
+        for effect, value in ((subprocess.CalledProcessError(1, "xcresulttool"), None), (None, "not json"),
+                              (subprocess.TimeoutExpired("xcresulttool", 600), None),
+                              (OSError("no xcrun"), None)):
             with self.subTest(effect=effect), tempfile.TemporaryDirectory() as directory, \
                     patch.object(run.subprocess, "check_output", side_effect=effect, return_value=value):
                 summary = run.summarize_result(Path(directory), 0)
                 self.assertEqual(summary["status"], "failed")
                 self.assertIn("result bundle unreadable", summary["reason"])
+
+    def test_result_summary_timeout_is_600_seconds(self):
+        seen = {}
+
+        def record(*args, **kwargs):
+            seen.update(kwargs)
+            return json.dumps({"passedTests": 1, "failedTests": 0})
+
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(run.subprocess, "check_output", side_effect=record):
+            run.summarize_result(Path(directory), 0)
+        self.assertEqual(seen.get("timeout"), 600)
+
+    def test_all_skipped_summary_gets_reason_and_stays_failed(self):
+        summary = self._summarize_with_bundle(0, {"passedTests": 0, "failedTests": 0, "skippedTests": 2})
+        self.assertEqual(summary["status"], "failed")
+        self.assertIn("No test passed (2 skipped)", summary["reason"])
+
+    def test_all_skipped_reason_not_added_for_failures_or_nonzero_exit(self):
+        summary = self._summarize_with_bundle(0, {"passedTests": 0, "failedTests": 1, "skippedTests": 1})
+        self.assertNotIn("reason", summary)
+        summary = self._summarize_with_bundle(65, {"passedTests": 0, "failedTests": 0, "skippedTests": 1})
+        self.assertNotIn("reason", summary)
+
+    def test_bootstrap_accepts_vetted_exit_133_summary(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(run, "run_logged", return_value=133), \
+                patch.object(run, "summarize_result", return_value={
+                    "status": "passed", "passed": 1, "failed": 0, "skipped": 0,
+                    "exitCode": 133, "exitCodeOverridden": True,
+                }):
+            summary = run.run_photos_permission_bootstrap(["xcodebuild"], Path(directory), {})
+        self.assertEqual(summary["status"], "passed")
+
+    def test_bootstrap_failure_prints_reason(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(run, "run_logged", return_value=65), \
+                patch.object(run, "summarize_result", return_value={
+                    "status": "failed", "passed": 0, "failed": 1, "skipped": 0,
+                    "exitCode": 65, "reason": "synthetic bootstrap failure",
+                }), contextlib.redirect_stderr(io.StringIO()) as captured:
+            with self.assertRaises(run.PhaseFailure) as raised:
+                run.run_photos_permission_bootstrap(["xcodebuild"], Path(directory), {})
+        self.assertEqual(raised.exception.exit_code, 65)
+        self.assertIn("reason: synthetic bootstrap failure", captured.getvalue())
+
+    def test_bootstrap_failed_summary_with_zero_exit_code_exits_1(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(run, "run_logged", return_value=0), \
+                patch.object(run, "summarize_result", return_value={
+                    "status": "failed", "passed": 0, "failed": 0, "skipped": 0,
+                    "exitCode": 0, "reason": "result bundle unreadable: ValueError",
+                }), contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(run.PhaseFailure) as raised:
+                run.run_photos_permission_bootstrap(["xcodebuild"], Path(directory), {})
+        self.assertEqual(raised.exception.exit_code, 1)
+
+    def test_bootstrap_real_summary_accepts_vetted_exit_133(self):
+        payload = json.dumps({"passedTests": 1, "failedTests": 0, "result": "Passed"})
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(run, "run_logged", return_value=133), \
+                patch.object(run.Path, "exists", side_effect=[False, True]), \
+                patch.object(run.subprocess, "check_output", return_value=payload):
+            summary = run.run_photos_permission_bootstrap(["xcodebuild"], Path(directory), {})
+        self.assertEqual(summary["status"], "passed")
+        self.assertTrue(summary["exitCodeOverridden"])
 
     def test_skipped_prerequisite_is_failure_in_routine_ci(self):
         summary = {"status": "passed", "passed": 1, "failed": 0, "skipped": 1}
@@ -922,6 +991,14 @@ class EvidenceTests(unittest.TestCase):
         }
         run.require_complete_run("fixtures", [run.REQUIRED_FIXTURE_SELECTOR, selector], summary)
         self.assertEqual(summary["status"], "passed")
+
+    def test_optional_fixture_skip_clears_all_skipped_reason(self):
+        selector = sorted(run.OPTIONAL_FIXTURE_SELECTORS)[0]
+        summary = self._summarize_with_bundle(0, {"passedTests": 0, "failedTests": 0, "skippedTests": 1})
+        self.assertIn("No test passed", summary["reason"])
+        run.require_complete_run("fixtures", [selector], summary)
+        self.assertEqual(summary["status"], "passed")
+        self.assertNotIn("reason", summary)
 
     def test_optional_local_skin_capture_skip_is_allowed(self):
         selector = "FilmyCameraTests/RendererSkinCaptureDiagnosticsTests/testExportStagesForLocalSkinCapture"
