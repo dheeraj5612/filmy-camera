@@ -45,6 +45,20 @@ final class CaptureModesProcessingTests: XCTestCase {
         XCTAssertThrowsError(try CaptureReference.prepare(Data([0, 1, 2, 3])))
     }
 
+    /// The 128x96 texture as a JPEG carrying an EXIF orientation tag (PNG orientation support is unreliable).
+    private func taggedFixture(orientation: Int) throws -> URL {
+        let png = try fixture()
+        defer { try? FileManager.default.removeItem(at: png) }
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(png as CFURL, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, UTType.jpeg.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, [kCGImagePropertyOrientation: orientation,
+                                                        kCGImageDestinationLossyCompressionQuality: 0.95] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return url
+    }
+
     func testFusionNeedsThreeFrames() {
         XCTAssertThrowsError(try CaptureImageProcessor.fuseNight([]))
         XCTAssertThrowsError(try CaptureImageProcessor.stitchPanorama([]))
@@ -61,6 +75,50 @@ final class CaptureModesProcessingTests: XCTestCase {
         XCTAssertLessThanOrEqual(result.image.extent.height, 96)
         XCTAssertEqual(result.image.extent.minX, 0)
         XCTAssertEqual(result.image.extent.minY, 0)
+    }
+
+    func testNightBakesTheOrientationTagUpright() throws {
+        let portrait = try (0..<3).map { _ in try taggedFixture(orientation: 6) }
+        let landscape = try (0..<3).map { _ in try taggedFixture(orientation: 1) }
+        defer { (portrait + landscape).forEach { try? FileManager.default.removeItem(at: $0) } }
+        let upright = try CaptureImageProcessor.fuseNight(portrait)
+        XCTAssertEqual(upright.accepted, 3)
+        XCTAssertGreaterThan(upright.image.extent.width, 88)
+        XCTAssertLessThanOrEqual(upright.image.extent.width, 96)
+        XCTAssertGreaterThan(upright.image.extent.height, 120)
+        XCTAssertLessThanOrEqual(upright.image.extent.height, 128)
+        let flat = try CaptureImageProcessor.fuseNight(landscape)
+        XCTAssertGreaterThan(flat.image.extent.width, 120)
+        XCTAssertLessThanOrEqual(flat.image.extent.width, 128)
+        XCTAssertGreaterThan(flat.image.extent.height, 88)
+        XCTAssertLessThanOrEqual(flat.image.extent.height, 96)
+    }
+
+    func testNightDropsFramesWhoseTagChangedMidSequence() throws {
+        let flat = try taggedFixture(orientation: 1)
+        let upright = try taggedFixture(orientation: 6)
+        defer { [flat, upright].forEach { try? FileManager.default.removeItem(at: $0) } }
+        XCTAssertThrowsError(try CaptureImageProcessor.fuseNight([flat, upright, flat])) { error in
+            guard case CaptureModesError.insufficientFrames(let accepted) = error else { return XCTFail("\(error)") }
+            XCTAssertEqual(accepted, 2)
+        }
+    }
+
+    func testStillEncodeKeepsSourceTagAndPixelSize() throws {
+        let types = CGImageDestinationCopyTypeIdentifiers() as? [String] ?? []
+        try XCTSkipUnless(types.contains(UTType.heic.identifier), "HEIC encoding is unavailable")
+        let source = try taggedFixture(orientation: 6)
+        let output = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".heic")
+        defer { [source, output].forEach { try? FileManager.default.removeItem(at: $0) } }
+        let image = try XCTUnwrap(CIImage(contentsOf: source, options: [.applyOrientationProperty: false]))
+        XCTAssertEqual(image.extent.width, 128)
+        XCTAssertEqual(image.extent.height, 96)
+        try CaptureImageProcessor.encode(image, to: output, metadataSource: source)
+        let result = try XCTUnwrap(CGImageSourceCreateWithURL(output as CFURL, nil))
+        let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(result, 0, nil) as? [CFString: Any])
+        XCTAssertEqual(properties[kCGImagePropertyOrientation] as? Int, 6)
+        XCTAssertEqual(properties[kCGImagePropertyPixelWidth] as? Int, 128)
+        XCTAssertEqual(properties[kCGImagePropertyPixelHeight] as? Int, 96)
     }
 
     func testPanoramaDoesNotPretendRepeatedStillFramesAreASweep() throws {

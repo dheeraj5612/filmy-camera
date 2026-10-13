@@ -44,7 +44,13 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
     private var controlsAllowed = true
     private var pendingConfiguration: (CaptureMode, Bool)?
     private var spatialAngle: CGFloat?
+    /// Interface-derived fallback angle, used until the rotation coordinator reports. Queue-only.
     private var rotationAngle: CGFloat = 90
+    /// Horizon-level capture angle from the rotation coordinator. Queue-only; written to connections
+    /// only by stampRotation() at configure, shutter and scene read.
+    private var horizonAngle: Double?
+    private var rotationToken = UUID()
+    private let rotationSource = ModesRotationSource()
     private var observers: [NSObjectProtocol] = []
     private var savedMetering: (AVCaptureDevice.FocusMode, AVCaptureDevice.ExposureMode, AVCaptureDevice.WhiteBalanceMode)?
 
@@ -90,6 +96,8 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
         // Normal ownership uses shutdown() before returning to the main camera.
         let session = session
         queue.async { if session.isRunning { session.stopRunning() } }
+        let source = rotationSource
+        DispatchQueue.main.async { source.detach() }
     }
 
     func configure(mode: CaptureMode, microphone: Bool) {
@@ -125,6 +133,7 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
                 throw CaptureModesError.unavailable("Camera access is disabled. Enable it in Settings to use capture modes.")
             }
             let selected = try selectDevice(for: mode)
+            if device?.position != selected.position { horizonAngle = nil }
             device = selected
             let input = try AVCaptureDeviceInput(device: selected)
             guard session.canAddInput(input) else { throw CaptureModesError.unavailable("This camera input is unavailable.") }
@@ -187,11 +196,7 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
                 session.addInput(audioInput)
                 state.microphoneEnabled = true
             }
-            for output in session.outputs {
-                if let connection = output.connection(with: .video), connection.isVideoRotationAngleSupported(rotationAngle), mode != .spatialVideo {
-                    connection.videoRotationAngle = rotationAngle
-                }
-            }
+            stampRotation()
             if mode.isVideo, let connection = movie.connection(with: .video) {
                 if mode != .spatialVideo {
                     if connection.isVideoStabilizationSupported { connection.preferredVideoStabilizationMode = .standard }
@@ -211,12 +216,14 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
             session.commitConfiguration()
             configurationOpen = false
             guard wantsRunning else { state.phase = .stopped; publish(); return }
+            trackRotation(of: selected)
             session.startRunning()
             guard session.isRunning else { throw CaptureModesError.unavailable("The capture session did not start. Try reopening this mode.") }
             state.phase = .ready
             state.message = mode.guidance
             publish()
         } catch {
+            trackRotation(of: nil)
             if configurationOpen { session.commitConfiguration() }
             state.phase = .unavailable
             state.message = error.localizedDescription
@@ -289,16 +296,42 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
 
     func setSpatialAngle(_ angle: CGFloat?) { queue.async { [self] in spatialAngle = angle } }
 
-    /// Interface-orientation-derived rotation for non-spatial video/photo connections, matching
-    /// the main capture path (CameraService.videoRotationAngle). Applied on the next configure and
-    /// immediately to already-installed connections so landscape iPad captures aren't sideways.
+    /// Interface-derived fallback angle (matches CameraService.videoRotationAngle). Used only until the
+    /// rotation coordinator reports. It never writes connections, so a rotation cannot change the
+    /// stamp in the middle of a burst or recording.
     func setRotationAngle(_ angle: CGFloat) {
-        queue.async { [self] in
-            rotationAngle = angle
-            guard state.mode != .spatialVideo else { return }
-            for output in session.outputs {
-                if let connection = output.connection(with: .video), connection.isVideoRotationAngleSupported(angle) {
-                    connection.videoRotationAngle = angle
+        queue.async { [self] in rotationAngle = angle }
+    }
+
+    /// Writes the capture angle to the photo and movie connections. Queue-only; called at configure,
+    /// shutter and scene read, never mid-sequence. Spatial video keeps its own path. Never throws.
+    private func stampRotation() {
+        guard state.mode != .spatialVideo else { return }
+        let angle = CGFloat(CaptureModesPolicy.captureRotationAngle(horizonLevel: horizonAngle, fallback: Double(rotationAngle)))
+        for output in session.outputs {
+            if let connection = output.connection(with: .video), connection.isVideoRotationAngleSupported(angle), connection.videoRotationAngle != angle {
+                connection.videoRotationAngle = angle
+            }
+        }
+    }
+
+    /// Follows the horizon-level angle of `device` (nil stops). The callback only stores the angle.
+    private func trackRotation(of device: AVCaptureDevice?) {
+        let token = UUID()
+        rotationToken = token
+        let source = rotationSource
+        guard let device else {
+            horizonAngle = nil
+            DispatchQueue.main.async { source.detach() }
+            return
+        }
+        let box = ModesDeviceBox(device)
+        DispatchQueue.main.async { [weak self] in
+            guard self != nil else { source.detach(); return }
+            source.attach(box.device) { [weak self] angle in
+                self?.queue.async { [weak self] in
+                    guard let self, self.rotationToken == token else { return }
+                    self.horizonAngle = Double(angle)
                 }
             }
         }
@@ -364,6 +397,7 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
                 if state.mode == .spatialVideo, spatialAngle == nil {
                     throw CaptureModesError.unavailable("Turn the phone horizontally before starting spatial video.")
                 }
+                stampRotation()
                 let record = CaptureMedia(id: UUID(), mode: state.mode, createdAt: Date(), recipeName: recipe.name)
                 try CaptureMediaStore.persist(record)
                 try CaptureMediaStore.saveRecipe(recipe, in: record.id)
@@ -515,6 +549,7 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
     func inspectScene() {
         queue.async { [self] in
             guard state.phase == .ready, !state.mode.isVideo else { return }
+            stampRotation()
             state.phase = .capturing
             state.scanning = true
             state.message = "Reading text, codes, and scene labels on device"
@@ -557,6 +592,7 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
     }
 
     private func pauseOnQueue(reason: String) {
+        trackRotation(of: nil)
         wantsRunning = false
         reopenWhenSettled = false
         pendingConfiguration = nil
@@ -796,6 +832,34 @@ extension CaptureModesEngine: AVCaptureFileOutputRecordingDelegate {
                 settle()
             }
         } catch { fail(error) }
+    }
+}
+
+/// AVCaptureDevice is not Sendable; hands it to the main thread for the rotation coordinator.
+private final class ModesDeviceBox: @unchecked Sendable {
+    let device: AVCaptureDevice
+    init(_ device: AVCaptureDevice) { self.device = device }
+}
+
+/// Owns the rotation coordinator and its observation. Main thread only (attach, detach).
+/// The preview layer is nil, so the coordinator cannot touch the viewfinder.
+private final class ModesRotationSource: @unchecked Sendable {
+    private var coordinator: AVCaptureDevice.RotationCoordinator?
+    private var observation: NSKeyValueObservation?
+
+    func attach(_ device: AVCaptureDevice, onAngle: @escaping @Sendable (CGFloat) -> Void) {
+        detach()
+        let next = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
+        coordinator = next
+        observation = next.observe(\.videoRotationAngleForHorizonLevelCapture, options: [.initial, .new]) { coordinator, change in
+            onAngle(change.newValue ?? coordinator.videoRotationAngleForHorizonLevelCapture)
+        }
+    }
+
+    func detach() {
+        observation?.invalidate()
+        observation = nil
+        coordinator = nil
     }
 }
 

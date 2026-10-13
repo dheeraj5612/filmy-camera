@@ -72,4 +72,26 @@ check(!CaptureModesPolicy.keepsScreenAwake(sceneActive: true, cameraReleased: tr
 check(!CaptureModesPolicy.keepsScreenAwake(sceneActive: false, cameraReleased: true, closing: false, phase: .ready), "screen may sleep when inactive")
 check(!CaptureModesPolicy.keepsScreenAwake(sceneActive: true, cameraReleased: false, closing: false, phase: .ready), "screen may sleep before camera release")
 check(!CaptureModesPolicy.keepsScreenAwake(sceneActive: true, cameraReleased: true, closing: true, phase: .ready), "screen may sleep while closing")
+let rotationRows: [(Double?, Double, Double)] = [
+    (nil, 90, 90), (nil, 0, 0), (nil, 180, 180), (nil, 270, 270), (nil, 450, 90),
+    (nil, Double.nan, 90), (nil, Double.infinity, 90), (Double.nan, 0, 0), (Double.infinity, 180, 180), (-Double.infinity, Double.nan, 90),
+    (0, 45, 0), (90, 0, 90), (180, 0, 180), (270, 0, 270),
+    (360, 90, 0), (450, 0, 90), (720, 90, 0), (-90, 90, 270), (-180, 90, 180), (-270, 0, 90),
+    (-0.0, 90, 0), (-1e-20, 90, 0),
+    (44.9, 90, 0), (45, 0, 90), (134.9, 0, 90), (135, 0, 180),
+    (224.9, 0, 180), (225, 0, 270), (314.9, 0, 270), (315, 90, 0), (359.9, 90, 0)
+]
+for row in rotationRows {
+    check(CaptureModesPolicy.captureRotationAngle(horizonLevel: row.0, fallback: row.1) == row.2, "capture angle \(String(describing: row.0)) fallback \(row.1)")
+}
+check([0.0, 90, 180, 270].contains(CaptureModesPolicy.captureRotationAngle(horizonLevel: 1e300, fallback: 90)), "huge angle stays cardinal")
+for fallback in [0.0, 90, 180, 270] {
+    var angle = -1080.0
+    while angle <= 1080 {
+        let result = CaptureModesPolicy.captureRotationAngle(horizonLevel: angle, fallback: fallback)
+        check([0.0, 90, 180, 270].contains(result), "capture angle is cardinal")
+        check(CaptureModesPolicy.captureRotationAngle(horizonLevel: result, fallback: fallback) == result, "capture angle is idempotent")
+        angle += 7.5
+    }
+}
 print("PASS: \(assertions) capture policy assertions")

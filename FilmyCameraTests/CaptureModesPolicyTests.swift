@@ -144,4 +144,33 @@ final class CaptureModesPolicyTests: XCTestCase {
         XCTAssertEqual(decoded.status, .originalsOnly)
         XCTAssertEqual(decoded.notes, media.notes)
     }
+
+    func testCaptureRotationAngleSnapsToQuarterTurnsAndNeverFails() {
+        let rows: [(Double?, Double, Double)] = [
+            (nil, 90, 90), (nil, 0, 0), (nil, 180, 180), (nil, 270, 270), (nil, 450, 90),
+            (nil, Double.nan, 90), (nil, Double.infinity, 90), (Double.nan, 0, 0), (Double.infinity, 180, 180), (-Double.infinity, Double.nan, 90),
+            (0, 45, 0), (90, 0, 90), (180, 0, 180), (270, 0, 270),
+            (360, 90, 0), (450, 0, 90), (720, 90, 0), (-90, 90, 270), (-180, 90, 180), (-270, 0, 90),
+            (-0.0, 90, 0), (-1e-20, 90, 0),
+            (44.9, 90, 0), (45, 0, 90), (134.9, 0, 90), (135, 0, 180),
+            (224.9, 0, 180), (225, 0, 270), (314.9, 0, 270), (315, 90, 0), (359.9, 90, 0)
+        ]
+        for row in rows {
+            XCTAssertEqual(CaptureModesPolicy.captureRotationAngle(horizonLevel: row.0, fallback: row.1), row.2,
+                           "horizon \(String(describing: row.0)) fallback \(row.1)")
+        }
+        XCTAssertTrue([0.0, 90, 180, 270].contains(CaptureModesPolicy.captureRotationAngle(horizonLevel: 1e300, fallback: 90)))
+    }
+
+    func testCaptureRotationAngleIsCardinalAndIdempotent() {
+        for fallback in [0.0, 90, 180, 270] {
+            var angle = -1080.0
+            while angle <= 1080 {
+                let result = CaptureModesPolicy.captureRotationAngle(horizonLevel: angle, fallback: fallback)
+                XCTAssertTrue([0.0, 90, 180, 270].contains(result), "\(angle)")
+                XCTAssertEqual(CaptureModesPolicy.captureRotationAngle(horizonLevel: result, fallback: fallback), result, "\(angle)")
+                angle += 7.5
+            }
+        }
+    }
 }

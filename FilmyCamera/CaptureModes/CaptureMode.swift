@@ -156,6 +156,21 @@ enum CaptureModesPolicy {
     static let registrationLongEdge: Double = 1_536
     static let minimumFreeBytes: Int64 = 1_000_000_000
 
+    /// Angle for the photo and movie connections: the rotation coordinator's horizon-level capture angle
+    /// snapped to a quarter turn, else `fallback` snapped the same way, else portrait (90).
+    /// Total: an unreadable angle can never block a capture.
+    static func captureRotationAngle(horizonLevel: Double?, fallback: Double) -> Double {
+        quarterTurn(horizonLevel) ?? quarterTurn(fallback) ?? 90
+    }
+
+    private static func quarterTurn(_ angle: Double?) -> Double? {
+        guard let angle, angle.isFinite else { return nil }
+        var turn = angle.truncatingRemainder(dividingBy: 360)
+        if turn < 0 { turn += 360 }
+        let quarters = Int((turn / 90).rounded()) % 4
+        return Double(quarters * 90)
+    }
+
     static func microphoneNotice(isVideo: Bool, wantsMicrophone: Bool, audioAllowed: Bool, alreadyShown: Bool) -> (show: Bool, shown: Bool) {
         var shown = alreadyShown
         if !wantsMicrophone || audioAllowed { shown = false }
