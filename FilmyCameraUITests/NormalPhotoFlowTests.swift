@@ -101,8 +101,7 @@ final class NormalPhotoFlowTests: XCTestCase {
         try ensureRecipe(id: "g7x-compact", name: "G7 X Compact")
         openRoll()
         let countBefore = try waitForRollFrameCount()
-        app.buttons["roll-back-to-camera"].tap()
-        XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 10))
+        returnToCameraFromRoll()
 
         try importSeededFixture(newerSavedFrameCount: countBefore)
         // SwiftUI promotes the outer review identifier onto its sole scroll
@@ -492,8 +491,7 @@ final class NormalPhotoFlowTests: XCTestCase {
         } else {
             openRoll()
             newerFrames = try waitForRollFrameCount()
-            app.buttons["roll-back-to-camera"].tap()
-            XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 10))
+            returnToCameraFromRoll()
         }
         let importPhoto = app.buttons["import-photo"]
         XCTAssertTrue(importPhoto.waitForExistence(timeout: 10))
@@ -730,6 +728,24 @@ final class NormalPhotoFlowTests: XCTestCase {
             },
             "The seeded filtered photo must complete its Photos save"
         )
+    }
+
+    private func returnToCameraFromRoll() {
+        let back = app.buttons["roll-back-to-camera"]
+        let menu = app.buttons["recipe-menu"]
+        for attempt in 1...3 {
+            var tapped = false
+            if back.waitForExistence(timeout: 5), back.isHittable {
+                back.tap()
+                tapped = true
+            }
+            if menu.waitForExistence(timeout: 10) { return }
+            // CI run 38345928864: the button dimmed (press recognized) but the
+            // Roll stayed up. Keep evidence so a recurring ignored press shows.
+            let name = tapped ? "roll-back-to-camera-ignored-attempt-\(attempt)" : "roll-back-to-camera-not-hittable-attempt-\(attempt)"
+            attachScreenshot(named: name)
+        }
+        XCTFail("Back to camera must reach the viewfinder")
     }
 
     private func openRoll() {

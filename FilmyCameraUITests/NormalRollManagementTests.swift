@@ -161,8 +161,21 @@ final class NormalRollManagementTests: XCTestCase {
     }
 
     private func returnToCamera() {
-        app.buttons["roll-back-to-camera"].tap()
-        XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 10))
+        let back = app.buttons["roll-back-to-camera"]
+        let menu = app.buttons["recipe-menu"]
+        for attempt in 1...3 {
+            var tapped = false
+            if back.waitForExistence(timeout: 5), back.isHittable {
+                back.tap()
+                tapped = true
+            }
+            if menu.waitForExistence(timeout: 10) { return }
+            // CI run 38345928864: the button dimmed (press recognized) but the
+            // Roll stayed up. Keep evidence so a recurring ignored press shows.
+            let name = tapped ? "roll-back-to-camera-ignored-attempt-\(attempt)" : "roll-back-to-camera-not-hittable-attempt-\(attempt)"
+            screenshot(name)
+        }
+        XCTFail("Back to camera must reach the viewfinder")
     }
 
     private func saveCafeFixture(newerSavedFrameCount: Int) throws {

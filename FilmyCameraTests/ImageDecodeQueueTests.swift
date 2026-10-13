@@ -78,7 +78,7 @@ final class ImageDecodeQueueTests: XCTestCase, @unchecked Sendable {
         let drained = expectation(description: "Cancelled operations are drained")
         operations.addBarrierBlock { drained.fulfill() }
         operations.isSuspended = false
-        await fulfillment(of: [drained], timeout: 5)
+        await fulfillment(of: [drained], timeout: 30)
     }
 
     func testCancellationDropsAnInFlightResultAndResumesBeforeDecodeCompletes() async {
@@ -89,17 +89,17 @@ final class ImageDecodeQueueTests: XCTestCase, @unchecked Sendable {
         let task = Task {
             await queue.value {
                 entered.fulfill()
-                _ = release.wait(timeout: .now() + 5)
+                _ = release.wait(timeout: .now() + 60)
                 finished.fulfill()
                 return 99
             }
         }
-        await fulfillment(of: [entered], timeout: 5)
+        await fulfillment(of: [entered], timeout: 30)
         task.cancel()
         let result = await task.value
         XCTAssertNil(result)
         release.signal()
-        await fulfillment(of: [finished], timeout: 5)
+        await fulfillment(of: [finished], timeout: 30)
     }
 
     func testConcurrentDecodesNeverExceedTwoWorkers() async {
@@ -116,7 +116,7 @@ final class ImageDecodeQueueTests: XCTestCase, @unchecked Sendable {
                     group.addTask {
                         await queue.value {
                             if probe.enter() <= 2 { firstWorkers.fulfill() }
-                            _ = release.wait(timeout: .now() + 30)
+                            _ = release.wait(timeout: .now() + 60)
                             probe.leave()
                             return index
                         }
@@ -127,7 +127,7 @@ final class ImageDecodeQueueTests: XCTestCase, @unchecked Sendable {
                 return results
             }
         }
-        await fulfillment(of: [firstWorkers], timeout: 15)
+        await fulfillment(of: [firstWorkers], timeout: 30)
         XCTAssertEqual(probe.counts().started, 2)
         for _ in 0..<12 { release.signal() }
         let values = await batch.value

@@ -326,8 +326,19 @@ final class ComprehensiveSettingsTests: XCTestCase {
         let scroll = form.exists ? form : (editor.exists ? editor : app.scrollViews.firstMatch)
         // A native iPad Form can require more than one viewport of travel when
         // keyboard or large-text settings change its content height.
+        let settings = app.scrollViews["settings-scroll"]
+        let returnBar = app.buttons["settings-back-to-camera"]
         for attempt in 0..<40 {
             var viewport = scroll.frame.intersection(app.frame)
+            // The pinned Settings return bar is opaque and can report a
+            // control under it as hittable, so exclude the strip it covers.
+            if settings.exists && returnBar.exists {
+                let top = returnBar.frame.maxY + 12
+                if top > viewport.minY {
+                    viewport.size.height = max(0, viewport.maxY - top)
+                    viewport.origin.y = top
+                }
+            }
             let action = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Apply changes to ' OR label BEGINSWITH 'Done editing '")).firstMatch
             if editor.exists && action.exists {
                 viewport.size.height = max(0, min(viewport.height, action.frame.minY - viewport.minY - 8))
@@ -357,6 +368,12 @@ final class ComprehensiveSettingsTests: XCTestCase {
                 // the direction. Search from both ends instead of repeatedly
                 // swiping toward the bottom when the target is absent.
                 if attempt < 20 { scroll.swipeDown() } else { scroll.swipeUp() }
+            } else if !form.exists && settings.exists {
+                // A measured drag in the page margin; a fling can overshoot
+                // and leave the target under the pinned return bar.
+                let from = settings.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: downward ? 0.35 : 0.65))
+                let to = settings.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: downward ? 0.65 : 0.35))
+                from.press(forDuration: 0.05, thenDragTo: to)
             } else if downward { scroll.swipeDown() } else { scroll.swipeUp() }
         }
         let container = form.exists ? "capture-setup-form" : (editor.exists ? "recipe-detail-scroll" : "first scroll view")
