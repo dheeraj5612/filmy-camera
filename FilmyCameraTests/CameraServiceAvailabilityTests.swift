@@ -1061,4 +1061,27 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         XCTAssertEqual(CameraService.startOutcomeAvailability(running: false, interrupted: true), .interrupted)
         XCTAssertEqual(CameraService.startOutcomeAvailability(running: false, interrupted: false), .needsRecovery)
     }
+
+    func testDefaultsWriteOffMainDoesNotWaitForLocationProviderOnMainThread() {
+        let key = "locationTaggingEnabled.v1"
+        let saved = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let saved {
+                UserDefaults.standard.set(saved, forKey: key)
+            } else {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
+        let provider = CameraCaptureLocationProvider()
+        // A changed value, so the write posts didChangeNotification.
+        let flipped = !((saved as? Bool) ?? true)
+        let returned = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            UserDefaults.standard.set(flipped, forKey: key)
+            returned.signal()
+        }
+        // The main thread is blocked here: the write must return without it.
+        XCTAssertEqual(returned.wait(timeout: .now() + 10), .success)
+        withExtendedLifetime(provider) {}
+    }
 }

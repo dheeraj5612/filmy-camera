@@ -410,12 +410,23 @@ final class PhotoLibraryService: ObservableObject {
         deinit { tokens.forEach { NotificationCenter.default.removeObserver($0) } }
     }
 
-    /// Serializes UserDefaults writes and drops a snapshot older than one
-    /// already written, so a late background write never overwrites a flush.
-    private final class DefaultsWriteGate: @unchecked Sendable {
+    /// Drops a snapshot older than one already written, so a late background
+    /// commit never overwrites a flush. The lock guards only the dictionaries and
+    /// is never held across the store call: UserDefaults.set can post
+    /// didChangeNotification, whose observers may wait on other threads. Writes
+    /// are main-actor isolated, so they are serialized on the main thread, which
+    /// is what keeps the compare-then-store sequence ordered without the lock.
+    final class DefaultsWriteGate: @unchecked Sendable {
         private let lock = NSLock()
         private var latest: [String: UInt64] = [:]
         private var requested: [String: UInt64] = [:]
+        private let store: @Sendable (Data, String) -> Void
+
+        init(store: @escaping @Sendable (Data, String) -> Void = { data, key in
+            UserDefaults.standard.set(data, forKey: key)
+        }) {
+            self.store = store
+        }
 
         func request(key: String, generation: UInt64) {
             lock.lock()
@@ -429,12 +440,14 @@ final class PhotoLibraryService: ObservableObject {
             return (requested[key] ?? 0) > generation
         }
 
+        @MainActor
         func write(_ data: Data, key: String, generation: UInt64) {
             lock.lock()
-            defer { lock.unlock() }
-            guard generation > (latest[key] ?? 0) else { return }
-            latest[key] = generation
-            UserDefaults.standard.set(data, forKey: key)
+            let isNewer = generation > (latest[key] ?? 0)
+            if isNewer { latest[key] = generation }
+            lock.unlock()
+            guard isNewer else { return }
+            store(data, key)
         }
     }
 
@@ -611,10 +624,13 @@ final class PhotoLibraryService: ObservableObject {
     private var thumbnailCacheGeneration: UInt64 = 0
     private var memoryWarningObserver: MemoryWarningObservation?
     private var lifecycleObservation: LifecycleObservation?
-    private let defaultsGate = DefaultsWriteGate()
+    private let defaultsGate: DefaultsWriteGate
     private var persistenceGeneration: UInt64 = 0
     private var metadataDirty = false
     private var resourcesDirty = false
+    /// Generation of a background snapshot not yet committed, per key.
+    private var metadataInFlightGeneration: UInt64?
+    private var resourcesInFlightGeneration: UInt64?
     private var persistenceTask: Task<Void, Never>?
     private var savedFrameResourcesCache: [String: SavedFrameResource]?
     private var savedAssetIdentifiersCache: [String]?
@@ -630,7 +646,9 @@ final class PhotoLibraryService: ObservableObject {
     }
     private var galleryAssetsCache: [PhotoLibraryGalleryAsset]?
 
-    init() {
+    /// The gate is injectable so tests can observe the writes.
+    init(defaultsGate: DefaultsWriteGate = DefaultsWriteGate()) {
+        self.defaultsGate = defaultsGate
         isUITesting = ProcessInfo.processInfo.arguments.contains("-ui-testing")
         thumbnailCache.countLimit = 80
         thumbnailCache.totalCostLimit = 48 * 1024 * 1024
@@ -671,11 +689,13 @@ final class PhotoLibraryService: ObservableObject {
     }
 
     /// Coalesces metadata and resource-index writes: mutations within one
-    /// main-actor turn share a single snapshot, encoded and written off the main
-    /// thread right away (no timer). A superseded snapshot is skipped before
-    /// encoding. On-disk format is unchanged (same UserDefaults keys and JSON).
-    /// A kill loses at most the write in flight; the Photos asset and its
-    /// ownership identifier are persisted synchronously and stay in the Roll.
+    /// main-actor turn share a single snapshot, encoded off the main thread
+    /// right away (no timer) and committed to UserDefaults on the main actor.
+    /// A superseded snapshot is skipped before encoding. On-disk format is
+    /// unchanged (same UserDefaults keys and JSON). A flush writes every key
+    /// that is dirty or still in flight. A kill without a flush loses at most
+    /// the snapshot in flight, up to its main-actor commit; the Photos asset and
+    /// its ownership identifier are persisted synchronously and stay in the Roll.
     private func schedulePersistence() {
         guard persistenceTask == nil else { return }
         persistenceTask = Task { [self] in
@@ -690,9 +710,14 @@ final class PhotoLibraryService: ObservableObject {
     private func writePersistence(inBackground: Bool) {
         persistenceTask?.cancel()
         persistenceTask = nil
-        guard metadataDirty || resourcesDirty else { return }
-        let metadataSnapshot: [String: SavedFrameMetadata]? = metadataDirty ? metadataByAssetIdentifier : nil
-        let resourcesSnapshot: [String: SavedFrameResource]? = resourcesDirty ? savedFrameResourcesCache : nil
+        // A flush also covers a key whose background snapshot has not been
+        // committed yet: that commit needs the main thread and may never come
+        // (willTerminate), so the flush writes the current in-memory state.
+        let metadataPending = metadataDirty || (!inBackground && metadataInFlightGeneration != nil)
+        let resourcesPending = resourcesDirty || (!inBackground && resourcesInFlightGeneration != nil)
+        guard metadataPending || resourcesPending else { return }
+        let metadataSnapshot: [String: SavedFrameMetadata]? = metadataPending ? metadataByAssetIdentifier : nil
+        let resourcesSnapshot: [String: SavedFrameResource]? = resourcesPending ? savedFrameResourcesCache : nil
         metadataDirty = false
         resourcesDirty = false
         persistenceGeneration &+= 1
@@ -700,23 +725,54 @@ final class PhotoLibraryService: ObservableObject {
         let gate = defaultsGate
         let metadataKey = savedFrameMetadataKey
         let resourcesKey = Self.savedFrameResourcesKey
-        if metadataSnapshot != nil { gate.request(key: metadataKey, generation: generation) }
-        if resourcesSnapshot != nil { gate.request(key: resourcesKey, generation: generation) }
-        let work: @Sendable () -> Void = {
-            if let metadataSnapshot, !gate.isSuperseded(key: metadataKey, generation: generation),
-               let data = try? JSONEncoder().encode(metadataSnapshot) {
+        if metadataSnapshot != nil {
+            gate.request(key: metadataKey, generation: generation)
+            metadataInFlightGeneration = inBackground ? generation : nil
+        }
+        if resourcesSnapshot != nil {
+            gate.request(key: resourcesKey, generation: generation)
+            resourcesInFlightGeneration = inBackground ? generation : nil
+        }
+        guard inBackground else {
+            if let metadataSnapshot, let data = try? JSONEncoder().encode(metadataSnapshot) {
                 gate.write(data, key: metadataKey, generation: generation)
             }
-            if let resourcesSnapshot, !gate.isSuperseded(key: resourcesKey, generation: generation),
-               let data = try? JSONEncoder().encode(resourcesSnapshot) {
+            if let resourcesSnapshot, let data = try? JSONEncoder().encode(resourcesSnapshot) {
                 gate.write(data, key: resourcesKey, generation: generation)
             }
+            return
         }
-        if inBackground {
-            Task.detached(priority: .utility) { work() }
-        } else {
-            work()
+        // Encode off the main thread, then commit on the main actor so every
+        // UserDefaults write happens on the main thread. Nothing waits on this task.
+        Task.detached(priority: .utility) { [weak self] in
+            // Immutable before the hop: the main-actor closure is Sendable.
+            let metadataData: Data?
+            if let metadataSnapshot, !gate.isSuperseded(key: metadataKey, generation: generation) {
+                metadataData = try? JSONEncoder().encode(metadataSnapshot)
+            } else {
+                metadataData = nil
+            }
+            let resourcesData: Data?
+            if let resourcesSnapshot, !gate.isSuperseded(key: resourcesKey, generation: generation) {
+                resourcesData = try? JSONEncoder().encode(resourcesSnapshot)
+            } else {
+                resourcesData = nil
+            }
+            let hadMetadata = metadataSnapshot != nil
+            let hadResources = resourcesSnapshot != nil
+            await MainActor.run { [weak self] in
+                if let metadataData { gate.write(metadataData, key: metadataKey, generation: generation) }
+                if let resourcesData { gate.write(resourcesData, key: resourcesKey, generation: generation) }
+                self?.finishBackgroundPersistence(generation: generation, metadata: hadMetadata, resources: hadResources)
+            }
         }
+    }
+
+    /// Clears the in-flight marker once the commit, a failed or skipped encode,
+    /// or a flush has settled this generation. A newer marker is left alone.
+    private func finishBackgroundPersistence(generation: UInt64, metadata: Bool, resources: Bool) {
+        if metadata, metadataInFlightGeneration == generation { metadataInFlightGeneration = nil }
+        if resources, resourcesInFlightGeneration == generation { resourcesInFlightGeneration = nil }
     }
 
     private struct CacheMaintenanceInput: Sendable {

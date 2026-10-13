@@ -33,6 +33,17 @@ private actor PhotoLibraryTestFlag {
     func read() -> Bool { value }
 }
 
+private final class LockedValue<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Value
+
+    init(_ value: Value) { stored = value }
+    var value: Value {
+        get { lock.lock(); defer { lock.unlock() }; return stored }
+        set { lock.lock(); stored = newValue; lock.unlock() }
+    }
+}
+
 final class PhotoLibraryMetadataTests: XCTestCase {
     @MainActor
     func testPhotosLocationMatchesEncodedSouthernWesternCoordinates() throws {
@@ -680,5 +691,118 @@ final class PhotoLibraryMetadataTests: XCTestCase {
         state.finish(with: lateImage, cacheable: true)
 
         XCTAssertFalse(state.canCacheResult())
+    }
+
+    @MainActor
+    func testDefaultsWriteGateDropsOlderGenerationAfterNewer() {
+        let stored = LockedValue<[Int]>([])
+        let gate = PhotoLibraryService.DefaultsWriteGate { data, _ in stored.value.append(data.count) }
+        gate.write(Data(count: 2), key: "gate.key", generation: 2)
+        gate.write(Data(count: 1), key: "gate.key", generation: 1)
+        XCTAssertEqual(stored.value, [2])
+        gate.write(Data(count: 3), key: "gate.key", generation: 3)
+        gate.write(Data(count: 4), key: "gate.other", generation: 1)
+        XCTAssertEqual(stored.value, [2, 3, 4])
+    }
+
+    @MainActor
+    func testDefaultsWriteGateRunsStoreWithLockReleased() {
+        let probeResult = LockedValue<Bool>(false)
+        let probeFinished = LockedValue<Bool>(false)
+        let gateBox = LockedValue<PhotoLibraryService.DefaultsWriteGate?>(nil)
+        let gate = PhotoLibraryService.DefaultsWriteGate { _, key in
+            // Another thread must be able to take the gate lock while the store runs.
+            let finished = DispatchSemaphore(value: 0)
+            DispatchQueue.global().async {
+                gateBox.value?.request(key: key, generation: 9)
+                probeResult.value = gateBox.value?.isSuperseded(key: key, generation: 1) == true
+                finished.signal()
+            }
+            probeFinished.value = finished.wait(timeout: .now() + 5) == .success
+        }
+        gateBox.value = gate
+        gate.write(Data(count: 1), key: "gate.lock", generation: 1)
+        XCTAssertTrue(probeFinished.value, "request and isSuperseded must not wait on the store")
+        XCTAssertTrue(probeResult.value)
+    }
+
+    @MainActor
+    func testFlushPersistenceWritesLatestStateWhileBackgroundSnapshotIsInFlight() async throws {
+        let keys = [PhotoLibraryAssetOwnership.defaultsKey,
+                    "filmyCamera.savedFrameMetadata",
+                    "filmyCamera.savedFrameResources"]
+        var saved: [String: Any] = [:]
+        for key in keys {
+            if let value = UserDefaults.standard.object(forKey: key) { saved[key] = value }
+        }
+        defer {
+            for key in keys {
+                if let value = saved[key] {
+                    UserDefaults.standard.set(value, forKey: key)
+                } else {
+                    UserDefaults.standard.removeObject(forKey: key)
+                }
+            }
+        }
+        let ids = (0..<4).map { "inflight-\($0)" }
+        let entry = SavedFrameMetadata(recipe: FilmRecipe.builtIns[0],
+                                       capturedAt: Date(timeIntervalSince1970: 1_754_000_000))
+        var seeded: [String: SavedFrameMetadata] = [:]
+        for identifier in ids { seeded[identifier] = entry }
+        PhotoLibraryAssetOwnership.persist(ids)
+        UserDefaults.standard.set(try JSONEncoder().encode(seeded), forKey: "filmyCamera.savedFrameMetadata")
+        UserDefaults.standard.removeObject(forKey: "filmyCamera.savedFrameResources")
+        // The shape that deadlocked: an observer that needs the main thread
+        // while a background thread is writing defaults.
+        let observer = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification, object: nil, queue: .main
+        ) { _ in }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        func persisted() throws -> Set<String> {
+            let data = try XCTUnwrap(UserDefaults.standard.data(forKey: "filmyCamera.savedFrameMetadata"))
+            return Set(try JSONDecoder().decode([String: SavedFrameMetadata].self, from: data).keys)
+        }
+        // The injected store records every commit and still writes the real
+        // defaults, so the observer above sees each write.
+        let metadataKey = "filmyCamera.savedFrameMetadata"
+        let metadataWrites = LockedValue<Int>(0)
+        let offMainWrites = LockedValue<Int>(0)
+        let gate = PhotoLibraryService.DefaultsWriteGate { data, key in
+            if key == metadataKey { metadataWrites.value += 1 }
+            if !Thread.isMainThread { offMainWrites.value += 1 }
+            UserDefaults.standard.set(data, forKey: key)
+        }
+        let service = PhotoLibraryService(defaultsGate: gate)
+        // Init queued a cache-maintenance pass that flushes. Let it run while
+        // nothing is dirty so it cannot write the state mutated below.
+        await Task.yield()
+        XCTAssertFalse(gate.isSuperseded(key: metadataKey, generation: 0))
+
+        // Snapshot taken and handed to the background task, then flushed
+        // before it commits: the flush must write that state itself. The
+        // commit needs the main actor, which this test holds until it suspends.
+        service.forgetSavedAssets([ids[0]])
+        await Task.yield()
+        XCTAssertTrue(gate.isSuperseded(key: metadataKey, generation: 0), "background snapshot was not taken")
+        XCTAssertEqual(metadataWrites.value, 0, "background snapshot must still be uncommitted")
+        service.flushPersistence()
+        XCTAssertEqual(metadataWrites.value, 1, "flush must write a key whose background commit is pending")
+        XCTAssertEqual(try persisted(), Set(ids.suffix(3)))
+
+        // In flight and dirty again: the flush writes the newest state.
+        service.forgetSavedAssets([ids[1]])
+        await Task.yield()
+        XCTAssertEqual(metadataWrites.value, 1, "second background snapshot must still be uncommitted")
+        service.forgetSavedAssets([ids[2]])
+        service.flushPersistence()
+        XCTAssertEqual(metadataWrites.value, 2)
+        XCTAssertEqual(try persisted(), Set([ids[3]]))
+
+        // Late background commits are dropped as stale: no further write.
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertEqual(metadataWrites.value, 2, "a stale background commit reached the store")
+        XCTAssertEqual(offMainWrites.value, 0, "saved-frame keys are written on the main thread only")
+        XCTAssertEqual(try persisted(), Set([ids[3]]))
+        XCTAssertEqual(Set(service.metadataByAssetIdentifier.keys), Set([ids[3]]))
     }
 }

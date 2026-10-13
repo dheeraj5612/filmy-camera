@@ -4615,10 +4615,20 @@ final class CameraCaptureLocationProvider: NSObject, @preconcurrency CLLocationM
         manager.desiredAccuracy = kCLLocationAccuracyBest
         manager.distanceFilter = kCLDistanceFilterNone
         lastEnabled = isEnabled
+        // queue is nil on purpose: UserDefaults.set posts this notification
+        // synchronously on the writing thread, and a queue: .main observer makes
+        // that thread wait for the main thread. A writer holding a lock the main
+        // thread wants, or a busy main thread, then stalls or deadlocks. Main-thread
+        // writes still run inline; others hop without waiting. defaultsDidChange
+        // re-reads the setting, so a late hop is harmless.
         defaultsObserver = NotificationCenter.default.addObserver(
-            forName: UserDefaults.didChangeNotification, object: nil, queue: .main
+            forName: UserDefaults.didChangeNotification, object: nil, queue: nil
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.defaultsDidChange() }
+            if Thread.isMainThread {
+                MainActor.assumeIsolated { self?.defaultsDidChange() }
+            } else {
+                Task { @MainActor [weak self] in self?.defaultsDidChange() }
+            }
         }
     }
 
