@@ -33,6 +33,9 @@ final class PhotoOutputEncoderTests: XCTestCase {
         let image = CIImage(color: CIColor(red: 0.8, green: 0.2, blue: 0.1))
             .cropped(to: CGRect(x: 0, y: 0, width: 64, height: 48))
         let location = CLLocation(latitude: 37.33, longitude: -122.03)
+        // Each range is checked on its own. A range the simulator cannot encode is
+        // reported as a skip that names it; the deterministic lanes fail on any skip.
+        var unavailable: [String] = []
         for dynamicRange in ProCaptureSettings.DynamicRange.allCases {
             var settings = ProCaptureSettings()
             settings.format = .heif
@@ -40,7 +43,10 @@ final class PhotoOutputEncoderTests: XCTestCase {
             let result = ProPhotoOutput.encode(image, sourceData: Data(), capturedAt: Date(timeIntervalSince1970: 1_700_000_000),
                 recipe: FilmRecipe.builtIns[0], settings: settings, location: location)
 #if targetEnvironment(simulator)
-            guard let data = result else { throw XCTSkip("The simulator does not provide this HEIF encoder; verify on device") }
+            guard let data = result else {
+                unavailable.append(dynamicRange.rawValue)
+                continue
+            }
 #else
             let data = try XCTUnwrap(result)
 #endif
@@ -54,6 +60,12 @@ final class PhotoOutputEncoderTests: XCTestCase {
             let exif = try XCTUnwrap(properties[kCGImagePropertyExifDictionary as String] as? [String: Any])
             XCTAssertNotNil(exif[kCGImagePropertyExifDateTimeOriginal as String])
             XCTAssertNotNil(exif[kCGImagePropertyExifUserComment as String])
+            if dynamicRange == .hdr {
+                XCTAssertEqual(properties[kCGImagePropertyDepth as String] as? Int, 10)
+            }
+        }
+        if !unavailable.isEmpty {
+            throw XCTSkip("The simulator does not provide an encoder for: \(unavailable); verify on device")
         }
     }
 
