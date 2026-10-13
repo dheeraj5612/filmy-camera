@@ -224,6 +224,35 @@ actor FujiCaptureLibrary {
         }
     }
 
+    /// Explicit user repair for an `originals/<uuid>` folder that holds exactly one
+    /// safe `source.*` file but no record.json (a crash between the media write and
+    /// the manifest write). Never called from listing; the outbox is never touched.
+    @discardableResult
+    func adoptOrphanedOriginal(folder: URL, recipe: FilmRecipe) throws -> FujiOriginalRecord {
+        let standardized = folder.standardizedFileURL
+        let collection = root.appendingPathComponent("originals", isDirectory: true).standardizedFileURL
+        guard let id = UUID(uuidString: standardized.lastPathComponent),
+              standardized.deletingLastPathComponent().path == collection.path else { throw FujiShootingError.storageFailed }
+        let manifest = standardized.appendingPathComponent("record.json")
+        guard !fileManager.fileExists(atPath: manifest.path) else { throw FujiShootingError.storageFailed }
+        let modified = (try? standardized.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+        let age: TimeInterval = modified.map { -$0.timeIntervalSinceNow } ?? .infinity
+        guard age >= 60 else { throw FujiShootingError.storageFailed }
+        let names = try fileManager.contentsOfDirectory(atPath: standardized.path).filter { $0.hasPrefix("source.") }
+        guard names.count == 1, let name = names.first else { throw FujiShootingError.storageFailed }
+        let isRAW = name != "source.jpg"
+        let source = standardized.appendingPathComponent(name)
+        let values = try source.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey, .contentModificationDateKey])
+        guard values.isRegularFile == true, values.isSymbolicLink != true,
+              let size = values.fileSize, size > 0, size <= Self.maximumImportBytes else { throw FujiShootingError.storageFailed }
+        let record = FujiOriginalRecord(id: id, capturedAt: values.contentModificationDate ?? Date(), isRAW: isRAW,
+            sourceFilename: name, sequenceID: UUID(), dynamicRange: .dr100, captureExposure: nil, recipe: recipe,
+            adjustment: .init(), cropFactor: 1, viewportWidth: 0, viewportHeight: 0, label: "Recovered original")
+        guard record.hasSafeSourceFilename else { throw FujiShootingError.storageFailed }
+        try encode(record, to: manifest)
+        return record
+    }
+
     /// Outbox folders that `pendingExports()` cannot list. Files are kept for repair.
     func unreadableExports() throws -> [FujiUnreadableEntry] {
         try unreadable(in: "outbox") { data in

@@ -128,7 +128,7 @@ final class FujiShootingController: ObservableObject {
         }
         self.viewModel = viewModel
         self.active = active
-        if !active { cancel(); hybridImage = nil; focusImage = nil; bufferedCount = 0 }
+        if !active { let discarded = multipleRequest != nil; cancel(); if discarded { errorMessage = "Multiple exposure discarded because the camera was paused." }; hybridImage = nil; focusImage = nil; bufferedCount = 0 }
         refreshPreview()
     }
 
@@ -209,6 +209,8 @@ final class FujiShootingController: ObservableObject {
                 preferences = updated
                 appliedProfile = nil; profileDeviceID = nil; appliedPrimeLock = false
                 status = "C\(bank.id) · \(bank.name)"
+            } catch is CancellationError {
+                errorMessage = "Recall canceled. Some camera controls may already have changed; recall the bank again."
             } catch { errorMessage = error.localizedDescription }
         }
     }
@@ -284,6 +286,7 @@ final class FujiShootingController: ObservableObject {
         }
         guard let sensor else { throw FujiShootingError.busy }
         var captured: [FujiOriginalRecord] = []
+        var endAttempted = false
         do {
             try Task.checkCancellation()
             if let multipleDeviceID, multipleDeviceID != sensor.deviceID {
@@ -330,12 +333,19 @@ final class FujiShootingController: ObservableObject {
                     if delay > 0 { try await Task.sleep(for: .seconds(delay)) }
                 }
             }
+            endAttempted = true
             try await driver.endFujiCapture(transactionID: sensor.transactionID)
         } catch {
-            do { try await driver.endFujiCapture(transactionID: sensor.transactionID) }
-            catch {
+            if endAttempted {
+                // The lease is already cleared, so a second end would report success.
                 sensorRestorationFailed = true
                 errorMessage = "Sensor restoration failed. Reopen the camera before continuing."
+            } else {
+                do { try await driver.endFujiCapture(transactionID: sensor.transactionID) }
+                catch {
+                    sensorRestorationFailed = true
+                    errorMessage = "Sensor restoration failed. Reopen the camera before continuing."
+                }
             }
             throw error
         }
@@ -343,10 +353,18 @@ final class FujiShootingController: ObservableObject {
         if settings.drive.isComposite && multipleRequest == nil { await worker.reset() }
         var lastData = Data()
         var lastDate = Date()
+        // A failed frame must not stop later frames from reaching the retry outbox.
+        var deferredError: Error?
         for (index, record) in captured.enumerated() {
             try Task.checkCancellation()
             status = "Developing \(settings.drive.title) · \(index + 1)/\(captured.count)"
-            let data = try await library.originalData(record)
+            let data: Data
+            do { data = try await library.originalData(record) }
+            catch {
+                if error is CancellationError || settings.drive.isComposite { throw error }
+                if deferredError == nil { deferredError = error }
+                continue
+            }
             lastData = data; lastDate = record.capturedAt
             if settings.drive.isComposite {
                 let thumbnail = try await worker.append(data: data, record: record, focusStack: settings.drive == .focusStack,
@@ -372,7 +390,10 @@ final class FujiShootingController: ObservableObject {
                         if variantError == nil { variantError = error }
                     }
                 }
-                if let variantError { throw variantError }
+                if let variantError {
+                    if variantError is CancellationError { throw variantError }
+                    if deferredError == nil { deferredError = variantError }
+                }
             }
             progress = 0.6 + 0.4 * Double(index + 1) / Double(captured.count)
         }
@@ -387,18 +408,25 @@ final class FujiShootingController: ObservableObject {
                 await worker.reset()
                 status = "Saved \(settings.drive.title) · \(result.width) × \(result.height)"
             } else { status = "Multiple exposure \(multipleCount)/\(settings.multipleExposureCount) · Compose the next layer, then press the shutter." }
-        } else { status = "Saved \(settings.drive.title)." }
+        } else if deferredError == nil { status = "Saved \(settings.drive.title)." }
         // Pre-shot writes follow the real shutter frame. Their date is the frame
         // timestamp, not the later date at which development or Photos finishes.
         for (index, frame) in preFrames.enumerated() {
             try Task.checkCancellation()
-            let data = try await Task.detached(priority: .utility) { try FujiFrameSampler.jpeg(frame) }.value
-            let record = originalRecord(dataIsRAW: false, request: request, recipe: request.recipe,
-                capturedAt: frame.capturedAt, step: .init(), exposure: nil, label: "Pre-shot \(index + 1) · preview resolution")
-            let result = try await worker.develop(data: data, record: record, finish: request.finish, grainSeed: request.grainSeed)
-            try await export(result.data, recipe: request.recipe, capturedAt: frame.capturedAt,
-                             label: record.label, photoLibrary: photoLibrary)
+            do {
+                let data = try await Task.detached(priority: .utility) { try FujiFrameSampler.jpeg(frame) }.value
+                let record = originalRecord(dataIsRAW: false, request: request, recipe: request.recipe,
+                    capturedAt: frame.capturedAt, step: .init(), exposure: nil, label: "Pre-shot \(index + 1) · preview resolution")
+                let result = try await worker.develop(data: data, record: record, finish: request.finish, grainSeed: request.grainSeed)
+                try await export(result.data, recipe: request.recipe, capturedAt: frame.capturedAt,
+                                 label: record.label, photoLibrary: photoLibrary)
+            } catch {
+                if error is CancellationError { throw error }
+                if deferredError == nil { deferredError = error }
+            }
         }
+        // Keep every original when any frame failed; the outbox holds the retryable copies.
+        if let deferredError { throw deferredError }
         for record in captured where !record.isRAW && !(settings.drive.isComposite && settings.keepCompositeSources) {
             try await library.removeOriginal(id: record.id)
         }
@@ -479,12 +507,27 @@ final class FujiShootingController: ObservableObject {
             guard let self else { return }
             do {
                 let pending = try await library.pendingExports()
+                var firstError: Error?
+                var saved = 0
                 for record in pending {
                     try Task.checkCancellation()
-                    let data = try await library.exportData(record)
-                    try await savePending(record, data: data, photoLibrary: photoLibrary)
+                    do {
+                        let data = try await library.exportData(record)
+                        try await savePending(record, data: data, photoLibrary: photoLibrary)
+                        saved += 1
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        if firstError == nil { firstError = error }
+                    }
                 }
-                status = "Pending exports saved."
+                if let firstError {
+                    let summary: String = "\(saved) of \(pending.count) saved"
+                    errorMessage = summary + ". " + firstError.localizedDescription
+                    status = summary
+                } else { status = "Pending exports saved." }
+            } catch is CancellationError {
+                errorMessage = FujiShootingError.cancelled.localizedDescription
             } catch { errorMessage = error.localizedDescription }
             finishActivity(); await reloadLibrary()
         }
@@ -583,5 +626,14 @@ final class FujiShootingController: ObservableObject {
     }
 
     func originalURL(_ record: FujiOriginalRecord) async throws -> URL { try await library.originalURL(record) }
+    /// Explicit repair of an original whose record.json is missing. The files stay in place.
+    func repairOriginal(_ entry: FujiUnreadableEntry, recipe: FilmRecipe) async {
+        guard !isBusy, entry.collection == "originals", entry.reason == "missing record.json" else { return }
+        errorMessage = nil
+        do { _ = try await library.adoptOrphanedOriginal(folder: entry.folder, recipe: recipe) }
+        catch { errorMessage = "This capture could not be repaired automatically. Its files were not changed." }
+        await reloadLibrary()
+    }
+
     func deleteOriginal(_ record: FujiOriginalRecord) async throws { try await library.removeOriginal(id: record.id); await reloadLibrary() }
 }

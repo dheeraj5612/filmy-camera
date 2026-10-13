@@ -4,19 +4,30 @@ import UniformTypeIdentifiers
 
 private struct FujiDecodedPreview: @unchecked Sendable { let image: UIImage }
 
-/// Library folders kept on disk whose record.json cannot be read. No delete action.
+/// Library folders kept on disk whose record.json cannot be read. No delete action; an original with only a missing record can be restored.
 private struct FujiUnreadableRow: View {
     @ObservedObject var controller: FujiShootingController
+    @ObservedObject var viewModel: CameraViewModel
 
     var body: some View {
         let count: Int = controller.unreadableEntries.count
         let title: String = count == 1 ? "1 capture needs repair" : "\(count) captures need repair"
+        let restorable: [FujiUnreadableEntry] = controller.unreadableEntries.filter { $0.collection == "originals" && $0.reason == "missing record.json" }
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(.headline)
             Text("Their files are still on this device but their records cannot be read. Nothing was deleted.")
                 .font(.footnote).foregroundStyle(.secondary)
             Button("Check again") { Task { await controller.reloadLibrary() } }
+                .buttonStyle(.borderless)
                 .disabled(controller.isBusy).frame(minHeight: 44)
+            ForEach(restorable) { entry in
+                let label: String = "Restore capture " + String(entry.id.uuidString.prefix(8))
+                Button(label) {
+                    Task { await controller.repairOriginal(entry, recipe: viewModel.selectedRecipe) }
+                }
+                .buttonStyle(.borderless)
+                .disabled(controller.isBusy).frame(minHeight: 44)
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("fuji-library-unreadable")
@@ -49,7 +60,7 @@ struct FujiRAWLibraryView: View {
                 }
             }
             if !controller.unreadableEntries.isEmpty {
-                Section("Needs repair") { FujiUnreadableRow(controller: controller) }
+                Section("Needs repair") { FujiUnreadableRow(controller: controller, viewModel: viewModel) }
             }
             if let error { Section { Text(error).foregroundStyle(.orange).font(.footnote) } }
             if let message = controller.errorMessage { Section { Text(message).foregroundStyle(.orange).font(.footnote) } }

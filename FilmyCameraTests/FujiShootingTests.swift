@@ -339,6 +339,124 @@ final class FujiShootingTests: XCTestCase {
         XCTAssertEqual(driver.counts.restores, 1)
     }
 
+    func testFailedBurstSaveQueuesEveryFrameForRetryAndKeepsOriginals() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = FujiCaptureLibrary(root: root)
+        let controller = FujiShootingController(library: library)
+        let driver = FujiTestDriver(data: jpeg())
+        let saver = FujiTestSaver(driver: driver, failSave: true)
+        var settings = FujiShootingSettings(); settings.drive = .continuousHigh; settings.burstCount = 3
+        do { try await controller.run(request(settings), driver: driver, photoLibrary: saver); XCTFail("Expected failure") }
+        catch { XCTAssertEqual(error as? PhotoLibrarySaveError, .accessDenied) }
+        let pending = try await library.pendingExports()
+        let originals = try await library.originals()
+        XCTAssertEqual(pending.count, 3)
+        XCTAssertEqual(originals.count, 3)
+        XCTAssertEqual(driver.counts.captures, 3)
+    }
+
+    func testSensorRestoreFailureAfterSuccessfulCaptureIsReportedAndShotKept() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = FujiCaptureLibrary(root: root)
+        let controller = FujiShootingController(library: library)
+        let driver = FujiTestDriver(data: jpeg(), failFirstEnd: true)
+        let saver = FujiTestSaver(driver: driver)
+        do { try await controller.run(request(.init()), driver: driver, photoLibrary: saver); XCTFail("Expected failure") }
+        catch { XCTAssertEqual(error as? FujiShootingError, .timedOut) }
+        XCTAssertEqual(controller.errorMessage, "Sensor restoration failed. Reopen the camera before continuing.")
+        XCTAssertEqual(driver.counts.restores, 1)
+        let originals = try await library.originals()
+        XCTAssertEqual(originals.count, 1)
+    }
+
+    func testMidSequenceCaptureFailureKeepsCapturedFrameAndRestoresSensor() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = FujiCaptureLibrary(root: root)
+        let controller = FujiShootingController(library: library)
+        let driver = FujiTestDriver(data: jpeg(), failOnCapture: 2)
+        let saver = FujiTestSaver(driver: driver)
+        var settings = FujiShootingSettings(); settings.drive = .continuousHigh; settings.burstCount = 3
+        do { try await controller.run(request(settings), driver: driver, photoLibrary: saver); XCTFail("Expected failure") }
+        catch { XCTAssertEqual(error as? FujiShootingError, .timedOut) }
+        XCTAssertEqual(driver.counts.restores, 1)
+        let originals = try await library.originals()
+        let pending = try await library.pendingExports()
+        XCTAssertEqual(originals.count, 1)
+        XCTAssertTrue(pending.isEmpty)
+        XCTAssertEqual(saver.savedCount, 0)
+    }
+
+    func testMultipleExposureRefusesLayerOnDifferentLens() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = FujiCaptureLibrary(root: root)
+        let controller = FujiShootingController(library: library)
+        let driver = FujiTestDriver(data: jpeg(), deviceIDs: ["wide", "ultra"])
+        let saver = FujiTestSaver(driver: driver)
+        var settings = FujiShootingSettings(); settings.drive = .multipleExposure; settings.multipleExposureCount = 3
+        try await controller.run(request(settings), driver: driver, photoLibrary: saver)
+        XCTAssertEqual(driver.counts.restores, 1)
+        do { try await controller.run(request(settings), driver: driver, photoLibrary: saver); XCTFail("Expected failure") }
+        catch {
+            guard case .invalidCombination = error as? FujiShootingError else { return XCTFail("Unexpected error \(error)") }
+        }
+        XCTAssertEqual(driver.counts.restores, 2)
+        XCTAssertEqual(driver.counts.captures, 1)
+        XCTAssertEqual(saver.savedCount, 0)
+    }
+
+    func testRetryExportsSavesReadableEntriesAndKeepsTheFailedOne() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = FujiCaptureLibrary(root: root)
+        let controller = FujiShootingController(library: library)
+        let base = Date()
+        var queued: [FujiPendingExport] = []
+        for offset in 0..<3 {
+            queued.append(try await library.enqueue(jpeg(), recipe: recipe, capturedAt: base.addingTimeInterval(Double(offset)), label: "Retry \(offset)"))
+        }
+        let first = queued[0]
+        try FileManager.default.removeItem(at: root.appendingPathComponent("outbox/\(first.id.uuidString)/image.jpg"))
+        let saver = FujiTestSaver(driver: FujiTestDriver(data: jpeg()))
+        controller.retryExports(photoLibrary: saver)
+        while controller.isBusy { await Task.yield() }
+        XCTAssertEqual(saver.savedCount, 2)
+        let pending = try await library.pendingExports()
+        XCTAssertEqual(pending.map(\.id), [first.id])
+        XCTAssertNotNil(controller.errorMessage)
+        XCTAssertEqual(controller.status, "2 of 3 saved")
+        XCTAssertEqual(controller.errorMessage?.hasPrefix("2 of 3 saved. "), true)
+    }
+
+    func testAdoptOrphanedOriginalRestoresOldFolderAndRefusesFreshOrRecordedOnes() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = FujiCaptureLibrary(root: root)
+        let id = UUID()
+        let folder = root.appendingPathComponent("originals/\(id.uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try jpeg().write(to: folder.appendingPathComponent("source.jpg"))
+        do { _ = try await library.adoptOrphanedOriginal(folder: folder, recipe: recipe); XCTFail("Expected refusal of fresh folder") }
+        catch { XCTAssertEqual(error as? FujiShootingError, .storageFailed) }
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-120)], ofItemAtPath: folder.path)
+        let before = try await library.unreadableOriginals()
+        XCTAssertEqual(before.map(\.reason), ["missing record.json"])
+        let listed = try await library.originals()
+        XCTAssertTrue(listed.isEmpty)
+        let record = try await library.adoptOrphanedOriginal(folder: folder, recipe: recipe)
+        XCTAssertEqual(record.id, id)
+        XCTAssertFalse(record.isRAW)
+        let after = try await library.originals()
+        let unreadable = try await library.unreadableOriginals()
+        XCTAssertEqual(after.map(\.id), [id])
+        XCTAssertTrue(unreadable.isEmpty)
+        do { _ = try await library.adoptOrphanedOriginal(folder: folder, recipe: recipe); XCTFail("Expected refusal once recorded") }
+        catch { XCTAssertEqual(error as? FujiShootingError, .storageFailed) }
+    }
+
     private func request(_ settings: FujiShootingSettings) -> FujiSequenceRequest {
         .init(settings: settings, recipe: recipe, filmRecipes: Array(FilmRecipe.builtIns.prefix(3)),
               viewport: CGSize(width: 4, height: 3), finish: .photo, grainSeed: 1, shutterUptime: 0)
@@ -367,22 +485,34 @@ final class FujiShootingTests: XCTestCase {
 private final class FujiTestDriver: FujiCaptureDriver, @unchecked Sendable {
     private let data: Data
     private let failure: FujiShootingError?
+    private let failFirstEnd: Bool
+    private let failOnCapture: Int?
     private let lock = NSLock()
+    private var deviceIDs: [String]
     private var captures = 0
     private var restores = 0
     var counts: (captures: Int, restores: Int) { lock.withLock { (captures, restores) } }
-    init(data: Data, failure: FujiShootingError? = nil) { self.data = data; self.failure = failure }
+    init(data: Data, failure: FujiShootingError? = nil, failFirstEnd: Bool = false,
+         failOnCapture: Int? = nil, deviceIDs: [String] = []) {
+        self.data = data; self.failure = failure; self.failFirstEnd = failFirstEnd
+        self.failOnCapture = failOnCapture; self.deviceIDs = deviceIDs
+    }
     func beginFujiCapture(requiresRAW: Bool, requiresCustomExposure: Bool, requiresFocus: Bool) async throws -> FujiSensorSnapshot {
-        .init(transactionID: UUID(), deviceID: "fake", exposure: .init(iso: 100, seconds: 1.0 / 125),
+        let deviceID = lock.withLock { () -> String in deviceIDs.isEmpty ? "fake" : deviceIDs.removeFirst() }
+        return .init(transactionID: UUID(), deviceID: deviceID, exposure: .init(iso: 100, seconds: 1.0 / 125),
               isoRange: 50...6400, durationRange: (1.0 / 8000)...1, lensPosition: 0.5, supportsFocus: true, supportsRAW: false)
     }
     func prepareFujiFrame(transactionID: UUID, exposure: FujiExposure?, focusPosition: Double?) async throws {}
     func captureFujiFrame(transactionID: UUID, requiresRAW: Bool) async throws -> FujiCapturedFrame {
-        lock.withLock { captures += 1 }
+        let number = lock.withLock { () -> Int in captures += 1; return captures }
         if let failure { throw failure }
+        if let failOnCapture, number == failOnCapture { throw FujiShootingError.timedOut }
         return .init(processedData: data, rawData: nil, capturedAt: Date(), exposure: .init(iso: 100, seconds: 1.0 / 125), lensPosition: 0.5)
     }
-    func endFujiCapture(transactionID: UUID) async throws { lock.withLock { restores += 1 } }
+    func endFujiCapture(transactionID: UUID) async throws {
+        let first = lock.withLock { () -> Bool in restores += 1; return restores == 1 }
+        if failFirstEnd && first { throw FujiShootingError.timedOut }
+    }
     func cancelFujiCapture() {}
 }
 
