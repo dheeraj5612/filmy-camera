@@ -99,7 +99,7 @@ struct GalleryScreen: View {
                 rebuildModel()
             }
             .onAppear { rebuildModel() }
-            .onChange(of: photoLibrary.galleryAssets.map(\.id)) { _, _ in
+            .onChange(of: galleryRebuildKey) { _, _ in
                 rebuildModel()
             }
             .onChange(of: photoLibrary.metadataByAssetIdentifier.count) { _, _ in
@@ -224,6 +224,14 @@ struct GalleryScreen: View {
         .accessibilityElement(children: .contain)
     }
 
+    /// Ids plus source: a cached/Photos swap keeps the id but changes what the
+    /// grid may offer (delete), so it must rebuild the lookup too.
+    private var galleryRebuildKey: [String] {
+        photoLibrary.galleryAssets.map { asset in
+            asset.isPhotosAsset ? "\(asset.id)|p" : "\(asset.id)|c"
+        }
+    }
+
     private var archiveSourceLabel: String {
         let assets = photoLibrary.galleryAssets
         let hasPhotosAssets = assets.contains(where: \.isPhotosAsset)
@@ -248,7 +256,12 @@ struct GalleryScreen: View {
     private func clearSelectionIfUnavailable() {
         guard let selectedAsset else { return }
         guard let current = photoLibrary.galleryAssets.first(where: { $0.id == selectedAsset.id }) else {
-            self.selectedAsset = nil
+            // The pager coordinator lands on the neighbouring frame (or
+            // dismisses when nothing is left); clearing here would close the
+            // pager before it can.
+            if photoLibrary.galleryAssets.isEmpty {
+                self.selectedAsset = nil
+            }
             return
         }
         if current.isPhotosAsset != selectedAsset.isPhotosAsset {
@@ -267,7 +280,8 @@ struct GalleryScreen: View {
                         title: "Give your roll a home",
                         message: "Allow photo access to show the frames you have made with Filmy Camera.",
                         actionTitle: "Allow Photos access",
-                        action: requestReadAccess
+                        action: requestReadAccess,
+                        actionHint: "Shows the system Photos permission prompt"
                     )
                     .padding(.horizontal, FilmyTheme.pageMargin)
                 } else {
@@ -277,6 +291,12 @@ struct GalleryScreen: View {
                         message: "Photos you take with Filmy Camera save here automatically. You can also import and edit a photo."
                     )
                     .padding(.horizontal, FilmyTheme.pageMargin)
+                }
+            } else if photoLibrary.authorizationStatus == .notDetermined {
+                VStack(alignment: .leading, spacing: 14) {
+                    readAccessNotice
+                        .padding(.horizontal, FilmyTheme.pageMargin)
+                    galleryGrid
                 }
             } else {
                 galleryGrid
@@ -304,7 +324,8 @@ struct GalleryScreen: View {
                     message: "Enable Photos access in Settings to see your saved frames.",
                     heroLabel: nil,
                     actionTitle: "Open Settings",
-                    action: openSystemSettings
+                    action: openSystemSettings,
+                    actionHint: "Opens Filmy Camera Photos permissions in Settings"
                 )
                 .padding(.horizontal, FilmyTheme.pageMargin)
             } else {
@@ -489,13 +510,28 @@ struct GalleryScreen: View {
     // MARK: Selection controls
 
     private var selectionControls: some View {
+        let layout: AnyLayout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 12))
+        let stacked = dynamicTypeSize.isAccessibilitySize
+        return layout {
+            if !stacked || !controlsSummary.isEmpty {
+                Text(controlsSummary)
+                    .font(.system(.caption, design: .rounded).weight(.semibold))
+                    .foregroundStyle(FilmyTheme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("roll-count-summary")
+            }
+            if !stacked {
+                Spacer(minLength: 8)
+            }
+            selectionControlButtons
+        }
+    }
+
+    /// One `HStack` so the buttons stay on a single row when the summary stacks above them.
+    private var selectionControlButtons: some View {
         HStack(spacing: 12) {
-            Text(controlsSummary)
-                .font(.system(.caption, design: .rounded).weight(.semibold))
-                .foregroundStyle(FilmyTheme.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("roll-count-summary")
-            Spacer(minLength: 8)
             if isSelecting {
                 controlButton(
                     title: rollSelection.isAllSelected(in: layoutModel.visibleIDs) ? "Deselect all" : "Select all",
@@ -603,6 +639,10 @@ struct GalleryScreen: View {
 
     /// Only frames the service allows to delete are offered for deletion.
     private func requestDelete(_ ids: [String]) {
+        guard !isWorking else {
+            batchMessage = "Another Roll action is still running. Try again in a moment."
+            return
+        }
         let deletable = ids.filter { id in
             assetsByID[id].map { photoLibrary.canDelete(asset: $0) } ?? false
         }
@@ -627,7 +667,17 @@ struct GalleryScreen: View {
     /// prompt). On failure nothing is removed and the selection stays.
     private func performDelete() {
         let targets = pendingDeleteIDs.compactMap { assetsByID[$0] }
-        guard !isWorking, !targets.isEmpty else { return }
+        guard !isWorking else { return }
+        guard !targets.isEmpty else {
+            pendingDeleteIDs = []
+            // Let the confirmation alert finish dismissing before the second
+            // alert is requested, or the system can drop it.
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                batchMessage = "These frames are no longer in the Roll."
+            }
+            return
+        }
         isWorking = true
         Task { @MainActor in
             let result = await deleteResult(of: targets)
@@ -635,6 +685,8 @@ struct GalleryScreen: View {
             pendingDeleteIDs = []
             switch result {
             case .success:
+                let deletedNote = targets.count == 1 ? "Deleted 1 frame" : "Deleted \(targets.count) frames"
+                UIAccessibility.post(notification: .announcement, argument: deletedNote)
                 HapticFeedback.play(.success)
                 animated {
                     isSelecting = false
@@ -813,7 +865,7 @@ struct GalleryScreen: View {
             SettingIcon(systemName: "lock.open")
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Showing your saved frames")
+                Text("Showing saved frames only")
                     .font(.system(.subheadline, design: .rounded).weight(.bold))
                     .foregroundStyle(FilmyTheme.primary)
                 Text("Enable Photos read access to refresh this roll from your library.")
@@ -827,6 +879,37 @@ struct GalleryScreen: View {
                     .frame(minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
                     .accessibilityIdentifier("gallery-photos-permission-settings")
                     .accessibilityHint("Opens Filmy Camera Photos permissions")
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(FilmyTheme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous)
+                .strokeBorder(FilmyTheme.accent.opacity(0.26), lineWidth: 1)
+        }
+    }
+
+    private var readAccessNotice: some View {
+        HStack(alignment: .top, spacing: 12) {
+            SettingIcon(systemName: "lock.open")
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Showing saved frames only")
+                    .font(.system(.subheadline, design: .rounded).weight(.bold))
+                    .foregroundStyle(FilmyTheme.primary)
+                Text("Allow Photos access to refresh this roll and delete frames from your library.")
+                    .font(.system(.caption, design: .rounded).weight(.medium))
+                    .foregroundStyle(FilmyTheme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button("Allow Photos access", action: requestReadAccess)
+                    .font(.system(.caption, design: .rounded).weight(.bold))
+                    .foregroundStyle(FilmyTheme.accent)
+                    .frame(minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
+                    .accessibilityIdentifier("gallery-photos-permission-request")
+                    .accessibilityHint("Shows the system Photos permission prompt")
             }
 
             Spacer(minLength: 0)
@@ -934,6 +1017,7 @@ private struct RollEmptyState: View {
     var heroLabel: String? = "NO FRAMES YET"
     var actionTitle: String?
     var action: (() -> Void)?
+    var actionHint: String?
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -1018,7 +1102,7 @@ private struct RollEmptyState: View {
         if let actionTitle, let action {
             Button(actionTitle, action: action)
                 .buttonStyle(.filmyPrimary)
-                .accessibilityHint("Opens the relevant permission settings")
+                .accessibilityHint(actionHint ?? "")
         }
     }
 }
@@ -1086,6 +1170,7 @@ private struct GalleryPager: UIViewControllerRepresentable {
             needsSynchronization = false
             guard let selection = parent.selection else {
                 pages.removeAll()
+                activeID = nil
                 return
             }
             let previousIDs = settledIDs
@@ -1095,11 +1180,26 @@ private struct GalleryPager: UIViewControllerRepresentable {
                 // The selected frame disappeared (deleted, or the Photos
                 // source changed). Land on the next surviving frame, else the
                 // previous one; dismiss only when nothing is left to show.
-                guard let replacementID = GalleryRemovalPolicy.replacementID(
+                let replacementID = GalleryRemovalPolicy.replacementID(
                     removedID: target.id,
                     previousIDs: previousIDs,
                     currentIDs: assets.map(\.id)
-                ), let replacement = assets.first(where: { $0.id == replacementID }) else {
+                )
+                // A second pass can run before the deferred selection write
+                // lands, when `previousIDs` no longer contains the removed
+                // frame. Fall back to the page already landed on.
+                var landedID = replacementID
+                if landedID == nil, let activeID {
+                    // The landed frame may itself have vanished since.
+                    landedID = assets.contains(where: { $0.id == activeID })
+                        ? activeID
+                        : GalleryRemovalPolicy.replacementID(
+                            removedID: activeID,
+                            previousIDs: previousIDs,
+                            currentIDs: assets.map(\.id)
+                        )
+                }
+                guard let landedID, let replacement = assets.first(where: { $0.id == landedID }) else {
                     pages.removeAll()
                     setSelectionDeferred(nil)
                     return
@@ -1277,6 +1377,7 @@ private struct GalleryDetailView: View {
     let onNextPhoto: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var image: UIImage?
     @State private var isLoadingImage = false
     @State private var imageLoadFailed = false
@@ -1590,7 +1691,7 @@ private struct GalleryDetailView: View {
                 Text(metadata.recipe.name)
                     .font(.system(.subheadline, design: .rounded).weight(.bold))
                     .foregroundStyle(.white)
-                    .lineLimit(1)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
                 Text(metadata.capturedAt, format: .dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
                     .font(.system(.caption, design: .rounded).weight(.medium))
                     .foregroundStyle(.white.opacity(0.76))
@@ -1613,59 +1714,14 @@ private struct GalleryDetailView: View {
     }
 
     private var detailToolbar: some View {
-        HStack(spacing: 10) {
-            FilmyIconButton(systemName: "xmark", accessibilityLabel: "Close frame") {
-                onClose()
-            }
-
-            BackToCameraButton(accessibilityIdentifier: "frame-back-to-camera") {
-                onClose()
-                onBackToCamera()
-            }
-
-            Spacer()
-
-            FilmyIconButton(systemName: "info.circle", accessibilityLabel: "Frame info") {
-                isShowingInfo = true
-            }
-            .accessibilityIdentifier("gallery-info-frame")
-
-            Button {
-                shareFrame()
-            } label: {
-                Group {
-                    if isPreparingShare {
-                        ProgressView().tint(.white)
-                    } else {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                toolbarTwoRows
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    toolbarSingleRow
+                    toolbarTwoRows
                 }
-                .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
-                .background { ChromeShapeBackground(shape: Circle()) }
-                .contentShape(Circle())
-            }
-            .buttonStyle(.pressable)
-            .accessibilityLabel("Share frame")
-            .accessibilityIdentifier("gallery-share-frame")
-            .disabled(image == nil || isDeleting || isPreparingShare)
-
-            if photoLibrary.canDelete(asset: asset) {
-                Button {
-                    isShowingDeleteConfirmation = true
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(FilmyTheme.danger)
-                        .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
-                        .background { ChromeShapeBackground(shape: Circle()) }
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.pressable)
-                .accessibilityLabel("Delete frame")
-                .accessibilityIdentifier("gallery-delete-frame")
-                .disabled(isDeleting || isPreparingShare)
             }
         }
         .padding(.horizontal, 16)
@@ -1673,6 +1729,84 @@ private struct GalleryDetailView: View {
         .sheet(isPresented: $isShowingInfo) {
             GalleryInfoSheet(rows: infoRows)
                 .presentationDetents([.medium])
+        }
+    }
+
+    private var toolbarSingleRow: some View {
+        HStack(spacing: 10) {
+            toolbarLeadingControls
+            Spacer()
+            toolbarTrailingControls
+        }
+    }
+
+    private var toolbarTwoRows: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                toolbarLeadingControls
+            }
+            HStack(spacing: 10) {
+                Spacer()
+                toolbarTrailingControls
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var toolbarLeadingControls: some View {
+        FilmyIconButton(systemName: "xmark", accessibilityLabel: "Close frame") {
+            onClose()
+        }
+
+        BackToCameraButton(accessibilityIdentifier: "frame-back-to-camera") {
+            onClose()
+            onBackToCamera()
+        }
+    }
+
+    @ViewBuilder
+    private var toolbarTrailingControls: some View {
+        FilmyIconButton(systemName: "info.circle", accessibilityLabel: "Frame info") {
+            isShowingInfo = true
+        }
+        .accessibilityIdentifier("gallery-info-frame")
+
+        Button {
+            shareFrame()
+        } label: {
+            Group {
+                if isPreparingShare {
+                    ProgressView().tint(.white)
+                } else {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+            }
+            .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+            .background { ChromeShapeBackground(shape: Circle()) }
+            .contentShape(Circle())
+        }
+        .buttonStyle(.pressable)
+        .accessibilityLabel("Share frame")
+        .accessibilityIdentifier("gallery-share-frame")
+        .disabled(image == nil || isDeleting || isPreparingShare)
+
+        if photoLibrary.canDelete(asset: asset) {
+            Button {
+                isShowingDeleteConfirmation = true
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(FilmyTheme.danger)
+                    .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+                    .background { ChromeShapeBackground(shape: Circle()) }
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.pressable)
+            .accessibilityLabel("Delete frame")
+            .accessibilityIdentifier("gallery-delete-frame")
+            .disabled(isDeleting || isPreparingShare)
         }
     }
 

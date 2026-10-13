@@ -112,9 +112,9 @@ struct CaptureReviewView: View {
                         .frame(maxWidth: .infinity)
                     }
                     .accessibilityIdentifier("review-content-scroll")
-                    .onChange(of: saveErrorMessage) { _, newValue in
+                    .onChange(of: saveErrorMessage) { oldValue, newValue in
                         if let newValue {
-                            UIAccessibility.post(notification: .announcement, argument: newValue)
+                            if oldValue != nil { UIAccessibility.post(notification: .announcement, argument: newValue) }
                             withAnimation { scroller.scrollTo("review-save-error", anchor: .bottom) }
                         }
                     }
