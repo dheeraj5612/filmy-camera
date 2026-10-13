@@ -297,7 +297,10 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var isCapturing = false
     /// Mirrors the camera screen's Fuji Drive/BKT controller so the workspace switch can wait for it.
     @Published var isFujiBusy = false
-    @Published private(set) var isImporting = false
+    @Published private(set) var isDecodingImport = false
+    /// True while the picker is still loading the selection (for example an iCloud download).
+    @Published private(set) var isLoadingImport = false
+    var isImporting: Bool { isLoadingImport || isDecodingImport }
     @Published private(set) var isSaving = false
     @Published private(set) var saveErrorMessage: String?
     @Published private(set) var saveErrorRequiresSettings = false
@@ -650,6 +653,9 @@ final class CameraViewModel: ObservableObject {
 #endif
 
         camera.capturePhoto { [weak self] capturedPhoto in
+            // Read the status now: later main-queue status blocks ("Camera is
+            // ready") can run before the Task below does.
+            let failureStatus: String? = capturedPhoto == nil ? camera.statusMessage : nil
             Task { @MainActor [weak self] in
                 var succeeded = false
                 self?.captureOriginalPersisted = false
@@ -668,10 +674,7 @@ final class CameraViewModel: ObservableObject {
                     if camera.availability == .simulator {
                         self.showToast("Capture is available on a physical device", style: .info)
                     } else {
-                        let message = camera.statusMessage == "Start the camera before capturing."
-                            ? "Capture could not be completed. Resume the camera and try again."
-                            : camera.statusMessage
-                        self.showToast(message, style: .error)
+                        self.showToast(Self.captureFailureMessage(status: failureStatus ?? ""), style: .error)
                     }
                     return
                 }
@@ -693,11 +696,24 @@ final class CameraViewModel: ObservableObject {
         }
     }
 
+    /// Maps the camera status at the moment a capture failed to an error toast.
+    /// Idle and success statuses say nothing about the failure.
+    nonisolated static func captureFailureMessage(status: String) -> String {
+        if status == "Start the camera before capturing." {
+            return "Capture could not be completed. Resume the camera and try again."
+        }
+        if status.isEmpty || status == "Camera is ready" || status == "Camera paused" || status.hasPrefix("Photo captured") {
+            return "Capture could not be completed. Try again."
+        }
+        return status
+    }
+
     func developCapturedPhotoForTesting(
         _ photo: CameraService.CapturedPhoto,
         recipe: FilmRecipe,
         camera: CameraService,
-        photoLibrary: any PhotoSaving
+        photoLibrary: any PhotoSaving,
+        renderOverride: (@Sendable () -> RenderedPhoto?)? = nil
     ) async -> Bool {
         let work = CapturedWork(
             photo: photo, recipe: recipe, finish: .photo,
@@ -705,14 +721,18 @@ final class CameraViewModel: ObservableObject {
             grainSeed: 1, dateStampEnabled: false, dateStampText: nil
         )
         isCapturing = true
-        return await developCapture(work, captureStartedAt: ContinuousClock.now, camera: camera, photoLibrary: photoLibrary)
+        return await developCapture(
+            work, captureStartedAt: ContinuousClock.now, camera: camera, photoLibrary: photoLibrary,
+            renderOverride: renderOverride
+        )
     }
 
     private func developCapture(
         _ work: CapturedWork,
         captureStartedAt: ContinuousClock.Instant,
         camera: CameraService,
-        photoLibrary: any PhotoSaving
+        photoLibrary: any PhotoSaving,
+        renderOverride: (@Sendable () -> RenderedPhoto?)? = nil
     ) async -> Bool {
         let recipe = work.recipe
         let finish = work.finish
@@ -738,8 +758,10 @@ final class CameraViewModel: ObservableObject {
             showToast("Original not saved. Free storage, then tap the shutter to retry. Keep Filmy open.", style: .error)
             return false
         }
-        let rendered = await Task.detached(priority: .userInitiated) {
-            autoreleasepool {
+        let rendered = await Task.detached(priority: .userInitiated) { () -> RenderedPhoto? in
+            // Test-only seam: an override never falls through to the real render.
+            if let renderOverride { return renderOverride() }
+            return autoreleasepool {
                 Self.render(
                     sourceData: work.photo.fileData, recipe: recipe,
                     viewportSize: work.viewport, previewDrawableSize: work.drawable,
@@ -835,10 +857,10 @@ final class CameraViewModel: ObservableObject {
     }
 
     func importPhoto(data: Data, camera: CameraService? = nil) async {
-        guard !isCapturing, !isImporting, !isSaving, reviewImage == nil else { return }
+        guard !isCapturing, !isDecodingImport, !isSaving, reviewImage == nil else { return }
         guard MembershipStore.shared.require(.photoImport) else { return }
 
-        isImporting = true
+        isDecodingImport = true
         saveErrorMessage = nil
         saveErrorRequiresSettings = false
         camera?.setFrameDeliveryPaused(true)
@@ -860,7 +882,7 @@ final class CameraViewModel: ObservableObject {
             renderTask.cancel()
         }
 
-        isImporting = false
+        isDecodingImport = false
         guard !Task.isCancelled else {
             camera?.setFrameDeliveryPaused(false)
             return
@@ -896,8 +918,11 @@ final class CameraViewModel: ObservableObject {
         HapticFeedback.play(.success)
     }
 
+    func beginImportLoading() { isLoadingImport = true }
+    func endImportLoading() { isLoadingImport = false }
+
     func reportImportFailure() {
-        isImporting = false
+        isDecodingImport = false
         showToast("That photo could not be opened. Try a different image.", style: .error)
     }
 
@@ -1220,6 +1245,11 @@ final class CameraViewModel: ObservableObject {
         saveErrorRequiresSettings = false
     }
 
+    /// Errors can be the only signal that a capture is unsaved, so they stay longer.
+    nonisolated static func toastDuration(for style: ToastStyle) -> Duration {
+        style == .error ? .seconds(7) : .seconds(2.4)
+    }
+
     private func showToast(_ message: String, style: ToastStyle = .success) {
         toastTask?.cancel()
         toastMessage = message
@@ -1236,8 +1266,9 @@ final class CameraViewModel: ObservableObject {
             notification: .announcement,
             argument: "\(style.accessibilityTitle): \(message)"
         )
+        let duration = Self.toastDuration(for: style)
         toastTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(2.4))
+            try? await Task.sleep(for: duration)
             guard !Task.isCancelled else { return }
             self?.toastMessage = nil
         }

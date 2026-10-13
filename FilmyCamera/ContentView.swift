@@ -234,9 +234,16 @@ struct ContentView: View {
               let id = importSession.begin() else { return }
         selectedTab = .camera
         importErrorMessage = nil
+        // Counts the loading phase (for example an iCloud download) as busy so
+        // the Capture modes button and Siri launches cannot unmount this view
+        // and silently cancel the import.
+        cameraViewModel.beginImportLoading()
         importTask = Task {
             defer {
-                if importSession.finish(id) { importTask = nil }
+                if importSession.finish(id) {
+                    importTask = nil
+                    cameraViewModel.endImportLoading()
+                }
             }
             do {
                 guard let photo = try await item.loadTransferable(type: ImportedPhoto.self) else {
@@ -255,6 +262,7 @@ struct ContentView: View {
     private func cancelImport() {
         importTask?.cancel()
         importSession.cancel()
+        cameraViewModel.endImportLoading()
         if !importSession.isBusy { importTask = nil }
     }
 

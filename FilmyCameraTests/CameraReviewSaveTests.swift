@@ -232,7 +232,8 @@ final class CameraReviewSaveTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let model = CameraViewModel(defaults: defaults, photoStore: FilmyPhotoStore(root: root))
+        let store = FilmyPhotoStore(root: root)
+        let model = CameraViewModel(defaults: defaults, photoStore: store)
         let saver = ControlledPhotoSaver()
         let source = try captureSourcePhoto()
         // Recognised as JPEG by the store, but cut off before the first
@@ -275,9 +276,216 @@ final class CameraReviewSaveTests: XCTestCase {
         XCTAssertTrue(saver.requests.isEmpty)
 
         model.capture(camera: camera, photoLibrary: saver)
+        // The retry branch sets this info toast synchronously; the normal
+        // shutter path clears the toast instead.
+        XCTAssertNotEqual(model.toastMessage, "Saving your earlier photo. No new photo is taken.")
+        XCTAssertNotEqual(model.toastStyle, .info)
         for _ in 0..<100 where model.isCapturing { try await Task.sleep(nanoseconds: 10_000_000) }
         XCTAssertFalse(model.isCapturing)
         XCTAssertNotEqual(model.toastMessage, "Saving your earlier photo. No new photo is taken.")
+        // A retained frame would have been created a second time.
+        let inventory = try await store.inventory()
+        XCTAssertEqual(inventory.documents.count, 1)
+        XCTAssertTrue(saver.requests.isEmpty)
+    }
+
+    func testFailedDevelopedRevisionKeepsOriginalAndReleasesShutter() async throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = FilmyPhotoStore(root: root)
+        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let saver = ControlledPhotoSaver()
+        let camera = CameraService()
+        let source = try captureSourcePhoto()
+        // Not JPEG or HEIC, so the store refuses it as a rendition.
+        let unusable = CameraViewModel.RenderedPhoto(image: UIImage(), data: Data([0]), capturedAt: source.capturedAt)
+
+        let result = await model.developCapturedPhotoForTesting(
+            source, recipe: model.selectedRecipe, camera: camera, photoLibrary: saver,
+            renderOverride: { unusable }
+        )
+        XCTAssertFalse(result)
+        XCTAssertFalse(model.isCapturing)
+        XCTAssertEqual(model.toastStyle, .error)
+        XCTAssertEqual(
+            model.toastMessage,
+            "Original retained. Filmy could not save the developed version; retry from Filmy originals."
+        )
+        XCTAssertTrue(saver.requests.isEmpty)
+        let inventory = try await store.inventory()
+        XCTAssertEqual(inventory.documents.count, 1)
+
+        model.capture(camera: camera, photoLibrary: saver)
+        XCTAssertNotEqual(model.toastMessage, "Saving your earlier photo. No new photo is taken.")
+        for _ in 0..<100 where model.isCapturing { try await Task.sleep(nanoseconds: 10_000_000) }
+        XCTAssertFalse(model.isCapturing)
+    }
+
+    func testLiveMovieIsKeptUntilTheOriginalIsPersisted() async throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let directory = CameraService.livePhotoTemporaryDirectory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        func makeMovie() throws -> URL {
+            let url = directory.appendingPathComponent("\(UUID().uuidString).mov")
+            try Data([1, 2, 3]).write(to: url)
+            return url
+        }
+        var liveSettings = ProCaptureSettings()
+        liveSettings.livePhoto = true
+        liveSettings.format = .heif
+        liveSettings.resolution = .mp12
+        XCTAssertNil(liveSettings.incompatibility)
+        let source = try captureSourcePhoto()
+        func livePhoto(_ movie: URL) -> CameraService.CapturedPhoto {
+            CameraService.CapturedPhoto(
+                fileData: source.fileData, capturedAt: source.capturedAt, dimensions: source.dimensions,
+                livePhotoMovieURL: movie, outputSettings: liveSettings
+            )
+        }
+
+        // The original cannot be written (the store root is a plain file): the
+        // movie must survive for the explicit retry.
+        let blockedRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: blockedRoot) }
+        try Data([0]).write(to: blockedRoot)
+        let blockedModel = CameraViewModel(defaults: defaults, photoStore: FilmyPhotoStore(root: blockedRoot))
+        let kept = try makeMovie()
+        defer { try? FileManager.default.removeItem(at: kept) }
+        let saver = ControlledPhotoSaver()
+        let camera = CameraService()
+        let failed = await blockedModel.developCapturedPhotoForTesting(
+            livePhoto(kept), recipe: blockedModel.selectedRecipe, camera: camera, photoLibrary: saver
+        )
+        XCTAssertFalse(failed)
+        XCTAssertFalse(blockedModel.isCapturing)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: kept.path), "The Live movie must outlive a failed original write")
+        blockedModel.capture(camera: camera, photoLibrary: saver)
+        XCTAssertEqual(blockedModel.toastMessage, "Saving your earlier photo. No new photo is taken.")
+        for _ in 0..<100 where blockedModel.isCapturing { try await Task.sleep(nanoseconds: 10_000_000) }
+        XCTAssertFalse(blockedModel.isCapturing)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: kept.path))
+
+        // Once the original is persisted the owned temporary movie is released.
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = FilmyPhotoStore(root: root)
+        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let released = try makeMovie()
+        defer { try? FileManager.default.removeItem(at: released) }
+        let unusable = CameraViewModel.RenderedPhoto(image: UIImage(), data: Data([0]), capturedAt: source.capturedAt)
+        let result = await model.developCapturedPhotoForTesting(
+            livePhoto(released), recipe: model.selectedRecipe, camera: camera, photoLibrary: saver,
+            renderOverride: { unusable }
+        )
+        XCTAssertFalse(result)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: released.path))
+        let inventory = try await store.inventory()
+        XCTAssertEqual(inventory.documents.count, 1)
+    }
+
+    func testLivePhotoWithInstantPrintIsRefusedBeforeCapturing() throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let key = "proCaptureSettings.v1"
+        let standard = UserDefaults.standard
+        let previous = standard.data(forKey: key)
+        var live = ProCaptureSettings()
+        live.livePhoto = true
+        live.format = .heif
+        live.resolution = .mp12
+        standard.set(try JSONEncoder().encode(live), forKey: key)
+        defer {
+            if let previous { standard.set(previous, forKey: key) } else { standard.removeObject(forKey: key) }
+        }
+        // Read the stored preference only after it is written.
+        let camera = CameraService()
+        defaults.set("instantPrint", forKey: "captureFinish")
+        XCTAssertTrue(MembershipStore.shared.hasFullAccess)
+        XCTAssertTrue(camera.proCaptureSettings.livePhoto)
+        let model = CameraViewModel(defaults: defaults)
+        let saver = ControlledPhotoSaver()
+
+        model.capture(camera: camera, photoLibrary: saver)
+
+        XCTAssertFalse(model.isCapturing)
+        XCTAssertEqual(model.toastStyle, .error)
+        XCTAssertEqual(model.toastMessage, "Live Photos require Photo finish. Turn off Instant Print before capturing.")
+        XCTAssertTrue(saver.requests.isEmpty)
+    }
+
+    func testImportIsRefusedWhileACameraCaptureIsSavingOrAwaitsRetry() async throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = CameraViewModel(defaults: defaults)
+        let saver = ControlledPhotoSaver()
+        let photo = try capturedPhoto()
+        let importData = try XCTUnwrap(try capturedPhoto().image.jpegData(compressionQuality: 0.9))
+        model.saveCapturedPhoto(photo, recipe: model.selectedRecipe, photoLibrary: saver)
+        XCTAssertTrue(model.isSaving)
+
+        await model.importPhoto(data: importData)
+        XCTAssertTrue(model.hasPendingCapture)
+        XCTAssertFalse(model.isReviewingImport)
+        XCTAssertTrue(model.reviewImage === photo.image)
+        XCTAssertFalse(model.isImporting)
+
+        saver.completeLast(with: .failure(.accessDenied))
+        XCTAssertFalse(model.isSaving)
+        XCTAssertNotNil(model.saveErrorMessage)
+        await model.importPhoto(data: importData)
+        XCTAssertTrue(model.hasPendingCapture, "A failed capture save awaiting retry must survive an import")
+        XCTAssertFalse(model.isReviewingImport)
+        XCTAssertTrue(model.reviewImage === photo.image)
+        XCTAssertFalse(model.isImporting)
+    }
+
+    func testImportLoadingCountsAsBusyUntilItEnds() async throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = CameraViewModel(defaults: defaults)
+        let saver = ControlledPhotoSaver()
+        let camera = CameraService()
+        let importData = try XCTUnwrap(try capturedPhoto().image.jpegData(compressionQuality: 0.9))
+
+        model.beginImportLoading()
+        XCTAssertTrue(model.isImporting)
+        model.capture(camera: camera, photoLibrary: saver)
+        XCTAssertFalse(model.isCapturing)
+        model.saveCapturedPhoto(try capturedPhoto(), recipe: model.selectedRecipe, photoLibrary: saver)
+        XCTAssertTrue(saver.requests.isEmpty)
+        XCTAssertFalse(model.hasPendingCapture)
+
+        await model.importPhoto(data: importData)
+        XCTAssertTrue(model.isReviewingImport, "The import that is loading must still be able to apply")
+        XCTAssertTrue(model.isImporting)
+        model.endImportLoading()
+        XCTAssertFalse(model.isImporting)
+    }
+
+    func testCaptureFailureMessageIgnoresIdleAndSuccessStatuses() {
+        XCTAssertEqual(
+            CameraViewModel.captureFailureMessage(status: "Start the camera before capturing."),
+            "Capture could not be completed. Resume the camera and try again."
+        )
+        for status in ["", "Camera is ready", "Camera paused", "Photo captured"] {
+            XCTAssertEqual(
+                CameraViewModel.captureFailureMessage(status: status),
+                "Capture could not be completed. Try again."
+            )
+        }
+        XCTAssertEqual(
+            CameraViewModel.captureFailureMessage(status: "The photo could not be processed."),
+            "The photo could not be processed."
+        )
+    }
+
+    func testErrorToastsOutlastSuccessAndInfoToasts() {
+        XCTAssertGreaterThanOrEqual(CameraViewModel.toastDuration(for: .error), .seconds(6))
+        XCTAssertEqual(CameraViewModel.toastDuration(for: .success), .seconds(2.4))
+        XCTAssertEqual(CameraViewModel.toastDuration(for: .info), .seconds(2.4))
     }
 
     func testDevelopedCaptureCarriesShutterLocationAsGPS() async throws {
