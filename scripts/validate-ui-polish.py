@@ -92,6 +92,9 @@ def main() -> None:
             "the native Xcode unit lane covers these tests.",
             flush=True,
         )
+        if "--allow-skip" not in sys.argv[1:]:
+            print("SKIPPED, not passed: pass --allow-skip to accept", file=sys.stderr)
+            raise SystemExit(77)
         return
     program = "import Foundation\nimport XCTest\n" + policy + "\n" + suite
     program += "\nXCTMain([testCase([\n" + entries + "\n])])\n"

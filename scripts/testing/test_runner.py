@@ -16,7 +16,18 @@ class SuiteRoutingTests(unittest.TestCase):
     def test_every_declared_test_has_an_explicit_lane(self):
         tests = run.inventory()
         self.assertTrue(tests)
-        self.assertEqual(len(tests), len(set(tests)))
+
+    def test_duplicate_test_identifiers_are_rejected(self):
+        source = "final class DupTests: XCTestCase {\n    func testOne() {}\n}\n"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "FilmyCameraTests").mkdir()
+            (root / "FilmyCameraTests" / "A.swift").write_text(source)
+            (root / "FilmyCameraTests" / "B.swift").write_text(source)
+            manifest = root / "manifest.json"
+            manifest.write_text(json.dumps({"classes": {"FilmyCameraTests/DupTests": "unit"}, "overrides": {}}))
+            with self.assertRaisesRegex(ValueError, "Duplicate test identifier"):
+                run.inventory(root, manifest)
 
     def test_routine_ci_includes_all_deterministic_tests_and_no_opt_ins(self):
         tests = run.inventory()

@@ -153,6 +153,26 @@ fi
   exit 1
 }
 
+if [[ "${release_app_variant}" == "filmy" ]]; then
+  built_monetization="$(plist_value FilmyMonetizationEnabled || true)"
+  built_monetization="$(printf '%s' "${built_monetization}" | tr '[:lower:]' '[:upper:]')"
+  built_ads="$(plist_value FilmyAdsEnabled || true)"
+  built_ads="$(printf '%s' "${built_ads}" | tr '[:lower:]' '[:upper:]')"
+  built_admob_app_id="$(plist_value GADApplicationIdentifier || true)"
+  [[ "${built_monetization}" == "NO" ]] || {
+    echo "Release archive must ship with FilmyMonetizationEnabled=NO (found: ${built_monetization:-missing}); check Config/Monetization.Local.Release.xcconfig" >&2
+    exit 1
+  }
+  [[ "${built_ads}" == "NO" ]] || {
+    echo "Release archive must ship with FilmyAdsEnabled=NO (found: ${built_ads:-missing}); check Config/Monetization.Local.Release.xcconfig" >&2
+    exit 1
+  }
+  [[ "${built_admob_app_id}" =~ ^ca-app-pub-[0-9]{16}~[0-9]{10}$ ]] || {
+    echo "Release archive has a malformed GADApplicationIdentifier: ${built_admob_app_id:-missing}" >&2
+    exit 1
+  }
+fi
+
 [[ -f "${app_path}/embedded.mobileprovision" ]] || {
   echo "Archive has no embedded provisioning profile" >&2
   exit 1

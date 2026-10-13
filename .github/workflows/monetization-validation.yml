@@ -55,7 +55,12 @@ jobs:
           unzip -q /tmp/xcodegen.zip -d .ci
           echo '6aa2b4da95304b343bea12890c59f9655aa428c08b351d57d592cfab4e88a9f1  .ci/xcodegen/bin/xcodegen' | shasum -a 256 --check
           .ci/xcodegen/bin/xcodegen generate
-          git diff --exit-code -- FilmyCamera.xcodeproj
+          if [[ -n "$(git status --porcelain -- FilmyCamera.xcodeproj)" ]]; then
+            git status --short -- FilmyCamera.xcodeproj >&2
+            git --no-pager diff -- FilmyCamera.xcodeproj | head -200 >&2 || true
+            echo 'XcodeGen changed the committed project; update it intentionally and rerun the gate.' >&2
+            exit 1
+          fi
       - name: Cache pinned SDK packages
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:

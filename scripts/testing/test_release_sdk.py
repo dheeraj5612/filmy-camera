@@ -166,6 +166,24 @@ class ReleaseSDKTests(unittest.TestCase):
         self.assertIn(call, text)
         self.assertLess(text.index(call), text.index("security cms"))
 
+    def test_archive_validation_requires_monetization_off_in_built_plist(self):
+        text = (ROOT / "scripts/release/validate-archive.sh").read_text()
+        for key in ("FilmyMonetizationEnabled", "FilmyAdsEnabled", "GADApplicationIdentifier"):
+            self.assertIn(f"plist_value {key}", text)
+        self.assertIn("ca-app-pub-[0-9]{16}~[0-9]{10}", text)
+        self.assertLess(text.index("plist_value FilmyMonetizationEnabled"), text.index("security cms"))
+        guard = 'if [[ "${release_app_variant}" == "filmy" ]]; then'
+        monetization_guard = '[[ "${built_monetization}" == "NO" ]]'
+        ads_guard = '[[ "${built_ads}" == "NO" ]]'
+        for line in (guard, monetization_guard, ads_guard):
+            self.assertEqual(text.count(line), 1, line)
+        block_start = text.index(guard)
+        block_end = text.index("\nfi\n", block_start)
+        for line in (monetization_guard, ads_guard):
+            self.assertLess(block_start, text.index(line))
+            self.assertLess(text.index(line), block_end)
+        self.assertLess(block_end, text.index("security cms"))
+
     def test_archive_help_is_available_without_xcode(self):
         result = subprocess.run(["bash", str(ROOT / "scripts/release/archive-device.sh"), "--help"],
                                 capture_output=True, text=True, timeout=10)

@@ -36,6 +36,8 @@ Run the portable checks with:
 python3 scripts/validate-ui-polish.py
 ```
 
+The script exits 77 when the host XCTest check cannot run; pass `--allow-skip` to accept that.
+
 The script parses the seven modified Swift files and compiles/runs the actual eight new interaction-policy XCTest methods against the production policy. Tests cover Reduce Motion, disabled/resting controls, normal press feedback, invalid scales, standard/narrow/invalid zoom ranges, and 160 valid hardware-range combinations. It is not a SwiftUI mock or a substitute for an iOS build.
 
 The new `FilmyControlInteractionTests` class is classified as `unit` in `scripts/testing/suites.json`, so the existing core CI lane discovers it. Tests are added inside an already registered test source; the generated Xcode project remains unchanged.

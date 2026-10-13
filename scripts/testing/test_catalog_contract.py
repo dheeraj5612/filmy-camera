@@ -4,6 +4,8 @@ from pathlib import Path
 import re
 import unittest
 
+import run
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -53,6 +55,20 @@ class CatalogContractTests(unittest.TestCase):
         self.assertIn('s["failedTests"] == 0 and s["skippedTests"] == 0', workflow)
         self.assertIn('Catalog result bundle is required', workflow)
         self.assertNotIn('contents: write', workflow)
+
+    def test_workflow_pass_count_pins_match_the_selected_inventory(self):
+        inventory = run.inventory()
+        for name in ('catalog-acceptance.yml', 'ui-experience.yml'):
+            text = (ROOT / '.github/workflows' / name).read_text()
+            selectors = re.findall(r'-only-testing:([^\s\\]+)', text)
+            self.assertTrue(selectors, name)
+            count = sum(
+                1 for test in inventory
+                if any(test == selector or test.startswith(selector + '/') for selector in selectors)
+            )
+            pin = re.search(r'passedTests"\] == (\d+)', text)
+            self.assertIsNotNone(pin, name)
+            self.assertEqual(count, int(pin.group(1)), name)
 
 
     def test_hardware_shutter_keeps_the_ios18_guard_and_older_os_fallback(self):

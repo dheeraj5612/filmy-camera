@@ -73,7 +73,10 @@ cleanup() {
     [[ -n "${path}" ]] && rm -rf "${path}"
   done
 }
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+trap "exit 129" HUP
+trap "exit 130" INT
+trap "exit 143" TERM
 
 plist_value() {
   local key="$1"
