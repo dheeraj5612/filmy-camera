@@ -305,6 +305,54 @@ final class SceneAutoPolicyTests: XCTestCase {
         XCTAssertEqual(policy.scene, .highContrast)
     }
 
+    /// Evidence that jitters strictly inside an entry/exit band must not change the scene,
+    /// so the label (and the exposure bias it carries) cannot pump over a long run.
+    func testEvidenceJitterInsideEachHysteresisBandDoesNotChangeScene() {
+        func run(_ name: String, expected: SceneAutoScene,
+                 shape: (_ tick: Int, _ wide: Bool, _ sample: inout SceneAutoObservation,
+                         _ hardware: inout SceneAutoSensor) -> Void) {
+            var policy = SceneAutoPolicy()
+            var hardware = sensor()
+            var lastScene = SceneAutoScene.balanced
+            var changesAfterEntry = 0
+            for tick in 0..<300 {
+                var sample = observation(Double(tick) * 0.4)
+                let wide = (tick / 5) % 2 == 0
+                shape(tick, wide, &sample, &hardware)
+                let decision = advance(&policy, to: sample.timestamp, observation: sample, sensor: hardware)
+                if decision.scene != lastScene {
+                    if tick >= 20 { changesAfterEntry += 1 }
+                    lastScene = decision.scene
+                }
+                if let value = decision.exposure {
+                    let ratio = (value.iso * value.duration) / (hardware.iso * hardware.duration)
+                    hardware.targetOffset += log2(ratio)
+                    hardware.iso = value.iso
+                    hardware.duration = value.duration
+                }
+            }
+            XCTAssertEqual(policy.scene, expected, name)
+            XCTAssertLessThanOrEqual(changesAfterEntry, 1, name)
+        }
+        run("highContrast", expected: .highContrast) { tick, wide, sample, _ in
+            sample.shadows = 0.2
+            sample.highlights = tick < 20 ? 0.09 : (wide ? 0.04 : 0.065)
+        }
+        run("backlit", expected: .backlit) { tick, wide, sample, _ in
+            sample.center = 0.2
+            sample.shadows = 0.25
+            sample.highlights = tick < 20 ? 0.08 : (wide ? 0.03 : 0.045)
+        }
+        run("action", expected: .action) { tick, wide, sample, _ in
+            sample.motion = tick < 20 ? 0.2 : (wide ? 0.05 : 0.08)
+        }
+        run("lowLight", expected: .lowLight) { tick, wide, _, hardware in
+            let base = hardware.meteredEV100 - hardware.targetOffset
+            let target = tick < 20 ? 5.0 : (wide ? 5.8 : 6.3)
+            hardware.targetOffset = target - base
+        }
+    }
+
     func testReframeMotionClearsHighlightLatch() {
         var policy = SceneAutoPolicy()
         var time = 0.0

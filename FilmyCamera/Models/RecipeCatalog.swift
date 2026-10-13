@@ -272,7 +272,32 @@ enum RecipeCatalog {
         }
     }
 
+    private struct SearchEntry {
+        let name: String
+        let subtitle: String
+        let filmBase: FilmRecipe.FilmBase
+        let provenance: FilmRecipe.Provenance
+        let text: String
+    }
+
+    private static let searchIndex: [String: SearchEntry] = {
+        let pairs: [(String, SearchEntry)] = FilmRecipe.builtIns.map { recipe in
+            let entry = SearchEntry(name: recipe.name, subtitle: recipe.subtitle, filmBase: recipe.filmBase,
+                                    provenance: recipe.provenance, text: computeSearchText(recipe))
+            return (recipe.id, entry)
+        }
+        return Dictionary(pairs, uniquingKeysWith: { first, _ in first })
+    }()
+
     static func searchText(for recipe: FilmRecipe) -> String {
+        if let cached = searchIndex[recipe.id], cached.name == recipe.name, cached.subtitle == recipe.subtitle,
+           cached.filmBase == recipe.filmBase, cached.provenance == recipe.provenance {
+            return cached.text
+        }
+        return computeSearchText(recipe)
+    }
+
+    private static func computeSearchText(_ recipe: FilmRecipe) -> String {
         let source = recipe.provenance.cameraSource
         return [recipe.name, recipe.subtitle, recipe.filmBase.officialName, recipe.filmBase.displayName,
                 recipe.creativeCollection?.title ?? "", source?.originalName ?? "",

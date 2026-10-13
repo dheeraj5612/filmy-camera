@@ -226,4 +226,37 @@ final class SmartRecipeEngineTests: XCTestCase {
             }
         }
     }
+
+    func testRankMatchesTheSortBasedReferenceAcrossTheCatalog() {
+        let catalog = FilmRecipe.builtIns.map(SmartRecipeProfile.init(recipe:))
+        for kind in SmartSceneKind.allCases {
+            for intent in SmartRecipeIntent.allCases {
+                let sceneValue = scene(kind)
+                var candidates: [(profile: SmartRecipeProfile, score: Double)] = []
+                for profile in catalog {
+                    if let only = SmartRecipeEngine.rank(scene: sceneValue, profiles: [profile], intent: intent).first {
+                        candidates.append((profile, only.score))
+                    }
+                }
+                var selected: [(profile: SmartRecipeProfile, score: Double)] = []
+                while selected.count < 3 && !candidates.isEmpty {
+                    let families = Set(selected.map { $0.profile.family })
+                    candidates.sort { left, right in
+                        let leftScore = left.score - (families.contains(left.profile.family) ? 11.0 : 0.0)
+                        let rightScore = right.score - (families.contains(right.profile.family) ? 11.0 : 0.0)
+                        return leftScore == rightScore ? left.profile.id < right.profile.id : leftScore > rightScore
+                    }
+                    let candidate = candidates.removeFirst()
+                    if intent != .monochrome && candidate.profile.isMonochrome
+                        && selected.contains(where: { $0.profile.isMonochrome }) { continue }
+                    selected.append(candidate)
+                }
+                let expected = selected.map { $0.profile.id }
+                let forward = SmartRecipeEngine.rank(scene: sceneValue, profiles: catalog, intent: intent)
+                let reversed = SmartRecipeEngine.rank(scene: sceneValue, profiles: catalog.reversed(), intent: intent)
+                XCTAssertEqual(forward.map(\.id), expected, "\(kind) \(intent)")
+                XCTAssertEqual(reversed.map(\.id), expected, "\(kind) \(intent) reversed")
+            }
+        }
+    }
 }

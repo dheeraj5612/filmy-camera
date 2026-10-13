@@ -728,6 +728,166 @@ final class RecipeInvariantsTests: XCTestCase {
         XCTAssertTrue(decoded.validationIssues.contains { $0.code == .provenanceUnavailable })
         XCTAssertFalse(decoded.isValid)
     }
+
+    func testUnknownProvenanceEnumFromNewerBuildFallsBackToLegacyAndKeepsControls() throws {
+        let original = FilmRecipe.builtIns[0]
+        let encoded = try JSONEncoder().encode(original)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        var provenance = try XCTUnwrap(object["provenance"] as? [String: Any])
+        provenance["references"] = ["futureReference"]
+        provenance["rendererVersion"] = "core-image-parametric-v1"
+        provenance["parentRecipeID"] = "parent-look"
+        object["provenance"] = provenance
+        let decoded = try JSONDecoder().decode(
+            FilmRecipe.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+        XCTAssertEqual(decoded.provenance.rendererVersion, "core-image-parametric-v1")
+        XCTAssertEqual(decoded.provenance.parentRecipeID, "parent-look")
+        XCTAssertEqual(decoded.provenance.source, .legacyRecordWithoutProvenance)
+        XCTAssertEqual(decoded.provenance.implementation, .unknownLegacyRecord)
+        XCTAssertEqual(decoded.provenance.calibration, original.provenance.calibration)
+        XCTAssertEqual(decoded.provenance.references, [])
+        XCTAssertEqual(decoded.id, original.id)
+        XCTAssertEqual(decoded.filmBase, original.filmBase)
+        XCTAssertEqual(decoded.exposure, original.exposure)
+        XCTAssertEqual(decoded.tone, original.tone)
+        XCTAssertEqual(decoded.saturation, original.saturation)
+        XCTAssertEqual(decoded.contrast, original.contrast)
+        XCTAssertEqual(decoded.whiteBalance, original.whiteBalance)
+        XCTAssertEqual(decoded.palette, original.palette)
+    }
+
+    func testUnknownProvenanceReferenceKeepsCreativeCollection() throws {
+        let id = try XCTUnwrap(FilmRecipe.originalCreativeRecipeIDs.first)
+        let original = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == id })
+        XCTAssertNotNil(original.creativeCollection)
+        let encoded = try JSONEncoder().encode(original)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        var provenance = try XCTUnwrap(object["provenance"] as? [String: Any])
+        provenance["references"] = ["futureReference"]
+        object["provenance"] = provenance
+        let decoded = try JSONDecoder().decode(
+            FilmRecipe.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+        XCTAssertEqual(decoded.creativeCollection, original.creativeCollection)
+        XCTAssertEqual(decoded.provenance.calibration, original.provenance.calibration)
+    }
+
+    func testUnknownProvenanceCalibrationFailsToDecode() throws {
+        let encoded = try JSONEncoder().encode(FilmRecipe.builtIns[0])
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        var provenance = try XCTUnwrap(object["provenance"] as? [String: Any])
+        provenance["calibration"] = "futureCalibration"
+        object["provenance"] = provenance
+        let data = try JSONSerialization.data(withJSONObject: object)
+        XCTAssertThrowsError(try JSONDecoder().decode(FilmRecipe.self, from: data))
+    }
+
+    func testUnknownFilmBaseStillFailsToDecode() throws {
+        let encoded = try JSONEncoder().encode(FilmRecipe.builtIns[0])
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object["filmBase"] = "futureBase"
+        let data = try JSONSerialization.data(withJSONObject: object)
+        XCTAssertThrowsError(try JSONDecoder().decode(FilmRecipe.self, from: data))
+    }
+
+    /// A literal build-3 override record (schemaVersion 5, renderer core-image-parametric-v1),
+    /// frozen on purpose: it must keep decoding even if HEAD's encoder and decoder change together.
+    func testBuild3OverrideFixtureDecodesAndMigrates() throws {
+        let json = """
+        {"schemaVersion":5,
+         "provenance":{"source":"userModified","implementation":"originalParametricApproximation",
+           "calibration":"notCalibratedToFujifilmHardware",
+           "references":["xt5ImageQualitySetting","filmSimulationOverview"],
+           "parentRecipeID":"provia-standard","rendererVersion":"core-image-parametric-v1"},
+         "id":"provia-standard","name":"Natural Standard","subtitle":"Natural color / clean daylight",
+         "filmBase":"provia","exposure":0.3,"tone":{"highlight":0.2,"shadow":-0.1},
+         "saturation":1.1,"contrast":1.05,"dynamicRange":200,"dRangePriority":"weak",
+         "whiteBalance":{"mode":"colorTemperature","kelvin":6500,"temperature":0.1,"tint":-0.05},
+         "monochromaticColor":{"warmCool":0.2,"greenMagenta":-0.3},
+         "colorChrome":0.5,"blueResponse":0.1,"fxBlue":0.5,"sharpness":0.2,"noiseReduction":0.1,
+         "clarity":0.15,"grain":0.5,"grainSize":1.5,"vignette":0.2,"halation":0.1,
+         "palette":{"redBias":0.05,"greenBias":-0.05,"blueBias":0.1,"redGreenMix":0.02,
+           "greenBlueMix":-0.02,"blueRedMix":0.03,"saturation":1.2}}
+        """
+        let stored = try JSONDecoder().decode(FilmRecipe.self, from: Data(json.utf8))
+        XCTAssertEqual(stored.schemaVersion, 5)
+        XCTAssertEqual(stored.filmBase, .provia)
+        XCTAssertEqual(stored.provenance.source, .userModified)
+        XCTAssertEqual(stored.provenance.implementation, .originalParametricApproximation)
+        XCTAssertEqual(stored.provenance.calibration, .notCalibratedToFujifilmHardware)
+        XCTAssertEqual(stored.provenance.references, [.xt5ImageQualitySetting, .filmSimulationOverview])
+        XCTAssertEqual(stored.provenance.parentRecipeID, "provia-standard")
+        XCTAssertEqual(stored.provenance.rendererVersion, "core-image-parametric-v1")
+
+        let parent = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == "provia-standard" })
+        var migrated = parent
+        migrated.applyControlValues(from: stored)
+        XCTAssertEqual(migrated.id, parent.id)
+        XCTAssertEqual(migrated.filmBase, .provia)
+        XCTAssertEqual(migrated.exposure, 0.3, accuracy: 1e-9)
+        XCTAssertEqual(migrated.tone, FilmRecipe.Tone(highlight: 0.2, shadow: -0.1))
+        XCTAssertEqual(migrated.saturation, 1.1, accuracy: 1e-9)
+        XCTAssertEqual(migrated.contrast, 1.05, accuracy: 1e-9)
+        XCTAssertEqual(migrated.dynamicRange, .dr200)
+        XCTAssertEqual(migrated.dRangePriority, .weak)
+        XCTAssertEqual(migrated.whiteBalance.mode, .colorTemperature)
+        XCTAssertEqual(migrated.whiteBalance.temperature, 0.1, accuracy: 1e-9)
+        XCTAssertEqual(migrated.whiteBalance.tint, -0.05, accuracy: 1e-9)
+        XCTAssertEqual(migrated.monochromaticColor.warmCool, 0.2, accuracy: 1e-9)
+        XCTAssertEqual(migrated.monochromaticColor.greenMagenta, -0.3, accuracy: 1e-9)
+        XCTAssertEqual(migrated.colorChrome, 0.5, accuracy: 1e-9)
+        XCTAssertEqual(migrated.blueResponse, 0.1, accuracy: 1e-9)
+        XCTAssertEqual(migrated.fxBlue, 0.5, accuracy: 1e-9)
+        XCTAssertEqual(migrated.sharpness, 0.2, accuracy: 1e-9)
+        XCTAssertEqual(migrated.noiseReduction, 0.1, accuracy: 1e-9)
+        XCTAssertEqual(migrated.clarity, 0.15, accuracy: 1e-9)
+        XCTAssertEqual(migrated.grain, 0.5, accuracy: 1e-9)
+        XCTAssertEqual(migrated.grainSize, 1.5, accuracy: 1e-9)
+        XCTAssertEqual(migrated.vignette, 0.2, accuracy: 1e-9)
+        XCTAssertEqual(migrated.halation, 0.1, accuracy: 1e-9)
+        XCTAssertEqual(migrated.palette.redBias, 0.05, accuracy: 1e-9)
+        XCTAssertEqual(migrated.palette.greenBias, -0.05, accuracy: 1e-9)
+        XCTAssertEqual(migrated.palette.blueBias, 0.1, accuracy: 1e-9)
+        XCTAssertEqual(migrated.palette.redGreenMix, 0.02, accuracy: 1e-9)
+        XCTAssertEqual(migrated.palette.greenBlueMix, -0.02, accuracy: 1e-9)
+        XCTAssertEqual(migrated.palette.blueRedMix, 0.03, accuracy: 1e-9)
+        XCTAssertEqual(migrated.palette.saturation, 1.2, accuracy: 1e-9)
+    }
+
+    func testCachedSearchTextMatchesTheUncachedJoinForEveryBuiltIn() throws {
+        for recipe in FilmRecipe.builtIns {
+            let source = recipe.provenance.cameraSource
+            let expected = [recipe.name, recipe.subtitle, recipe.filmBase.officialName, recipe.filmBase.displayName,
+                            recipe.creativeCollection?.title ?? "", source?.originalName ?? "",
+                            source?.publisher.title ?? "", source?.cameraScope ?? "",
+                            RecipeCatalog.packByRecipeID[recipe.id]?.title ?? ""].joined(separator: " ")
+            XCTAssertEqual(RecipeCatalog.searchText(for: recipe), expected, recipe.id)
+        }
+        let encoded = try JSONEncoder().encode(FilmRecipe.builtIns[0])
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object["name"] = "Renamed Look"
+        let renamed = try JSONDecoder().decode(FilmRecipe.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertTrue(RecipeCatalog.searchText(for: renamed).contains("Renamed Look"))
+        let otherBase = try XCTUnwrap(FilmRecipe.FilmBase.allCases.first {
+            $0.displayName != FilmRecipe.builtIns[0].filmBase.displayName
+        })
+        object["name"] = FilmRecipe.builtIns[0].name
+        object["filmBase"] = otherBase.rawValue
+        let rebased = try JSONDecoder().decode(FilmRecipe.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertEqual(rebased.id, FilmRecipe.builtIns[0].id)
+        XCTAssertEqual(rebased.name, FilmRecipe.builtIns[0].name)
+        let rebasedSource = rebased.provenance.cameraSource
+        let rebasedExpected = [rebased.name, rebased.subtitle, otherBase.officialName, otherBase.displayName,
+                               rebased.creativeCollection?.title ?? "", rebasedSource?.originalName ?? "",
+                               rebasedSource?.publisher.title ?? "", rebasedSource?.cameraScope ?? "",
+                               RecipeCatalog.packByRecipeID[rebased.id]?.title ?? ""].joined(separator: " ")
+        // A stale cache hit would return the built-in's text, which names the original film base.
+        XCTAssertEqual(RecipeCatalog.searchText(for: rebased), rebasedExpected)
+        XCTAssertNotEqual(RecipeCatalog.searchText(for: rebased), RecipeCatalog.searchText(for: FilmRecipe.builtIns[0]))
+    }
 }
 
 

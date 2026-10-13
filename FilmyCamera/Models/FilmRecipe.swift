@@ -1255,14 +1255,54 @@ public struct FilmRecipe: Identifiable, Codable, Hashable, Sendable {
         case palette
     }
 
+    private enum ProvenanceFallbackKey: String, CodingKey {
+        case calibration
+        case rendererVersion
+        case parentRecipeID
+    }
+
+    /// A provenance written by a newer build can hold enum cases this build
+    /// does not know. Fall back to legacy rather than dropping the whole look,
+    /// but keep `calibration`: it decides pixels through `creativeCollection`,
+    /// so an unknown calibration still fails the decode. The fallback keeps the
+    /// look's controls, `rendererVersion` and `parentRecipeID`, and drops
+    /// `references` and `cameraSource` on purpose; an unknown `calibration`
+    /// still throws on purpose (`testUnknownProvenanceCalibrationFailsToDecode`).
+    private static func decodeProvenance(
+        from container: KeyedDecodingContainer<CodingKeys>
+    ) throws -> Provenance {
+        guard container.contains(.provenance) else { return legacyProvenance }
+        if try container.decodeNil(forKey: .provenance) { return legacyProvenance }
+        do {
+            return try container.decode(Provenance.self, forKey: .provenance)
+        } catch {
+            let nested = try container.nestedContainer(
+                keyedBy: ProvenanceFallbackKey.self,
+                forKey: .provenance
+            )
+            let calibration = try nested.decode(Provenance.Calibration.self, forKey: .calibration)
+            let rendererVersion = (try? nested.decodeIfPresent(String.self, forKey: .rendererVersion))
+                ?? nil
+            let parentRecipeID = (try? nested.decodeIfPresent(String.self, forKey: .parentRecipeID))
+                ?? nil
+            return Provenance(
+                source: .legacyRecordWithoutProvenance,
+                implementation: .unknownLegacyRecord,
+                calibration: calibration,
+                references: [],
+                parentRecipeID: parentRecipeID,
+                rendererVersion: rendererVersion ?? "legacy-unknown"
+            )
+        }
+    }
+
     /// Decode both the current envelope and the original pre-provenance
     /// envelope. Missing metadata is deliberately marked as legacy rather
     /// than silently receiving the current provenance claim.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
-        provenance = try container.decodeIfPresent(Provenance.self, forKey: .provenance)
-            ?? Self.legacyProvenance
+        provenance = try Self.decodeProvenance(from: container)
         id = try container.decode(String.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
         subtitle = try container.decode(String.self, forKey: .subtitle)

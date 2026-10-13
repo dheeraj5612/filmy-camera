@@ -223,20 +223,31 @@ enum SmartRecipeEngine {
         }
         var selected: [(profile: SmartRecipeProfile, score: Double)] = []
         while selected.count < min(limit, 3) && !candidates.isEmpty {
-            candidates.sort { left, right in
-                let leftScore = left.score - diversityPenalty(left.profile, selected: selected.map(\.profile))
-                let rightScore = right.score - diversityPenalty(right.profile, selected: selected.map(\.profile))
-                return leftScore == rightScore ? left.profile.id < right.profile.id : leftScore > rightScore
+            let selectedFamilies = Set(selected.map { $0.profile.family })
+            var bestIndex = 0
+            var bestScore = -Double.infinity
+            for (index, entry) in candidates.enumerated() {
+                let penalty = diversityPenalty(entry.profile, selectedFamilies: selectedFamilies)
+                let adjusted = entry.score - penalty
+                if index == 0 {
+                    bestIndex = 0
+                    bestScore = adjusted
+                } else if adjusted > bestScore {
+                    bestIndex = index
+                    bestScore = adjusted
+                } else if adjusted == bestScore && entry.profile.id < candidates[bestIndex].profile.id {
+                    bestIndex = index
+                }
             }
-            let candidate = candidates.removeFirst()
+            let candidate = candidates.remove(at: bestIndex)
             if intent != .monochrome && candidate.profile.isMonochrome && selected.contains(where: { $0.profile.isMonochrome }) { continue }
             selected.append(candidate)
         }
         return selected.map { SmartRecipeMatch(id: $0.profile.id, score: $0.score, reason: reason(for: $0.profile, scene: scene)) }
     }
 
-    private static func diversityPenalty(_ profile: SmartRecipeProfile, selected: [SmartRecipeProfile]) -> Double {
-        selected.contains(where: { $0.family == profile.family }) ? 11 : 0
+    private static func diversityPenalty(_ profile: SmartRecipeProfile, selectedFamilies: Set<String>) -> Double {
+        selectedFamilies.contains(profile.family) ? 11 : 0
     }
     private static func affinity(for family: String, scene: SmartSceneKind) -> Double {
         let preferred: [String]
