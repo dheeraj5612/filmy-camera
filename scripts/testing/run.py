@@ -149,8 +149,10 @@ def validate_destination(lane, destination, allow_photos_writes):
     physical = re.search(r"(?:^|,)platform=iOS(?:,|$)", destination) is not None
     if lane in PHYSICAL and (not physical or "id=" not in destination):
         raise ValueError(f"{lane} requires an explicit physical iOS device destination")
-    if lane in {"unit", "integration", "core", "e2e", "ci", "photos-e2e", "store-media"} and not simulator:
+    if lane in {"unit", "integration", "core", "e2e", "ci", "photos-e2e", "fixtures", "store-media"} and not simulator:
         raise ValueError(f"{lane} requires an iOS Simulator destination")
+    if lane in {"ci", "photos-e2e", "fixtures", "store-media"} and re.search(r"(?:^|,)id=", destination) is None:
+        raise ValueError(f"{lane} needs platform=iOS Simulator,id=<udid> to clone an owned simulator")
     if lane in PHOTOS_WRITES and not allow_photos_writes:
         raise ValueError(f"{lane} can keep real photos; pass --allow-photos-writes to run it")
     if not simulator and not physical and lane != "device-build":
@@ -222,7 +224,8 @@ def fixture_test_environment(inherited=None):
 def build_input_digest(root=ROOT):
     paths = [root / "project.yml", root / "FilmyCamera.xcodeproj/project.pbxproj"]
     for directory in ("FilmyCamera", "FilmyCameraTests", "FilmyCameraUITests",
-                      "FilmyCamera.xcodeproj/xcshareddata", "Config", "StoreKit"):
+                      "FilmyCamera.xcodeproj/xcshareddata",
+                      "FilmyCamera.xcodeproj/project.xcworkspace/xcshareddata", "Config", "StoreKit"):
         paths += [path for path in (root / directory).rglob("*")
                   if path.is_file() and not any(part.startswith(".") for part in path.relative_to(root).parts)]
     digest = hashlib.sha256()
@@ -447,7 +450,12 @@ def summarize_result(result, exit_code):
     if not result.exists():
         return {"status": "failed", "reason": "XCTest did not produce a result bundle", "exitCode": exit_code}
     command = ["xcrun", "xcresulttool", "get", "test-results", "summary", "--path", str(result), "--format", "json"]
-    summary = json.loads(subprocess.check_output(command, text=True))
+    try:
+        summary = json.loads(subprocess.check_output(command, text=True, timeout=120))
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError, ValueError) as error:
+        # json.JSONDecodeError is a ValueError. Report instead of aborting with exit 2.
+        return {"status": "failed", "passed": 0, "failed": 0, "skipped": 0, "exitCode": exit_code,
+                "reason": f"result bundle unreadable: {type(error).__name__}"}
     passed, failed, skipped = (summary.get(key, 0) for key in ("passedTests", "failedTests", "skippedTests"))
     status = "passed" if exit_code == 0 and passed > 0 and failed == 0 else "failed"
     result_summary = {"status": status,
@@ -491,7 +499,10 @@ def require_complete_run(phase, selectors, summary):
     if (phase in {"unit", "integration", "core", "e2e", "photos-e2e", "fixtures"}
             and summary.get("skipped", 0)
             and not optional_fixture_skip):
-        summary.update(status="failed", reason="Unexpected skipped tests in a deterministic lane")
+        reason = "Unexpected skipped tests in a deterministic lane"
+        if summary.get("reason"):
+            reason = f"{summary['reason']}; {reason}"
+        summary.update(status="failed", reason=reason)
     elif (optional_fixture_skip and summary.get("failed", 0) == 0
           and summary.get("exitCode", 0) == 0):
         # xcresult summaries with only an intentional skip have no passedTests,
@@ -499,7 +510,11 @@ def require_complete_run(phase, selectors, summary):
         summary["status"] = "passed"
     actual_count = sum(summary.get(key, 0) for key in ("passed", "failed", "skipped"))
     if actual_count != len(selectors):
-        summary.update(status="failed", reason=f"Selected {len(selectors)} tests but XCTest reported {actual_count}; check target membership/build products")
+        reason = (f"Selected {len(selectors)} tests but XCTest reported {actual_count}; "
+                  "check target membership/build products")
+        if summary.get("reason"):
+            reason = f"{summary['reason']}; {reason}"
+        summary.update(status="failed", reason=reason)
 
 
 def run_isolated_photos_methods(command, selectors, result, output, environment, phase="photos-e2e"):
@@ -749,6 +764,8 @@ def main(argv=None):
                     }
                 (output / f"filmycamera-{phase}-summary.json").write_text(json.dumps(summary, indent=2) + "\n")
                 print(json.dumps({key: summary.get(key) for key in ("lane", "status", "passed", "failed", "skipped")}), flush=True)
+                if summary["status"] != "passed" and summary.get("reason"):
+                    print(f"reason: {summary['reason']}", file=sys.stderr, flush=True)
                 if summary["status"] != "passed":
                     # Carry the recorded failure as an exception so context-manager cleanup
                     # cannot replace its exit code with a secondary timeout.

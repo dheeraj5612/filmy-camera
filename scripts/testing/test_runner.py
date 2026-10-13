@@ -192,6 +192,17 @@ class SuiteRoutingTests(unittest.TestCase):
             with self.subTest(lane=lane), self.assertRaises(ValueError):
                 run.validate_destination(lane, destination, True)
 
+    def test_owned_simulator_lanes_need_simulator_udid(self):
+        for lane, destination in [("photos-e2e", "platform=iOS Simulator,name=iPhone 16"),
+                                  ("ci", "platform=iOS Simulator,name=iPhone 16"),
+                                  ("store-media", "platform=iOS Simulator,name=iPhone 16"),
+                                  ("fixtures", "platform=iOS Simulator,name=iPhone 16"),
+                                  ("fixtures", "platform=iOS,id=X")]:
+            with self.subTest(lane=lane, destination=destination), self.assertRaises(ValueError):
+                run.validate_destination(lane, destination, True)
+        run.validate_destination("fixtures", "platform=iOS Simulator,id=example", True)
+        run.validate_destination("e2e", "platform=iOS Simulator,name=iPhone 16", True)
+
     def test_dry_run_has_no_build_or_simulator_side_effects(self):
         with patch.object(run.subprocess, "Popen") as process, patch.object(run, "simctl") as simctl:
             output = io.StringIO()
@@ -805,7 +816,9 @@ class EvidenceTests(unittest.TestCase):
             previous = run.build_input_digest(root)
             (root / "Config").mkdir()
             (root / "StoreKit").mkdir()
+            (root / "FilmyCamera.xcodeproj/project.xcworkspace/xcshareddata/swiftpm").mkdir(parents=True)
             for relative, value in (("FilmyCameraTests/New.swift", "func testNew() {}"),
+                                    ("FilmyCamera.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved", "{}"),
                                     ("Config/Monetization.Debug.xcconfig", "FILMY_MONETIZATION_ENABLED = YES"),
                                     ("StoreKit/Filmy.storekit", "{}"),
                                     ("FilmyCameraTests/fixture.jpg", "image"),
@@ -858,6 +871,21 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(summary["status"], "failed")
         self.assertIn("xcodebuild exited 65", summary["reason"])
         self.assertEqual(summary["xcodebuildExitCode"], 65)
+
+    def test_short_count_keeps_earlier_reason(self):
+        summary = {"status": "failed", "passed": 1, "failed": 0, "skipped": 0,
+                   "reason": "xcodebuild exited 65 although the result bundle reports 1 passed, 0 failed"}
+        run.require_complete_run("core", ["old", "new"], summary)
+        self.assertIn("xcodebuild exited 65", summary["reason"])
+        self.assertIn("target membership", summary["reason"])
+
+    def test_unreadable_result_bundle_is_failed_summary(self):
+        for effect, value in ((subprocess.CalledProcessError(1, "xcresulttool"), None), (None, "not json")):
+            with self.subTest(effect=effect), tempfile.TemporaryDirectory() as directory, \
+                    patch.object(run.subprocess, "check_output", side_effect=effect, return_value=value):
+                summary = run.summarize_result(Path(directory), 0)
+                self.assertEqual(summary["status"], "failed")
+                self.assertIn("result bundle unreadable", summary["reason"])
 
     def test_skipped_prerequisite_is_failure_in_routine_ci(self):
         summary = {"status": "passed", "passed": 1, "failed": 0, "skipped": 1}

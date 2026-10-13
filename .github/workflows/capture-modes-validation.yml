@@ -12,6 +12,8 @@ on:
       - FilmyCamera/FilmyCameraApp.swift
       - FilmyCamera/Services/CameraService.swift
       - FilmyCameraTests/CaptureModes*Tests.swift
+      - scripts/test-capture-modes-policy.sh
+      - scripts/capture-modes-policy/**
       - project.yml
       - .github/workflows/capture-modes-validation.yml
 

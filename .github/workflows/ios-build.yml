@@ -200,6 +200,14 @@ jobs:
       - name: Validate release project configuration
         run: scripts/release/validate-project.sh
 
+      - name: Run host policy gates (Gallery mutation checks, Scene Auto core)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/testing/check_policy_regressions.py --mutation-checks \
+            --output-dir "${RUNNER_TEMP}/policy-regressions"
+          bash scripts/testing/test-scene-auto-core.sh
+
       - name: Select an available iPhone simulator
         id: simulator
         shell: bash
