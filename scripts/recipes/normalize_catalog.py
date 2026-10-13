@@ -9,8 +9,10 @@ import argparse
 from collections import Counter
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
+import sys
 import unicodedata
 from urllib.parse import urlsplit
 
@@ -163,6 +165,8 @@ def normalize(record):
     raw_grain = values.get('grain','Off')
     grain_parts = [p.strip() for p in raw_grain.split(',')]
     grain = categorical(grain_parts[0], 'Grain', notes)
+    if 'grainSize' in values and len(grain_parts)==2 and key(values['grainSize'])!=key(grain_parts[1]):
+        raise ValueError(f'Contradictory grain size: {raw_grain} vs {values["grainSize"]}')
     size = values.get('grainSize', grain_parts[1] if len(grain_parts) == 2 else 'Small')
     if key(size) not in ('small','large') or len(grain_parts)>2:
         raise ValueError(f'Unsupported grain size: {raw_grain}')
@@ -182,7 +186,7 @@ def normalize(record):
         elif key(toning) not in ('off','0','off (wc 0 & mg 0)'):
             raise ValueError(f'Unmapped monochrome toning axis: {toning}')
     indexes = record['indexes']
-    generations = sorted(set(re.search(r'x-trans-([iv]+)-', u)[1].upper() for u in indexes if re.search(r'x-trans-([iv]+)-',u)), key=lambda g:len(g))
+    generations = sorted(set(re.search(r'x-trans-([iv]+)-', u)[1].upper() for u in indexes if re.search(r'x-trans-([iv]+)-',u)), key=lambda g:(len(g),g))
     scope = 'X-Trans ' + ' / '.join(generations) + ' source index' if generations else 'Published primary camera settings'
     if host == 'film.recipes':
         notes.append('Uses the primary table values; camera-specific alternatives remain visible in the source. The phone is not treated as an X-Trans sensor.')
@@ -231,16 +235,26 @@ def build(data):
                 mappingVersion=MAPPING_VERSION,calibration='Not calibrated to camera hardware; source settings are not pixel-match evidence.')
     return {'schemaVersion':1,'records':accepted},report
 
-def main():
+def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('staging',type=Path)
     parser.add_argument('--output',type=Path,default=Path('FilmyCamera/Resources/RecipeCatalog.json'))
     parser.add_argument('--report',type=Path,default=Path('docs/recipe-catalog-audit.json'))
-    args=parser.parse_args()
-    catalog,report=build(json.loads(args.staging.read_text()))
-    for path,data in [(args.output,catalog),(args.report,report)]:
-        path.parent.mkdir(parents=True,exist_ok=True)
-        path.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n')
+    args=parser.parse_args(argv)
+    catalog,report=build(json.loads(args.staging.read_text(encoding='utf-8')))
+    if not catalog['records']:
+        sys.exit('No records accepted; refusing to overwrite catalog and report')
+    outputs=[(args.output,catalog),(args.report,report)]
+    temps=[path.with_name(path.name+'.tmp') for path,_ in outputs]
+    try:
+        for (path,data),temp in zip(outputs,temps):
+            path.parent.mkdir(parents=True,exist_ok=True)
+            temp.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+        for (path,_),temp in zip(outputs,temps):
+            os.replace(temp,path)
+    finally:
+        for temp in temps:
+            temp.unlink(missing_ok=True)
     print(json.dumps({k:v for k,v in report.items() if k not in ('rejected','sameControlGroups')},indent=2))
     print('Rejected:',len(report['rejected']))
 
