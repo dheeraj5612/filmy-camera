@@ -55,6 +55,8 @@ final class FujiShootingController: ObservableObject {
     private var multipleRequest: FujiSequenceRequest?
     private var multipleDeviceID: String?
     private var multipleCapturedAt: Date?
+    /// Non-RAW layer sources of a multiple exposure; removed only after the composite is exported.
+    private var multipleLayerIDs: [UUID] = []
     private var appliedProfile: FujiAutoISOProfile?
     private var profileDeviceID: String?
     private var appliedPrimeLock = false
@@ -186,6 +188,7 @@ final class FujiShootingController: ObservableObject {
         var updated = preferences
         updated.banks.removeAll { $0.id == index }; updated.banks.append(bank); updated.selectedBank = index
         preferences = updated
+        errorMessage = nil
         status = "Saved C\(index). Changes are not written back until you save again."
     }
 
@@ -287,6 +290,9 @@ final class FujiShootingController: ObservableObject {
         guard let sensor else { throw FujiShootingError.busy }
         var captured: [FujiOriginalRecord] = []
         var endAttempted = false
+        // A mid-sequence failure of a non-composite drive keeps the frames
+        // already captured: they are developed and the error is rethrown after.
+        var captureError: Error?
         do {
             try Task.checkCancellation()
             if let multipleDeviceID, multipleDeviceID != sensor.deviceID {
@@ -317,7 +323,6 @@ final class FujiShootingController: ObservableObject {
                 let record = originalRecord(dataIsRAW: frame.rawData != nil, request: request, recipe: request.recipe,
                     capturedAt: frame.capturedAt, step: step, exposure: frame.exposure, label: label)
                 try await library.retainOriginal(data, record: record)
-                captured.append(record)
                 try Task.checkCancellation()
                 if let expected = exposures[index], step.dynamicRange != .dr100 || settings.drive == .aeBracket {
                     guard frame.exposure.product.isFinite, frame.exposure.product > 0,
@@ -325,6 +330,7 @@ final class FujiShootingController: ObservableObject {
                         throw FujiShootingError.invalidCombination("The camera did not honor the requested exposure. The original was kept without exporting a misleading DR/bracket result.")
                     }
                 }
+                captured.append(record)
                 progress = 0.6 * Double(index + 1) / Double(plan.steps.count)
                 if index + 1 < plan.steps.count, step.delayAfter > 0, !settings.drive.usesFocusSweep {
                     // Requested start-to-start interval; never emit a catch-up
@@ -347,14 +353,15 @@ final class FujiShootingController: ObservableObject {
                     errorMessage = "Sensor restoration failed. Reopen the camera before continuing."
                 }
             }
-            throw error
+            if error is CancellationError || settings.drive.isComposite || captured.isEmpty || sensorRestorationFailed { throw error }
+            captureError = error
         }
         try Task.checkCancellation()
         if settings.drive.isComposite && multipleRequest == nil { await worker.reset() }
         var lastData = Data()
         var lastDate = Date()
         // A failed frame must not stop later frames from reaching the retry outbox.
-        var deferredError: Error?
+        var deferredError: Error? = captureError
         for (index, record) in captured.enumerated() {
             try Task.checkCancellation()
             status = "Developing \(settings.drive.title) · \(index + 1)/\(captured.count)"
@@ -374,6 +381,7 @@ final class FujiShootingController: ObservableObject {
                     multipleRequest = request; multipleDeviceID = sensor.deviceID
                     if multipleCapturedAt == nil { multipleCapturedAt = record.capturedAt }
                     multipleCount += 1; ghostImage = UIImage(cgImage: thumbnail.image)
+                    if !record.isRAW { multipleLayerIDs.append(record.id) }
                 }
             } else {
                 var variantError: Error?
@@ -398,13 +406,28 @@ final class FujiShootingController: ObservableObject {
             progress = 0.6 + 0.4 * Double(index + 1) / Double(captured.count)
         }
         try Task.checkCancellation()
+        let layerIDs = multipleLayerIDs
+        let completesLayers = settings.drive == .multipleExposure && multipleCount >= settings.multipleExposureCount
+        var persisted = false
+        // Layer sources go only after the composite is safely in the outbox. A source
+        // already deleted from the RAW library is not an error for a finished shot.
+        func removeLayerSources() async {
+            guard completesLayers, persisted, !settings.keepCompositeSources else { return }
+            for id in layerIDs { try? await library.removeOriginal(id: id) }
+        }
         if settings.drive.isComposite {
             if settings.drive != .multipleExposure || multipleCount >= settings.multipleExposureCount {
                 let capturedAt = multipleCapturedAt ?? lastDate
                 let result = try await worker.finish(recipe: request.recipe, sourceData: lastData, capturedAt: capturedAt,
                                                      finish: request.finish, grainSeed: request.grainSeed)
-                try await export(result.data, recipe: request.recipe, capturedAt: capturedAt,
-                                 label: settings.drive.title, photoLibrary: photoLibrary, didPersist: { self.clearMultiple() })
+                do {
+                    try await export(result.data, recipe: request.recipe, capturedAt: capturedAt,
+                                     label: settings.drive.title, photoLibrary: photoLibrary,
+                                     didPersist: { persisted = true; self.clearMultiple() })
+                } catch {
+                    await removeLayerSources()
+                    throw error
+                }
                 await worker.reset()
                 status = "Saved \(settings.drive.title) · \(result.width) × \(result.height)"
             } else { status = "Multiple exposure \(multipleCount)/\(settings.multipleExposureCount) · Compose the next layer, then press the shutter." }
@@ -426,10 +449,14 @@ final class FujiShootingController: ObservableObject {
             }
         }
         // Keep every original when any frame failed; the outbox holds the retryable copies.
-        if let deferredError { throw deferredError }
-        for record in captured where !record.isRAW && !(settings.drive.isComposite && settings.keepCompositeSources) {
-            try await library.removeOriginal(id: record.id)
+        if let deferredError {
+            if captureError != nil { status = "Saved \(captured.count) of \(plan.steps.count) · \(settings.drive.title)" }
+            throw deferredError
         }
+        if settings.drive == .multipleExposure { await removeLayerSources(); return }
+        if settings.drive.isComposite && settings.keepCompositeSources { return }
+        // An original already removed from the RAW library is not an error for a saved shot.
+        for record in captured where !record.isRAW { try? await library.removeOriginal(id: record.id) }
     }
 
     static func variants(for request: FujiSequenceRequest) throws -> [(FilmRecipe, String)] {
@@ -546,7 +573,7 @@ final class FujiShootingController: ObservableObject {
 
     private func clearMultiple() {
         multipleRequest = nil; multipleDeviceID = nil; multipleCapturedAt = nil
-        multipleCount = 0; ghostImage = nil
+        multipleCount = 0; ghostImage = nil; multipleLayerIDs = []
     }
 
     private func keepScreenAwake() {
@@ -601,6 +628,13 @@ final class FujiShootingController: ObservableObject {
         return try await previewWorker.develop(data: data, record: record, maximumEdge: 1200).data
     }
 
+    /// As-shot temperature and tint of a RAW original, decoded off the main actor.
+    func asShotWhiteBalance(_ record: FujiOriginalRecord) async -> (Double, Double)? {
+        guard record.isRAW, let data = try? await library.originalData(record) else { return nil }
+        let result = await Task.detached(priority: .userInitiated) { FujiImageProcessor.asShotWhiteBalance(data) }.value
+        return result.map { ($0.temperature, $0.tint) }
+    }
+
     func saveDevelopment(_ record: FujiOriginalRecord, photoLibrary: any PhotoSaving) async throws {
         guard !settingsLocked else { throw FujiShootingError.busy }
         isBusy = true; status = "Developing original…"; errorMessage = nil
@@ -635,5 +669,5 @@ final class FujiShootingController: ObservableObject {
         await reloadLibrary()
     }
 
-    func deleteOriginal(_ record: FujiOriginalRecord) async throws { try await library.removeOriginal(id: record.id); await reloadLibrary() }
+    func deleteOriginal(_ record: FujiOriginalRecord) async throws { guard !isBusy, !isComposing else { throw FujiShootingError.busy }; try await library.removeOriginal(id: record.id); await reloadLibrary() }
 }

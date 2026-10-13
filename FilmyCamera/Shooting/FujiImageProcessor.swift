@@ -72,6 +72,16 @@ enum FujiImageProcessor {
         return type.conforms(to: .rawImage)
     }
 
+    /// The camera's as-shot white balance, clamped to the develop sliders. Nil for non-RAW or unreadable data.
+    static func asShotWhiteBalance(_ data: Data) -> (temperature: Double, tint: Double)? {
+        guard !data.isEmpty, data.count <= FujiCaptureLibrary.maximumImportBytes, isRAW(data),
+              let raw = CIRAWFilter(imageData: data, identifierHint: nil) else { return nil }
+        let temperature = Double(raw.neutralTemperature)
+        let tint = Double(raw.neutralTint)
+        guard temperature.isFinite, tint.isFinite else { return nil }
+        return (FujiMath.finite(temperature, in: 2000...12_000, fallback: 5600), FujiMath.finite(tint, in: -150...150, fallback: 0))
+    }
+
     static func decoded(_ data: Data, isRAW: Bool, dynamicRange: FujiDynamicRange,
                         adjustment: FujiRAWAdjustment = .init(), maximumEdge: CGFloat? = nil) throws -> CIImage {
         guard !data.isEmpty, data.count <= FujiCaptureLibrary.maximumImportBytes,
@@ -95,6 +105,12 @@ enum FujiImageProcessor {
             }
             raw.linearSpaceFilter = FujiRAWLinearFilter(gain: pow(2, dynamicRange.protectionStops),
                                                        recovery: edit.highlightRecovery, shadows: edit.shadowLift)
+            // Demosaic at preview size instead of full sensor size when a bound is requested.
+            if let maximumEdge, maximumEdge > 0 {
+                let native = raw.nativeSize
+                let longest = max(native.width, native.height)
+                if longest.isFinite, longest > maximumEdge { raw.scaleFactor = Float(maximumEdge / longest) }
+            }
             guard let result = raw.outputImage else { throw FujiShootingError.processingFailed }
             image = result
         } else {

@@ -64,7 +64,11 @@ struct FujiViewfinderOverlay: View {
 struct FujiShootingStatusView: View {
     @ObservedObject var controller: FujiShootingController
     let photoLibrary: PhotoLibraryService
+    @State private var confirmDiscard = false
     var body: some View {
+        let layerNoun: String = controller.multipleCount == 1 ? "layer" : "layers"
+        let discardTitle = "Discard \(controller.multipleCount) \(layerNoun)?"
+        Group {
         if controller.isBusy || controller.isComposing || controller.errorMessage != nil || controller.pendingExportCount > 0 {
             VStack(alignment: .leading, spacing: 8) {
                 if controller.isBusy {
@@ -76,7 +80,7 @@ struct FujiShootingStatusView: View {
                     }
                 } else if controller.isComposing {
                     Text(controller.status).font(.caption).lineLimit(3)
-                    Button("Discard layers", role: .destructive) { controller.cancel() }.frame(minHeight: 44)
+                    Button("Discard layers", role: .destructive) { confirmDiscard = true }.frame(minHeight: 44)
                 }
                 if let error = controller.errorMessage {
                     HStack(alignment: .top) {
@@ -92,6 +96,12 @@ struct FujiShootingStatusView: View {
             }
             .padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
             .padding(.horizontal, 12).accessibilityIdentifier("fuji-shooting-status")
+            .confirmationDialog(discardTitle, isPresented: $confirmDiscard, titleVisibility: .visible) {
+                Button("Discard layers", role: .destructive) { controller.cancel() }
+                Button("Keep composing", role: .cancel) {}
+            } message: { Text("The blended composite is discarded. Layer sources stay in RAW Develop.") }
         }
+        }
+        .onChange(of: controller.isComposing) { _, composing in if !composing { confirmDiscard = false } }
     }
 }

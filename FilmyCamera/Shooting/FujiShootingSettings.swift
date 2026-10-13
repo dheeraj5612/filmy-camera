@@ -238,6 +238,15 @@ enum FujiMath {
         min(max(value.isFinite ? value : fallback, range.lowerBound), range.upperBound)
     }
 
+    /// Shutter speed as photographers read it: "1/125 s" below 0.3 s.
+    static func shutterText(_ seconds: Double) -> String {
+        guard seconds.isFinite, seconds > 0 else { return "Auto" }
+        if seconds >= 0.3 { return String(format: "%.1f s", seconds) }
+        let reciprocal = (1 / seconds).rounded()
+        guard reciprocal.isFinite, reciprocal < 1_000_000 else { return "<1/1000000 s" }
+        return "1/\(max(Int(reciprocal), 1)) s"
+    }
+
     /// Preserve metered exposure. Raise ISO before slowing past the preferred
     /// shutter; at maximum ISO permit a slower shutter, as Fuji Auto ISO does.
     static func autoExposure(

@@ -6,8 +6,11 @@ struct FujiQuickMenuView: View {
     @ObservedObject var viewModel: CameraViewModel
     @ObservedObject var photoLibrary: PhotoLibraryService
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
+        let tileMinimum: CGFloat = dynamicTypeSize.isAccessibilitySize ? 220 : 110
+        let lineCap: Int? = dynamicTypeSize.isAccessibilitySize ? nil : 2
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
@@ -18,15 +21,15 @@ struct FujiQuickMenuView: View {
                     }
                     Text("\(controller.settings.drive.title) · \(controller.settings.dynamicRange.title)")
                         .font(.title3.weight(.semibold))
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 8)], spacing: 8) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: tileMinimum), spacing: 8)], spacing: 8) {
                         ForEach(controller.preferences.quickControls) { control in
                             NavigationLink {
                                 destination(control)
                             } label: {
                                 VStack(alignment: .leading, spacing: 10) {
-                                    Text(control.title).font(.caption.weight(.semibold)).lineLimit(2)
+                                    Text(control.title).font(.caption.weight(.semibold)).lineLimit(lineCap)
                                     Spacer(minLength: 0)
-                                    Text(value(control)).font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(2)
+                                    Text(value(control)).font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(lineCap)
                                 }
                                 .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
                                 .padding(10)
@@ -135,6 +138,9 @@ private struct FujiBanksView: View {
     @State private var pendingOverwrite: Int?
     var body: some View {
         Form {
+            if let message = controller.errorMessage {
+                Section { Text(message).font(.footnote).foregroundStyle(.orange) }
+            }
             Section {
                 Text("Each bank saves the complete recipe, shooting setup, device, manual controls, crop, framing, timer and finish. Recall does not automatically overwrite a bank.")
                     .font(.footnote).foregroundStyle(.secondary)
@@ -304,7 +310,8 @@ private struct FujiControlDetail: View {
                 }
                 Text("Raises ISO before slowing below the preferred shutter. At maximum ISO it permits slower shutter speeds. The app continuously meters on a supported physical lens. Exposure is held through a bracket or sweep.")
                     .font(.footnote).foregroundStyle(.secondary)
-                Text("Applied: ISO \(Int(camera.manualControls.iso)) · \(camera.manualControls.exposureDurationSeconds.formatted()) s")
+                let appliedLine = "Applied: ISO \(Int(camera.manualControls.iso)) · \(FujiMath.shutterText(camera.manualControls.exposureDurationSeconds))"
+                Text(appliedLine)
                     .font(.caption.monospaced())
             }
             ForEach(0..<3, id: \.self) { index in

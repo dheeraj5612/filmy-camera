@@ -85,7 +85,7 @@ struct FujiRAWLibraryView: View {
                         }.padding(.vertical, 6)
                     }
                     .swipeActions {
-                        Button("Delete original", role: .destructive) { deletion = record }.disabled(controller.isBusy)
+                        Button("Delete original", role: .destructive) { deletion = record }.disabled(controller.isBusy || controller.isComposing)
                     }
                 }
             }
@@ -150,7 +150,8 @@ struct FujiRAWDevelopView: View {
                 Text("\(original.isRAW ? "RAW" : "Processed source") · \(original.dynamicRange.title) · Original unchanged")
                     .font(.caption.monospaced()).foregroundStyle(.secondary)
                 if let exposure = original.captureExposure {
-                    Text("Captured ISO \(Int(exposure.iso)) · \(exposure.seconds.formatted()) s · protection \(exposure.protectedStops.formatted()) EV")
+                    let capturedLine = "Captured ISO \(Int(exposure.iso)) · \(FujiMath.shutterText(exposure.seconds)) · protection \(exposure.protectedStops.formatted()) EV"
+                    Text(capturedLine)
                         .font(.caption2.monospaced()).foregroundStyle(.secondary)
                 }
                 if let error { Text(error).font(.footnote).foregroundStyle(.orange) }
@@ -165,7 +166,21 @@ struct FujiRAWDevelopView: View {
             if original.isRAW {
                 Section("RAW exposure and white balance") {
                     control("Exposure (EV)", value: $draft.adjustment.exposure, range: -5...5)
-                    Toggle("As-shot white balance", isOn: $draft.adjustment.useAsShotWhiteBalance)
+                    Toggle("As-shot white balance", isOn: Binding(
+                        get: { draft.adjustment.useAsShotWhiteBalance },
+                        set: { asShot in
+                            draft.adjustment.useAsShotWhiteBalance = asShot
+                            let defaults = FujiRAWAdjustment()
+                            let untouched = draft.adjustment.temperature == defaults.temperature && draft.adjustment.tint == defaults.tint
+                            guard !asShot, untouched else { return }
+                            // Start the sliders at the as-shot balance instead of jumping to the 5600 K default.
+                            Task {
+                                guard let shot = await controller.asShotWhiteBalance(original) else { return }
+                                let stillUntouched = draft.adjustment.temperature == defaults.temperature && draft.adjustment.tint == defaults.tint
+                                guard !draft.adjustment.useAsShotWhiteBalance, stillUntouched else { return }
+                                draft.adjustment.temperature = shot.0; draft.adjustment.tint = shot.1
+                            }
+                        }))
                     if !draft.adjustment.useAsShotWhiteBalance {
                         control("Temperature (K)", value: $draft.adjustment.temperature, range: 2000...12000)
                         control("Tint", value: $draft.adjustment.tint, range: -150...150)
@@ -184,7 +199,9 @@ struct FujiRAWDevelopView: View {
                         defer { isSaving = false }
                         do {
                             try await controller.saveDevelopment(snapshot, photoLibrary: photoLibrary)
-                            savedMessage = "Saved a developed copy. Original unchanged."
+                            if snapshot == draft { savedMessage = "Saved a developed copy. Original unchanged." }
+                        } catch is CancellationError {
+                            self.error = "Development canceled. The original is unchanged."
                         } catch { self.error = error.localizedDescription }
                     }
                 }.disabled(isSaving || controller.isBusy).frame(minHeight: 44)
@@ -202,6 +219,7 @@ struct FujiRAWDevelopView: View {
             catch { self.error = error.localizedDescription }
         }
         .task(id: draft) {
+            savedMessage = nil
             let generation = UUID(); renderGeneration = generation
             isRendering = true
             do {

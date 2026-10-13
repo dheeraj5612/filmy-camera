@@ -386,7 +386,76 @@ final class FujiShootingTests: XCTestCase {
         let pending = try await library.pendingExports()
         XCTAssertEqual(originals.count, 1)
         XCTAssertTrue(pending.isEmpty)
+        // The frame captured before the failure is still developed and saved.
+        XCTAssertEqual(saver.savedCount, 1)
+    }
+
+    func testShutterTextReadsAsFractionsAndGuardsOddValues() {
+        XCTAssertEqual(FujiMath.shutterText(1.0 / 125), "1/125 s")
+        XCTAssertEqual(FujiMath.shutterText(1.0 / 8000), "1/8000 s")
+        XCTAssertEqual(FujiMath.shutterText(2), "2.0 s")
+        XCTAssertEqual(FujiMath.shutterText(0.7), "0.7 s")
+        XCTAssertEqual(FujiMath.shutterText(0.5), "0.5 s")
+        XCTAssertEqual(FujiMath.shutterText(1.0 / 3), "0.3 s")
+        XCTAssertEqual(FujiMath.shutterText(0.25), "1/4 s")
+        XCTAssertEqual(FujiMath.shutterText(0), "Auto")
+        XCTAssertEqual(FujiMath.shutterText(.nan), "Auto")
+        XCTAssertEqual(FujiMath.shutterText(.leastNonzeroMagnitude), "<1/1000000 s")
+    }
+
+    func testAsShotWhiteBalanceIsNilWithoutMetadata() {
+        XCTAssertNil(FujiImageProcessor.asShotWhiteBalance(jpeg()))
+    }
+
+    func testCompositeCaptureFailureExportsNothing() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = FujiCaptureLibrary(root: root)
+        let controller = FujiShootingController(library: library)
+        let driver = FujiTestDriver(data: jpeg(), failOnCapture: 2)
+        let saver = FujiTestSaver(driver: driver)
+        var settings = FujiShootingSettings(); settings.drive = .computationalND; settings.ndStops = 1
+        do { try await controller.run(request(settings), driver: driver, photoLibrary: saver); XCTFail("Expected failure") }
+        catch { XCTAssertEqual(error as? FujiShootingError, .timedOut) }
+        XCTAssertEqual(driver.counts.restores, 1)
         XCTAssertEqual(saver.savedCount, 0)
+    }
+
+    func testMultipleExposureKeepsLayerSourcesUntilCompositeExported() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = FujiCaptureLibrary(root: root)
+        let controller = FujiShootingController(library: library)
+        let driver = FujiTestDriver(data: jpeg())
+        let saver = FujiTestSaver(driver: driver)
+        var settings = FujiShootingSettings(); settings.drive = .multipleExposure; settings.multipleExposureCount = 2
+        settings.keepCompositeSources = false
+        try await controller.run(request(settings), driver: driver, photoLibrary: saver)
+        let afterFirst = try await library.originals()
+        XCTAssertEqual(afterFirst.count, 1)
+        XCTAssertEqual(saver.savedCount, 0)
+        try await controller.run(request(settings), driver: driver, photoLibrary: saver)
+        let afterFinal = try await library.originals()
+        XCTAssertTrue(afterFinal.isEmpty)
+        XCTAssertEqual(saver.savedCount, 1)
+    }
+
+    func testMultipleExposureSourcesRemovedWhenPhotosSaveFailsAfterPersist() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = FujiCaptureLibrary(root: root)
+        let controller = FujiShootingController(library: library)
+        let driver = FujiTestDriver(data: jpeg())
+        let saver = FujiTestSaver(driver: driver, failSave: true)
+        var settings = FujiShootingSettings(); settings.drive = .multipleExposure; settings.multipleExposureCount = 2
+        settings.keepCompositeSources = false
+        try await controller.run(request(settings), driver: driver, photoLibrary: saver)
+        do { try await controller.run(request(settings), driver: driver, photoLibrary: saver); XCTFail("Expected save failure") }
+        catch {}
+        let pending = try await library.pendingExports()
+        let originals = try await library.originals()
+        XCTAssertEqual(pending.count, 1)
+        XCTAssertTrue(originals.isEmpty)
     }
 
     func testMultipleExposureRefusesLayerOnDifferentLens() async throws {
