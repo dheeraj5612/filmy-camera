@@ -105,6 +105,24 @@ final class RecipeControlEffectTests: XCTestCase {
         }
     }
 
+    func testPublishedPositiveMGProducesGreenNotMagentaAcrossRenderQualities() throws {
+        let record = try XCTUnwrap(RecipeCatalog.records.first {
+            $0.source.url == "https://film.recipes/2022/08/01/emerald-mono-a-toned-mono-for-nature/"
+        })
+        var green = record.recipe
+        green.grain = 0
+        green.monochromaticColor.warmCool = 0
+        var neutral = green
+        neutral.monochromaticColor.greenMagenta = 0
+        let input = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5))
+            .cropped(to: CGRect(x: 0, y: 0, width: 16, height: 16))
+        for quality in [FilmRenderer.Quality.preview, .photo, .export] {
+            let a = Self.pixels(FilmRenderer.render(input, recipe: green, quality: quality))
+            let b = Self.pixels(FilmRenderer.render(input, recipe: neutral, quality: quality))
+            XCTAssertGreaterThan(a[1] - (a[0] + a[2]) / 2, b[1] - (b[0] + b[2]) / 2 + 0.001)
+        }
+    }
+
     private static var controls: [(FilmRecipe.Control, WritableKeyPath<FilmRecipe, Double>)] { [
         (.exposure, \.exposure), (.highlights, \.tone.highlight), (.shadows, \.tone.shadow),
         (.color, \.saturation), (.contrast, \.contrast), (.colorChrome, \.colorChrome),

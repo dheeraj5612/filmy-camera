@@ -1,3 +1,4 @@
+import Combine
 import Photos
 import SwiftUI
 import UIKit
@@ -14,6 +15,19 @@ struct GalleryScreen: View {
     @State private var selectedAsset: PhotoLibraryGalleryAsset?
     @AppStorage("rollRoomyGrid") private var roomyGrid = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var layoutModel = GalleryLayoutModel.empty
+    @State private var assetsByID: [String: PhotoLibraryGalleryAsset] = [:]
+    @State private var lookFilter: String?
+    @State private var isSelecting = false
+    @State private var rollSelection = GallerySelection()
+    @State private var pendingDeleteIDs: [String] = []
+    @State private var isShowingDeleteConfirmation = false
+    @State private var isWorking = false
+    @State private var batchShareURLs: [URL] = []
+    @State private var isShowingBatchShare = false
+    @State private var shareNote: String?
+    @State private var batchMessage: String?
 
     /// Three columns on iPhone; iPad widths flow as many ~200pt squares as
     /// fit so the contact sheet does not become three enormous tiles.
@@ -25,6 +39,95 @@ struct GalleryScreen: View {
     }
 
     var body: some View {
+        observedContent
+            .sheet(isPresented: $isShowingBatchShare, onDismiss: finishBatchShare) {
+                ShareSheet(items: batchShareURLs)
+                    .presentationDetents([.medium, .large])
+            }
+            .alert(deleteAlertTitle, isPresented: $isShowingDeleteConfirmation) {
+                Button(deleteAlertButtonTitle, role: .destructive) { performDelete() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This removes the selected frames from Photos and from your Filmy Camera roll.")
+            }
+            .alert("Roll action incomplete", isPresented: batchMessageBinding) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(batchMessage ?? "Try again in a moment.")
+            }
+            .fullScreenCover(isPresented: detailPresentedBinding) {
+                detailPager
+            }
+    }
+
+    private var batchMessageBinding: Binding<Bool> {
+        Binding(
+            get: { batchMessage != nil },
+            set: { if !$0 { batchMessage = nil } }
+        )
+    }
+
+    private var detailPresentedBinding: Binding<Bool> {
+        Binding(
+            get: { selectedAsset != nil },
+            set: { if !$0 { selectedAsset = nil } }
+        )
+    }
+
+    private var pagerVisibleIDs: Set<String>? {
+        lookFilter == nil ? nil : Set(layoutModel.visibleIDs)
+    }
+
+    private var detailPager: some View {
+        GalleryPager(
+            selection: $selectedAsset,
+            photoLibrary: photoLibrary,
+            visibleIDs: pagerVisibleIDs,
+            onBackToCamera: onBackToCamera
+        )
+        .ignoresSafeArea()
+        .presentationBackground(.black)
+    }
+
+    private var observedContent: some View {
+        rootContent
+            .task {
+                // Keep the Roll useful without prompting for broad Photos read
+                // access. It displays frames created by Filmy Camera and its
+                // private local fallback cache.
+                photoLibrary.refresh()
+                rebuildModel()
+            }
+            .onAppear { rebuildModel() }
+            .onChange(of: photoLibrary.galleryAssets.map(\.id)) { _, _ in
+                rebuildModel()
+            }
+            .onChange(of: photoLibrary.metadataByAssetIdentifier.count) { _, _ in
+                rebuildModel()
+            }
+            .onChange(of: scenePhase) { _, phase in
+                guard phase == .active else { return }
+                photoLibrary.refresh()
+                clearSelectionIfUnavailable()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged).receive(on: RunLoop.main)) { _ in
+                rebuildModel()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification).receive(on: RunLoop.main)) { _ in
+                rebuildModel()
+            }
+            .onChange(of: photoLibrary.authorizationStatus) { _, _ in
+                clearSelectionIfUnavailable()
+            }
+            .onChange(of: photoLibrary.assets.map(\.localIdentifier)) { _, _ in
+                clearSelectionIfUnavailable()
+            }
+            .onChange(of: photoLibrary.localSavedFrames.map(\.assetIdentifier)) { _, _ in
+                clearSelectionIfUnavailable()
+            }
+    }
+
+    private var rootContent: some View {
         NavigationStack {
             ZStack {
                 FilmyPageBackground()
@@ -41,7 +144,22 @@ struct GalleryScreen: View {
                         if !photoLibrary.galleryAssets.isEmpty {
                             rollSummary
                                 .padding(.horizontal, FilmyTheme.pageMargin)
+                            if !layoutModel.looks.isEmpty {
+                                filterRow
+                            }
+                            selectionControls
+                                .padding(.horizontal, FilmyTheme.pageMargin)
                         }
+
+                        NavigationLink {
+                            FilmyOriginalsView(photoLibrary: photoLibrary)
+                        } label: {
+                            Label("Filmy originals · edit again", systemImage: "photo.stack")
+                                .font(.headline).padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                                .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 16))
+                        }
+                        .padding(.horizontal, FilmyTheme.pageMargin)
+                        .accessibilityIdentifier("roll-filmy-originals")
 
                         galleryContent
 
@@ -62,42 +180,16 @@ struct GalleryScreen: View {
             .safeAreaInset(edge: .top, spacing: 0) {
                 CameraReturnBar(accessibilityIdentifier: "roll-back-to-camera", action: onBackToCamera)
             }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if isSelecting {
+                    selectionBar
+                        .transition(reduceMotion ? .identity : .move(edge: .bottom).combined(with: .opacity))
+                }
+            }
             .toolbar(.hidden, for: .navigationBar)
             .refreshable {
-                photoLibrary.refresh()
+                await photoLibrary.refreshAndWait()
             }
-        }
-        .task {
-            // Keep the Roll useful without prompting for broad Photos read
-            // access. It displays frames created by Filmy Camera and its
-            // private local fallback cache.
-            photoLibrary.refresh()
-        }
-        .onChange(of: scenePhase) { _, phase in
-            guard phase == .active else { return }
-            photoLibrary.refresh()
-            clearSelectionIfUnavailable()
-        }
-        .onChange(of: photoLibrary.authorizationStatus) { _, _ in
-            clearSelectionIfUnavailable()
-        }
-        .onChange(of: photoLibrary.assets.map(\.localIdentifier)) { _, _ in
-            clearSelectionIfUnavailable()
-        }
-        .onChange(of: photoLibrary.localSavedFrames.map(\.assetIdentifier)) { _, _ in
-            clearSelectionIfUnavailable()
-        }
-        .fullScreenCover(isPresented: Binding(
-            get: { selectedAsset != nil },
-            set: { if !$0 { selectedAsset = nil } }
-        )) {
-            GalleryPager(
-                selection: $selectedAsset,
-                photoLibrary: photoLibrary,
-                onBackToCamera: onBackToCamera
-            )
-            .ignoresSafeArea()
-            .presentationBackground(.black)
         }
     }
 
@@ -268,26 +360,452 @@ struct GalleryScreen: View {
         .accessibilityIdentifier("gallery-manage-limited-access")
     }
 
-    private var galleryGrid: some View {
-        LazyVGrid(columns: columns, spacing: 6) {
-            ForEach(photoLibrary.galleryAssets) { asset in
-                Button {
-                    selectedAsset = asset
-                } label: {
-                    GalleryThumbnail(asset: asset, photoLibrary: photoLibrary)
+    // MARK: Model
+
+    /// Builds the day sections and look counts once per change, never per
+    /// body pass.
+    private func rebuildModel() {
+        let assets = photoLibrary.galleryAssets
+        var byID: [String: PhotoLibraryGalleryAsset] = [:]
+        var items: [GalleryItem] = []
+        items.reserveCapacity(assets.count)
+        for asset in assets {
+            byID[asset.id] = asset
+            items.append(galleryItem(for: asset))
+        }
+        let calendar = Calendar.current
+        var model = GalleryLayoutModel(items: items, lookFilter: lookFilter, calendar: calendar)
+        if let filter = lookFilter, !model.looks.contains(where: { $0.name == filter }) {
+            lookFilter = nil
+            model = GalleryLayoutModel(items: items, lookFilter: nil, calendar: calendar)
+        }
+        assetsByID = byID
+        layoutModel = model
+        rollSelection.prune(keeping: Set(byID.keys))
+        if assets.isEmpty { isSelecting = false }
+    }
+
+    private func galleryItem(for asset: PhotoLibraryGalleryAsset) -> GalleryItem {
+        GalleryItem(
+            id: asset.id,
+            date: photoLibrary.galleryCaptureDate(for: asset),
+            lookName: photoLibrary.metadata(for: asset)?.recipe.name
+        )
+    }
+
+    private func animated(_ change: () -> Void) {
+        if reduceMotion {
+            change()
+        } else {
+            withAnimation(.easeOut(duration: 0.18)) { change() }
+        }
+    }
+
+    private func setLookFilter(_ name: String?) {
+        guard name != lookFilter else { return }
+        HapticFeedback.play(.selection)
+        animated {
+            lookFilter = name
+            rebuildModel()
+            rollSelection.prune(keeping: Set(layoutModel.visibleIDs))
+        }
+    }
+
+    // MARK: Filter chips
+
+    private var filterRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                filterChip(
+                    title: "All",
+                    count: layoutModel.totalCount,
+                    isSelected: lookFilter == nil,
+                    identifier: "roll-filter-all"
+                ) { setLookFilter(nil) }
+                ForEach(layoutModel.looks) { look in
+                    filterChip(
+                        title: look.name,
+                        count: look.count,
+                        isSelected: lookFilter == look.name,
+                        identifier: "roll-filter-\(look.name)"
+                    ) { setLookFilter(look.name) }
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(
-                    photoLibrary.metadata(for: asset).map {
-                        "Photo in your gallery, \($0.recipe.name)"
-                    } ?? "Photo in your gallery"
+            }
+            .padding(.horizontal, FilmyTheme.pageMargin)
+        }
+    }
+
+    private func filterChip(
+        title: String,
+        count: Int,
+        isSelected: Bool,
+        identifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        let background: Color = isSelected ? FilmyTheme.accent : FilmyTheme.panel
+        let foreground: Color = isSelected ? FilmyTheme.background : FilmyTheme.primary
+        let traits: AccessibilityTraits = isSelected ? .isSelected : []
+        return Button(action: action) {
+            Text(title)
+                .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                .foregroundStyle(foreground)
+                .lineLimit(1)
+                .padding(.horizontal, 14)
+                .frame(minHeight: FilmyTheme.minimumHitTarget)
+                .background(background, in: Capsule())
+                .overlay { Capsule().strokeBorder(FilmyTheme.line, lineWidth: 1) }
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityValue(count == 1 ? "1 photo" : "\(count) photos")
+        .accessibilityAddTraits(traits)
+        .accessibilityIdentifier(identifier)
+    }
+
+    private var filteredEmptyState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "line.3.horizontal.decrease.circle")
+                .font(.largeTitle)
+                .foregroundStyle(FilmyTheme.secondary)
+                .accessibilityHidden(true)
+            Text("No frames with this look")
+                .font(.system(.title3, design: .default).weight(.bold))
+                .foregroundStyle(FilmyTheme.primary)
+                .multilineTextAlignment(.center)
+            Text("Show the whole roll to see every frame again.")
+                .font(.subheadline)
+                .foregroundStyle(FilmyTheme.secondary)
+                .multilineTextAlignment(.center)
+            Button("Show all") { setLookFilter(nil) }
+                .buttonStyle(.filmyPrimary)
+                .accessibilityIdentifier("roll-filter-show-all")
+        }
+        .frame(maxWidth: .infinity)
+        .padding(FilmyTheme.pageMargin)
+        .accessibilityElement(children: .contain)
+    }
+
+    // MARK: Selection controls
+
+    private var selectionControls: some View {
+        HStack(spacing: 12) {
+            Text(controlsSummary)
+                .font(.system(.caption, design: .rounded).weight(.semibold))
+                .foregroundStyle(FilmyTheme.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("roll-count-summary")
+            Spacer(minLength: 8)
+            if isSelecting {
+                controlButton(
+                    title: rollSelection.isAllSelected(in: layoutModel.visibleIDs) ? "Deselect all" : "Select all",
+                    identifier: "roll-select-all",
+                    action: toggleSelectAll
                 )
-                .accessibilityValue("\(asset.pixelWidth)x\(asset.pixelHeight)")
-                .accessibilityHint("Opens frame details")
-                .accessibilityIdentifier("roll-frame-\(asset.id)")
+            }
+            controlButton(
+                title: isSelecting ? "Done" : "Select",
+                identifier: "roll-select-toggle",
+                action: toggleSelectionMode
+            )
+        }
+    }
+
+    private var controlsSummary: String {
+        if isSelecting {
+            return rollSelection.count == 1 ? "1 selected" : "\(rollSelection.count) selected"
+        }
+        if lookFilter != nil {
+            return "Showing \(layoutModel.visibleIDs.count) of \(layoutModel.totalCount) frames"
+        }
+        return ""
+    }
+
+    private func controlButton(title: String, identifier: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                .foregroundStyle(FilmyTheme.accent)
+                .padding(.horizontal, 6)
+                .frame(minHeight: FilmyTheme.minimumHitTarget)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(identifier)
+    }
+
+    private func toggleSelectionMode() {
+        HapticFeedback.play(.selection)
+        animated {
+            isSelecting.toggle()
+            rollSelection.clear()
+        }
+    }
+
+    private func toggleSelectAll() {
+        animated {
+            if rollSelection.isAllSelected(in: layoutModel.visibleIDs) {
+                rollSelection.clear()
+            } else {
+                rollSelection.selectAll(layoutModel.visibleIDs)
+            }
+        }
+    }
+
+    private var selectionBar: some View {
+        let layout: AnyLayout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+            : AnyLayout(HStackLayout(spacing: 12))
+        let selectedIDs = rollSelection.ordered(in: layoutModel.visibleIDs)
+        let canDeleteAny = selectedIDs.contains { id in
+            assetsByID[id].map { photoLibrary.canDelete(asset: $0) } ?? false
+        }
+        return layout {
+            Button {
+                shareAssets(selectedIDs.compactMap { assetsByID[$0] })
+            } label: {
+                Label(selectedIDs.isEmpty ? "Share" : "Share \(selectedIDs.count)", systemImage: "square.and.arrow.up")
+            }
+            .buttonStyle(.filmySecondary)
+            .disabled(selectedIDs.isEmpty || isWorking)
+            .accessibilityLabel("Share selected frames")
+            .accessibilityValue(selectedIDs.count == 1 ? "1 frame" : "\(selectedIDs.count) frames")
+            .accessibilityIdentifier("roll-selection-share")
+
+            Button(role: .destructive) {
+                requestDelete(selectedIDs)
+            } label: {
+                Label(selectedIDs.isEmpty ? "Delete" : "Delete \(selectedIDs.count)", systemImage: "trash")
+            }
+            .buttonStyle(.filmySecondary)
+            .disabled(selectedIDs.isEmpty || !canDeleteAny || isWorking)
+            .accessibilityLabel("Delete selected frames")
+            .accessibilityValue(selectedIDs.count == 1 ? "1 frame" : "\(selectedIDs.count) frames")
+            .accessibilityIdentifier("roll-selection-delete")
+        }
+        .padding(.horizontal, FilmyTheme.pageMargin)
+        .padding(.vertical, 10)
+        .background(FilmyTheme.backgroundRaised.opacity(0.96))
+        .overlay(alignment: .top) {
+            Rectangle().fill(FilmyTheme.line).frame(height: 1)
+        }
+    }
+
+    // MARK: Batch actions
+
+    private var deleteAlertTitle: String {
+        pendingDeleteIDs.count == 1 ? "Delete 1 frame?" : "Delete \(pendingDeleteIDs.count) frames?"
+    }
+
+    private var deleteAlertButtonTitle: String {
+        pendingDeleteIDs.count == 1 ? "Delete 1 Frame" : "Delete \(pendingDeleteIDs.count) Frames"
+    }
+
+    /// Only frames the service allows to delete are offered for deletion.
+    private func requestDelete(_ ids: [String]) {
+        let deletable = ids.filter { id in
+            assetsByID[id].map { photoLibrary.canDelete(asset: $0) } ?? false
+        }
+        guard !deletable.isEmpty else {
+            batchMessage = "These frames can’t be deleted from the Roll."
+            return
+        }
+        pendingDeleteIDs = deletable
+        isShowingDeleteConfirmation = true
+    }
+
+    @MainActor
+    private func deleteResult(of assets: [PhotoLibraryGalleryAsset]) async -> Result<Void, PhotoLibraryServiceError> {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Result<Void, PhotoLibraryServiceError>, Never>) in
+            photoLibrary.delete(assets: assets) { result in
+                continuation.resume(returning: result)
+            }
+        }
+    }
+
+    /// Deletes the confirmed frames with one service call (one system
+    /// prompt). On failure nothing is removed and the selection stays.
+    private func performDelete() {
+        let targets = pendingDeleteIDs.compactMap { assetsByID[$0] }
+        guard !isWorking, !targets.isEmpty else { return }
+        isWorking = true
+        Task { @MainActor in
+            let result = await deleteResult(of: targets)
+            isWorking = false
+            pendingDeleteIDs = []
+            switch result {
+            case .success:
+                HapticFeedback.play(.success)
+                animated {
+                    isSelecting = false
+                    rollSelection.clear()
+                }
+            case .failure(.cancelled):
+                break
+            case .failure(let error):
+                HapticFeedback.play(.error)
+                let count = targets.count
+                let summary = count == 1
+                    ? "This frame could not be deleted."
+                    : "\(count) frames could not be deleted and are still selected."
+                batchMessage = "\(summary) \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func shareAssets(_ assets: [PhotoLibraryGalleryAsset]) {
+        guard !isWorking, !assets.isEmpty else { return }
+        isWorking = true
+        Task { @MainActor in
+            var urls: [URL] = []
+            for asset in assets {
+                if let url = await photoLibrary.shareURL(for: asset) { urls.append(url) }
+            }
+            isWorking = false
+            guard !urls.isEmpty else {
+                batchMessage = "The original frames could not be prepared for sharing. Try again in a moment."
+                return
+            }
+            let missing = assets.count - urls.count
+            shareNote = missing > 0 ? "\(missing) of \(assets.count) frames could not be prepared and were not shared." : nil
+            batchShareURLs = urls
+            isShowingBatchShare = true
+        }
+    }
+
+    private func finishBatchShare() {
+        for url in batchShareURLs {
+            photoLibrary.removeTemporaryShare(at: url)
+        }
+        batchShareURLs = []
+        if let note = shareNote {
+            shareNote = nil
+            Task { @MainActor in batchMessage = note }
+        }
+    }
+
+    // MARK: Sectioned grid
+
+    @ViewBuilder
+    private var galleryGrid: some View {
+        if layoutModel.sections.isEmpty && lookFilter != nil {
+            filteredEmptyState
+        } else {
+            sectionedGrid
+        }
+    }
+
+    private var sectionedGrid: some View {
+        LazyVStack(alignment: .leading, spacing: 6, pinnedViews: [.sectionHeaders]) {
+            ForEach(layoutModel.sections) { section in
+                Section {
+                    sectionGrid(section)
+                } header: {
+                    sectionHeader(section)
+                }
+            }
+        }
+    }
+
+    private func sectionGrid(_ section: GallerySection) -> some View {
+        LazyVGrid(columns: columns, spacing: 6) {
+            ForEach(section.ids, id: \.self) { id in
+                thumbnailCell(id: id)
             }
         }
         .padding(.horizontal, 6)
+    }
+
+    private func sectionHeader(_ section: GallerySection) -> some View {
+        let title = GallerySectionTitle.title(
+            for: section.day,
+            now: Date(),
+            calendar: Calendar.current,
+            locale: Locale.current
+        )
+        return Text(title)
+            .font(.system(.subheadline, design: .rounded).weight(.bold))
+            .foregroundStyle(FilmyTheme.primary)
+            .padding(.horizontal, FilmyTheme.pageMargin)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(FilmyTheme.background.opacity(0.92))
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    @ViewBuilder
+    private func thumbnailCell(id: String) -> some View {
+        if let asset = assetsByID[id] {
+            thumbnailButton(asset)
+        }
+    }
+
+    private func thumbnailButton(_ asset: PhotoLibraryGalleryAsset) -> some View {
+        let isSelected = rollSelection.contains(asset.id)
+        let traits: AccessibilityTraits = isSelected ? .isSelected : []
+        let hint = isSelecting ? "Toggles selection" : "Opens frame details"
+        return Button {
+            if isSelecting {
+                animated { rollSelection.toggle(asset.id) }
+            } else {
+                selectedAsset = asset
+            }
+        } label: {
+            GalleryThumbnail(asset: asset, photoLibrary: photoLibrary)
+                .overlay {
+                    if isSelecting {
+                        selectionOverlay(isSelected: isSelected)
+                    }
+                }
+        }
+        .buttonStyle(.plain)
+        .contextMenu { contextMenuItems(for: asset) }
+        .accessibilityLabel(
+            photoLibrary.metadata(for: asset).map {
+                "Photo in your gallery, \($0.recipe.name)"
+            } ?? "Photo in your gallery"
+        )
+        .accessibilityValue("\(asset.pixelWidth)x\(asset.pixelHeight)")
+        .accessibilityHint(hint)
+        .accessibilityAddTraits(traits)
+        .accessibilityIdentifier("roll-frame-\(asset.id)")
+    }
+
+    private func selectionOverlay(isSelected: Bool) -> some View {
+        let dim: Color = isSelected ? Color.black.opacity(0.28) : Color.clear
+        return ZStack(alignment: .topTrailing) {
+            dim
+            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                .font(.title3)
+                .foregroundStyle(isSelected ? FilmyTheme.accent : Color.white)
+                .shadow(color: .black.opacity(0.5), radius: 2)
+                .padding(8)
+        }
+        .accessibilityHidden(true)
+        .allowsHitTesting(false)
+    }
+
+    @ViewBuilder
+    private func contextMenuItems(for asset: PhotoLibraryGalleryAsset) -> some View {
+        Button {
+            shareAssets([asset])
+        } label: {
+            Label("Share", systemImage: "square.and.arrow.up")
+        }
+        if photoLibrary.canDelete(asset: asset) {
+            Button(role: .destructive) {
+                requestDelete([asset.id])
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+        if let name = photoLibrary.metadata(for: asset)?.recipe.name {
+            Button {
+                setLookFilter(name)
+            } label: {
+                Label("Show only this look", systemImage: "line.3.horizontal.decrease.circle")
+            }
+        }
     }
 
     private var archiveAccessNotice: some View {
@@ -375,7 +893,8 @@ private struct GalleryThumbnail: View {
             .overlay(alignment: .bottomLeading) {
                 if let metadata = photoLibrary.metadata(for: asset) {
                     Text(metadata.recipe.name)
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .font(.system(.caption2, design: .rounded).weight(.bold))
+                        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                         .foregroundStyle(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
@@ -509,6 +1028,8 @@ private struct RollEmptyState: View {
 private struct GalleryPager: UIViewControllerRepresentable {
     @Binding var selection: PhotoLibraryGalleryAsset?
     @ObservedObject var photoLibrary: PhotoLibraryService
+    /// Restricts paging to the frames the Roll currently shows (look filter).
+    let visibleIDs: Set<String>?
     let onBackToCamera: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
@@ -549,6 +1070,9 @@ private struct GalleryPager: UIViewControllerRepresentable {
         private var isTransitioning = false
         private var needsSynchronization = false
         private var activeID: String?
+        /// Identifiers of the list last shown successfully; the reference for
+        /// choosing a neighbour once the selected frame disappears.
+        private var settledIDs: [String] = []
 
         init(parent: GalleryPager) { self.parent = parent }
 
@@ -564,24 +1088,47 @@ private struct GalleryPager: UIViewControllerRepresentable {
                 pages.removeAll()
                 return
             }
+            let previousIDs = settledIDs
             refreshSnapshot()
-            guard let index = indices[selection.id] else {
-                // The selected frame may disappear when Photos authorization
-                // or the source changes. Dismiss the stale detail immediately
-                // instead of leaving an orphaned page on screen.
-                pages.removeAll()
-                self.parent.selection = nil
-                return
+            var target = selection
+            if indices[target.id] == nil {
+                // The selected frame disappeared (deleted, or the Photos
+                // source changed). Land on the next surviving frame, else the
+                // previous one; dismiss only when nothing is left to show.
+                guard let replacementID = GalleryRemovalPolicy.replacementID(
+                    removedID: target.id,
+                    previousIDs: previousIDs,
+                    currentIDs: assets.map(\.id)
+                ), let replacement = assets.first(where: { $0.id == replacementID }) else {
+                    pages.removeAll()
+                    setSelectionDeferred(nil)
+                    return
+                }
+                target = replacement
+                setSelectionDeferred(replacement)
             }
+            guard let index = indices[target.id] else { return }
             let current = pager.viewControllers?.first as? GalleryPageController
-            if current?.assetIdentifier != selection.id {
+            if current?.assetIdentifier != target.id {
                 pager.setViewControllers([page(at: index)], direction: .forward, animated: false)
             }
             finishSelection(at: index)
         }
 
+        /// A binding write during `updateUIViewController` would change state
+        /// mid view update, so it lands on the next main-actor turn.
+        private func setSelectionDeferred(_ asset: PhotoLibraryGalleryAsset?) {
+            let binding = parent.$selection
+            Task { @MainActor in binding.wrappedValue = asset }
+        }
+
         private func refreshSnapshot() {
-            assets = parent.photoLibrary.galleryAssets
+            let all = parent.photoLibrary.galleryAssets
+            if let visibleIDs = parent.visibleIDs {
+                assets = all.filter { visibleIDs.contains($0.id) }
+            } else {
+                assets = all
+            }
             indices = Dictionary(uniqueKeysWithValues: assets.enumerated().map { ($0.element.id, $0.offset) })
         }
 
@@ -589,6 +1136,7 @@ private struct GalleryPager: UIViewControllerRepresentable {
             GalleryDetailView(
                 asset: asset,
                 photoLibrary: parent.photoLibrary,
+                visibleIDs: parent.visibleIDs,
                 onBackToCamera: parent.onBackToCamera,
                 onClose: { [weak self] in self?.parent.selection = nil },
                 onZoomChanged: { [weak self] zoomed in
@@ -675,14 +1223,15 @@ private struct GalleryPager: UIViewControllerRepresentable {
             } else if let selection = parent.selection,
                       let current = assets.first(where: { $0.id == selection.id }) {
                 parent.selection = current
-            } else {
-                parent.selection = nil
             }
+            // A selection that no longer exists is resolved by synchronize,
+            // which picks a neighbour or dismisses.
             synchronize(with: parent)
         }
 
         private func finishSelection(at index: Int) {
             let currentID = assets[index].id
+            settledIDs = assets.map(\.id)
             if activeID != currentID {
                 pager?.view.subviews.compactMap { $0 as? UIScrollView }.forEach { $0.isScrollEnabled = true }
                 activeID = currentID
@@ -719,6 +1268,7 @@ private final class GalleryPageController: UIHostingController<GalleryDetailView
 private struct GalleryDetailView: View {
     let asset: PhotoLibraryGalleryAsset
     @ObservedObject var photoLibrary: PhotoLibraryService
+    let visibleIDs: Set<String>?
     let onBackToCamera: () -> Void
 
     let onClose: () -> Void
@@ -745,6 +1295,14 @@ private struct GalleryDetailView: View {
     @State private var dragStartedZoomed = false
     @State private var isDraggingFrame = false
     @State private var shareGeneration = 0
+    @State private var isShowingInfo = false
+
+    /// The frames the pager walks: the Roll, narrowed by the look filter.
+    private var pagedAssets: [PhotoLibraryGalleryAsset] {
+        let all = photoLibrary.galleryAssets
+        guard let visibleIDs else { return all }
+        return all.filter { visibleIDs.contains($0.id) }
+    }
 
     private var imageRequestKey: PhotoLibraryImageRequestKey {
         PhotoLibraryGalleryImagePolicy.requestKey(
@@ -791,7 +1349,7 @@ private struct GalleryDetailView: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 8) {
-                if photoLibrary.galleryAssets.count > 1 {
+                if pagedAssets.count > 1 {
                     pagingControls
                 }
                 if let metadata = photoLibrary.metadata(for: asset) {
@@ -935,12 +1493,12 @@ private struct GalleryDetailView: View {
             .accessibilityIdentifier("gallery-previous-frame")
             .disabled(adjacentAsset(.previous) == nil || isNavigationLocked)
 
-            Text("\(currentFrameNumber) of \(photoLibrary.galleryAssets.count)")
+            Text("\(currentFrameNumber) of \(pagedAssets.count)")
                 .font(.system(.caption, design: .rounded).weight(.semibold))
                 .monospacedDigit()
                 .frame(minWidth: 80)
                 .accessibilityLabel("Frame")
-                .accessibilityValue("\(currentFrameNumber) of \(photoLibrary.galleryAssets.count)")
+                .accessibilityValue("\(currentFrameNumber) of \(pagedAssets.count)")
                 .accessibilityIdentifier("gallery-frame-position")
 
             Button { moveFrame(.next) } label: {
@@ -958,11 +1516,11 @@ private struct GalleryDetailView: View {
     }
 
     private var currentFrameNumber: Int {
-        photoLibrary.galleryAssets.firstIndex(where: { $0.id == asset.id }).map { $0 + 1 } ?? 0
+        pagedAssets.firstIndex(where: { $0.id == asset.id }).map { $0 + 1 } ?? 0
     }
 
     private func adjacentAsset(_ direction: GalleryPagingDirection) -> PhotoLibraryGalleryAsset? {
-        let assets = photoLibrary.galleryAssets
+        let assets = pagedAssets
         guard let target = GalleryPagingPolicy.targetIdentifier(
             in: assets.map(\.id), selectedIdentifier: asset.id, direction: direction
         ) else { return nil }
@@ -1041,7 +1599,8 @@ private struct GalleryDetailView: View {
             Spacer(minLength: 8)
 
             Text(zoomScale > 1 ? "\(Int(zoomScale * 100))%" : "FIT")
-                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .font(.system(.caption2, design: .rounded).weight(.bold))
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 .tracking(0.6)
                 .foregroundStyle(.white.opacity(0.72))
                 .monospacedDigit()
@@ -1065,6 +1624,11 @@ private struct GalleryDetailView: View {
             }
 
             Spacer()
+
+            FilmyIconButton(systemName: "info.circle", accessibilityLabel: "Frame info") {
+                isShowingInfo = true
+            }
+            .accessibilityIdentifier("gallery-info-frame")
 
             Button {
                 shareFrame()
@@ -1106,6 +1670,21 @@ private struct GalleryDetailView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+        .sheet(isPresented: $isShowingInfo) {
+            GalleryInfoSheet(rows: infoRows)
+                .presentationDetents([.medium])
+        }
+    }
+
+    private var infoRows: [GalleryInfo.Row] {
+        GalleryInfo.rows(
+            capturedAt: photoLibrary.galleryCaptureDate(for: asset),
+            lookName: photoLibrary.metadata(for: asset)?.recipe.name,
+            pixelWidth: asset.pixelWidth,
+            pixelHeight: asset.pixelHeight,
+            calendar: .current,
+            locale: .current
+        )
     }
 
     private func deleteFrame() {
@@ -1114,7 +1693,12 @@ private struct GalleryDetailView: View {
             isDeleting = false
             switch result {
             case .success:
-                onClose()
+                // The pager Coordinator sees the frame disappear and lands on
+                // the next (else previous) frame, or dismisses when none is
+                // left, so nothing else is needed here.
+                break
+            case .failure(.cancelled):
+                break
             case .failure(let error):
                 actionErrorMessage = error.localizedDescription
             }
@@ -1231,6 +1815,16 @@ private struct GalleryDetailView: View {
             width: imageSize.width * fitScale,
             height: imageSize.height * fitScale
         )
+    }
+}
+
+fileprivate extension PhotoLibraryService {
+    /// Same source order the service sorts by: recorded capture time, then
+    /// the Photos creation date. Cached frames without metadata have none.
+    func galleryCaptureDate(for asset: PhotoLibraryGalleryAsset) -> Date? {
+        if let capturedAt = metadata(for: asset)?.capturedAt { return capturedAt }
+        if case .photos(let photo) = asset { return photo.creationDate }
+        return nil
     }
 }
 

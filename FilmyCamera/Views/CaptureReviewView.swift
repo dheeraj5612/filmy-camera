@@ -30,6 +30,9 @@ struct CaptureReviewView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var comparison = ReviewComparisonState()
     @State private var isShowingLookLibrary = false
+    @State private var isConfirmingRetake = false
+    @State private var openingRecipeID: String?
+    @State private var openingFinish: PhotoFinish?
 
     var body: some View {
         ZStack {
@@ -61,6 +64,7 @@ struct CaptureReviewView: View {
                     // Keep the photo and its metadata together in a bounded
                     // scroll view for phone portrait, landscape, and large
                     // Dynamic Type sizes.
+                    ScrollViewReader { scroller in
                     ScrollView(showsIndicators: false) {
                         VStack(spacing: 0) {
                             header
@@ -108,6 +112,13 @@ struct CaptureReviewView: View {
                         .frame(maxWidth: .infinity)
                     }
                     .accessibilityIdentifier("review-content-scroll")
+                    .onChange(of: saveErrorMessage) { _, newValue in
+                        if let newValue {
+                            UIAccessibility.post(notification: .announcement, argument: newValue)
+                            withAnimation { scroller.scrollTo("review-save-error", anchor: .bottom) }
+                        }
+                    }
+                    }
                     .safeAreaInset(edge: .bottom, spacing: 0) {
                         if !dynamicTypeSize.isAccessibilitySize {
                             actionBar
@@ -146,6 +157,10 @@ struct CaptureReviewView: View {
         }
         .onAppear {
             comparison.reset()
+            if openingRecipeID == nil {
+                openingRecipeID = recipe.id
+                openingFinish = finish
+            }
         }
         .onChange(of: recipe.id) { _, _ in
             comparison.reset()
@@ -559,6 +574,31 @@ struct CaptureReviewView: View {
     }
 
     private var lookPicker: some View {
+        #if G7_APP
+        HStack(spacing: 8) {
+            Image(systemName: "film")
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Look")
+                    .font(.system(.caption2, design: .rounded).weight(.bold))
+                    .foregroundStyle(FilmyTheme.tertiary)
+                Text("G7X Compact")
+                    .font(.system(.subheadline, design: .rounded).weight(.bold))
+                    .foregroundStyle(FilmyTheme.primary)
+            }
+            Spacer(minLength: 4)
+            Image(systemName: "lock.fill")
+                .font(.system(.caption2, weight: .bold))
+                .accessibilityHidden(true)
+        }
+        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+        .padding(.horizontal, 12)
+        .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .accessibilityIdentifier("review-look-locked")
+        .accessibilityLabel("G7X Compact look")
+        .accessibilityHint("G7X Camera uses one fixed look")
+        .frame(maxWidth: .infinity)
+        #else
         Button {
             HapticFeedback.play(.selection)
             isShowingLookLibrary = true
@@ -592,6 +632,7 @@ struct CaptureReviewView: View {
         .accessibilityValue(pendingReviewRecipeName)
         .accessibilityHint("Choose a Compact, Film, or Monochrome look for this photo")
         .frame(maxWidth: .infinity)
+        #endif
     }
 
     private var comparisonControls: some View {
@@ -716,6 +757,8 @@ struct CaptureReviewView: View {
                     .accessibilityHint("Retries saving this finished photo")
             }
         }
+        .id("review-save-error")
+        .onAppear { UIAccessibility.post(notification: .announcement, argument: message) }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(FilmyTheme.danger.opacity(0.1), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -756,10 +799,19 @@ struct CaptureReviewView: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
+    private var hasUnsavedLookChanges: Bool {
+        guard !isImported else { return false }
+        return recipe.id != openingRecipeID || finish != openingFinish
+    }
+
     private var retakeButton: some View {
         Button {
-            HapticFeedback.play(.discard)
-            onRetake()
+            if hasUnsavedLookChanges {
+                isConfirmingRetake = true
+            } else {
+                HapticFeedback.play(.discard)
+                onRetake()
+            }
         } label: {
             Label(
                 isImported ? "Cancel" : "Retake",
@@ -769,6 +821,15 @@ struct CaptureReviewView: View {
         .buttonStyle(.filmySecondary)
         .accessibilityIdentifier("review-cancel")
         .disabled(isSaving)
+        .confirmationDialog("Discard this photo?", isPresented: $isConfirmingRetake, titleVisibility: .visible) {
+            Button("Discard and retake", role: .destructive) {
+                HapticFeedback.play(.discard)
+                onRetake()
+            }
+            Button("Keep editing", role: .cancel) { }
+        } message: {
+            Text("Your look and finish choices for this photo will be lost.")
+        }
     }
 
     private var keepFrameAccessibilityLabel: String {
@@ -795,6 +856,7 @@ struct CaptureReviewView: View {
         .accessibilityIdentifier("review-save")
         .disabled(isSaving || isRenderingReview || isPreparingReviewOriginal)
         .accessibilityLabel(keepFrameAccessibilityLabel)
+        .accessibilityInputLabels(["Save to Photos", "Keep frame", "Save", "Save filtered photo"])
         .accessibilityHint("Saves the finished photo to your Photos library")
     }
 }

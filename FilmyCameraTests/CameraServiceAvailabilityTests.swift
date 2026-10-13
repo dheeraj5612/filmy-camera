@@ -37,15 +37,17 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         XCTAssertTrue(GalleryPagingPolicy.retainedIndices(around: 0, count: 0).isEmpty)
     }
 
-    func testAppAndItsInfoPlistAllowOnlyPortrait() throws {
+    func testAppAndInfoPlistUseDeviceSpecificOrientations() throws {
         let delegate = FilmyAppDelegate()
-        XCTAssertEqual(delegate.application(.shared, supportedInterfaceOrientationsFor: nil), .portrait)
+        XCTAssertEqual(delegate.application(.shared, supportedInterfaceOrientationsFor: nil),
+                       UIDevice.current.userInterfaceIdiom == .pad ? .all : .portrait)
         // Bundle resolves device-qualified keys. Read the built file to verify both device families.
         let data = try Data(contentsOf: Bundle.main.bundleURL.appendingPathComponent("Info.plist"))
         let info = try XCTUnwrap(PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any])
-        for key in ["UISupportedInterfaceOrientations", "UISupportedInterfaceOrientations~ipad"] {
-            XCTAssertEqual(info[key] as? [String], ["UIInterfaceOrientationPortrait"])
-        }
+        XCTAssertEqual(info["UISupportedInterfaceOrientations"] as? [String], ["UIInterfaceOrientationPortrait"])
+        XCTAssertEqual(Set(info["UISupportedInterfaceOrientations~ipad"] as? [String] ?? []),
+                       Set(["UIInterfaceOrientationPortrait", "UIInterfaceOrientationPortraitUpsideDown",
+                            "UIInterfaceOrientationLandscapeLeft", "UIInterfaceOrientationLandscapeRight"]))
         XCTAssertEqual(info["UIRequiresFullScreen"] as? Bool, true)
     }
 
@@ -730,7 +732,7 @@ final class CameraServiceAvailabilityTests: XCTestCase {
                 availability: .available,
                 supportedModeRawValues: supported
             ),
-            [.off, .auto, .on]
+            [.off, .on, .auto]
         )
         XCTAssertEqual(
             CameraService.flashModesForCycle(
@@ -754,6 +756,34 @@ final class CameraServiceAvailabilityTests: XCTestCase {
                 availability: .available,
                 supportedModeRawValues: supported,
                 manualExposureActive: true
+            ),
+            .off
+        )
+
+        XCTAssertEqual(
+            CameraService.nextFlashMode(
+                current: .off,
+                availability: .available,
+                supportedModeRawValues: supported,
+                manualExposureActive: false
+            ),
+            .on
+        )
+        XCTAssertEqual(
+            CameraService.nextFlashMode(
+                current: .on,
+                availability: .available,
+                supportedModeRawValues: supported,
+                manualExposureActive: false
+            ),
+            .auto
+        )
+        XCTAssertEqual(
+            CameraService.nextFlashMode(
+                current: .auto,
+                availability: .available,
+                supportedModeRawValues: supported,
+                manualExposureActive: false
             ),
             .off
         )

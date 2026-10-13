@@ -32,21 +32,57 @@ struct FilmyMark: Shape {
     }
 }
 
+/// The G7X monogram uses the same square-terminal construction as Filmy's
+/// mark. Coordinates mirror scripts/design/render_g7_identity.py exactly.
+struct G7Mark: Shape {
+    private let polygons: [[CGPoint]] = [
+        [(1, 7), (11, 7), (11, 11), (5, 11), (5, 21), (7, 21),
+         (7, 18), (6, 18), (6, 14), (11, 14), (11, 25), (1, 25)],
+        [(13, 7), (22, 7), (22, 11), (17, 25), (13, 25), (18, 11), (13, 11)],
+        [(23, 7), (27, 7), (28.5, 12), (30, 7), (34, 7),
+         (30.5, 16), (34, 25), (30, 25), (28.5, 20), (27, 25),
+         (23, 25), (26.5, 16)]
+    ].map { $0.map { CGPoint(x: $0.0, y: $0.1) } }
+
+    func path(in rect: CGRect) -> Path {
+        let side = min(rect.width, rect.height)
+        let x = rect.midX - side / 2
+        let y = rect.midY - side / 2
+        func point(_ p: CGPoint) -> CGPoint {
+            CGPoint(x: x + side * p.x / 32, y: y + side * p.y / 32)
+        }
+        var path = Path()
+        for polygon in polygons {
+            guard let first = polygon.first else { continue }
+            path.move(to: point(first))
+            for vertex in polygon.dropFirst() { path.addLine(to: point(vertex)) }
+            path.closeSubpath()
+        }
+        return path
+    }
+}
+
 struct FilmyWordmark: View {
     var compact = false
 
     var body: some View {
         HStack(spacing: compact ? 5 : 8) {
-            FilmyMark()
-                .fill(FilmyTheme.accent)
+            Group {
+                #if G7_APP
+                G7Mark()
+                #else
+                FilmyMark()
+                #endif
+            }
+                .foregroundStyle(FilmyTheme.accent)
                 .frame(width: compact ? 20 : 28, height: compact ? 20 : 28)
-            Text("filmy")
+            Text(AppConfiguration.wordmark)
                 .font(.system(compact ? .subheadline : .title2, design: .rounded).weight(.heavy))
                 .tracking(-0.8)
                 .foregroundStyle(FilmyTheme.primary)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Filmy Camera")
+        .accessibilityLabel(AppConfiguration.displayName)
     }
 }
 

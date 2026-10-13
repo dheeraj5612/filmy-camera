@@ -82,6 +82,121 @@ final class AdditionalInteractionTests: XCTestCase {
         attach("timer-background-cancellation-live-preview")
     }
 
+    func testFujiQuickMenuSavesAndRecallsC1AcrossLaunch() throws {
+        launch(isolated: true)
+        XCTAssertTrue(waitForFreshCameraFrames())
+
+        let q = app.buttons["fuji-q-menu"]
+        XCTAssertTrue(q.waitForExistence(timeout: 8) && q.isHittable)
+        q.tap()
+        let banks = app.buttons["fuji-q-banks"]
+        XCTAssertTrue(banks.waitForExistence(timeout: 8), "The Q menu must expose shooting banks")
+        reveal(banks)
+        XCTAssertTrue(banks.isHittable, "The Q menu shooting banks entry must be reachable")
+        banks.tap()
+        XCTAssertTrue(app.navigationBars["C1–C7 Shooting Banks"].waitForExistence(timeout: 5))
+
+        let save = app.buttons["fuji-bank-save-1"]
+        XCTAssertTrue(save.waitForExistence(timeout: 5) && save.isHittable)
+        save.tap()
+        if app.buttons["Replace bank"].waitForExistence(timeout: 2) {
+            app.buttons["Replace bank"].tap()
+        }
+        XCTAssertTrue(waitUntil(timeout: 5) { app.buttons["fuji-bank-recall-1"].exists })
+        app.buttons["fuji-bank-recall-1"].tap()
+        XCTAssertTrue(waitUntil(timeout: 5) {
+            app.staticTexts.matching(NSPredicate(format: "label == 'Active'" )).firstMatch.exists
+        }, "Recalling C1 must mark the bank active")
+
+        app.terminate()
+        app.launch()
+        dismissBanner()
+        XCTAssertTrue(waitForFreshCameraFrames())
+        app.buttons["fuji-q-menu"].tap()
+        let relaunchedBanks = app.buttons["fuji-q-banks"]
+        XCTAssertTrue(relaunchedBanks.waitForExistence(timeout: 5))
+        reveal(relaunchedBanks)
+        relaunchedBanks.tap()
+        XCTAssertTrue(app.buttons["fuji-bank-recall-1"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == 'Active'" )).firstMatch.exists,
+                      "The selected C1 bank must survive a normal relaunch")
+    }
+
+    func testFujiQuickMenuExposesCapabilityGatedControls() throws {
+        launch(isolated: true)
+        XCTAssertTrue(waitForFreshCameraFrames())
+        app.buttons["fuji-q-menu"].tap()
+        for control in ["banks", "drive", "autoISO", "dynamicRange", "teleconverter", "viewfinder", "focusAssist", "naturalView", "nd", "multipleExposure", "preShot", "rawDevelopment", "bracketing", "focusStack", "interval", "manual"] {
+            let item = app.buttons["fuji-q-\(control)"]
+            reveal(item)
+            XCTAssertTrue(item.waitForExistence(timeout: 5), "Q menu control \(control) must be discoverable")
+            XCTAssertTrue(item.isEnabled || app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'supported' OR label CONTAINS[c] 'available'" )).firstMatch.exists,
+                          "Unavailable Q control \(control) needs an explanation")
+        }
+        app.buttons["fuji-q-manual"].tap()
+        XCTAssertTrue(app.otherElements["manual-controls-screen"].waitForExistence(timeout: 8))
+        let unavailable = app.otherElements["manual-controls-unavailable"]
+        if unavailable.exists {
+            XCTAssertFalse(unavailable.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        } else {
+            XCTAssertTrue(app.otherElements["manual-exposure-section"].exists)
+            XCTAssertTrue(app.otherElements["manual-focus-section"].exists)
+        }
+    }
+
+    func testCaptureModesExposeAllModesAndReferenceComparisonTools() throws {
+        launch(isolated: true)
+        XCTAssertTrue(waitForFreshCameraFrames())
+        let entry = app.buttons["open-capture-modes"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 8) && entry.isHittable)
+        entry.tap()
+        XCTAssertTrue(app.otherElements["capture-modes-viewfinder"].waitForExistence(timeout: 15))
+        for mode in ["photo", "burst", "macro", "portrait", "filmVideo", "night", "panorama", "spatialVideo"] {
+            XCTAssertTrue(app.buttons["capture-mode-\(mode)"].waitForExistence(timeout: 5),
+                          "Capture mode \(mode) must be discoverable")
+        }
+        let reference = app.buttons["Reference image"]
+        XCTAssertTrue(reference.waitForExistence(timeout: 5))
+        reference.tap()
+        XCTAssertTrue(app.buttons["choose-reference-image"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'never burns'" )).firstMatch.exists,
+                      "Reference tools must explain that the reference is not embedded in output")
+        app.buttons["Back"].tap()
+        XCTAssertTrue(app.buttons["open-capture-modes"].waitForExistence(timeout: 8))
+    }
+
+    func testSmartLooksAppliesAndUndoesARealCameraRecommendation() throws {
+        launch(isolated: true)
+        XCTAssertTrue(waitForFreshCameraFrames())
+        let entry = app.buttons["smart-recipes-open"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10) && entry.isHittable)
+        let originalRecipe = app.buttons["recipe-menu"].label
+        entry.tap()
+        XCTAssertTrue(app.switches["smart-recipes-enabled"].waitForExistence(timeout: 8))
+
+        let scene = app.otherElements["smart-recipes-scene"]
+        let empty = app.otherElements["smart-recipes-empty"]
+        XCTAssertTrue(waitUntil(timeout: 30) { scene.exists || empty.exists },
+                      "Smart Looks must finish real-camera analysis or publish an explicit unavailable state")
+        if empty.exists {
+            throw XCTSkip("Smart Looks reported no recommendation for this real camera scene: \(empty.label)")
+        }
+
+        let applyButtons = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'smart-recipes-apply-'"))
+        XCTAssertEqual(applyButtons.count, 3, "A real recommendation must provide three comparison options")
+        let candidate = applyButtons.firstMatch
+        XCTAssertTrue(candidate.isHittable)
+        candidate.tap()
+        XCTAssertTrue(app.buttons["smart-recipes-undo"].waitForExistence(timeout: 8),
+                      "Applying a Smart Look must expose Undo")
+        XCTAssertNotEqual(app.buttons["recipe-menu"].label, originalRecipe,
+                           "Applying a Smart Look must change the active recipe")
+
+        app.buttons["smart-recipes-undo"].tap()
+        XCTAssertTrue(waitUntil(timeout: 8) { app.buttons["recipe-menu"].label == originalRecipe },
+                      "Undo must restore the recipe that was active before Smart Looks")
+    }
+
     private func exerciseFlashSettingsAndRestore() throws {
         let flash = app.buttons["flash-control"]
         try XCTSkipUnless(flash.exists && flash.isEnabled,
@@ -320,6 +435,16 @@ final class AdditionalInteractionTests: XCTestCase {
             firstToken = token
             return false
         }
+    }
+
+    private func reveal(_ element: XCUIElement) {
+        guard !element.isHittable else { return }
+        let scroll = app.scrollViews.firstMatch
+        for _ in 0..<8 where !element.isHittable {
+            if scroll.exists { scroll.swipeUp() } else { app.swipeUp() }
+        }
+        XCTAssertTrue(element.isHittable || element.exists,
+                      "The Q menu control must remain discoverable after scrolling")
     }
 
     private func waitUntil(timeout: TimeInterval = 8, _ condition: () -> Bool) -> Bool {

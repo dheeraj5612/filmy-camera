@@ -1,5 +1,22 @@
 # Filmy Camera release checklist
 
+## Standing UI acceptance gate
+
+- [ ] For camera/control changes, verify the current revision in portrait on an iPhone simulator or physical iPhone (iPhone compatibility mode on iPad is an acceptable fallback), including large text. Retain screenshots and test results before merge/release. Native iPad coverage is additional. See [primary portrait iPhone acceptance](testing.md#primary-portrait-iphone-acceptance).
+
+## Monetized candidate
+
+Do not reuse the historical free-release approvals below for this branch. Complete [monetization setup](monetization.md), [new store/privacy disclosures](app-store/monetized-release.md), real-provider tests and a new version/build review before release. Production billing and ads are disabled until owner configuration and legal approval.
+
+## Version 1.0.2 update
+
+This update uses the explicit free-release configuration (`FILMY_MONETIZATION_ENABLED = NO`). It preserves unrestricted features without starting purchases, accounts or ads. The monetized candidate requirements above remain mandatory before enabling those services in a later release.
+
+- [ ] Integrate current PR deltas and pass relevant automated checks on the final source.
+- [ ] Confirm the signed archive is version 1.0.2, build 28, with monetization and ads disabled.
+- [ ] Complete iPhone portrait/large-text and iPad acceptance, plus available physical-camera checks; record any remaining hardware coverage.
+- [ ] Validate and upload the exact archive, confirm Apple processing, and submit matching listing/media for review.
+
 The current build 15 candidate carries the consolidated camera and gallery corrections while preserving the refreshed opaque app icon. Its source changes and generated icon provenance are documented in [the icon record](app-store/icon/README.md). Build 12 has already uploaded and finished processing; its distribution binary retains the earlier icon.
 
 ## Build 15 release gates

@@ -1,9 +1,11 @@
 import Combine
+import CoreLocation
 import Foundation
 @preconcurrency import Photos
 import PhotosUI
 import ImageIO
 import UIKit
+import UniformTypeIdentifiers
 
 struct SavedFrameMetadata: Codable, Hashable, Sendable {
     let recipe: FilmRecipe
@@ -136,6 +138,14 @@ enum PhotoLibraryServiceError: LocalizedError, Sendable {
     case accessDenied
     case notOwned
     case changeFailed
+    /// The user declined the system confirmation prompt. Not a failure.
+    case cancelled
+
+    /// Maps a failed `performChanges` error; `userCancelled` is a decline, not a fault.
+    static func failure(for error: Error?) -> PhotoLibraryServiceError {
+        guard let photosError = error as? PHPhotosError else { return .changeFailed }
+        return photosError.code == .userCancelled ? .cancelled : .changeFailed
+    }
 
     var errorDescription: String? {
         switch self {
@@ -145,6 +155,8 @@ enum PhotoLibraryServiceError: LocalizedError, Sendable {
             return "Filmy Camera can only remove frames that it created. This frame was left in Photos."
         case .changeFailed:
             return "Photos could not update this frame. Try again in a moment."
+        case .cancelled:
+            return "Deletion was cancelled."
         }
     }
 }
@@ -176,6 +188,21 @@ protocol PhotoSaving: AnyObject {
         capturedAt: Date,
         completion: @escaping @MainActor (Result<Void, PhotoLibrarySaveError>) -> Void
     )
+    func save(
+        image: UIImage, imageData: Data?, recipe: FilmRecipe, capturedAt: Date,
+        documentID: UUID?, completion: @escaping @MainActor (Result<Void, PhotoLibrarySaveError>) -> Void
+    )
+}
+
+extension PhotoSaving {
+    // Preserve existing import and test-double behavior. Concrete Photos
+    // exports override this witness to retain original resources and edits.
+    func save(
+        image: UIImage, imageData: Data?, recipe: FilmRecipe, capturedAt: Date,
+        documentID: UUID?, completion: @escaping @MainActor (Result<Void, PhotoLibrarySaveError>) -> Void
+    ) {
+        save(image: image, imageData: imageData, recipe: recipe, capturedAt: capturedAt, completion: completion)
+    }
 }
 
 enum PhotoLibraryCompletionBridge {
@@ -216,6 +243,35 @@ enum PhotoLibraryCompletionBridge {
         let box = MainActorCompletionBox(completion: completion)
         return { success, _ in
             box.callAsynchronously(with: success)
+        }
+    }
+
+    private final class MainActorResultBox: @unchecked Sendable {
+        private let completion: @MainActor (Result<Void, PhotoLibraryServiceError>) -> Void
+
+        init(completion: @escaping @MainActor (Result<Void, PhotoLibraryServiceError>) -> Void) {
+            self.completion = completion
+        }
+
+        nonisolated func callAsynchronously(with result: Result<Void, PhotoLibraryServiceError>) {
+            Task { @MainActor in
+                completion(result)
+            }
+        }
+    }
+
+    /// Like `mainActor`, but keeps the PhotoKit error so a declined system
+    /// prompt can be told apart from a real failure.
+    nonisolated static func mainActorResult(
+        _ completion: @escaping @MainActor (Result<Void, PhotoLibraryServiceError>) -> Void
+    ) -> @Sendable (Bool, Error?) -> Void {
+        let box = MainActorResultBox(completion: completion)
+        return { success, error in
+            if success {
+                box.callAsynchronously(with: .success(()))
+            } else {
+                box.callAsynchronously(with: .failure(PhotoLibraryServiceError.failure(for: error)))
+            }
         }
     }
 
@@ -335,6 +391,53 @@ enum PhotoLibraryCachePath {
 
 @MainActor
 final class PhotoLibraryService: ObservableObject {
+    /// Immutable registration ownership; NotificationCenter removal is thread-safe.
+    /// Keep non-Sendable Objective-C token access out of the service's actor-isolated lifetime.
+    private final class MemoryWarningObservation: @unchecked Sendable {
+        private let token: NSObjectProtocol
+
+        init(token: NSObjectProtocol) { self.token = token }
+
+        deinit { NotificationCenter.default.removeObserver(token) }
+    }
+
+    /// Removes lifecycle observers; NotificationCenter removal is thread-safe.
+    private final class LifecycleObservation: @unchecked Sendable {
+        private let tokens: [NSObjectProtocol]
+
+        init(tokens: [NSObjectProtocol]) { self.tokens = tokens }
+
+        deinit { tokens.forEach { NotificationCenter.default.removeObserver($0) } }
+    }
+
+    /// Serializes UserDefaults writes and drops a snapshot older than one
+    /// already written, so a late background write never overwrites a flush.
+    private final class DefaultsWriteGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var latest: [String: UInt64] = [:]
+        private var requested: [String: UInt64] = [:]
+
+        func request(key: String, generation: UInt64) {
+            lock.lock()
+            requested[key] = generation
+            lock.unlock()
+        }
+
+        func isSuperseded(key: String, generation: UInt64) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return (requested[key] ?? 0) > generation
+        }
+
+        func write(_ data: Data, key: String, generation: UInt64) {
+            lock.lock()
+            defer { lock.unlock() }
+            guard generation > (latest[key] ?? 0) else { return }
+            latest[key] = generation
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
     private final class IdentifierBox: @unchecked Sendable {
         private let lock = NSLock()
         private var value: String?
@@ -374,12 +477,14 @@ final class PhotoLibraryService: ObservableObject {
         private var fallbackImage: UIImage?
         private var didFinish = false
         private var didProduceCacheableImage = false
+        private var timeout: DispatchWorkItem?
 
         init(imageManager: PHImageManager) {
             self.imageManager = imageManager
         }
 
-        func install(_ continuation: CheckedContinuation<UIImage?, Never>) {
+        @discardableResult
+        func install(_ continuation: CheckedContinuation<UIImage?, Never>) -> Bool {
             lock.lock()
             let shouldFinish = didFinish
             if !shouldFinish {
@@ -390,6 +495,7 @@ final class PhotoLibraryService: ObservableObject {
             if shouldFinish {
                 continuation.resume(returning: nil)
             }
+            return !shouldFinish
         }
 
         func install(requestID: PHImageRequestID) {
@@ -403,6 +509,26 @@ final class PhotoLibraryService: ObservableObject {
             if shouldCancel {
                 imageManager.cancelImageRequest(requestID)
             }
+        }
+
+        /// A degraded-only or stalled iCloud request must not retain a suspended
+        /// task forever. A timeout may display a preview but never cache it as final.
+        func startTimeout(after interval: TimeInterval = 30) {
+            let seconds = interval.isFinite ? min(max(interval, 0), 120) : 30
+            let work = DispatchWorkItem { [weak self] in self?.expire() }
+            lock.lock()
+            guard !didFinish else {
+                lock.unlock()
+                return
+            }
+            timeout?.cancel()
+            timeout = work
+            lock.unlock()
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + seconds, execute: work)
+        }
+
+        func expire() {
+            finish(with: nil, cancelRequest: true, allowFallback: true)
         }
 
         func rememberFallback(_ image: UIImage?) {
@@ -434,7 +560,10 @@ final class PhotoLibraryService: ObservableObject {
             self.continuation = nil
             let requestID = self.requestID
             self.requestID = nil
+            let timeout = self.timeout
+            self.timeout = nil
             lock.unlock()
+            timeout?.cancel()
 
             if cancelRequest, let requestID {
                 imageManager.cancelImageRequest(requestID)
@@ -480,6 +609,13 @@ final class PhotoLibraryService: ObservableObject {
     private let isUITesting: Bool
     private let thumbnailCache = NSCache<NSString, UIImage>()
     private var thumbnailCacheGeneration: UInt64 = 0
+    private var memoryWarningObserver: MemoryWarningObservation?
+    private var lifecycleObservation: LifecycleObservation?
+    private let defaultsGate = DefaultsWriteGate()
+    private var persistenceGeneration: UInt64 = 0
+    private var metadataDirty = false
+    private var resourcesDirty = false
+    private var persistenceTask: Task<Void, Never>?
     private var savedFrameResourcesCache: [String: SavedFrameResource]?
     private var savedAssetIdentifiersCache: [String]?
     private var ownedAssetIdentifierSet = Set<String>()
@@ -510,6 +646,77 @@ final class PhotoLibraryService: ObservableObject {
             // applied here, after which the Roll thumbnail refreshes.
             scheduleCacheMaintenance(includingLaunchPasses: true)
         }
+        let observer = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            // UIKit posts this notification on the main thread.
+            MainActor.assumeIsolated { self?.invalidateThumbnailCache() }
+        }
+        memoryWarningObserver = MemoryWarningObservation(token: observer)
+        // Debounced metadata and resource writes are flushed whenever the app
+        // can be suspended or killed.
+        var lifecycleTokens: [NSObjectProtocol] = []
+        let lifecycleNames: [Notification.Name] = [
+            UIApplication.willResignActiveNotification,
+            UIApplication.didEnterBackgroundNotification,
+            UIApplication.willTerminateNotification
+        ]
+        for name in lifecycleNames {
+            let token = NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.flushPersistence() }
+            }
+            lifecycleTokens.append(token)
+        }
+        lifecycleObservation = LifecycleObservation(tokens: lifecycleTokens)
+    }
+
+    /// Coalesces metadata and resource-index writes: mutations within one
+    /// main-actor turn share a single snapshot, encoded and written off the main
+    /// thread right away (no timer). A superseded snapshot is skipped before
+    /// encoding. On-disk format is unchanged (same UserDefaults keys and JSON).
+    /// A kill loses at most the write in flight; the Photos asset and its
+    /// ownership identifier are persisted synchronously and stay in the Roll.
+    private func schedulePersistence() {
+        guard persistenceTask == nil else { return }
+        persistenceTask = Task { [self] in
+            writePersistence(inBackground: true)
+        }
+    }
+
+    func flushPersistence() {
+        writePersistence(inBackground: false)
+    }
+
+    private func writePersistence(inBackground: Bool) {
+        persistenceTask?.cancel()
+        persistenceTask = nil
+        guard metadataDirty || resourcesDirty else { return }
+        let metadataSnapshot: [String: SavedFrameMetadata]? = metadataDirty ? metadataByAssetIdentifier : nil
+        let resourcesSnapshot: [String: SavedFrameResource]? = resourcesDirty ? savedFrameResourcesCache : nil
+        metadataDirty = false
+        resourcesDirty = false
+        persistenceGeneration &+= 1
+        let generation = persistenceGeneration
+        let gate = defaultsGate
+        let metadataKey = savedFrameMetadataKey
+        let resourcesKey = Self.savedFrameResourcesKey
+        if metadataSnapshot != nil { gate.request(key: metadataKey, generation: generation) }
+        if resourcesSnapshot != nil { gate.request(key: resourcesKey, generation: generation) }
+        let work: @Sendable () -> Void = {
+            if let metadataSnapshot, !gate.isSuperseded(key: metadataKey, generation: generation),
+               let data = try? JSONEncoder().encode(metadataSnapshot) {
+                gate.write(data, key: metadataKey, generation: generation)
+            }
+            if let resourcesSnapshot, !gate.isSuperseded(key: resourcesKey, generation: generation),
+               let data = try? JSONEncoder().encode(resourcesSnapshot) {
+                gate.write(data, key: resourcesKey, generation: generation)
+            }
+        }
+        if inBackground {
+            Task.detached(priority: .utility) { work() }
+        } else {
+            work()
+        }
     }
 
     private struct CacheMaintenanceInput: Sendable {
@@ -534,26 +741,35 @@ final class PhotoLibraryService: ObservableObject {
     /// Runs migration, reconciliation, budget trimming, and share-file pruning
     /// on a background executor, then applies the result on the main actor.
     private func scheduleCacheMaintenance(includingLaunchPasses: Bool) {
-        let input = CacheMaintenanceInput(
-            legacyDirectoryURL: legacyLocalFramesDirectoryURL,
-            directoryURL: localFramesDirectoryURL,
-            shareDirectoryURL: temporaryShareDirectoryURL,
-            savedAssetIdentifiers: savedAssetIdentifiers,
-            resources: savedFrameResources,
-            maxBytes: localCacheMaxBytes,
-            includingLaunchPasses: includingLaunchPasses
-        )
         let previous = cacheMaintenanceTask
         cacheMaintenanceTask = Task(priority: .utility) { [weak self] in
-            // Passes touch the same directory; keep them strictly sequential.
+            // Snapshot only when this pass can run. A queued pass must not
+            // reconcile a resource index captured before a newer save/clear.
             await previous?.value
+            guard let self, !Task.isCancelled else { return }
+            let generation = self.cacheWriteGeneration
+            let input = CacheMaintenanceInput(
+                legacyDirectoryURL: self.legacyLocalFramesDirectoryURL,
+                directoryURL: self.localFramesDirectoryURL,
+                shareDirectoryURL: self.temporaryShareDirectoryURL,
+                savedAssetIdentifiers: self.savedAssetIdentifiers,
+                resources: self.savedFrameResources,
+                maxBytes: self.localCacheMaxBytes,
+                includingLaunchPasses: includingLaunchPasses
+            )
+            // The background pass reads the persisted index; make it current.
+            self.flushPersistence()
             let result = await Task.detached(priority: .utility) {
                 Self.runCacheMaintenance(input)
             }.value
-            guard let self else { return }
+            guard self.cacheWriteGeneration == generation else { return }
             if !result.removedIdentifiers.isEmpty {
                 var resources = self.savedFrameResources
                 for identifier in result.removedIdentifiers {
+                    guard CacheMaintenancePolicy.canRemove(
+                        currentFilename: resources[identifier]?.filename,
+                        inspectedFilename: input.resources[identifier]?.filename
+                    ) else { continue }
                     resources.removeValue(forKey: identifier)
                 }
                 self.savedFrameResources = resources
@@ -698,6 +914,14 @@ final class PhotoLibraryService: ObservableObject {
         refreshCachedFrames(excluding: Set(assets.map(\.localIdentifier)))
     }
 
+    /// Awaitable pull-to-refresh. `refresh()` is fully synchronous on the main
+    /// actor: results are already published when it returns, so there is nothing
+    /// in flight to coalesce or wait on. The yield only lets observers render.
+    func refreshAndWait() async {
+        refresh()
+        await Task.yield()
+    }
+
     func presentLimitedLibraryPicker() {
         guard !isUITesting, authorizationStatus == .limited,
               let windowScene = UIApplication.shared.connectedScenes
@@ -756,6 +980,7 @@ final class PhotoLibraryService: ObservableObject {
                 PHPhotoLibrary.authorizationStatus(for: .readWrite)
             )
             let assetIdentifierBox = IdentifierBox()
+            let receiptURL = PhotosExportReceipt.sidecar
             let metadata = SavedFrameMetadata(recipe: recipe, capturedAt: capturedAt)
             let cacheData = await Self.cacheData(
                 providedData: imageData,
@@ -804,12 +1029,103 @@ final class PhotoLibraryService: ObservableObject {
                     request = PHAssetChangeRequest.creationRequestForAsset(from: image)
                 }
                 request.creationDate = capturedAt
-                assetIdentifierBox.set(request.placeholderForCreatedAsset?.localIdentifier)
+                request.location = Self.location(from: imageData)
+                let createdIdentifier = request.placeholderForCreatedAsset?.localIdentifier
+                assetIdentifierBox.set(createdIdentifier)
+                if let receiptURL, let createdIdentifier {
+                    PhotosExportReceipt.record(createdIdentifier, at: receiptURL)
+                }
+            }
+            if let adopted = PhotosExportReceipt.adoptable(at: receiptURL) {
+                // A prior attempt created this asset but never confirmed it.
+                assetIdentifierBox.set(adopted)
+                photoWriteCompletion(true, nil)
+                return
             }
             PHPhotoLibrary.shared().performChanges(
                 photoWriteChanges,
                 completionHandler: photoWriteCompletion
             )
+        }
+    }
+
+    nonisolated static func location(from data: Data?) -> CLLocation? {
+        guard let data,
+              let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any],
+              let gps = properties[kCGImagePropertyGPSDictionary as String] as? [String: Any] else { return nil }
+        return location(fromGPS: gps)
+    }
+
+    /// Reads only the metadata header, not the whole image, so large
+    /// originals are not fully decoded just to recover a geotag.
+    nonisolated static func location(fromURL url: URL?) -> CLLocation? {
+        guard let url,
+              let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any],
+              let gps = properties[kCGImagePropertyGPSDictionary as String] as? [String: Any] else { return nil }
+        return location(fromGPS: gps)
+    }
+
+    nonisolated static func location(fromGPS gps: [String: Any]) -> CLLocation? {
+        guard let latitude = (gps[kCGImagePropertyGPSLatitude as String] as? NSNumber)?.doubleValue,
+              let longitude = (gps[kCGImagePropertyGPSLongitude as String] as? NSNumber)?.doubleValue else { return nil }
+        let latRef = (gps[kCGImagePropertyGPSLatitudeRef as String] as? String)?.uppercased()
+        let lonRef = (gps[kCGImagePropertyGPSLongitudeRef as String] as? String)?.uppercased()
+        guard (latRef == "N" || latRef == "S"), (lonRef == "E" || lonRef == "W"),
+              latitude >= 0, latitude <= 90, longitude >= 0, longitude <= 180 else { return nil }
+        let coordinate = CLLocationCoordinate2D(
+            latitude: (latRef == "S" ? -1 : 1) * latitude,
+            longitude: (lonRef == "W" ? -1 : 1) * longitude
+        )
+        guard CLLocationCoordinate2DIsValid(coordinate) else { return nil }
+        let altitude = (gps[kCGImagePropertyGPSAltitude as String] as? NSNumber)?.doubleValue ?? 0
+        let altitudeRef = (gps[kCGImagePropertyGPSAltitudeRef as String] as? NSNumber)?.intValue ?? 0
+        let hasAltitude = (gps[kCGImagePropertyGPSAltitude as String] as? NSNumber) != nil
+        return CLLocation(coordinate: coordinate, altitude: altitudeRef == 1 ? -altitude : altitude,
+                          horizontalAccuracy: kCLLocationAccuracyBest, verticalAccuracy: hasAltitude ? 0 : -1,
+                          timestamp: gpsTimestamp(gps) ?? Date())
+    }
+
+    /// UTC time from the GPS date and time stamps, or nil if either is
+    /// missing or unparsable.
+    nonisolated private static func gpsTimestamp(_ gps: [String: Any]) -> Date? {
+        guard let day = gps[kCGImagePropertyGPSDateStamp as String] as? String,
+              let time = gps[kCGImagePropertyGPSTimeStamp as String] as? String else { return nil }
+        let parts = time.split(separator: ":")
+        guard parts.count == 3, let seconds = Double(parts[2]) else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy:MM:dd HH:mm:ss"
+        let whole = Int(seconds)
+        guard let base = formatter.date(from: "\(day) \(parts[0]):\(parts[1]):\(String(format: "%02d", whole))") else { return nil }
+        return base.addingTimeInterval(seconds - Double(whole))
+    }
+
+    func save(
+        image: UIImage, imageData: Data?, recipe: FilmRecipe, capturedAt: Date,
+        documentID: UUID?, completion: @escaping @MainActor (Result<Void, PhotoLibrarySaveError>) -> Void
+    ) {
+        guard let documentID else {
+            save(image: image, imageData: imageData, recipe: recipe, capturedAt: capturedAt, completion: completion)
+            return
+        }
+        Task { @MainActor in
+            do {
+                let assetID = try await FilmyPhotosExporter.save(documentID)
+                await rememberSavedAsset(assetID, metadata: SavedFrameMetadata(recipe: recipe, capturedAt: capturedAt),
+                                         imageData: imageData, image: image)
+                refreshAuthorizationStatuses()
+                refresh()
+                completion(.success(()))
+                if PhotoLibraryAuthorizationPolicy.canManageCollections(authorizationStatus) {
+                    addToAppAlbum(assetIdentifier: assetID) { [weak self] _ in self?.refresh() }
+                }
+            } catch {
+                if case FilmyPhotosExporter.ExportError.accessDenied = error { completion(.failure(.accessDenied)) }
+                else { completion(.failure(.writeFailed)) }
+            }
         }
     }
 
@@ -836,10 +1152,10 @@ final class PhotoLibraryService: ObservableObject {
             completion(.failure(.notOwned))
             return
         }
-        let photoDeleteCompletion = PhotoLibraryCompletionBridge.mainActor { [weak self] success in
+        let photoDeleteCompletion = PhotoLibraryCompletionBridge.mainActorResult { [weak self] result in
             guard let self else { return }
-            guard success else {
-                completion(.failure(.changeFailed))
+            if case .failure = result {
+                completion(result)
                 return
             }
 
@@ -882,6 +1198,62 @@ final class PhotoLibraryService: ObservableObject {
         case .photos(let photoAsset):
             delete(asset: photoAsset, completion: completion)
         }
+    }
+
+    /// Deletes several frames with one Photos change request, so the system
+    /// asks for confirmation once. Nothing is forgotten unless it succeeds.
+    func delete(
+        assets: [PhotoLibraryGalleryAsset],
+        completion: @escaping @MainActor (Result<Void, PhotoLibraryServiceError>) -> Void
+    ) {
+        var photoCollected: [String] = []
+        var cachedCollected: [String] = []
+        for asset in assets {
+            guard ownsAsset(asset.assetIdentifier) else {
+                completion(.failure(.notOwned))
+                return
+            }
+            if asset.isPhotosAsset {
+                photoCollected.append(asset.assetIdentifier)
+            } else {
+                cachedCollected.append(asset.assetIdentifier)
+            }
+        }
+        let photoIdentifiers = photoCollected
+        let cachedIdentifiers = cachedCollected
+        let forgetAll: @MainActor () -> Void = { [weak self] in
+            guard let self else { return }
+            self.cacheWriteGeneration &+= 1
+            for identifier in photoIdentifiers + cachedIdentifiers {
+                self.forgetSavedAsset(identifier)
+            }
+            self.refresh()
+            completion(.success(()))
+        }
+        guard !photoIdentifiers.isEmpty else {
+            forgetAll()
+            return
+        }
+        guard PhotoLibraryAuthorizationPolicy.canRead(PHPhotoLibrary.authorizationStatus(for: .readWrite)) else {
+            completion(.failure(.accessDenied))
+            return
+        }
+        let photoDeleteCompletion = PhotoLibraryCompletionBridge.mainActorResult { result in
+            if case .failure = result {
+                completion(result)
+                return
+            }
+            forgetAll()
+        }
+        let photoDeleteChanges: @Sendable () -> Void = {
+            let fetched = PHAsset.fetchAssets(withLocalIdentifiers: photoIdentifiers, options: nil)
+            guard fetched.count > 0 else { return }
+            PHAssetChangeRequest.deleteAssets(fetched)
+        }
+        PHPhotoLibrary.shared().performChanges(
+            photoDeleteChanges,
+            completionHandler: photoDeleteCompletion
+        )
     }
 
     private func appAlbum() -> PHAssetCollection? {
@@ -936,13 +1308,28 @@ final class PhotoLibraryService: ObservableObject {
             return resources
         }
         set {
-            guard let data = try? JSONEncoder().encode(newValue) else { return }
             // Every app write goes through this main-actor setter. Row/image
-            // lookups reuse the decoded index; background maintenance keeps
-            // using loadSavedFrameResources() for a fresh persisted snapshot.
+            // lookups reuse the decoded index; the debounced writer persists
+            // it, and maintenance flushes first so it reads a fresh snapshot.
             savedFrameResourcesCache = newValue
-            UserDefaults.standard.set(data, forKey: savedFrameResourcesKey)
+            resourcesDirty = true
+            schedulePersistence()
         }
+    }
+
+    func registerDocumentExport(
+        _ identifier: String, recipe: FilmRecipe, capturedAt: Date, thumbnailData: Data?, thumbnail: UIImage?
+    ) async {
+        if let thumbnail {
+            await rememberSavedAsset(identifier, metadata: SavedFrameMetadata(recipe: recipe, capturedAt: capturedAt),
+                                     imageData: thumbnailData, image: thumbnail)
+        } else {
+            savedAssetIdentifiers = PhotoLibraryAssetOwnership.adding(identifier, to: savedAssetIdentifiers)
+            metadataByAssetIdentifier[identifier] = SavedFrameMetadata(recipe: recipe, capturedAt: capturedAt)
+            persistMetadata()
+        }
+        refreshAuthorizationStatuses()
+        refresh()
     }
 
     private func rememberSavedAsset(
@@ -1007,8 +1394,8 @@ final class PhotoLibraryService: ObservableObject {
     }
 
     private func persistMetadata() {
-        guard let data = try? JSONEncoder().encode(metadataByAssetIdentifier) else { return }
-        UserDefaults.standard.set(data, forKey: savedFrameMetadataKey)
+        metadataDirty = true
+        schedulePersistence()
     }
 
     private func pruneMetadata(keeping identifiers: [String]) {
@@ -1072,7 +1459,7 @@ final class PhotoLibraryService: ObservableObject {
             return
         }
 
-        let filename = "\(UUID().uuidString).jpg"
+        let filename = "\(UUID().uuidString).\(FilmyPhotoStore.imageExtension(data) ?? "jpg")"
         guard let resourceURL = localFrameURL(for: filename) else { return }
         let dimensions = Self.pixelDimensions(in: data, fallbackImage: fallbackImage)
         let generation = cacheWriteGeneration
@@ -1172,11 +1559,15 @@ final class PhotoLibraryService: ObservableObject {
     private func removeCachedFrame(identifier: String) {
         invalidateThumbnailCache()
         var resources = savedFrameResources
-        guard let resource = resources.removeValue(forKey: identifier) else { return }
-        if let resourceURL = localFrameURL(for: resource.filename) {
-            try? FileManager.default.removeItem(at: resourceURL)
+        if let resource = resources.removeValue(forKey: identifier) {
+            if let resourceURL = localFrameURL(for: resource.filename) {
+                try? FileManager.default.removeItem(at: resourceURL)
+            }
+            savedFrameResources = resources
         }
-        savedFrameResources = resources
+        // Ownership can be removed even when the resource index was already
+        // missing. Always rebuild the published fallback list so a deleted
+        // frame cannot remain visible until the next explicit refresh.
         refreshCachedFrames(excluding: Set(assets.map(\.localIdentifier)))
     }
 
@@ -1296,20 +1687,28 @@ final class PhotoLibraryService: ObservableObject {
                 removed.insert(identifier)
                 continue
             }
-            let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
-            let byteCount = (attributes?[.size] as? NSNumber)?.intValue ?? 0
+            let attributes: [FileAttributeKey: Any]
+            do {
+                attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+            } catch {
+                if CacheMaintenancePolicy.confirmsMissingFile(error) { removed.insert(identifier) }
+                // Protected-data, permission, and transient I/O errors are not
+                // deletion. Preserve the mapping and retry on a later pass.
+                continue
+            }
+            let byteCount = (attributes[.size] as? NSNumber)?.intValue ?? 0
             guard byteCount > 0 else {
                 removed.insert(identifier)
                 continue
             }
 
-            if totalBytes + byteCount > maxBytes {
+            if byteCount > max(0, maxBytes - totalBytes) {
                 do {
                     try FileManager.default.removeItem(at: url)
                     removed.insert(identifier)
                 } catch {
                     // Keep the mapping so a later pass can retry the eviction.
-                    totalBytes += byteCount
+                    totalBytes = maxBytes
                 }
             } else {
                 protectLocalResource(at: url)
@@ -1384,14 +1783,14 @@ final class PhotoLibraryService: ObservableObject {
             let resources = PHAssetResource.assetResources(for: photoAsset)
             guard PhotoLibraryAuthorizationPolicy.canRead(status),
                   ownsAsset(photoAsset.localIdentifier),
-                  let resource = resources.first(where: { $0.type == .photo }) ?? resources.first,
+                  let resource = resources.first(where: { $0.type == .fullSizePhoto }) ?? resources.first(where: { $0.type == .photo }),
                   let cachesURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
                 return nil
             }
 
             let directoryURL = cachesURL.appendingPathComponent(shareDirectoryName, isDirectory: true)
             let destinationURL = directoryURL.appendingPathComponent(
-                "\(UUID().uuidString).jpg",
+                "\(UUID().uuidString).\(UTType(resource.uniformTypeIdentifier)?.preferredFilenameExtension ?? "jpg")",
                 isDirectory: false
             )
             do {
@@ -1536,6 +1935,7 @@ final class PhotoLibraryService: ObservableObject {
         targetSize: CGSize,
         contentMode: PHImageContentMode = .aspectFill
     ) async -> UIImage? {
+        guard !Task.isCancelled, ImageSizePolicy.isFinitePositive(targetSize) else { return nil }
         switch asset {
         case .photos(let photoAsset):
             return await image(
@@ -1561,17 +1961,27 @@ final class PhotoLibraryService: ObservableObject {
                 return cached
             }
             let cacheGeneration = thumbnailCacheGeneration
-            let loaded = await Task.detached(priority: .utility) {
-                CachedThumbnail(
-                    image: Self.cachedImage(at: resourceURL, targetSize: targetSize)
-                )
-            }.value.image
-            guard !Task.isCancelled else { return loaded }
-            if cacheGeneration == thumbnailCacheGeneration {
-                storeThumbnail(loaded, forKey: nsCacheKey)
+            let result = await ImageDecodeQueue.shared.value {
+                CachedThumbnail(image: Self.cachedImage(at: resourceURL, targetSize: targetSize))
             }
+            guard !Task.isCancelled,
+                  cacheGeneration == thumbnailCacheGeneration,
+                  ownsAsset(frame.assetIdentifier),
+                  savedFrameResources[frame.assetIdentifier] == resource else { return nil }
+            let loaded = result?.image
+            storeThumbnail(loaded, forKey: nsCacheKey)
             return loaded
         }
+    }
+
+    private func canReadImageNow(for asset: PHAsset) -> Bool {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard PhotoLibraryAuthorizationPolicy.canRead(status) else { return false }
+        // A user's limited selection can change while status stays .limited.
+        // Do not let a cached thumbnail bypass removal from that selection.
+        return status != .limited || PHAsset.fetchAssets(
+            withLocalIdentifiers: [asset.localIdentifier], options: nil
+        ).count > 0
     }
 
     func image(
@@ -1579,6 +1989,11 @@ final class PhotoLibraryService: ObservableObject {
         targetSize: CGSize,
         contentMode: PHImageContentMode = .aspectFill
     ) async -> UIImage? {
+        guard !Task.isCancelled, ImageSizePolicy.isFinitePositive(targetSize),
+              canReadImageNow(for: asset) else {
+            return nil
+        }
+        refreshAuthorizationStatuses()
         let revision = "\(asset.pixelWidth)x\(asset.pixelHeight)|\(asset.modificationDate?.timeIntervalSinceReferenceDate ?? -1)"
         let cacheKey = PhotoLibraryThumbnailCachePolicy.key(
             assetIdentifier: asset.localIdentifier,
@@ -1598,19 +2013,17 @@ final class PhotoLibraryService: ObservableObject {
 
         let loaded = await withTaskCancellationHandler(operation: {
             await withCheckedContinuation { continuation in
-                state.install(continuation)
+                guard state.install(continuation) else { return }
+                state.startTimeout()
                 let options = PHImageRequestOptions()
                 options.deliveryMode = .opportunistic
                 options.resizeMode = .fast
                 options.isNetworkAccessAllowed = true
                 options.isSynchronous = false
 
-                let requestID = imageManager.requestImage(
-                    for: asset,
-                    targetSize: targetSize,
-                    contentMode: contentMode,
-                    options: options
-                ) { image, info in
+                // PhotoKit may call back off-main. Explicit @Sendable keeps
+                // this closure from inheriting the caller's main-actor isolation.
+                let resultHandler: @Sendable (UIImage?, [AnyHashable: Any]?) -> Void = { image, info in
                     let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
                     let isCancelled = (info?[PHImageCancelledKey] as? Bool) ?? false
                     let hasError = info?[PHImageErrorKey] != nil
@@ -1629,14 +2042,21 @@ final class PhotoLibraryService: ObservableObject {
                         cacheable: !isDegraded && !isCancelled && !hasError && image != nil
                     )
                 }
+                let requestID = imageManager.requestImage(
+                    for: asset, targetSize: targetSize, contentMode: contentMode,
+                    options: options, resultHandler: resultHandler
+                )
                 state.install(requestID: requestID)
             }
         }, onCancel: {
             state.cancel()
         })
-        if !Task.isCancelled,
-           cacheGeneration == thumbnailCacheGeneration,
-           state.canCacheResult() {
+        guard !Task.isCancelled,
+              cacheGeneration == thumbnailCacheGeneration,
+              canReadImageNow(for: asset) else {
+            return nil
+        }
+        if state.canCacheResult() {
             storeThumbnail(loaded, forKey: nsCacheKey)
         }
         return loaded
@@ -1649,8 +2069,6 @@ final class PhotoLibraryService: ObservableObject {
         guard let image, let key else {
             return
         }
-        let width = max(Int((image.size.width * image.scale).rounded(.up)), 1)
-        let height = max(Int((image.size.height * image.scale).rounded(.up)), 1)
         let byteCount: Int64
         if let cgImage = image.cgImage {
             let result = Int64(cgImage.bytesPerRow).multipliedReportingOverflow(
@@ -1659,6 +2077,10 @@ final class PhotoLibraryService: ObservableObject {
             guard !result.overflow, result.partialValue > 0 else { return }
             byteCount = result.partialValue
         } else {
+            let size = CGSize(width: image.size.width * image.scale, height: image.size.height * image.scale)
+            guard ImageSizePolicy.isFinitePositive(size), size.width <= 8_192, size.height <= 8_192 else { return }
+            let width = Int(size.width.rounded(.up))
+            let height = Int(size.height.rounded(.up))
             let rowBytes = Int64(width).multipliedReportingOverflow(by: 4)
             guard !rowBytes.overflow else { return }
             let result = rowBytes.partialValue.multipliedReportingOverflow(by: Int64(height))
