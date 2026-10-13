@@ -159,6 +159,9 @@ struct SceneAutoPolicy {
     private var focusCandidateSince: Double = 0
     private var lastFocusAt: Double = -.infinity
     private var spatialChangeSince: Double?
+    private var steadyLowLight = false
+    private var highlightExitAt: Double = -.infinity
+    private var highlightLatchUntil: Double = -.infinity
 
     static func approach(_ value: Double, _ target: Double, by step: Double) -> Double {
         guard value.isFinite, target.isFinite, step.isFinite, step >= 0 else { return value.isFinite ? value : 0 }
@@ -179,6 +182,9 @@ struct SceneAutoPolicy {
         // A pause can interrupt native WB reacquisition. Warm up and lock
         // again instead of accidentally leaving continuous WB running.
         wbReference = nil
+        steadyLowLight = false
+        highlightExitAt = -.infinity
+        highlightLatchUntil = -.infinity
     }
 
     mutating func update(
@@ -203,6 +209,7 @@ struct SceneAutoPolicy {
         let alpha = 1 - exp(-dt / 0.8)
         filteredOffset += alpha * (s.targetOffset - filteredOffset)
         filteredMotion += alpha * (o.motion - filteredMotion)
+        steadyLowLight = filteredMotion < (steadyLowLight ? 0.030 : 0.018)
         let warmup = o.timestamp - (beganAt ?? o.timestamp) < 1.2
         updateScene(o, s, at: o.timestamp)
 
@@ -223,11 +230,12 @@ struct SceneAutoPolicy {
         }
         let confirmedError = exposureErrorSince.map { o.timestamp - $0 >= 0.65 } ?? false
         var exposure: SceneAutoExposure?
+        var limited = false
         if !warmup, !s.isAdjustingExposure, s.supportsCustomExposure,
            o.timestamp - lastExposureAt >= Self.sampleInterval {
             let maximumStep = (abs(error) > 1.5 ? 1.0 : 0.45) * min(dt, 0.6)
             let correction = confirmedError ? min(max(error, -maximumStep), maximumStep) : 0
-            let target = Self.allocateExposure(sensor: s, scene: scene, motion: filteredMotion, correctionEV: correction)
+            let target = Self.allocateExposure(sensor: s, scene: scene, motion: steadyLowLight ? 0 : max(filteredMotion, 0.018), correctionEV: correction)
             let isoChange = abs(log2(target.iso / s.iso))
             let shutterChange = abs(log2(target.duration / s.duration))
             // Don't resubmit hardware-quantized values or chase single-frame ISO noise.
@@ -237,6 +245,9 @@ struct SceneAutoPolicy {
                 // Metering is feedback from the *applied* previous request. Do
                 // not integrate a stale residual after making a correction.
                 filteredOffset += correction
+            } else if abs(correction) > 0.08 {
+                // Pinned at a hardware limit: nothing further will change.
+                limited = true
             }
         }
 
@@ -255,7 +266,7 @@ struct SceneAutoPolicy {
         return SceneAutoDecision(
             scene: scene, exposure: exposure, fallbackBias: bias, whiteBalance: wb, focus: focus,
             development: development, isMetering: warmup,
-            isAdapting: !warmup && (confirmedError || exposure != nil || wb == .meter)
+            isAdapting: !warmup && ((confirmedError && !limited) || exposure != nil || wb == .meter)
         )
     }
 
@@ -280,11 +291,15 @@ struct SceneAutoPolicy {
         let product = s.iso * s.duration * pow(2, min(max(correctionEV, -1), 1))
         let duration = min(max(product / s.minimumISO, s.minimumDuration), longest)
         let iso = min(max(product / duration, s.minimumISO), s.maximumISO)
-        return SceneAutoExposure(iso: iso, duration: duration)
+        // When ISO is pinned at its ceiling, hand the unmet exposure back to
+        // shutter time, never slower than the camera was already using.
+        let slowest = max(longest, min(s.duration, s.maximumDuration))
+        let preserved = min(max(product / iso, s.minimumDuration), slowest)
+        return SceneAutoExposure(iso: iso, duration: max(duration, preserved))
     }
 
     private mutating func updateScene(_ o: SceneAutoObservation, _ s: SceneAutoSensor, at now: Double) {
-        let next: SceneAutoScene
+        var next: SceneAutoScene
         // Separate entry/exit thresholds avoid flapping at every boundary.
         if filteredMotion > (scene == .action ? 0.045 : 0.085) {
             next = .action
@@ -299,12 +314,25 @@ struct SceneAutoPolicy {
         } else {
             next = .balanced
         }
+        // A highlight scene darkens the frame it is measured on. After leaving
+        // one and quickly re-entering it, hold it (bounded) until the user reframes.
+        let inHighlightScene = scene == .highContrast || scene == .backlit
+        if filteredMotion > 0.045 { highlightLatchUntil = -.infinity }
+        if now < highlightLatchUntil, inHighlightScene, next == .balanced {
+            next = scene
+        }
         if next != candidate {
             candidate = next
             candidateSince = now
         }
         if candidate != scene, now - candidateSince >= Self.sceneDwell, now - sceneChangedAt >= Self.sceneCooldown {
+            let previous = scene
             scene = candidate
+            if (previous == .highContrast || previous == .backlit) && scene == .balanced {
+                highlightExitAt = now
+            } else if (scene == .highContrast || scene == .backlit) && now - highlightExitAt < 10 {
+                highlightLatchUntil = now + 30
+            }
             sceneChangedAt = now
         }
     }

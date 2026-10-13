@@ -241,6 +241,95 @@ final class SceneAutoPolicyTests: XCTestCase {
         XCTAssertLessThan(still.iso, moving.iso)
     }
 
+    func testExposureIsPreservedWhenShutterFloorNeedsMoreISOThanSensorHas() {
+        var hardware = sensor(); hardware.iso = 2000; hardware.duration = 1.0 / 15; hardware.maximumISO = 2000
+        let product = hardware.iso * hardware.duration
+        for scene in SceneAutoScene.allCases {
+            let value = SceneAutoPolicy.allocateExposure(sensor: hardware, scene: scene, motion: 0, correctionEV: 0)
+            XCTAssertEqual(value.iso * value.duration, product, accuracy: 0.000001)
+            XCTAssertLessThanOrEqual(value.iso, hardware.maximumISO)
+            XCTAssertTrue((hardware.minimumDuration...hardware.maximumDuration).contains(value.duration))
+        }
+    }
+
+    func testLowLightShutterFloorDoesNotFlapAroundMotionThreshold() {
+        var policy = SceneAutoPolicy()
+        var hardware = sensor(offset: -0.2); hardware.iso = 1600
+        var requests = 0
+        for tick in 0..<300 {
+            var sample = observation(Double(tick) * 0.4)
+            sample.motion = (tick / 10).isMultiple(of: 2) ? 0.014 : 0.022
+            let decision = advance(&policy, to: sample.timestamp, observation: sample, sensor: hardware)
+            if let value = decision.exposure {
+                requests += 1
+                hardware.iso = value.iso
+                hardware.duration = value.duration
+            }
+        }
+        XCTAssertEqual(policy.scene, .lowLight)
+        XCTAssertLessThanOrEqual(requests, 2)
+    }
+
+    func testIsAdaptingClearsWhenCorrectionIsPinnedAtHardwareLimit() {
+        var dark = sensor(offset: -2); dark.iso = dark.maximumISO; dark.duration = 1.0 / 30
+        var bright = sensor(offset: 2); bright.iso = bright.minimumISO; bright.duration = bright.minimumDuration
+        for hardware in [dark, bright] {
+            var policy = SceneAutoPolicy()
+            var decision = advance(&policy, to: 0, sensor: hardware)
+            for tick in 1..<60 { decision = advance(&policy, to: Double(tick) * 0.4, sensor: hardware) }
+            XCTAssertNil(decision.exposure)
+            XCTAssertFalse(decision.isAdapting)
+        }
+    }
+
+    func testSelfInducedHighlightBiasDoesNotPumpExposure() {
+        var policy = SceneAutoPolicy()
+        var hardware = sensor()
+        var changes = 0
+        var lastScene = SceneAutoScene.balanced
+        for tick in 0..<90 {
+            var sample = observation(Double(tick) * 0.4)
+            let darkening = min(max(hardware.targetOffset / -0.35, 0), 1)
+            sample.highlights = 0.08 - 0.05 * darkening
+            sample.shadows = 0.2
+            let decision = advance(&policy, to: sample.timestamp, observation: sample, sensor: hardware)
+            if decision.scene != lastScene { changes += 1; lastScene = decision.scene }
+            if let value = decision.exposure {
+                let ratio = (value.iso * value.duration) / (hardware.iso * hardware.duration)
+                hardware.targetOffset += log2(ratio)
+                hardware.iso = value.iso
+                hardware.duration = value.duration
+            }
+        }
+        XCTAssertLessThanOrEqual(changes, 3)
+        XCTAssertEqual(policy.scene, .highContrast)
+    }
+
+    func testReframeMotionClearsHighlightLatch() {
+        var policy = SceneAutoPolicy()
+        var time = 0.0
+        func run(seconds: Double, highlights: Double, motion: Double = 0) {
+            let end = time + seconds
+            while time < end {
+                var sample = observation(time, motion: motion)
+                sample.highlights = highlights
+                sample.shadows = 0.2
+                advance(&policy, to: time, observation: sample)
+                time += 0.4
+            }
+        }
+        run(seconds: 4, highlights: 0.09)
+        XCTAssertEqual(policy.scene, .highContrast)
+        run(seconds: 5, highlights: 0.01)
+        XCTAssertEqual(policy.scene, .balanced)
+        run(seconds: 5, highlights: 0.09)
+        XCTAssertEqual(policy.scene, .highContrast)
+        // Leaving and re-entering within 10 s armed the latch; reframing must clear it.
+        run(seconds: 0.8, highlights: 0.01, motion: 0.2)
+        run(seconds: 5, highlights: 0.01)
+        XCTAssertEqual(policy.scene, .balanced)
+    }
+
     func testExposureRequestsRespectHardwareBoundsAcrossDeterministicGrid() {
         for iso in [50.0, 100, 800, 3200, 12_800] {
             for duration in [1.0 / 12_000, 1.0 / 60, 1.0 / 3] {
