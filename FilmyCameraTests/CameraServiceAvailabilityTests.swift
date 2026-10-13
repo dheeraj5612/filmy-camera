@@ -1040,6 +1040,32 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         XCTAssertNil(CameraService.fujiRAWFormat(from: [], hardwareZoom: 1))
     }
 
+    func testFujiRAWFormatPrefersBayerAtUnitZoomAndProRAWAway() {
+        let bayer: OSType = 1
+        let pro: OSType = 2
+        let isPro: (OSType) -> Bool = { $0 == pro }
+        XCTAssertEqual(CameraService.fujiRAWFormat(from: [bayer, pro], hardwareZoom: 2, isProRAW: isPro), pro)
+        XCTAssertEqual(CameraService.fujiRAWFormat(from: [pro, bayer], hardwareZoom: 1, isProRAW: isPro), bayer)
+        XCTAssertEqual(CameraService.fujiRAWFormat(from: [pro], hardwareZoom: 1, isProRAW: isPro), pro)
+        XCTAssertNil(CameraService.fujiRAWFormat(from: [bayer], hardwareZoom: 2, isProRAW: isPro))
+        XCTAssertEqual(CameraService.fujiRAWFormat(from: [bayer, pro], hardwareZoom: 1.0005, isProRAW: isPro), pro)
+    }
+
+    func testCustomExposureResolutionRefusalExemptsSceneAuto() {
+        XCTAssertNil(CameraService.customExposureResolutionRefusal(customExposure: true, sceneAutoOwnsExposure: true, resolution: .mp48))
+        XCTAssertNil(CameraService.customExposureResolutionRefusal(customExposure: false, sceneAutoOwnsExposure: false, resolution: .mp48))
+        XCTAssertNil(CameraService.customExposureResolutionRefusal(customExposure: true, sceneAutoOwnsExposure: false, resolution: .mp12))
+        XCTAssertNotNil(CameraService.customExposureResolutionRefusal(customExposure: true, sceneAutoOwnsExposure: false, resolution: .mp24))
+        XCTAssertNotNil(CameraService.customExposureResolutionRefusal(customExposure: true, sceneAutoOwnsExposure: false, resolution: .mp48))
+    }
+
+    func testStopDefersOnlyForRunningUninterruptedCapture() {
+        XCTAssertTrue(CameraService.shouldDeferStop(photoIssued: true, running: true, interrupted: false))
+        XCTAssertFalse(CameraService.shouldDeferStop(photoIssued: false, running: true, interrupted: false))
+        XCTAssertFalse(CameraService.shouldDeferStop(photoIssued: true, running: false, interrupted: false))
+        XCTAssertFalse(CameraService.shouldDeferStop(photoIssued: true, running: true, interrupted: true))
+    }
+
     func testStillSalvageRequiresCompleteProcessedStill() {
         var assembly = PhotoCaptureAssembly(uniqueID: 1, settings: ProCaptureSettings())
         XCTAssertNil(CameraService.salvageableStill(assembly))

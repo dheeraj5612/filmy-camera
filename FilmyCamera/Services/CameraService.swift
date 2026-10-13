@@ -467,6 +467,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private var recoveryScheduled = false
     private var needsGraphRebuild = false
     private var deferredStopGeneration: UInt64 = 0
+    /// Set when stop() was deferred until the in-flight photo finishes.
+    private var stopAfterPhotoGeneration: UInt64?
     private var interruptionStatus = "Camera temporarily unavailable."
     private var frameDeliveryPausedState = false
     private var sessionAvailability: Availability = .idle
@@ -712,11 +714,35 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         sessionQueue.async { [weak self] in
             guard let self else { return }
             self.deferredStopGeneration &+= 1
+            if Self.shouldDeferStop(
+                photoIssued: self.pendingPhotoUniqueID != nil,
+                running: self.session.isRunning,
+                interrupted: self.session.isInterrupted
+            ) {
+                // A shutter press is still being processed: let it finish
+                // instead of discarding it. finishPhotoOnQueue performs the
+                // stop; the timer bounds the wait. start() and any later
+                // stop bump the generation and void both.
+                let generation = self.deferredStopGeneration
+                self.stopAfterPhotoGeneration = generation
+                self.sessionQueue.asyncAfter(deadline: .now() + 8) { [weak self] in
+                    guard let self,
+                          self.deferredStopGeneration == generation,
+                          self.stopAfterPhotoGeneration == generation else { return }
+                    self.stopOnQueue()
+                }
+                return
+            }
             self.stopOnQueue()
         }
     }
 
+    static func shouldDeferStop(photoIssued: Bool, running: Bool, interrupted: Bool) -> Bool {
+        photoIssued && running && !interrupted
+    }
+
     private func stopOnQueue() {
+        stopAfterPhotoGeneration = nil
         stopFujiAutoISOOnQueue(restoreAuto: true)
         if let lease = fujiLease { restoreFujiLeaseOnQueue(lease) }
         disableSceneAutoOnQueue()
@@ -738,7 +764,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             self.restoreContinuousFocusExposureOnQueue(for: device)
             self.publishManualControlsOnQueue(for: device)
         }
-        if self.session.isRunning {
+        if self.session.isRunning || self.session.isInterrupted {
             self.session.stopRunning()
         }
         self.cancelPendingPhotoOnQueue(status: "Capture canceled.")
@@ -2811,6 +2837,10 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                     // so the shutter UI cannot remain stuck in a busy state;
                     // any late callback is rejected by its cleared unique ID.
                     self.cancelPendingPhotoOnQueue(status: "Capture interrupted.")
+                    if self.stopAfterPhotoGeneration != nil, self.stopAfterPhotoGeneration == self.deferredStopGeneration {
+                        self.stopOnQueue()
+                        return
+                    }
                     self.interruptionStatus = Self.interruptionStatus(forReasonRawValue: reasonRawValue)
                     self.publishRunning(false)
                     self.publishAvailability(.interrupted)
@@ -2873,6 +2903,15 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         // path instead of silently presenting a frozen preview.
         guard wantsToRun else { return }
         cancelPendingPhotoOnQueue(status: "Capture interrupted.")
+        if self.stopAfterPhotoGeneration != nil, self.stopAfterPhotoGeneration == self.deferredStopGeneration {
+            // A stop was already requested, so do not recover here. The graph
+            // is still suspect after any error but a media services reset.
+            if codeRawValue != AVError.Code.mediaServicesWereReset.rawValue {
+                needsGraphRebuild = true
+            }
+            self.stopOnQueue()
+            return
+        }
         if codeRawValue == AVError.Code.mediaServicesWereReset.rawValue, isConfigured {
             session.startRunning()
             publishStartOutcomeOnQueue(running: session.isRunning)
@@ -4084,8 +4123,13 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         case .on:
             settings.flashMode = .on
         }
-        guard device.exposureMode != .custom || capturePreferences.resolution == .mp12 else {
-            publishStatus("Manual and priority exposure use 12 MP to preserve the selected controls. Choose 12 MP or Auto exposure.")
+        let sceneAutoOwnsExposure = sceneAutoState.isEnabled && fujiAutoISOProfile == nil
+        if let refusal = Self.customExposureResolutionRefusal(
+            customExposure: device.exposureMode == .custom,
+            sceneAutoOwnsExposure: sceneAutoOwnsExposure,
+            resolution: capturePreferences.resolution
+        ) {
+            publishStatus(refusal)
             publishPhoto(nil, completion: completion)
             return
         }
@@ -4167,6 +4211,11 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             return
         }
 
+        defer {
+            if stopAfterPhotoGeneration == deferredStopGeneration, stopAfterPhotoGeneration != nil {
+                stopOnQueue()
+            }
+        }
         cancelCaptureTimeoutOnQueue()
         let completion = pendingPhotoCompletion
         let flashFallback = pendingPhotoFlashFallback
@@ -4253,6 +4302,17 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         // a different ISO/duration. Auto keeps the existing quality pipeline.
         // Bayer RAW requests raise NSInvalidArgumentException unless speed.
         (manualExposureEnabled || bayerRAW) ? .speed : .quality
+    }
+
+    /// Manual and priority exposure keep the 12 MP pipeline. Scene Auto also
+    /// holds the sensor in custom exposure but is an auto mode, so it is exempt.
+    static func customExposureResolutionRefusal(
+        customExposure: Bool,
+        sceneAutoOwnsExposure: Bool,
+        resolution: ProCaptureSettings.Resolution
+    ) -> String? {
+        guard customExposure, !sceneAutoOwnsExposure, resolution != .mp12 else { return nil }
+        return "Manual and priority exposure use 12 MP to preserve the selected controls. Choose 12 MP or Auto exposure."
     }
 
     /// Bayer RAW requests raise NSInvalidArgumentException unless the source
@@ -5084,6 +5144,12 @@ extension CameraService {
     ) {
         sessionQueue.async { [weak self] in
             guard let self, self.pendingPhotoCompletion == nil, let device = self.activeDevice() else { return }
+            guard self.fujiAutoISOProfile == nil else {
+                self.publishStatus("Turn off Auto ISO in Q before changing exposure mode.")
+                return
+            }
+            guard self.fujiLease == nil else { return }
+            self.disableSceneAutoOnQueue()
             if program == .automatic { self.setAutoExposureOnQueue(); return }
             if program == .manual && aperture == nil {
                 self.setManualExposureOnQueue(iso: iso ?? device.iso, durationSeconds: durationSeconds ?? CMTimeGetSeconds(device.exposureDuration))
@@ -5417,11 +5483,15 @@ extension CameraService {
 
     /// Bayer RAW needs 1x zoom (otherwise AVCapturePhotoOutput raises), so
     /// away from 1x only an Apple ProRAW format is usable.
-    static func fujiRAWFormat(from formats: [OSType], hardwareZoom: CGFloat) -> OSType? {
+    static func fujiRAWFormat(
+        from formats: [OSType],
+        hardwareZoom: CGFloat,
+        isProRAW: (OSType) -> Bool = AVCapturePhotoOutput.isAppleProRAWPixelFormat
+    ) -> OSType? {
         if hardwareZoom == 1 {
-            return formats.first(where: { !AVCapturePhotoOutput.isAppleProRAWPixelFormat($0) }) ?? formats.first
+            return formats.first(where: { !isProRAW($0) }) ?? formats.first
         }
-        return formats.first(where: { AVCapturePhotoOutput.isAppleProRAWPixelFormat($0) })
+        return formats.first(where: { isProRAW($0) })
     }
 
     func captureFujiFrame(transactionID: UUID, requiresRAW: Bool) async throws -> FujiCapturedFrame {
