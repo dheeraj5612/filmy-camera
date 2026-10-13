@@ -1022,4 +1022,43 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         )
     }
 
+    func testBayerRAWRequiresSpeedPrioritizationAndUnitZoom() {
+        XCTAssertEqual(CameraService.photoQualityPrioritization(manualExposureEnabled: false, bayerRAW: true), .speed)
+        XCTAssertEqual(CameraService.photoQualityPrioritization(manualExposureEnabled: false, bayerRAW: false), .quality)
+        XCTAssertNotNil(CameraService.bayerRAWZoomRefusal(format: .bayerRAW, hardwareZoom: 2))
+        XCTAssertNil(CameraService.bayerRAWZoomRefusal(format: .bayerRAW, hardwareZoom: 1))
+        XCTAssertNotNil(CameraService.bayerRAWZoomRefusal(format: .bayerRAW, hardwareZoom: 1.0005))
+        XCTAssertNil(CameraService.bayerRAWZoomRefusal(format: .proRAW, hardwareZoom: 2))
+        XCTAssertNil(CameraService.bayerRAWZoomRefusal(format: .heif, hardwareZoom: 3))
+    }
+
+    func testFujiRAWFormatRefusesBayerAwayFromUnitZoom() {
+        let bayer = OSType(kCVPixelFormatType_14Bayer_RGGB)
+        XCTAssertEqual(CameraService.fujiRAWFormat(from: [bayer], hardwareZoom: 1), bayer)
+        XCTAssertNil(CameraService.fujiRAWFormat(from: [bayer], hardwareZoom: 2))
+        XCTAssertNil(CameraService.fujiRAWFormat(from: [bayer], hardwareZoom: 1.0005))
+        XCTAssertNil(CameraService.fujiRAWFormat(from: [], hardwareZoom: 1))
+    }
+
+    func testStillSalvageRequiresCompleteProcessedStill() {
+        var assembly = PhotoCaptureAssembly(uniqueID: 1, settings: ProCaptureSettings())
+        XCTAssertNil(CameraService.salvageableStill(assembly))
+        assembly.processed = Data([1, 2, 3])
+        XCTAssertEqual(CameraService.salvageableStill(assembly), Data([1, 2, 3]))
+        assembly.failed = true
+        XCTAssertNil(CameraService.salvageableStill(assembly))
+        var rawSettings = ProCaptureSettings()
+        rawSettings.format = .bayerRAW
+        var rawAssembly = PhotoCaptureAssembly(uniqueID: 2, settings: rawSettings)
+        rawAssembly.processed = Data([1])
+        XCTAssertNil(CameraService.salvageableStill(rawAssembly))
+        rawAssembly.raw = Data([9])
+        XCTAssertNotNil(CameraService.salvageableStill(rawAssembly))
+    }
+
+    func testFailedStartWhileInterruptedIsNotARecoveryCandidate() {
+        XCTAssertEqual(CameraService.startOutcomeAvailability(running: true, interrupted: true), .running)
+        XCTAssertEqual(CameraService.startOutcomeAvailability(running: false, interrupted: true), .interrupted)
+        XCTAssertEqual(CameraService.startOutcomeAvailability(running: false, interrupted: false), .needsRecovery)
+    }
 }

@@ -474,6 +474,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private var pendingPhotoCapturedAt: Date?
     private var pendingPhotoLocation: CLLocation?
     private var pendingPhotoUniqueID: Int64?
+    /// Metadata of the processed still, kept so a cancel can salvage it.
+    private var deliveredStillInfo: (id: Int64, dimensions: CMVideoDimensions, flashFired: Bool)?
     // Session-queue confined; tokens reject a cancelled timer already dequeued.
     private var pendingCaptureTimeout: DispatchWorkItem?
     private var pendingCaptureTimeoutToken: UUID?
@@ -743,6 +745,9 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         self.focusExposureLocked = false
         self.publishFocusExposureLocked(false)
         self.publishRunning(false)
+        // publishRunning(true) can re-enable location after stop(after:)
+        // disabled it, so release it again once the session really stops.
+        Task { @MainActor [weak self] in self?.captureLocationProvider.setActive(false) }
 
         self.publishAvailability(nextAvailability)
         switch nextAvailability {
@@ -1149,12 +1154,15 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     /// Sets a bounded optical/digital zoom factor for the active camera.
-    public func setZoom(_ factor: CGFloat) {
+    public func setZoom(_ factor: CGFloat, reseedTracking: Bool = false) {
         sessionQueue.async { [weak self] in
             guard self?.fujiPrimeLensID == nil else { return }
             guard self?.fujiLease == nil else { return }
             self?.invalidateSceneAutoAnalysisOnQueue()
-            self?.setZoomOnQueue(factor)
+            // Pinch and zoom-bar steps keep following the tracked subject. A
+            // caller that jumps the framing (a zoom chip) passes
+            // reseedTracking: true to re-seed at the centre, as lens changes do.
+            self?.setZoomOnQueue(factor, reseedTracking: reseedTracking)
         }
     }
 
@@ -2535,11 +2543,23 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             scheduleRecoveryResetOnQueue()
             publishAvailability(.running)
             publishStatus("Camera ready")
+        } else if Self.startOutcomeAvailability(running: running, interrupted: session.isInterrupted) == .interrupted {
+            // The interruption-ended notification restarts the session; blind
+            // retries would only burn the recovery budget.
+            publishAvailability(.interrupted)
+            publishStatus(interruptionStatus)
         } else {
             publishAvailability(.needsRecovery)
             publishStatus("Camera could not start.")
             scheduleAutomaticRecoveryOnQueue()
         }
+    }
+
+    /// Availability after a start attempt: a failed start while the session is
+    /// interrupted is an interruption, not a failure that needs recovery.
+    static func startOutcomeAvailability(running: Bool, interrupted: Bool) -> Availability {
+        if running { return .running }
+        return interrupted ? .interrupted : .needsRecovery
     }
 
     static let maxAutomaticRecoveryAttempts = 6
@@ -2579,6 +2599,13 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             guard let self else { return }
             self.recoveryScheduled = false
             guard self.wantsToRun, !self.session.isRunning else { return }
+            guard !self.session.isInterrupted else {
+                // Nothing is reconnecting while interrupted: say so. The
+                // interruption-ended notification restarts the session.
+                self.publishAvailability(.interrupted)
+                self.publishStatus(self.interruptionStatus)
+                return
+            }
             self.requestAuthorizationAndStartOnQueue()
         }
     }
@@ -3114,17 +3141,17 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     }
 
     @discardableResult
-    private func setZoomOnQueue(_ factor: CGFloat) -> Bool {
+    private func setZoomOnQueue(_ factor: CGFloat, reseedTracking: Bool = true) -> Bool {
         guard let device = activeDevice() else { return false }
         let hardwareFactor = hardwareZoomFactorOnQueue(
             for: device,
             userFacingFactor: factor
         )
-        return setHardwareZoomOnQueue(hardwareFactor)
+        return setHardwareZoomOnQueue(hardwareFactor, reseedTracking: reseedTracking)
     }
 
     @discardableResult
-    private func setHardwareZoomOnQueue(_ factor: CGFloat) -> Bool {
+    private func setHardwareZoomOnQueue(_ factor: CGFloat, reseedTracking: Bool = true) -> Bool {
         guard let device = activeDevice() else { return false }
         let lowerBound = device.minAvailableVideoZoomFactor
         let userFacingPerHardwareFactor = userFacingZoomFactorOnQueue(
@@ -3146,7 +3173,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             try device.lockForConfiguration()
             device.videoZoomFactor = nextFactor
             device.unlockForConfiguration()
-            if trackingRequested { selectFocusAssistPointOnQueue(CGPoint(x: 0.5, y: 0.5)) }
+            if trackingRequested && reseedTracking { selectFocusAssistPointOnQueue(CGPoint(x: 0.5, y: 0.5)) }
             let userFacingFactor = userFacingZoomFactorOnQueue(
                 for: device,
                 hardwareFactor: nextFactor
@@ -4037,6 +4064,14 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
                 publishPhoto(nil, completion: completion)
                 return
             }
+            if let refusal = Self.bayerRAWZoomRefusal(
+                format: capturePreferences.format,
+                hardwareZoom: device.videoZoomFactor
+            ) {
+                publishStatus(refusal)
+                publishPhoto(nil, completion: completion)
+                return
+            }
             settings = AVCapturePhotoSettings(rawPixelFormatType: rawType, processedFormat: processedFormat)
         } else {
             settings = AVCapturePhotoSettings(format: processedFormat)
@@ -4055,7 +4090,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
             return
         }
         settings.photoQualityPrioritization = Self.photoQualityPrioritization(
-            manualExposureEnabled: device.exposureMode == .custom
+            manualExposureEnabled: device.exposureMode == .custom,
+            bayerRAW: capturePreferences.format == .bayerRAW
         )
         let availableDimensions = device.activeFormat.supportedMaxPhotoDimensions.map {
             PhotoResolutionPolicy.Dimensions(width: $0.width, height: $0.height)
@@ -4118,6 +4154,8 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         pendingCaptureTimeout = nil
     }
 
+    private static let flashFallbackStatus = "Photo captured without flash — flash is temporarily unavailable."
+
     private func finishPhotoOnQueue(_ photo: CapturedPhoto?, uniqueID: Int64) {
         guard Self.acceptsPhotoCallback(
             pendingUniqueID: pendingPhotoUniqueID,
@@ -4135,6 +4173,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         if photo == nil { cleanupPendingMovieOnQueue() }
         pendingMovieDestination = nil
         photoAssembly = nil
+        deliveredStillInfo = nil
         pendingPhotoCompletion = nil
         pendingPhotoCapturedAt = nil
         pendingPhotoLocation = nil
@@ -4145,7 +4184,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         if photo == nil {
             publishStatus("The photo could not be processed.")
         } else if flashFallback {
-            publishStatus("Photo captured without flash — flash is temporarily unavailable.")
+            publishStatus(Self.flashFallbackStatus)
         } else {
             publishStatus("Photo captured")
         }
@@ -4155,10 +4194,30 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     private func cancelPendingPhotoOnQueue(status: String) {
         if let lease = fujiLease { restoreFujiLeaseOnQueue(lease) }
         cancelCaptureTimeoutOnQueue()
+        // A still that already finished processing (for example while a Live
+        // Photo movie tail is outstanding) is delivered without the movie
+        // instead of being discarded.
+        var salvaged: CapturedPhoto?
+        var wasLive = false
+        if let assembly = photoAssembly, assembly.uniqueID == pendingPhotoUniqueID,
+           let data = Self.salvageableStill(assembly),
+           let info = deliveredStillInfo, info.id == assembly.uniqueID {
+            var delivered = assembly.settings
+            wasLive = delivered.livePhoto
+            delivered.livePhoto = false
+            salvaged = CapturedPhoto(
+                fileData: data, capturedAt: pendingPhotoCapturedAt ?? Date(),
+                dimensions: info.dimensions, flashFired: info.flashFired, location: pendingPhotoLocation,
+                rawFileData: assembly.raw, livePhotoMovieURL: nil,
+                outputSettings: delivered
+            )
+        }
+        deliveredStillInfo = nil
         cleanupPendingMovieOnQueue()
         photoAssembly = nil
         let completion = pendingPhotoCompletion ?? pendingManualControlsPhotoCompletion
         guard let completion else { return }
+        let flashFallback = pendingPhotoFlashFallback
         pendingPhotoCompletion = nil
         pendingManualControlsPhotoCompletion = nil
         pendingManualControlsPhotoLocation = nil
@@ -4166,17 +4225,45 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         pendingPhotoLocation = nil
         pendingPhotoUniqueID = nil
         pendingPhotoFlashFallback = false
-        publishStatus(status)
-        publishPhoto(nil, completion: completion)
+        if salvaged == nil {
+            publishStatus(status)
+        } else if wasLive {
+            publishStatus("Photo captured. Live Photo movie was interrupted.")
+        } else if flashFallback {
+            publishStatus(Self.flashFallbackStatus)
+        } else {
+            publishStatus("Photo captured")
+        }
+        publishPhoto(salvaged, completion: completion)
+    }
+
+    /// The processed still when it is complete enough to deliver on its own.
+    static func salvageableStill(_ assembly: PhotoCaptureAssembly) -> Data? {
+        guard !assembly.failed, let data = assembly.processed, !data.isEmpty else { return nil }
+        if assembly.settings.format.retainsRAW, assembly.raw?.isEmpty != false { return nil }
+        return data
     }
 
     static func photoQualityPrioritization(
-        manualExposureEnabled: Bool
+        manualExposureEnabled: Bool,
+        bayerRAW: Bool = false
     ) -> AVCapturePhotoOutput.QualityPrioritization {
         // AVCaptureDevice requires speed prioritization for a still to honor
         // custom or locked sensor exposure instead of computationally choosing
         // a different ISO/duration. Auto keeps the existing quality pipeline.
-        manualExposureEnabled ? .speed : .quality
+        // Bayer RAW requests raise NSInvalidArgumentException unless speed.
+        (manualExposureEnabled || bayerRAW) ? .speed : .quality
+    }
+
+    /// Bayer RAW requests raise NSInvalidArgumentException unless the source
+    /// device is at 1x zoom. Returns a user-facing refusal, or nil when allowed.
+    static func bayerRAWZoomRefusal(
+        format: ProCaptureSettings.Format,
+        hardwareZoom: CGFloat
+    ) -> String? {
+        guard format == .bayerRAW else { return nil }
+        guard hardwareZoom != 1 else { return nil }
+        return "DNG capture needs 1x zoom on this lens. Reset zoom or choose HEIF."
     }
 
     private func publishRunning(_ running: Bool) {
@@ -4441,8 +4528,13 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
         let data = error == nil ? photo.fileDataRepresentation() : nil
         let isRAW = photo.isRawPhoto
         let id = photo.resolvedSettings.uniqueID
+        let stillDimensions = photo.resolvedSettings.photoDimensions
+        let stillFlashFired = photo.resolvedSettings.isFlashEnabled
         sessionQueue.async { [weak self] in
             guard let self, self.photoAssembly?.uniqueID == id else { return }
+            if !isRAW {
+                self.deliveredStillInfo = (id: id, dimensions: stillDimensions, flashFired: stillFlashFired)
+            }
             if data?.isEmpty != false { self.photoAssembly?.failed = true }
             if isRAW { self.photoAssembly?.raw = data } else { self.photoAssembly?.processed = data }
         }
@@ -5219,6 +5311,10 @@ extension CameraService {
                 if requiresRAW && self.photoOutput.availableRawPhotoPixelFormatTypes.isEmpty {
                     continuation.resume(throwing: FujiShootingError.unsupportedRAW); return
                 }
+                if requiresRAW,
+                   Self.fujiRAWFormat(from: self.photoOutput.availableRawPhotoPixelFormatTypes, hardwareZoom: device.videoZoomFactor) == nil {
+                    continuation.resume(throwing: FujiShootingError.invalidCombination(Self.fujiRAWZoomMessage)); return
+                }
                 if requiresCustomExposure && !device.isExposureModeSupported(.custom) {
                     continuation.resume(throwing: FujiShootingError.unsupportedExposure); return
                 }
@@ -5307,6 +5403,17 @@ extension CameraService {
         }
     }
 
+    static let fujiRAWZoomMessage = "RAW capture on this lens needs 1x zoom. Reset zoom and try again."
+
+    /// Bayer RAW needs 1x zoom (otherwise AVCapturePhotoOutput raises), so
+    /// away from 1x only an Apple ProRAW format is usable.
+    static func fujiRAWFormat(from formats: [OSType], hardwareZoom: CGFloat) -> OSType? {
+        if hardwareZoom == 1 {
+            return formats.first(where: { !AVCapturePhotoOutput.isAppleProRAWPixelFormat($0) }) ?? formats.first
+        }
+        return formats.first(where: { AVCapturePhotoOutput.isAppleProRAWPixelFormat($0) })
+    }
+
     func captureFujiFrame(transactionID: UUID, requiresRAW: Bool) async throws -> FujiCapturedFrame {
         try await withCheckedThrowingContinuation { continuation in
             sessionQueue.async { [weak self] in
@@ -5330,8 +5437,13 @@ extension CameraService {
                     let formats = self.photoOutput.availableRawPhotoPixelFormatTypes
                     // Prefer Bayer RAW; ProRAW is a computational source, not a
                     // claim that the phone has become a Fujifilm sensor.
-                    guard let format = formats.first(where: { !AVCapturePhotoOutput.isAppleProRAWPixelFormat($0) }) ?? formats.first else {
+                    // Bayer RAW raises an exception above 1x zoom, so a zoomed
+                    // lens may only use an Apple ProRAW format.
+                    guard !formats.isEmpty else {
                         gate.finish(.failure(FujiShootingError.unsupportedRAW)); return
+                    }
+                    guard let format = Self.fujiRAWFormat(from: formats, hardwareZoom: lease.device.videoZoomFactor) else {
+                        gate.finish(.failure(FujiShootingError.invalidCombination(Self.fujiRAWZoomMessage))); return
                     }
                     settings = AVCapturePhotoSettings(rawPixelFormatType: format, processedFormat: [AVVideoCodecKey: AVVideoCodecType.jpeg])
                 } else {
