@@ -111,6 +111,53 @@ final class FilmyPhotoStoreTests: XCTestCase {
         XCTAssertTrue(files.fileExists(atPath: kept.path))
         XCTAssertFalse(files.fileExists(atPath: removed.path))
     }
+    private func createDocument(_ store: FilmyPhotoStore) async throws -> FilmyPhotoDocument {
+        var settings = ProCaptureSettings()
+        settings.format = .jpeg
+        settings.colorGamut = .sRGB
+        return try await store.create(
+            processed: try fixture(), raw: nil, liveMovieURL: nil, capturedAt: Date(timeIntervalSince1970: 5),
+            geometry: FilmyRenderGeometry(viewportWidth: 4, viewportHeight: 3,
+                                          previewWidth: 400, previewHeight: 300,
+                                          grainSeed: 1, flashFired: false),
+            recipe: FilmRecipe.builtIns[0], finish: .photo, settings: settings
+        )
+    }
+    func testStaleSweepPromotesCompletePendingCaptureAndLeavesMismatchedOne() async throws {
+        let location = root()
+        defer { try? FileManager.default.removeItem(at: location) }
+        let files = FileManager.default
+        let store = FilmyPhotoStore(root: location)
+        let document = try await createDocument(store)
+        let final = location.appendingPathComponent(document.id.uuidString)
+        let pending = location.appendingPathComponent(".\(document.id.uuidString).pending")
+        try files.moveItem(at: final, to: pending)
+        let mismatched = location.appendingPathComponent(".\(UUID().uuidString).pending")
+        try files.copyItem(at: pending, to: mismatched)
+        let old = Date().addingTimeInterval(-7200)
+        for url in [pending, mismatched] { try files.setAttributes([.modificationDate: old], ofItemAtPath: url.path) }
+        let inventory = try await store.inventory()
+        XCTAssertEqual(inventory.documents.map(\.id), [document.id])
+        XCTAssertFalse(files.fileExists(atPath: pending.path))
+        XCTAssertTrue(files.fileExists(atPath: mismatched.path))
+        _ = try await store.loadDocument(document.id)
+    }
+    func testDeleteLeavesNeitherDocumentNorDeletingDirectoryAndSweepFinishesInterruptedDelete() async throws {
+        let location = root()
+        defer { try? FileManager.default.removeItem(at: location) }
+        let files = FileManager.default
+        let store = FilmyPhotoStore(root: location)
+        let document = try await createDocument(store)
+        try await store.delete(document.id)
+        XCTAssertFalse(files.fileExists(atPath: location.appendingPathComponent(document.id.uuidString).path))
+        XCTAssertFalse(files.fileExists(atPath: location.appendingPathComponent(".\(document.id.uuidString).deleting").path))
+        let interrupted = location.appendingPathComponent(".\(UUID().uuidString).deleting")
+        try files.createDirectory(at: interrupted, withIntermediateDirectories: true)
+        try Data([1]).write(to: interrupted.appendingPathComponent("original.jpg"))
+        let inventory = try await store.inventory()
+        XCTAssertTrue(inventory.documents.isEmpty)
+        XCTAssertFalse(files.fileExists(atPath: interrupted.path))
+    }
     func testCorruptDerivativeAliasCannotDeleteOriginal() async throws {
         let location = root()
         defer { try? FileManager.default.removeItem(at: location) }

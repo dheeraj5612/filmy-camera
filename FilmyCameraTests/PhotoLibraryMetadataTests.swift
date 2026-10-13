@@ -298,6 +298,50 @@ final class PhotoLibraryMetadataTests: XCTestCase {
         #endif
     }
 
+    @MainActor
+    func testBatchForgetRemovesOnlyRequestedIdentifiersFromOwnershipAndMetadata() throws {
+        let keys = [PhotoLibraryAssetOwnership.defaultsKey,
+                    "filmyCamera.savedFrameMetadata",
+                    "filmyCamera.savedFrameResources"]
+        var saved: [String: Any] = [:]
+        for key in keys {
+            if let value = UserDefaults.standard.object(forKey: key) {
+                saved[key] = value
+            }
+        }
+        defer {
+            for key in keys {
+                if let value = saved[key] {
+                    UserDefaults.standard.set(value, forKey: key)
+                } else {
+                    UserDefaults.standard.removeObject(forKey: key)
+                }
+            }
+        }
+        let all = (0..<2000).map { "batch-forget-\($0)" }
+        let doomed = Array(all.prefix(1500)) + ["batch-forget-unknown", ""]
+        let kept = Array(all.suffix(500))
+        let entry = SavedFrameMetadata(recipe: FilmRecipe.builtIns[0],
+                                       capturedAt: Date(timeIntervalSince1970: 1_754_000_000))
+        var seeded: [String: SavedFrameMetadata] = [:]
+        for identifier in all.prefix(3) + all.suffix(3) {
+            seeded[identifier] = entry
+        }
+        PhotoLibraryAssetOwnership.persist(all)
+        UserDefaults.standard.set(try JSONEncoder().encode(seeded), forKey: "filmyCamera.savedFrameMetadata")
+        UserDefaults.standard.removeObject(forKey: "filmyCamera.savedFrameResources")
+        let service = PhotoLibraryService()
+        XCTAssertEqual(service.metadataByAssetIdentifier.count, 6)
+
+        service.forgetSavedAssets(doomed)
+        XCTAssertEqual(PhotoLibraryAssetOwnership.load(), kept)
+        XCTAssertEqual(Set(service.metadataByAssetIdentifier.keys), Set(all.suffix(3)))
+
+        service.forgetSavedAssets([])
+        XCTAssertEqual(PhotoLibraryAssetOwnership.load(), kept)
+        XCTAssertEqual(Set(service.metadataByAssetIdentifier.keys), Set(all.suffix(3)))
+    }
+
     func testReadWriteAuthorizationAllowsFullAndLimitedAccess() {
         XCTAssertTrue(PhotoLibraryAuthorizationPolicy.canRead(.authorized))
         XCTAssertTrue(PhotoLibraryAuthorizationPolicy.canRead(.limited))

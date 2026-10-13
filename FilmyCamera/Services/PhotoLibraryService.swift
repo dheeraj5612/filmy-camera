@@ -1224,9 +1224,7 @@ final class PhotoLibraryService: ObservableObject {
         let forgetAll: @MainActor () -> Void = { [weak self] in
             guard let self else { return }
             self.cacheWriteGeneration &+= 1
-            for identifier in photoIdentifiers + cachedIdentifiers {
-                self.forgetSavedAsset(identifier)
-            }
+            self.forgetSavedAssets(photoIdentifiers + cachedIdentifiers)
             self.refresh()
             completion(.success(()))
         }
@@ -1362,6 +1360,28 @@ final class PhotoLibraryService: ObservableObject {
         metadataByAssetIdentifier.removeValue(forKey: identifier)
         persistMetadata()
         removeCachedFrame(identifier: identifier)
+    }
+
+    /// Batch form of `forgetSavedAsset`: one ownership persist, one metadata
+    /// write and one cache refresh instead of one of each per identifier.
+    func forgetSavedAssets(_ identifiers: [String]) {
+        let doomed = Set(identifiers)
+        guard !doomed.isEmpty else { return }
+        savedAssetIdentifiers = savedAssetIdentifiers.filter { !doomed.contains($0) }
+        metadataByAssetIdentifier = metadataByAssetIdentifier.filter { !doomed.contains($0.key) }
+        persistMetadata()
+        invalidateThumbnailCache()
+        var resources = savedFrameResources
+        var removedResource = false
+        for identifier in doomed {
+            guard let resource = resources.removeValue(forKey: identifier) else { continue }
+            removedResource = true
+            if let resourceURL = localFrameURL(for: resource.filename) {
+                try? FileManager.default.removeItem(at: resourceURL)
+            }
+        }
+        if removedResource { savedFrameResources = resources }
+        refreshCachedFrames(excluding: Set(assets.map(\.localIdentifier)))
     }
 
     private func fetchSavedAssets(

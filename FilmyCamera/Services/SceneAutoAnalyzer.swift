@@ -10,6 +10,7 @@ import Vision
 /// with synchronous Vision work. No image, face, or statistic leaves the device.
 final class SceneAutoAnalyzer: @unchecked Sendable {
     private let lock = NSLock()
+    private let detectsFaces: Bool
     private var busy = false
     private var acceptedAt: Double = -.infinity
     private let queue = DispatchQueue(label: "com.dheeraj.filmycamera.scene-auto", qos: .utility)
@@ -26,6 +27,10 @@ final class SceneAutoAnalyzer: @unchecked Sendable {
     private final class ImageBox: @unchecked Sendable {
         let image: CIImage
         init(_ image: CIImage) { self.image = image }
+    }
+
+    init(detectsFaces: Bool = true) {
+        self.detectsFaces = detectsFaces
     }
 
     func submit(
@@ -49,7 +54,7 @@ final class SceneAutoAnalyzer: @unchecked Sendable {
                 self.lock.lock(); self.busy = false; self.lock.unlock()
             }
             autoreleasepool {
-                guard let observation = self.analyze(box.image, at: now, generation: generation, detectFaces: thermal != .serious) else { return }
+                guard let observation = self.analyze(box.image, at: now, generation: generation, detectFaces: self.detectsFaces && thermal != .serious) else { return }
                 completion(observation, generation)
             }
         }

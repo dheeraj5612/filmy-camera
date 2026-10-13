@@ -194,6 +194,13 @@ actor FilmyPhotoStore {
         let cutoff = Date().addingTimeInterval(-3600)
         for url in hidden {
             let name = url.lastPathComponent
+            // A delete renames the document here first, so whatever is left
+            // was already confirmed for deletion: finish it.
+            if name.hasPrefix(".") && name.hasSuffix(".deleting"),
+               UUID(uuidString: String(name.dropFirst().dropLast(".deleting".count))) != nil {
+                try? files.removeItem(at: url)
+                continue
+            }
             let isPending = name.hasPrefix(".") && name.hasSuffix(".pending")
                 && UUID(uuidString: String(name.dropFirst().dropLast(".pending".count))) != nil
             let isStaging = name.hasPrefix(".staging-")
@@ -206,9 +213,28 @@ actor FilmyPhotoStore {
             let hasManifest = ["document.json", "project.json"].contains {
                 files.fileExists(atPath: url.appendingPathComponent($0).path)
             }
-            guard !hasManifest else { continue }
+            if hasManifest {
+                if isPending { promoteCompletePending(url, name: name) }
+                continue
+            }
             try? files.removeItem(at: url)
         }
+    }
+
+    /// Moves a fully written `.<uuid>.pending` capture to its final directory
+    /// when the manifest is valid for that id and the original is present. An
+    /// undecodable or inconsistent directory is left exactly as it is.
+    private func promoteCompletePending(_ url: URL, name: String) {
+        guard let id = UUID(uuidString: String(name.dropFirst().dropLast(".pending".count))),
+              let data = try? Data(contentsOf: url.appendingPathComponent("document.json")),
+              let document = try? JSONDecoder().decode(FilmyPhotoDocument.self, from: data),
+              document.schemaVersion == FilmyPhotoDocument.currentSchemaVersion,
+              document.id == id,
+              let original = document.originalFilename,
+              !document.revisions.isEmpty,
+              files.fileExists(atPath: url.appendingPathComponent(original).path),
+              !files.fileExists(atPath: directory(id).path) else { return }
+        try? files.moveItem(at: url, to: directory(id))
     }
 
     func inventory() throws -> Inventory {
@@ -663,7 +689,13 @@ actor FilmyPhotoStore {
         }
         // No load/validation: a corrupt or unsupported project must stay
         // deletable. The directory name is derived from a UUID only.
-        try files.removeItem(at: directory(id))
+        // Rename first so the user-visible delete is atomic; a crash during
+        // the recursive removal leaves a `.deleting` directory the next
+        // sweep finishes.
+        let doomed = root.appendingPathComponent(".\(id.uuidString).deleting", isDirectory: true)
+        try? files.removeItem(at: doomed)
+        try files.moveItem(at: directory(id), to: doomed)
+        try? files.removeItem(at: doomed)
     }
 
     private static func legacySettings(for options: ProCaptureOptions) -> ProCaptureSettings {
