@@ -44,7 +44,12 @@ private struct CaptureModesDetail: View {
     @State private var image: UIImage?
     @State private var player: AVPlayer?
     @State private var confirmingDelete = false
+    @State private var deleted = false
     private var media: CaptureMedia { model.captures.first(where: { $0.id == initial.id }) ?? initial }
+    private var deleteTitle: String {
+        if media.isExported { return "Delete originals and developed files from Filmy? Exports already in Photos stay unchanged." }
+        return "This capture is not fully exported to Photos, so Filmy holds the only copy. Delete originals and developed files from Filmy? This cannot be undone."
+    }
 
     var body: some View {
         List {
@@ -88,13 +93,14 @@ private struct CaptureModesDetail: View {
             }
         }
         .navigationTitle(media.mode.title)
-        .confirmationDialog("Delete originals and developed files from Filmy? Exports already in Photos stay unchanged.",
+        .confirmationDialog(deleteTitle,
                             isPresented: $confirmingDelete, titleVisibility: .visible) {
             Button("Delete local capture", role: .destructive) {
                 Task {
                     do {
                         let id = media.id
                         try await Task.detached(priority: .utility) { try CaptureMediaStore.delete(id) }.value
+                        deleted = true
                         model.refresh()
                         dismiss()
                     } catch { model.errorMessage = error.localizedDescription }
@@ -106,6 +112,7 @@ private struct CaptureModesDetail: View {
     }
 
     @MainActor private func loadFiles() async {
+        guard !deleted else { return }
         let record = media
         do {
             let paths = try await Task.detached(priority: .utility) {
@@ -126,7 +133,7 @@ private struct CaptureModesDetail: View {
                 guard !Task.isCancelled else { return }
                 image = UIImage(cgImage: preview.image)
             }
-        } catch { if !Task.isCancelled { model.errorMessage = error.localizedDescription } }
+        } catch { if !Task.isCancelled, !deleted { model.errorMessage = error.localizedDescription } }
     }
 }
 

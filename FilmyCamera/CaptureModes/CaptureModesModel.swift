@@ -159,8 +159,14 @@ final class CaptureModesModel: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             defer { exporting = false; refresh() }
-            do { _ = try await CaptureMediaStore.exportToPhotos(media) }
-            catch { errorMessage = error.localizedDescription }
+            do {
+                _ = try await CaptureMediaStore.exportToPhotos(media)
+                UIAccessibility.post(notification: .announcement, argument: "Exported to Photos")
+            } catch is CancellationError {
+            } catch {
+                errorMessage = error.localizedDescription
+                UIAccessibility.post(notification: .announcement, argument: error.localizedDescription)
+            }
         }
     }
 

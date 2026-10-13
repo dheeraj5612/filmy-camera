@@ -141,6 +141,19 @@ final class CaptureModesProcessingTests: XCTestCase {
         XCTAssertEqual(try CaptureMediaStore.load(id).originals, ["original-000.heic"])
     }
 
+    func testReadPathsDoNotResurrectADeletedCaptureFolder() throws {
+        let id = UUID()
+        let media = CaptureMedia(id: id, mode: .photo, createdAt: Date(), recipeName: "Test")
+        try CaptureMediaStore.persist(media)
+        try CaptureMediaStore.delete(id)
+        XCTAssertThrowsError(try CaptureMediaStore.recoverableOriginals(media))
+        XCTAssertThrowsError(try CaptureMediaStore.load(id))
+        XCTAssertThrowsError(try CaptureMediaStore.loadRecipe(in: id))
+        XCTAssertNoThrow(try CaptureMediaStore.delete(id))
+        let folder = try CaptureMediaStore.root().appendingPathComponent(id.uuidString)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path))
+    }
+
     func testRecoverableOriginalsSkipsEmptyAndNonOriginalFilesInNameOrder() throws {
         let id = UUID()
         defer { try? CaptureMediaStore.delete(id) }

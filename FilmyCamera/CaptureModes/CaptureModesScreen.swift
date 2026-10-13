@@ -164,7 +164,7 @@ struct CaptureModesScreen: View {
                 Text(model.state.mode == .spatialVideo ? "Native stereo" : model.state.recipeName).font(.caption.weight(.semibold))
                 if model.state.mode.isVideo { Text(model.state.microphoneEnabled ? "Audio on" : "Silent video").font(.caption2) }
                 if model.state.focusLocked { Text("AE / AF / WB locked").font(.caption2) }
-            }.padding(10).background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 10)).padding(8)
+            }.dynamicTypeSize(...DynamicTypeSize.accessibility1).padding(10).background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 10)).padding(8)
         }
         .accessibilityIdentifier("capture-modes-viewfinder")
     }
@@ -200,13 +200,13 @@ struct CaptureModesScreen: View {
                         }
                     }
                     if model.state.maximumZoom > 1 {
-                        Text("Zoom \(model.state.zoom, specifier: "%.1f")×")
+                        Text("Zoom \(model.state.zoom, specifier: "%.1f")×").accessibilityHidden(true)
                         Slider(value: Binding(get: { model.state.zoom }, set: model.engine.setZoom), in: 1...max(1.01, model.state.maximumZoom))
                             .accessibilityLabel("Zoom")
                             .accessibilityValue(String(format: "%.1f times", model.state.zoom))
                     }
                     if model.state.maximumExposure > model.state.minimumExposure {
-                        Text("Exposure \(model.state.exposure, specifier: "%+.1f") EV")
+                        Text("Exposure \(model.state.exposure, specifier: "%+.1f") EV").accessibilityHidden(true)
                         Slider(value: Binding(get: { model.state.exposure }, set: model.engine.setExposure),
                                in: model.state.minimumExposure...model.state.maximumExposure)
                             .accessibilityLabel("Exposure compensation")
@@ -276,8 +276,18 @@ struct CaptureModesScreen: View {
     private var shutterBar: some View {
         HStack(spacing: 22) {
             VStack(spacing: 2) {
-                if model.state.phase == .recording { Text(String(format: "%d:%02d", model.state.seconds / 60, model.state.seconds % 60)) }
-                else if model.state.phase == .capturing, !model.state.scanning { Text("\(model.state.frameCount)") }
+                if model.state.phase == .recording {
+                    let minutes = model.state.seconds / 60
+                    let remainder = model.state.seconds % 60
+                    Text(String(format: "%d:%02d", minutes, remainder))
+                        .accessibilityLabel("Recording time")
+                        .accessibilityValue("\(minutes) minutes \(remainder) seconds")
+                }
+                else if model.state.phase == .capturing, !model.state.scanning {
+                    Text("\(model.state.frameCount)")
+                        .accessibilityLabel("Frames captured")
+                        .accessibilityValue("\(model.state.frameCount)")
+                }
                 else { Text(model.state.mode.title).lineLimit(2) }
             }.font(.caption.monospacedDigit()).frame(maxWidth: .infinity)
             CaptureModesShutter(enabled: model.canShoot,
@@ -290,6 +300,7 @@ struct CaptureModesScreen: View {
                 if model.state.phase == .processing {
                     ProgressView()
                     Button("Pause") { model.engine.pause(reason: model.state.scanning ? "Scene reading stopped. Reopen the mode to read the scene again." : "Processing paused. Retry it from Captures.") }.font(.caption)
+                        .accessibilityLabel("Pause processing")
                 } else if model.state.phase == .unavailable || model.state.phase == .stopped {
                     if cameraDenied {
                         Button("Open Settings") {

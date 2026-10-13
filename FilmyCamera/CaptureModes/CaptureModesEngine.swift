@@ -60,9 +60,17 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
         self.emit = emit
         super.init()
         let interruptedReason = "Camera interrupted. Completed originals remain in Captures. Reopen the mode to continue."
-        observers.append(NotificationCenter.default.addObserver(forName: AVCaptureSession.wasInterruptedNotification, object: session, queue: nil) { [weak self] _ in
+        observers.append(NotificationCenter.default.addObserver(forName: AVCaptureSession.wasInterruptedNotification, object: session, queue: nil) { [weak self] notification in
+            let raw = (notification.userInfo?[AVCaptureSessionInterruptionReasonKey] as? NSNumber)?.intValue
+            let cause = raw.flatMap { AVCaptureSession.InterruptionReason(rawValue: $0) }
+            var text = interruptedReason
+            if cause == .audioDeviceInUseByAnotherClient {
+                text = "Another app is using the microphone. Completed originals remain in Captures. Reopen the mode to continue."
+            } else if cause == .videoDeviceNotAvailableWithMultipleForegroundApps {
+                text = "The camera is unavailable while another app is in the foreground. Completed originals remain in Captures. Reopen the mode to continue."
+            }
             self?.queue.async { [weak self] in self?.pausedByInterruption = true }
-            self?.pause(reason: interruptedReason)
+            self?.pause(reason: text)
         })
         observers.append(NotificationCenter.default.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: session, queue: nil) { [weak self] _ in
             self?.pause(reason: interruptedReason)
@@ -399,8 +407,8 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
                 stampRotation()
                 let record = CaptureMedia(id: UUID(), mode: state.mode, createdAt: Date(), recipeName: recipe.name)
                 try CaptureMediaStore.persist(record)
-                try CaptureMediaStore.saveRecipe(recipe, in: record.id)
                 media = record
+                try CaptureMediaStore.saveRecipe(recipe, in: record.id)
                 state.frameCount = 0
                 if state.mode.isVideo {
                     if state.mode == .spatialVideo, let angle = spatialAngle, let connection = movie.connection(with: .video),
@@ -501,6 +509,9 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
             do {
                 var recovered = try CaptureMediaStore.load(record.id)
                 recovered.originals = try CaptureMediaStore.recoverableOriginals(recovered).map(\.lastPathComponent)
+                guard !recovered.originals.isEmpty else {
+                    throw CaptureModesError.unavailable("Nothing could be recovered from this capture. You can delete it.")
+                }
                 try CaptureMediaStore.persist(recovered)
                 let originalRecipe = try CaptureMediaStore.loadRecipe(in: record.id)
                 process(recovered, using: originalRecipe)

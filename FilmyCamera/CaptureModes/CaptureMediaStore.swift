@@ -20,6 +20,11 @@ enum CaptureMediaStore {
         return url
     }
 
+    /// Read paths must not create the folder: a deleted capture would come back as an empty orphan.
+    private static func existingDirectory(_ id: UUID) throws -> URL {
+        try root().appendingPathComponent(id.uuidString, isDirectory: true)
+    }
+
     static func file(_ name: String, in id: UUID) throws -> URL {
         guard CaptureModesPolicy.isSafeFilename(name) else { throw CaptureModesError.invalidImage }
         return try directory(id).appendingPathComponent(name)
@@ -47,19 +52,21 @@ enum CaptureMediaStore {
     static func loadRecipe(in id: UUID) throws -> FilmRecipe {
         lock.lock()
         defer { lock.unlock() }
-        return try JSONDecoder().decode(FilmRecipe.self, from: Data(contentsOf: file("recipe.json", in: id)))
+        return try JSONDecoder().decode(FilmRecipe.self, from: Data(contentsOf: existingDirectory(id).appendingPathComponent("recipe.json")))
     }
 
     static func delete(_ id: UUID) throws {
         lock.lock()
         defer { lock.unlock() }
-        try FileManager.default.removeItem(at: directory(id))
+        let url = try existingDirectory(id)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        try FileManager.default.removeItem(at: url)
     }
 
     static func load(_ id: UUID) throws -> CaptureMedia {
         lock.lock()
         defer { lock.unlock() }
-        let data = try Data(contentsOf: file("capture.json", in: id))
+        let data = try Data(contentsOf: existingDirectory(id).appendingPathComponent("capture.json"))
         return try JSONDecoder().decode(CaptureMedia.self, from: data)
     }
 
@@ -77,7 +84,7 @@ enum CaptureMediaStore {
     /// Recover a completed movie after termination between AVFoundation's final
     /// callback and the manifest update. Partial/empty movie files are not promoted.
     static func recoverableOriginals(_ media: CaptureMedia) throws -> [URL] {
-        let folder = try directory(media.id)
+        let folder = try existingDirectory(media.id)
         return try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.fileSizeKey])
             .filter { $0.lastPathComponent.hasPrefix("original-") }
             .filter { ((try? $0.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) > 0 }
