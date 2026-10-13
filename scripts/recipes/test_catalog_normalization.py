@@ -366,6 +366,35 @@ class CollectorTests(unittest.TestCase):
                     collect.main(['--output', str(output), '--limit', '5'])
             self.assertIs(json.loads(output.read_text(encoding='utf-8'))['complete'], True)
 
+    @unittest.skipUnless(HAS_BS4, 'bs4 missing')
+    def test_index_fetch_failure_marks_crawl_incomplete(self):
+        index = '<div class="entry-content">' + ''.join(
+            f'<a href="https://fujixweekly.com/2026/01/0{n}/r{n}/">Recipe {n}</a>' for n in (1, 2)) + '</div>'
+        failing = 'https://film.recipes/blog/film-recipes-index-a-z/'
+        class Stub:
+            def __init__(self, delay):
+                pass
+            def get(self, url, robots=False):
+                if url == failing:
+                    raise urllib.error.URLError('timed out')
+                if '/20' in url:
+                    raise ValueError('Article content missing')
+                return index.encode()
+        original = collect.Fetcher
+        collect.Fetcher = Stub
+        self.addCleanup(setattr, collect, 'Fetcher', original)
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / 'o.json'
+            errors = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(errors):
+                with self.assertRaises(SystemExit):
+                    collect.main(['--output', str(output), '--limit', '5'])
+            self.assertIn('marked incomplete', errors.getvalue())
+            data = json.loads(output.read_text(encoding='utf-8'))
+            self.assertIs(data['complete'], False)
+            self.assertEqual(data['candidateCount'], 2)
+            self.assertIn(failing, [f['url'] for f in data['failures']])
+
 class IdentityRenderTests(unittest.TestCase):
     @unittest.skipUnless(HAS_PIL, 'Pillow missing')
     def test_icon_profile_is_reproducible(self):

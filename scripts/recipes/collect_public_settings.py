@@ -159,6 +159,7 @@ def main(argv=None):
                     candidates[url]["indexes"].append(index)
             except Exception as error:
                 failures.append({"url": index, "reason": str(error)})
+    index_failures = len(failures)
     if not candidates:
         for failure in failures:
             print(f"{failure['url']}: {failure['reason']}", file=sys.stderr)
@@ -190,9 +191,11 @@ def main(argv=None):
         if number % 20 == 0:
             print(f"{number + 1}/{len(candidates)} pages; {len(output['records'])} candidate records", flush=True)
             args.output.write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
-    output["complete"] = len(selected) == len(candidates)
+    output["complete"] = len(selected) == len(candidates) and index_failures == 0
     args.output.write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"Saved {len(output['records'])} records; {len(output['failures'])} review items", flush=True)
+    if index_failures:
+        print(f"{index_failures} index page(s) failed; {args.output} is marked incomplete", file=sys.stderr)
     if not output["records"]:
         sys.exit(f"No records collected; see failures in {args.output}")
 
