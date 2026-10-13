@@ -127,6 +127,11 @@ private struct ViewfinderChromeHeightKey: PreferenceKey {
     }
 }
 
+@MainActor
+private final class CompositionAssistStoreBox: ObservableObject {
+    let store = CompositionAssistStore()
+}
+
 /// The viewfinder and its capture controls. The picture keeps a stable frame
 /// while look and camera-tool drawers float above it. Wide layouts put the
 /// primary controls in an edge column; compact layouts keep them below the
@@ -152,7 +157,10 @@ struct CameraScreen: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @AppStorage("showGrid") private var showGrid = true
     @StateObject private var countdown = CaptureCountdown()
-    @StateObject private var assists = CompositionAssistStore()
+    // Held in a box that never publishes: the store ticks at 10 Hz and only
+    // CompositionAssistOverlay (which observes it directly) reads those values.
+    @StateObject private var assistBox = CompositionAssistStoreBox()
+    private var assists: CompositionAssistStore { assistBox.store }
     @StateObject private var smartRecipes = SmartRecipeStore()
     @State private var isShowingSmartRecipes = false
     @State private var smartPresentation: SmartRecipeSnapshot?
@@ -372,7 +380,8 @@ struct CameraScreen: View {
     private var smartRecipeLifecycleView: some View {
         cameraHardwareView
         .onChange(of: isSmartRecipeAnalysisActive, initial: true) { _, _ in updateSmartRecipeAnalysis() }
-        .onChange(of: viewModel.recipes) { _, _ in updateSmartRecipeAnalysis() }
+        .onChange(of: viewModel.selectedRecipe) { _, _ in updateSmartRecipeAnalysis() }
+        .onChange(of: membership.hasFullAccess) { _, _ in updateSmartRecipeAnalysis() }
         .onChange(of: favoriteData) { _, _ in updateSmartRecipeAnalysis() }
         .onChange(of: smartRecipeFrameKey) { _, _ in smartRecipes.invalidateScene() }
         .onChange(of: viewModel.selectedRecipeID) { _, selected in
@@ -510,9 +519,13 @@ struct CameraScreen: View {
                 // The presenter owns closing the editor. Cancelling never
                 // commits its local draft or selects a different recipe.
                 onCancel: { recipeForDetail = nil },
-                onUpdate: viewModel.update,
+                onUpdate: { updated in
+                    viewModel.update(recipe: updated)
+                    updateSmartRecipeAnalysis()
+                },
                 onReset: {
                     viewModel.reset(recipeID: recipe.id)
+                    updateSmartRecipeAnalysis()
                     recipeForDetail = viewModel.originalRecipe(for: recipe.id)
                 }
             )
@@ -1991,7 +2004,7 @@ struct CameraScreen: View {
                 recipe: viewModel.selectedRecipe,
                 message: "The camera was interrupted. Resume when you are ready.",
                 actionTitle: "Resume Camera",
-                action: camera.start
+                action: resumeCamera
             )
         case .needsRecovery:
             PreviewPlaceholder(
@@ -1999,7 +2012,7 @@ struct CameraScreen: View {
                 recipe: viewModel.selectedRecipe,
                 message: camera.statusMessage,
                 actionTitle: "Resume Camera",
-                action: camera.start
+                action: resumeCamera
             )
         case .unavailable:
             PreviewPlaceholder(
@@ -2007,7 +2020,7 @@ struct CameraScreen: View {
                 recipe: viewModel.selectedRecipe,
                 message: camera.statusMessage,
                 actionTitle: "Resume Camera",
-                action: camera.start
+                action: resumeCamera
             )
         case .permissionDenied:
             PreviewPlaceholder(
@@ -2222,6 +2235,14 @@ struct CameraScreen: View {
         }
     }
 
+    private func resumeCamera() {
+        guard scenePhase == .active, isCameraTabActive, !isImporting else { return }
+        if !viewModel.isReviewingImport {
+            camera.setFrameDeliveryPaused(false)
+        }
+        camera.start()
+    }
+
     private func updateCameraActivity() {
         guard !CameraActivityPolicy.isUnitTestHost else { return }
 
@@ -2256,7 +2277,7 @@ struct CameraScreen: View {
                 hasReview: viewModel.reviewImage != nil
             ))
         case .hold:
-            break
+            camera.setFrameDeliveryPaused(false)
         }
     }
 

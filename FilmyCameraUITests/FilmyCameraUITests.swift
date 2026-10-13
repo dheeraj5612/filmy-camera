@@ -733,7 +733,7 @@ final class FilmyCameraUITests: XCTestCase {
 
         app.terminate()
         let cacheApp = makeApplication()
-        cacheApp.launchArguments = ["-selectedRecipeID", "g7x-compact", "-cameraGestureHintSeen.v1", "YES"]
+        cacheApp.launchArguments = ["-ui-testing-preview-status", "-selectedRecipeID", "g7x-compact", "-cameraGestureHintSeen.v1", "YES"]
         cacheApp.launch()
         app = cacheApp
         defer { cacheApp.terminate() }
@@ -826,7 +826,7 @@ final class FilmyCameraUITests: XCTestCase {
 
         for recipeID in recipeIDs {
             let recipeApp = makeApplication()
-            recipeApp.launchArguments = ["-hasCompletedRecipeFirstOnboarding", "YES", "-selectedRecipeID", recipeID, "-captureFinish", "photo", "-cameraGestureHintSeen.v1", "YES"]
+            recipeApp.launchArguments = ["-ui-testing-preview-status", "-hasCompletedRecipeFirstOnboarding", "YES", "-selectedRecipeID", recipeID, "-captureFinish", "photo", "-cameraGestureHintSeen.v1", "YES"]
             recipeApp.launch()
             recipeApp.tap()
 
@@ -1337,6 +1337,16 @@ final class FilmyCameraUITests: XCTestCase {
         let selectedRecipe = onboardingApp.buttons["onboarding-recipe-g7x-compact"]
         XCTAssertTrue(selectedRecipe.waitForExistence(timeout: 5))
         XCTAssertEqual(selectedRecipe.value as? String, "Selected")
+        // Choosing another tile must not reorder the row under the user's finger.
+        let chrome = onboardingApp.buttons["onboarding-recipe-classic-chrome"]
+        XCTAssertTrue(chrome.waitForExistence(timeout: 5))
+        XCTAssertLessThan(selectedRecipe.frame.minX, chrome.frame.minX)
+        chrome.tap()
+        XCTAssertTrue(waitUntil(timeout: 5) { chrome.value as? String == "Selected" },
+                      "Tapping a tile must select it")
+        XCTAssertTrue(selectedRecipe.exists)
+        XCTAssertLessThan(selectedRecipe.frame.minX, chrome.frame.minX,
+                          "The tapped tile must keep its position")
         let compare = onboardingApp.buttons["onboarding-compare"]
         XCTAssertTrue(compare.waitForExistence(timeout: 5))
         XCTAssertEqual(compare.value as? String, "Look")

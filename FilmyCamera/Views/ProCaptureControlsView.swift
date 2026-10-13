@@ -105,26 +105,48 @@ struct ProCaptureControlsView: View {
             if priority {
                 if camera.exposureProgram == .isoPriority {
                     Text("ISO \(Int(iso)) · shutter auto").monospacedDigit()
-                    Slider(value: $iso, in: Double(max(controls.minimumISO, 1))...Double(max(controls.maximumISO, controls.minimumISO + 1)),
+                    Slider(value: $iso, in: isoRange,
                            onEditingChanged: { if !$0 { apply(camera.exposureProgram) } })
                         .accessibilityLabel("Priority ISO").accessibilityIdentifier("pro-priority-iso")
+                        .accessibilityValue("ISO \(Int(iso))")
+                        .accessibilityAdjustableAction { direction in
+                            guard !controls.isApplying else { return }
+                            guard let sign = Self.adjustSign(direction) else { return }
+                            iso = Self.clamped(iso * pow(2, sign / 3), isoRange)
+                            apply(camera.exposureProgram)
+                        }
                 }
                 if camera.exposureProgram == .shutterPriority {
                     Text("\(Self.shutterTitle(pow(2, shutterLog))) · ISO auto").monospacedDigit()
                     Slider(value: $shutterLog,
-                           in: log2(max(controls.minimumExposureDurationSeconds, 0.00001))...log2(max(controls.maximumExposureDurationSeconds, 0.00002)),
+                           in: shutterLogRange,
                            onEditingChanged: { if !$0 { apply(camera.exposureProgram) } })
                         .accessibilityLabel("Priority shutter duration").accessibilityIdentifier("pro-priority-shutter")
+                        .accessibilityValue(Self.shutterTitle(pow(2, shutterLog)))
+                        .accessibilityAdjustableAction { direction in
+                            guard !controls.isApplying else { return }
+                            guard let sign = Self.adjustSign(direction) else { return }
+                            shutterLog = Self.clamped(shutterLog + sign / 3, shutterLogRange)
+                            apply(camera.exposureProgram)
+                        }
                 }
                 Text("Applied: ISO \(Int(controls.iso)) · \(Self.shutterTitle(controls.exposureDurationSeconds))")
                     .font(.caption).foregroundStyle(.secondary).monospacedDigit()
             }
             if capabilities.variableApertureSupported {
                 Text("Aperture f/\(aperture, specifier: "%.1f")").monospacedDigit()
-                Slider(value: $aperture, in: Double(capabilities.minimumAperture)...Double(capabilities.maximumAperture), onEditingChanged: {
+                Slider(value: $aperture, in: apertureRange, onEditingChanged: {
                     if !$0 { apply(camera.exposureProgram == .manual ? .manual : .aperturePriority, includeAperture: true) }
                 })
                 .accessibilityLabel("Lens aperture").accessibilityIdentifier("pro-aperture")
+                .accessibilityValue(String(format: "f/%.1f", aperture))
+                .accessibilityAdjustableAction { direction in
+                    guard !controls.isApplying else { return }
+                    guard let sign = Self.adjustSign(direction) else { return }
+                    let step = (apertureRange.upperBound - apertureRange.lowerBound) / 20
+                    aperture = Self.clamped(aperture + sign * step, apertureRange)
+                    apply(camera.exposureProgram == .manual ? .manual : .aperturePriority, includeAperture: true)
+                }
                 Text("Moving aperture selects Aperture Priority, or keeps full Manual when already selected.")
                     .font(.caption).foregroundStyle(.secondary)
             } else if capabilities.aperture > 0 {
@@ -155,6 +177,30 @@ struct ProCaptureControlsView: View {
             next[keyPath: keyPath] = value
             camera.setProCaptureSettings(next)
         })
+    }
+
+    private var isoRange: ClosedRange<Double> {
+        Double(max(controls.minimumISO, 1))...Double(max(controls.maximumISO, controls.minimumISO + 1))
+    }
+
+    private var shutterLogRange: ClosedRange<Double> {
+        log2(max(controls.minimumExposureDurationSeconds, 0.00001))...log2(max(controls.maximumExposureDurationSeconds, 0.00002))
+    }
+
+    private var apertureRange: ClosedRange<Double> {
+        Double(capabilities.minimumAperture)...Double(capabilities.maximumAperture)
+    }
+
+    private static func adjustSign(_ direction: AccessibilityAdjustmentDirection) -> Double? {
+        switch direction {
+        case .increment: return 1
+        case .decrement: return -1
+        @unknown default: return nil
+        }
+    }
+
+    private static func clamped(_ value: Double, _ range: ClosedRange<Double>) -> Double {
+        min(range.upperBound, max(range.lowerBound, value))
     }
 
     private func apply(_ program: CameraExposureProgram, includeAperture: Bool = false) {

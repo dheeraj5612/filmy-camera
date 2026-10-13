@@ -964,7 +964,7 @@ struct RecipeSwatch: View {
         // Let the caller's tile bounds size the labels and border; an
         // aspect-filled image can otherwise expand them outside the tile.
         Color.clear.overlay {
-            if thumbnailRecipe == recipe, let thumbnailImage {
+            if thumbnailRecipe?.id == recipe.id, let thumbnailImage {
                 Image(uiImage: thumbnailImage)
                     .resizable()
                     .scaledToFill()
@@ -1024,14 +1024,19 @@ struct RecipeSwatch: View {
                 )
         }
         .task(id: recipe, priority: .utility) {
-            thumbnailImage = nil
-            thumbnailRecipe = recipe
+            // Keep the previous frame while the same look is edited so a slider
+            // drag does not blank the hero; a different look still blanks.
+            if thumbnailRecipe?.id != recipe.id {
+                thumbnailImage = nil
+                thumbnailRecipe = recipe
+            }
             thumbnailFailed = false
             // Reopening a cached collection should not blank every photograph
             // for the editor's debounce interval.
             if let cached = await RecipeSwatchRenderer.shared.cachedThumbnail(for: recipe) {
                 guard !Task.isCancelled else { return }
                 thumbnailImage = cached
+                thumbnailRecipe = recipe
                 return
             }
             // Only uncached slider revisions wait. Cancellation still prevents
@@ -1042,6 +1047,7 @@ struct RecipeSwatch: View {
             let renderedImage = await RecipeSwatchRenderer.shared.render(recipe: recipe)
             guard !Task.isCancelled else { return }
             thumbnailImage = renderedImage
+            thumbnailRecipe = recipe
             thumbnailFailed = renderedImage == nil
         }
     }
@@ -1074,7 +1080,8 @@ actor RecipeSwatchRenderer {
     private let sampleCache: NSCache<SampleKey, UIImage> = {
         let cache = NSCache<SampleKey, UIImage>()
         cache.countLimit = 48
-        cache.totalCostLimit = 12 * 1024 * 1024
+        // Sized for 48 entries of 384 x 512 RGBA8 (about 786 KB each).
+        cache.totalCostLimit = 40 * 1024 * 1024
         return cache
     }()
 

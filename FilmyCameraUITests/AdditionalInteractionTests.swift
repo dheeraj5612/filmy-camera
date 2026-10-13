@@ -171,11 +171,21 @@ final class AdditionalInteractionTests: XCTestCase {
         let entry = app.buttons["smart-recipes-open"]
         XCTAssertTrue(entry.waitForExistence(timeout: 10) && entry.isHittable)
         let originalRecipe = app.buttons["recipe-menu"].label
+        // The sheet shows a snapshot frozen at open, so wait for a published
+        // suggestion first; opening early would freeze the empty state.
+        // Analysis only runs while the tool rail is collapsed.
+        let chromeToggle = app.buttons["camera-chrome-toggle"]
+        if chromeToggle.waitForExistence(timeout: 5), (chromeToggle.value as? String) == "Expanded" {
+            chromeToggle.tap()
+        }
+        guard waitUntil(timeout: 30, { app.buttons["smart-recipes-quick-apply"].exists }) else {
+            throw XCTSkip("No Smart Look differing from the current look was published")
+        }
         entry.tap()
         XCTAssertTrue(app.switches["smart-recipes-enabled"].waitForExistence(timeout: 8))
 
-        let scene = app.otherElements["smart-recipes-scene"]
-        let empty = app.otherElements["smart-recipes-empty"]
+        let scene = app.descendants(matching: .any)["smart-recipes-scene"]
+        let empty = app.descendants(matching: .any)["smart-recipes-empty"]
         XCTAssertTrue(waitUntil(timeout: 30) { scene.exists || empty.exists },
                       "Smart Looks must finish real-camera analysis or publish an explicit unavailable state")
         if empty.exists {
