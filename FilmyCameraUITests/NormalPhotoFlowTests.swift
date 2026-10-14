@@ -758,17 +758,30 @@ final class NormalPhotoFlowTests: XCTestCase {
         // disposable simulator was pre-seeded. Resolve the in-app CTA and the
         // subsequent system prompt while waiting for Roll's loaded or empty
         // state; a missing count is never treated as an empty Roll.
-        var requestedReadAccess = false
-        let loaded = waitUntil(timeout: 30) {
+        var readAccessRequests = 0
+        var lastReadAccessRequest = Date.distantPast
+        var sawSystemPrompt = false
+        let loaded = waitUntil(timeout: 40) {
             if rollFrameCount() != nil { return true }
-            if tapPhotosPermissionPromptIfPresent() { return false }
+            if tapPhotosPermissionPromptIfPresent() {
+                sawSystemPrompt = true
+                return false
+            }
 
             // Request once, then handle the system alert directly. Repeated
             // CTA taps can be replayed after XCTest dismisses the alert onto
             // the newly positioned "Make your first frame" button.
+            // CI run 38493415557: the press landed on the button's centre, no
+            // prompt followed and the CTA stayed for 30 s. Ask one more time,
+            // only while no prompt has shown for 10 s after the first request.
             let permission = app.buttons["Allow Photos access"]
-            if !requestedReadAccess, permission.exists, permission.isHittable {
-                requestedReadAccess = true
+            let isFirstRequest = readAccessRequests == 0
+            let isRetry = readAccessRequests == 1 && !sawSystemPrompt
+                && Date().timeIntervalSince(lastReadAccessRequest) > 10
+            if isFirstRequest || isRetry, permission.exists, permission.isHittable {
+                if isRetry { attachScreenshot(named: "roll-photos-request-ignored") }
+                readAccessRequests += 1
+                lastReadAccessRequest = Date()
                 permission.tap()
             }
             return rollFrameCount() != nil
@@ -776,7 +789,8 @@ final class NormalPhotoFlowTests: XCTestCase {
         if !loaded {
             XCTFail(
                 "Roll did not publish a loaded frame count or empty state after Photos permission handling. " +
-                "Permission UI: \(photosPermissionPromptDescription())\nAccessibility tree:\n\(app.debugDescription)"
+                "Permission UI: \(photosPermissionPromptDescription()), requests: \(readAccessRequests), " +
+                "system prompt seen: \(sawSystemPrompt)\nAccessibility tree:\n\(app.debugDescription)"
             )
         }
     }
