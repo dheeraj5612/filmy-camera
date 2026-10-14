@@ -53,6 +53,24 @@ enum CameraActivityPolicy {
         }
         return .start
     }
+
+    /// On iPhone a `.large` sheet hides the viewfinder, so its frames can be
+    /// skipped. At regular width (iPad) the sheet is a form sheet and the
+    /// finder stays visible around it.
+    static func sheetCoversViewfinder(fullHeightSheetOpen: Bool, isCompactWidth: Bool) -> Bool {
+        fullHeightSheetOpen && isCompactWidth
+    }
+
+    /// Only an explicit compact width counts; a nil size class never pauses.
+    static func isCompactWidth(_ sizeClass: UserInterfaceSizeClass?) -> Bool {
+        sizeClass == .compact
+    }
+
+    /// The single decision for pausing preview frame delivery while the
+    /// session keeps running: an import, an import review, or a covering sheet.
+    static func pausesFrameDelivery(isImporting: Bool, hasImportReview: Bool, coveredBySheet: Bool) -> Bool {
+        isImporting || hasImportReview || coveredBySheet
+    }
 }
 
 /// Geometry of the letterboxed viewfinder.
@@ -172,6 +190,7 @@ struct CameraScreen: View {
     let isImportInProgress: Bool
 
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @AppStorage("showGrid") private var showGrid = true
@@ -639,6 +658,9 @@ struct CameraScreen: View {
         .onChange(of: viewModel.isImporting) { _, _ in
             updateCameraActivity()
             updateIdleTimer()
+        }
+        .onChange(of: isViewfinderCoveredBySheet) { _, _ in
+            updateCameraActivity()
         }
         .onChange(of: isImportInProgress) { _, _ in
             updateCameraActivity()
@@ -2618,6 +2640,31 @@ struct CameraScreen: View {
         viewModel.isReviewingImport
     }
 
+    /// The five `.large` sheets that hide the viewfinder at compact width.
+    /// Manual controls (medium detent) and the Fuji menu are excluded on
+    /// purpose: the finder is live behind them and the Fuji sampler consumes
+    /// frames.
+    private var isFullHeightSheetOpen: Bool {
+        isShowingLookLibrary || isShowingRecipeManager || recipeForDetail != nil
+            || isShowingSmartRecipes || isShowingCaptureSetup
+    }
+
+    /// A nil size class counts as not compact, so it never pauses.
+    private var isViewfinderCoveredBySheet: Bool {
+        CameraActivityPolicy.sheetCoversViewfinder(
+            fullHeightSheetOpen: isFullHeightSheetOpen,
+            isCompactWidth: CameraActivityPolicy.isCompactWidth(horizontalSizeClass)
+        )
+    }
+
+    private var pausesFrameDelivery: Bool {
+        CameraActivityPolicy.pausesFrameDelivery(
+            isImporting: isImporting,
+            hasImportReview: viewModel.isReviewingImport,
+            coveredBySheet: isViewfinderCoveredBySheet
+        )
+    }
+
     private var isViewfinderChromePreview: Bool {
         ProcessInfo.processInfo.arguments.contains("-ui-testing-viewfinder-chrome")
     }
@@ -2872,9 +2919,7 @@ struct CameraScreen: View {
 
     private func resumeCamera() {
         guard scenePhase == .active, isCameraTabActive, !isImporting else { return }
-        if !viewModel.isReviewingImport {
-            camera.setFrameDeliveryPaused(false)
-        }
+        camera.setFrameDeliveryPaused(pausesFrameDelivery)
         camera.start()
     }
 
@@ -2903,7 +2948,7 @@ struct CameraScreen: View {
 
         switch action {
         case .start:
-            camera.setFrameDeliveryPaused(false)
+            camera.setFrameDeliveryPaused(pausesFrameDelivery)
             camera.start()
         case .stop:
             camera.stop()
@@ -2912,7 +2957,7 @@ struct CameraScreen: View {
                 hasReview: viewModel.reviewImage != nil
             ))
         case .hold:
-            camera.setFrameDeliveryPaused(false)
+            camera.setFrameDeliveryPaused(pausesFrameDelivery)
         }
     }
 

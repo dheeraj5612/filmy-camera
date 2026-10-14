@@ -1,5 +1,6 @@
 import XCTest
 import Combine
+import SwiftUI
 @preconcurrency import AVFoundation
 import CoreVideo
 @testable import FilmyCamera
@@ -699,6 +700,55 @@ final class CameraServiceAvailabilityTests: XCTestCase {
             CameraActivityPolicy.inactiveGracePeriod
         )
         XCTAssertEqual(CameraActivityPolicy.inactiveGracePeriod, 8)
+    }
+
+    func testCompactWidthMappingTreatsNilAndRegularAsNotCompact() {
+        XCTAssertTrue(CameraActivityPolicy.isCompactWidth(.compact))
+        XCTAssertFalse(CameraActivityPolicy.isCompactWidth(.regular))
+        XCTAssertFalse(CameraActivityPolicy.isCompactWidth(nil), "A nil size class must not pause")
+    }
+
+    func testFrameDeliveryPausePolicyCoversSheetImportReviewAndSizeClass() {
+        func pauses(sheet: Bool, importing: Bool, review: Bool, compact: Bool) -> Bool {
+            CameraActivityPolicy.pausesFrameDelivery(
+                isImporting: importing,
+                hasImportReview: review,
+                coveredBySheet: CameraActivityPolicy.sheetCoversViewfinder(
+                    fullHeightSheetOpen: sheet,
+                    isCompactWidth: compact
+                )
+            )
+        }
+        let flags = [false, true]
+        for sheet in flags {
+            for importing in flags {
+                for review in flags {
+                    for compact in flags {
+                        XCTAssertEqual(
+                            pauses(sheet: sheet, importing: importing, review: review, compact: compact),
+                            importing || review || (sheet && compact),
+                            "sheet=\(sheet) import=\(importing) review=\(review) compact=\(compact)"
+                        )
+                    }
+                }
+            }
+        }
+        XCTAssertTrue(
+            pauses(sheet: false, importing: false, review: true, compact: true),
+            "Review active with the sheet closed stays paused"
+        )
+        XCTAssertFalse(
+            pauses(sheet: true, importing: false, review: false, compact: false),
+            "Regular width never pauses for a sheet alone"
+        )
+        XCTAssertTrue(
+            pauses(sheet: true, importing: false, review: false, compact: true),
+            "Compact width with a sheet pauses"
+        )
+        XCTAssertFalse(
+            pauses(sheet: false, importing: false, review: false, compact: true),
+            "Nothing open never pauses"
+        )
     }
 
     func testFlashSelectionSurvivesAPreCaptureRefreshWithoutPersistence() {
