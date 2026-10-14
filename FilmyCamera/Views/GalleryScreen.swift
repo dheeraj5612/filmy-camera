@@ -187,7 +187,10 @@ struct GalleryScreen: View {
                 await photoLibrary.refreshAndWait()
             }
         }
-        .sheet(isPresented: $isShowingCaptures, onDismiss: { capturesModel.refresh() }) {
+        .sheet(isPresented: $isShowingCaptures, onDismiss: {
+            capturesModel.errorMessage = nil
+            capturesModel.refresh()
+        }) {
             CaptureModesLibrary(model: capturesModel, readOnly: true)
         }
     }
@@ -273,6 +276,7 @@ struct GalleryScreen: View {
     private var rollCapturesRow: some View {
         Button {
             HapticFeedback.play(.selection)
+            capturesModel.errorMessage = nil
             isShowingCaptures = true
         } label: {
             HStack(spacing: 6) {

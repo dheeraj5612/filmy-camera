@@ -203,8 +203,10 @@ final class HistogramInteractionTests: XCTestCase {
         dragPreviewUp(preview)
         // The readout lingers 1.5 s after lift: resolve it before any slow query.
         XCTAssertTrue(readout.waitForExistence(timeout: 1), "A vertical drag must show the EV readout")
-        let readoutLabel = readout.label
-        let readoutFrame = readout.frame
+        // One snapshot: the 1.5 s linger can remove the element between queries.
+        let snap = try readout.snapshot()
+        let readoutLabel = snap.label
+        let readoutFrame = snap.frame
         attachScreenshot("exposure-drag-readout", settle: 0)
         XCTAssertTrue(readoutLabel.hasSuffix(" EV"))
         XCTAssertTrue(preview.frame.contains(readoutFrame))
@@ -235,7 +237,8 @@ final class HistogramInteractionTests: XCTestCase {
         let largePreview = app.descendants(matching: .any)["camera-preview"]
         dragPreviewUp(largePreview)
         XCTAssertTrue(readout.waitForExistence(timeout: 1))
-        let largeReadoutFrame = readout.frame
+        let largeSnap = try readout.snapshot()
+        let largeReadoutFrame = largeSnap.frame
         attachScreenshot("exposure-drag-readout-largest-text", settle: 0)
         XCTAssertTrue(largePreview.frame.contains(largeReadoutFrame),
                       "The readout must fit the finder at the largest text size")

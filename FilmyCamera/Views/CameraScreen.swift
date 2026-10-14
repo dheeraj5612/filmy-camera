@@ -189,6 +189,7 @@ struct CameraScreen: View {
     @AppStorage("cameraGestureHintSeen.v1") private var gestureHintSeen = false
     @State private var originalPreviewOverride: Bool?
     @GestureState private var isHoldingOriginalPreview = false
+    @GestureState private var isPreviewDragActive = false
     @State private var isShowingLookLibrary = false
     @State private var isShowingRecipeManager = false
     @State private var quickRecipeQuery = ""
@@ -458,6 +459,10 @@ struct CameraScreen: View {
         .onChange(of: camera.isRunning) { _, running in
             if !running { isShowingExposureReadout = false }
         }
+        .onChange(of: isPreviewDragActive) { _, active in
+            // One main-actor turn later, so a normal onEnded always runs first.
+            if !active { Task { @MainActor in resetCancelledPreviewDrag() } }
+        }
         // Re-enter through current SwiftUI state after the system callback,
         // avoiding a retained callback snapshot with stale scene values.
         .onChange(of: hardwareShutterCaptureRequest) { _, _ in capture() }
@@ -589,6 +594,8 @@ struct CameraScreen: View {
         }
         .onChange(of: viewModel.isReviewingImport) { _, hasReview in
             if hasReview {
+                // The linger task dies with the unmounted readout, so clear it here.
+                isShowingExposureReadout = false
                 camera.setFrameDeliveryPaused(true)
             }
             updateCameraActivity()
@@ -1110,8 +1117,25 @@ struct CameraScreen: View {
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) { isShowingExposureReadout = false }
     }
 
+    /// A system-cancelled drag never calls onEnded. This runs one turn after
+    /// the gesture ends, so a normal onEnded has already read previewDragAxis
+    /// and reset it; the reset is then a no-op. A newer drag is left alone.
+    private func resetCancelledPreviewDrag() {
+        guard !isPreviewDragActive else { return }
+        let wasInProgress: Bool = previewDragAxis != nil || previewDragMaySelectLook != nil
+        previewDragMaySelectLook = nil
+        previewDragAxis = nil
+        exposureDragStart = nil
+        exposureDragCommitted = false
+        exposureDragSentBias = nil
+        if wasInProgress { focusFeedbackRevision += 1 }
+    }
+
     private func previewLookSwipe(in size: CGSize) -> some Gesture {
         DragGesture(minimumDistance: 12)
+            .updating($isPreviewDragActive) { _, state, _ in
+                if !state { state = true }
+            }
             .onChanged { value in
                 let enabled = canTriggerShutter && !isPinching && Date() >= suppressLookSwipeUntil
                 if previewDragMaySelectLook == nil {
