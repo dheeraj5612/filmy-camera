@@ -5,6 +5,10 @@ import CoreMedia
 import CoreLocation
 import Foundation
 import UIKit
+import os
+
+/// Device-measurement signposts for the preview frame path (static names only).
+private let previewSignposter = OSSignposter(subsystem: Bundle.main.bundleIdentifier ?? "FilmyCamera", category: "preview")
 
 /// Owns the AVFoundation session and provides CIImage frames to the preview.
 ///
@@ -4609,7 +4613,6 @@ extension CameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
         }
 
         let image = Self.previewImage(from: pixelBuffer)
-        processFocusAssistsOnVideoQueue(image, connection: connection)
 
         // CIImage is immutable and the callback is intentionally delivered on
         // main, where SwiftUI/Metal preview views can consume it safely. The
@@ -4622,6 +4625,15 @@ extension CameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
             frameDeliveryGate.submit(image)
         }
         frameHandlersLock.unlock()
+        if isStillDeliverable, previewSignposter.isEnabled { previewSignposter.emitEvent("frameSubmit") }
+
+        // Invariant: pause check, then submit, then assists. Assists run after the
+        // frame is handed to the gate so Vision and loupe work cannot delay preview
+        // delivery. They stay on this queue. The interval opens only when an assist is on.
+        guard videoTrackingEnabled || videoLoupeEnabled else { return }
+        let assistState = previewSignposter.beginInterval("focusAssist")
+        processFocusAssistsOnVideoQueue(image, connection: connection)
+        previewSignposter.endInterval("focusAssist", assistState)
     }
 }
 

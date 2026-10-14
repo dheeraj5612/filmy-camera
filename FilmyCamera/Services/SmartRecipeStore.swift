@@ -151,7 +151,8 @@ final class SmartRecipeStore: ObservableObject {
     static let intentKey = "smartRecipes.intent.v1"
     @Published private(set) var isEnabled: Bool
     @Published private(set) var intent: SmartRecipeIntent
-    @Published private(set) var snapshot: SmartRecipeSnapshot?
+    /// Published by hand: a silent refresh of the same displayed scene stores a fresher frame without a view update.
+    private(set) var snapshot: SmartRecipeSnapshot?
     @Published private(set) var status: Status = .waiting
     @Published private(set) var undo: SmartRecipeUndo?
     private let defaults: UserDefaults
@@ -190,6 +191,14 @@ final class SmartRecipeStore: ObservableObject {
         return value
     }
 
+    private func storeSnapshot(_ value: SmartRecipeSnapshot?, publish: Bool) {
+        if publish { objectWillChange.send() }
+        snapshot = value
+    }
+    private func setStatus(_ value: Status) {
+        if status != value { status = value }
+    }
+
     func setEnabled(_ enabled: Bool) {
         guard isEnabled != enabled else { return }
         isEnabled = enabled
@@ -214,7 +223,7 @@ final class SmartRecipeStore: ObservableObject {
         guard active, isEnabled, !recipes.isEmpty else { stop(); return }
         isActive = true
         guard handlerID == nil else { return }
-        status = .analyzing
+        setStatus(.analyzing)
         handlerID = camera.installFrameHandler { [weak self] image in
             if Thread.isMainThread {
                 MainActor.assumeIsolated { self?.receive(image) }
@@ -231,16 +240,16 @@ final class SmartRecipeStore: ObservableObject {
         handlerID = nil
         isActive = false
         invalidateScene()
-        status = isEnabled ? .waiting : .off
+        setStatus(isEnabled ? .waiting : .off)
     }
     /// Invalidates analysis on lens, zoom, orientation, crop, and camera-position changes.
     func invalidateScene() {
         gate.invalidate()
         stabilizer.reset()
-        snapshot = nil
+        if snapshot != nil { storeSnapshot(nil, publish: true) }
         lastFrameTime = nil
         consecutiveFailures = 0
-        if isEnabled && isActive { status = .analyzing }
+        if isEnabled && isActive { setStatus(.analyzing) }
     }
     func recordSelection(previousID: String, appliedID: String) {
         guard previousID != appliedID else { return }
@@ -250,6 +259,27 @@ final class SmartRecipeStore: ObservableObject {
         if undo?.target(currentID: currentID, availableIDs: availableIDs) == nil { undo = nil }
     }
     func clearUndo() { undo = nil }
+
+    /// Applies one successful analysis result. Internal so tests can feed results without the private worker.
+    func applyAnalyzed(_ frame: SmartAnalyzedFrame, recipes: [FilmRecipe], favorites: Set<String>, intent requestedIntent: SmartRecipeIntent,
+                         now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        consecutiveFailures = 0
+        let candidate = SmartRecipeSnapshot(id: UUID(), scene: frame.scene, image: frame.image,
+            catalog: recipes, favoriteIDs: favorites, usedVision: frame.usedVision)
+        let ranked = candidate.options(intent: requestedIntent)
+        let identifiers = ranked.map(\.id)
+        let signature = ([frame.scene.kind.rawValue, requestedIntent.rawValue] + identifiers).joined(separator: "|")
+        if stabilizer.shouldPublish(signature: signature, now: now) {
+            optionsCache = (id: candidate.id, intent: requestedIntent, value: ranked)
+            storeSnapshot(candidate, publish: true)
+            setStatus(identifiers.isEmpty ? .unavailable : .ready)
+        } else if stabilizer.displayed == signature {
+            // Refresh the owned small frame without reshuffling tap targets or publishing a view update.
+            optionsCache = (id: candidate.id, intent: requestedIntent, value: ranked)
+            storeSnapshot(candidate, publish: false)
+            setStatus(identifiers.isEmpty ? .unavailable : .ready)
+        }
+    }
 
     private func receive(_ image: CIImage) {
         guard isActive, isEnabled, let camera else { return }
@@ -263,7 +293,7 @@ final class SmartRecipeStore: ObservableObject {
         }
         let interval = ProcessInfo.processInfo.isLowPowerModeEnabled ? 4.0 : thermal == .fair ? 3.0 : 1.5
         guard let ticket = gate.begin(now: now, interval: interval) else { return }
-        if snapshot == nil { status = .analyzing }
+        if snapshot == nil { setStatus(.analyzing) }
         let recipes = catalog
         let favorites = favoriteIDs
         let requestedIntent = intent
@@ -272,25 +302,13 @@ final class SmartRecipeStore: ObservableObject {
                 guard let self, self.gate.finish(ticket), self.isActive, self.isEnabled else { return }
                 switch result {
                 case .success(let frame):
-                    self.consecutiveFailures = 0
-                    let candidate = SmartRecipeSnapshot(id: UUID(), scene: frame.scene, image: frame.image,
-                        catalog: recipes, favoriteIDs: favorites, usedVision: frame.usedVision)
-                    let identifiers = candidate.options(intent: requestedIntent).map(\.id)
-                    let signature = ([frame.scene.kind.rawValue, requestedIntent.rawValue] + identifiers).joined(separator: "|")
-                    if self.stabilizer.shouldPublish(signature: signature, now: ProcessInfo.processInfo.systemUptime) {
-                        self.snapshot = candidate
-                        self.status = identifiers.isEmpty ? .unavailable : .ready
-                    } else if self.stabilizer.displayed == signature {
-                        // Refresh the owned small frame without reshuffling tap targets.
-                        self.snapshot = candidate
-                        self.status = identifiers.isEmpty ? .unavailable : .ready
-                    }
+                    self.applyAnalyzed(frame, recipes: recipes, favorites: favorites, intent: requestedIntent)
                 case .failure(let error):
                     self.consecutiveFailures += 1
                     if error == .unusableFrame || self.consecutiveFailures >= 2 {
-                        self.snapshot = nil
+                        if self.snapshot != nil { self.storeSnapshot(nil, publish: true) }
                         self.stabilizer.reset()
-                        self.status = error == .unusableFrame ? .insufficientLight : .unavailable
+                        self.setStatus(error == .unusableFrame ? .insufficientLight : .unavailable)
                     }
                 }
             }

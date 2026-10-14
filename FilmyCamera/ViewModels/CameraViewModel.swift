@@ -763,6 +763,21 @@ final class CameraViewModel: ObservableObject {
         let finish = work.finish
         let grainSeed = work.grainSeed
         let document: FilmyPhotoDocument
+        // The render only needs the captured bytes, so it overlaps the original write.
+        let renderTask = Task.detached(priority: .userInitiated) { () -> RenderedPhoto? in
+            // Test-only seam: an override never falls through to the real render.
+            if let renderOverride { return renderOverride() }
+            return autoreleasepool {
+                Self.render(
+                    sourceData: work.photo.fileData, recipe: recipe,
+                    viewportSize: work.viewport, previewDrawableSize: work.drawable,
+                    capturedAt: work.photo.capturedAt, flashFired: work.photo.flashFired,
+                    location: work.photo.location,
+                    grainSeed: grainSeed, finish: finish, outputSettings: work.photo.outputSettings,
+                    dateStampEnabled: work.dateStampEnabled, dateStampText: work.dateStampText
+                )
+            }
+        }
         do {
             document = try await photoStore.create(
                 processed: work.photo.fileData, raw: work.photo.rawFileData,
@@ -778,25 +793,15 @@ final class CameraViewModel: ObservableObject {
         } catch {
             // Keep the captured bytes and owned Live movie for an explicit
             // retry. A disk failure must not silently throw away a RAW capture.
+            // Let the render finish and drop it before re-enabling the shutter,
+            // so a 48 MP render cannot overlap the retry.
+            _ = await renderTask.value
             pendingOriginalRetention = work
             isCapturing = false
             showToast("Original not saved. Free storage, then tap the shutter to retry. Keep Filmy open.", style: .error)
             return false
         }
-        let rendered = await Task.detached(priority: .userInitiated) { () -> RenderedPhoto? in
-            // Test-only seam: an override never falls through to the real render.
-            if let renderOverride { return renderOverride() }
-            return autoreleasepool {
-                Self.render(
-                    sourceData: work.photo.fileData, recipe: recipe,
-                    viewportSize: work.viewport, previewDrawableSize: work.drawable,
-                    capturedAt: work.photo.capturedAt, flashFired: work.photo.flashFired,
-                    location: work.photo.location,
-                    grainSeed: grainSeed, finish: finish, outputSettings: work.photo.outputSettings,
-                    dateStampEnabled: work.dateStampEnabled, dateStampText: work.dateStampText
-                )
-            }
-        }.value
+        let rendered = await renderTask.value
         guard var renderedPhoto = rendered, let firstRevision = document.currentRevision else {
             isCapturing = false
             showToast("Original retained in Filmy originals. Open it there to retry developing this look.", style: .error)

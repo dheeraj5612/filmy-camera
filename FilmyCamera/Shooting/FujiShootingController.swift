@@ -136,7 +136,16 @@ final class FujiShootingController: ObservableObject {
         refreshPreview()
     }
 
-    func invalidatePreview() { sampler.reset(); hybridImage = nil; focusImage = nil; bufferedCount = 0; refreshPreview() }
+    /// Test seam: the private(set) preview images are otherwise only written by the sampler callback.
+    func setPreviewImagesForTesting(hybrid: UIImage?, focus: UIImage?) { hybridImage = hybrid; focusImage = focus }
+
+    func invalidatePreview() {
+        sampler.reset()
+        if hybridImage != nil { hybridImage = nil }
+        if focusImage != nil { focusImage = nil }
+        if bufferedCount != 0 { bufferedCount = 0 }
+        refreshPreview()
+    }
 
     func refreshPreview() {
         guard let camera, let viewModel else { return }
@@ -151,8 +160,8 @@ final class FujiShootingController: ObservableObject {
                 self.bufferedCount = result.bufferedCount
             }
         }
-        if settings.viewfinder != .hybrid { hybridImage = nil }
-        if settings.focusAssist == .off { focusImage = nil }
+        if settings.viewfinder != .hybrid, hybridImage != nil { hybridImage = nil }
+        if settings.focusAssist == .off, focusImage != nil { focusImage = nil }
         let profile = active && camera.isRunning ? settings.autoISOProfile : nil
         if !isBusy && (profile != appliedProfile || profileDeviceID != camera.manualControls.activeDeviceID) {
             camera.configureFujiAutoISO(profile)

@@ -439,6 +439,67 @@ final class CameraReviewSaveTests: XCTestCase {
         XCTAssertEqual(inventory.documents.count, 1)
     }
 
+    func testRenderStartsBeforeOriginalWriteOutcomeAndIsDiscardedWhenTheWriteFails() async throws {
+        final class RenderCounter: @unchecked Sendable {
+            private let lock = NSLock()
+            private var value = 0
+            func increment() { lock.lock(); value += 1; lock.unlock() }
+            var count: Int { lock.lock(); defer { lock.unlock() }; return value }
+        }
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let directory = CameraService.livePhotoTemporaryDirectory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let movie = directory.appendingPathComponent("\(UUID().uuidString).mov")
+        try Data([1, 2, 3]).write(to: movie)
+        defer { try? FileManager.default.removeItem(at: movie) }
+        var liveSettings = ProCaptureSettings()
+        liveSettings.livePhoto = true
+        liveSettings.format = .heif
+        liveSettings.resolution = .mp12
+        XCTAssertNil(liveSettings.incompatibility)
+        let source = try captureSourcePhoto()
+        let live = CameraService.CapturedPhoto(
+            fileData: source.fileData, capturedAt: source.capturedAt, dimensions: source.dimensions,
+            livePhotoMovieURL: movie, outputSettings: liveSettings
+        )
+
+        // The original cannot be written (the store root is a plain file).
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data([0]).write(to: root)
+        let store = FilmyPhotoStore(root: root)
+        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let saver = ControlledPhotoSaver()
+        let camera = CameraService()
+        let counter = RenderCounter()
+        let rendered = CameraViewModel.RenderedPhoto(image: UIImage(), data: Data([9]), capturedAt: source.capturedAt)
+
+        let result = await model.developCapturedPhotoForTesting(
+            live, recipe: model.selectedRecipe, camera: camera, photoLibrary: saver,
+            renderOverride: { counter.increment(); return rendered }
+        )
+        XCTAssertFalse(result)
+        // Sequential code only renders after the write succeeds, so 1 here proves the render was
+        // launched before the write outcome was known. Its result must then be discarded.
+        XCTAssertEqual(counter.count, 1, "the render must be launched before the original write outcome is known")
+        XCTAssertTrue(saver.requests.isEmpty, "A discarded render must never reach the saver")
+        XCTAssertFalse(model.isCapturing)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: movie.path), "The Live movie must outlive a failed original write")
+
+        // The explicit retry still persists the original and saves a developed photo.
+        try FileManager.default.removeItem(at: root)
+        model.capture(camera: camera, photoLibrary: saver)
+        XCTAssertEqual(model.toastMessage, "Saving your earlier photo. No new photo is taken.")
+        for _ in 0..<200 where saver.requests.isEmpty { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(saver.requests.count, 1, "saver requests after the explicit retry")
+        XCTAssertFalse(try XCTUnwrap(saver.requests.first?.imageData).isEmpty, "The real retry render must hand the saver image data")
+        let inventory = try await store.inventory()
+        XCTAssertEqual(inventory.documents.count, 1, "The failed attempt must leave no document; the retry creates exactly one")
+        saver.completeLast(with: .success(()))
+        XCTAssertFalse(model.hasPendingCapture)
+    }
+
     func testLivePhotoWithInstantPrintIsRefusedBeforeCapturing() throws {
         let (defaults, suiteName) = try makeDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }

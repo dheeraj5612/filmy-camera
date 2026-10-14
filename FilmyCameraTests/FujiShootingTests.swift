@@ -1,3 +1,4 @@
+import Combine
 import CoreImage
 import UIKit
 import XCTest
@@ -180,6 +181,43 @@ final class FujiShootingTests: XCTestCase {
         XCTAssertEqual(controller.preferences.banks.first?.name, "Isolated C3")
         XCTAssertEqual(UserDefaults.standard.data(forKey: "fuji.shooting.v1"), standardBefore,
                        "An explicit preference suite must not write to standard defaults")
+    }
+
+    @MainActor
+    func testInvalidatePreviewWithNoStateDoesNotPublish() throws {
+        let suite = "FujiShootingTests.Invalidate.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let controller = FujiShootingController(defaults: defaults)
+        XCTAssertNil(controller.hybridImage)
+        XCTAssertNil(controller.focusImage)
+        XCTAssertEqual(controller.bufferedCount, 0)
+        var sends = 0
+        let cancellable = controller.objectWillChange.sink { sends += 1 }
+        defer { cancellable.cancel() }
+
+        controller.invalidatePreview()
+        sends = 0
+        controller.invalidatePreview()
+        XCTAssertEqual(sends, 0, "objectWillChange sends on invalidatePreview() with nothing attached")
+    }
+
+    @MainActor
+    func testInvalidatePreviewClearsDisplayedImagesAndPublishes() throws {
+        let suite = "FujiShootingTests.InvalidateImages.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let controller = FujiShootingController(defaults: defaults)
+        controller.setPreviewImagesForTesting(hybrid: UIImage(), focus: UIImage())
+        XCTAssertNotNil(controller.hybridImage)
+        var sends = 0
+        let cancellable = controller.objectWillChange.sink { sends += 1 }
+        defer { cancellable.cancel() }
+
+        controller.invalidatePreview()
+        XCTAssertGreaterThan(sends, 0, "Clearing displayed preview images must notify observers")
+        XCTAssertNil(controller.hybridImage)
+        XCTAssertNil(controller.focusImage)
     }
 
     func testCompletionGateAllowsOnlyOneCallbackAcrossConcurrentRacers() async {

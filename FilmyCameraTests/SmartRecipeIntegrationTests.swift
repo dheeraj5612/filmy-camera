@@ -1,3 +1,4 @@
+import Combine
 import CoreImage
 import XCTest
 @testable import FilmyCamera
@@ -35,6 +36,128 @@ final class SmartRecipeIntegrationTests: XCTestCase {
             image: try XCTUnwrap(context.makeImage()), catalog: FilmRecipe.builtIns, favoriteIDs: [], usedVision: false)
         XCTAssertEqual(snapshot.options(intent: .balanced).map(\.id), snapshot.options(intent: .balanced).map(\.id))
         XCTAssertFalse(snapshot.options(intent: .balanced).isEmpty)
+    }
+
+    @MainActor
+    private func analyzedFrame(kind: SmartSceneKind = .people) throws -> SmartAnalyzedFrame {
+        let context = try XCTUnwrap(CGContext(data: nil, width: 2, height: 2, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        return SmartAnalyzedFrame(scene: SmartScene(kind: kind, evidence: 0.8, metrics: .init(), hasFaces: kind == .people),
+                                  image: try XCTUnwrap(context.makeImage()), usedVision: false)
+    }
+
+    @MainActor
+    func testStableSceneTickDoesNotPublish() throws {
+        let suite = "SmartRecipeIntegrationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SmartRecipeStore(defaults: defaults)
+        let frame = try analyzedFrame()
+        var sends = 0
+        let cancellable = store.objectWillChange.sink { sends += 1 }
+        defer { cancellable.cancel() }
+
+        // The stabilizer needs two matching observations before it displays a scene.
+        store.applyAnalyzed(frame, recipes: FilmRecipe.builtIns, favorites: [], intent: .balanced)
+        store.applyAnalyzed(frame, recipes: FilmRecipe.builtIns, favorites: [], intent: .balanced)
+        XCTAssertGreaterThan(sends, 0, "The display transition (nil to scene) must notify observers")
+        let firstID = try XCTUnwrap(store.snapshot?.id, "A stable scene must be displayed after two observations")
+        let optionIDs = store.options.map(\.id)
+        XCTAssertFalse(optionIDs.isEmpty)
+
+        sends = 0
+        store.applyAnalyzed(frame, recipes: FilmRecipe.builtIns, favorites: [], intent: .balanced)
+        XCTAssertEqual(sends, 0, "objectWillChange sends on a repeat tick of an unchanged scene")
+        let secondID = try XCTUnwrap(store.snapshot?.id)
+        XCTAssertNotEqual(secondID, firstID, "The silent refresh must still store the freshest frame")
+        XCTAssertEqual(store.options.map(\.id), optionIDs, "Options must not reshuffle on a repeat tick")
+    }
+
+    @MainActor
+    func testSceneSwitchPublishesOnceWhileStatusStaysReady() throws {
+        let suite = "SmartRecipeIntegrationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SmartRecipeStore(defaults: defaults)
+        let sceneA = try analyzedFrame(kind: .people)
+        let sceneB = try analyzedFrame(kind: .landscape)
+        let rankedB = SmartRecipeEngine.rank(scene: sceneB.scene, profiles: FilmRecipe.builtIns.map(SmartRecipeProfile.init(recipe:)), intent: .balanced)
+        XCTAssertFalse(rankedB.isEmpty)
+
+        store.applyAnalyzed(sceneA, recipes: FilmRecipe.builtIns, favorites: [], intent: .balanced, now: 100)
+        store.applyAnalyzed(sceneA, recipes: FilmRecipe.builtIns, favorites: [], intent: .balanced, now: 101)
+        XCTAssertEqual(store.status, .ready)
+        XCTAssertEqual(store.snapshot?.scene.kind, .people)
+
+        var sends = 0
+        let cancellable = store.objectWillChange.sink { sends += 1 }
+        defer { cancellable.cancel() }
+
+        // The first observation of the new scene only becomes pending.
+        store.applyAnalyzed(sceneB, recipes: FilmRecipe.builtIns, favorites: [], intent: .balanced, now: 110)
+        XCTAssertEqual(sends, 0)
+        XCTAssertEqual(store.snapshot?.scene.kind, .people)
+
+        store.applyAnalyzed(sceneB, recipes: FilmRecipe.builtIns, favorites: [], intent: .balanced, now: 111)
+        XCTAssertEqual(sends, 1, "A displayed scene switch must notify observers exactly once")
+        XCTAssertEqual(store.status, .ready)
+        XCTAssertEqual(store.snapshot?.scene.kind, .landscape)
+        XCTAssertFalse(store.options.isEmpty)
+    }
+
+    @MainActor
+    func testInvalidateSceneClearsDisplayedSnapshotAndPublishes() throws {
+        let suite = "SmartRecipeIntegrationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SmartRecipeStore(defaults: defaults)
+        let frame = try analyzedFrame()
+        store.applyAnalyzed(frame, recipes: FilmRecipe.builtIns, favorites: [], intent: .balanced)
+        store.applyAnalyzed(frame, recipes: FilmRecipe.builtIns, favorites: [], intent: .balanced)
+        XCTAssertNotNil(store.snapshot)
+        var sends = 0
+        let cancellable = store.objectWillChange.sink { sends += 1 }
+        defer { cancellable.cancel() }
+
+        store.invalidateScene()
+        XCTAssertGreaterThan(sends, 0, "Clearing a displayed snapshot must notify observers")
+        XCTAssertNil(store.snapshot)
+    }
+
+    @MainActor
+    func testRepeatedInvalidateSceneOnActiveStoreDoesNotPublish() throws {
+        let suite = "SmartRecipeIntegrationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SmartRecipeStore(defaults: defaults)
+        let camera = CameraService()
+        store.configure(camera: camera, active: true, recipes: FilmRecipe.builtIns)
+        defer { store.stop() }
+        XCTAssertEqual(store.status, .analyzing)
+        var sends = 0
+        let cancellable = store.objectWillChange.sink { sends += 1 }
+        defer { cancellable.cancel() }
+
+        store.invalidateScene()
+        store.invalidateScene()
+        XCTAssertEqual(sends, 0, "objectWillChange sends on repeated invalidateScene() of an active, empty store")
+    }
+
+    @MainActor
+    func testInvalidateSceneWithNoSnapshotDoesNotPublish() throws {
+        let suite = "SmartRecipeIntegrationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SmartRecipeStore(defaults: defaults)
+        XCTAssertNil(store.snapshot)
+        var sends = 0
+        let cancellable = store.objectWillChange.sink { sends += 1 }
+        defer { cancellable.cancel() }
+
+        store.invalidateScene()
+        sends = 0
+        store.invalidateScene()
+        XCTAssertEqual(sends, 0, "objectWillChange sends on invalidateScene() with no snapshot")
     }
 
     func testProjectionUsesEffectiveRecipeControls() {
