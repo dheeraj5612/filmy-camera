@@ -118,6 +118,9 @@ struct FilmyPhotoEditorView: View {
     @State private var rawURL: URL?
     @State private var liveURL: URL?
     @State private var showingOriginal = false
+    /// True while a look or finish pick renders its preview.
+    @State private var developingPreview = false
+    @State private var showingLookLibrary = false
     @State private var showingLive = false
     @State private var busy = false
     @State private var message: String?
@@ -135,49 +138,18 @@ struct FilmyPhotoEditorView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                imagePreview
-                if let document, let editing = document.revisionForEditing(selectedRevisionID) {
-                    Text(document.capturedAt, format: .dateTime.month().day().year().hour().minute()).foregroundStyle(.secondary)
-                    Text("\(editing.output.format.title) · \(editing.output.resolution.title) requested · \(editing.output.dynamicRange == .hdr ? "HDR PQ" : "SDR")")
-                        .font(.caption).monospacedDigit()
-                    Toggle("Compare original", isOn: $showingOriginal).accessibilityIdentifier("filmy-compare-original")
-                    if let recipe {
-                        Picker("Film look", selection: Binding(get: { recipe.id }, set: { id in
-                            if let match = FilmRecipe.builtIns.first(where: { $0.id == id }) { self.recipe = match }
-                        })) {
-                            if !FilmRecipe.builtIns.contains(where: { $0.id == recipe.id }) { Text(recipe.name).tag(recipe.id) }
-                            ForEach(FilmRecipe.builtIns) { Text($0.name).tag($0.id) }
-                        }
-                        .accessibilityIdentifier("filmy-edit-recipe")
-                    }
-                    Picker("Finish", selection: $finish) {
-                        Text("Photo").tag(PhotoFinish.photo)
-                        Text("Instant Print").tag(PhotoFinish.instantPrint).disabled(document.hasLivePhoto)
-                    }.pickerStyle(.segmented)
-                    developmentActions
-                    if let message { Text(message).font(.callout).accessibilityIdentifier("filmy-document-message") }
-                    Text("Editing previews are SDR and limited to 1800 pixels. HDR is preserved in the saved HEIF when selected. \(saveActionName) renders from the retained original at the selected output resolution. Every save creates a new version.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    revisionPicker(document)
-                    exportControls(document)
-                } else if let message {
-                    Text(message).font(.callout).accessibilityIdentifier("filmy-document-message")
-                }
-                if busy { ProgressView("Processing photo").frame(maxWidth: .infinity) }
-                if !savesAsNewFrame {
-                    Button("Delete Filmy original and versions", role: .destructive) { confirmDelete = true }
-                        .accessibilityIdentifier("filmy-delete-original")
-                }
-            }
-            .padding(20).frame(maxWidth: 760).frame(maxWidth: .infinity)
+        GeometryReader { geometry in
+            editorLayout(size: geometry.size)
         }
+        .background(FilmyTheme.background)
+        .safeAreaInset(edge: .bottom, spacing: 0) { saveBar }
         .navigationTitle(savesAsNewFrame ? "Edit look" : "Develop again")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .toolbar { editLookToolbar }
         .interactiveDismissDisabled(savesAsNewFrame && busy)
         .disabled(busy)
+        .sheet(isPresented: $showingLookLibrary) { lookLibrarySheet() }
         .task { await load() }
         .onChange(of: message) { _, newValue in
             if let newValue { UIAccessibility.post(notification: .announcement, argument: newValue) }
@@ -192,56 +164,325 @@ struct FilmyPhotoEditorView: View {
         } message: { Text("This cannot be undone. Existing exports in Apple Photos will not be deleted.") }
     }
 
+    private func editorLayout(size: CGSize) -> some View {
+        let width = min(size.width, 760)
+        let maxBox = photoMaxBox(width: width, available: size.height)
+        return VStack(spacing: 0) {
+            photoArea(maxBox: maxBox)
+            ScrollView {
+                secondaryControls
+                    .padding(.horizontal, FilmyTheme.pageMargin)
+                    .padding(.vertical, 12)
+            }
+        }
+        .frame(width: width)
+        .frame(maxWidth: .infinity)
+    }
+
+    /// Largest box the photo may fill. Non-accessibility sizes keep 124 pt for
+    /// the controls below the photo; accessibility sizes give it 55%.
+    private func photoMaxBox(width: CGFloat, available: CGFloat) -> CGSize {
+        let boxWidth = max(width - FilmyTheme.pageMargin, 1)
+        let boxHeight: CGFloat = dynamicTypeSize.isAccessibilitySize
+            ? max(available * 0.55, 160)
+            : max(available - 124, 160)
+        return CGSize(width: boxWidth, height: boxHeight)
+    }
+
+    private func photoArea(maxBox: CGSize) -> some View {
+        imagePreview(maxBox: maxBox)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 4)
+    }
+
+    private var secondaryControls: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if busy { ProgressView("Processing photo").frame(maxWidth: .infinity) }
+            if let document, let editing = document.revisionForEditing(selectedRevisionID) {
+                editingControls(document, editing)
+            }
+            if !savesAsNewFrame {
+                Button("Delete Filmy original and versions", role: .destructive) { confirmDelete = true }
+                    .accessibilityIdentifier("filmy-delete-original")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func editingControls(_ document: FilmyPhotoDocument, _ editing: FilmyPhotoRevision) -> some View {
+        if let recipe { lookRow(recipe) }
+        Toggle("Compare original", isOn: $showingOriginal).accessibilityIdentifier("filmy-compare-original")
+        finishRow(document)
+        revisionPicker(document)
+        detailsGroup(document, editing)
+        exportControls(document)
+    }
+
+    private func lookRow(_ recipe: FilmRecipe) -> some View {
+        let nameLines: Int = dynamicTypeSize.isAccessibilitySize ? 3 : 1
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        return Button {
+            showingLookLibrary = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "camera.filters").foregroundStyle(FilmyTheme.accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Film look")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(FilmyTheme.secondary)
+                    Text(recipe.name)
+                        .font(.headline)
+                        .foregroundStyle(FilmyTheme.primary)
+                        .lineLimit(nameLines)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(FilmyTheme.tertiary)
+            }
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+            .background(FilmyTheme.panel, in: shape)
+            .contentShape(shape)
+        }
+        .buttonStyle(.pressable)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Film look")
+        .accessibilityValue(recipe.name)
+        .accessibilityHint("Opens the look library. Your original is unchanged.")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("filmy-edit-recipe")
+    }
+
+    /// Looks offered by the library: allowed built-ins with the user's saved
+    /// look edits resolved behind full access, read only. The frame's own look
+    /// maps to the recipe saved in its version so re-picking restores it.
+    private var editorRecipes: [FilmRecipe] {
+        let stock: [FilmRecipe] = FilmRecipe.builtIns.filter { AppConfiguration.isRecipeAllowed($0.id) }
+        var overrides: [String: FilmRecipe] = [:]
+        if MembershipStore.shared.hasFullAccess {
+            let stored: Data? = UserDefaults.standard.data(forKey: CameraViewModel.recipeOverridesKey)
+            overrides = CameraViewModel.decodeRecipeOverrides(from: stored).recipes
+        }
+        let savedRecipe: FilmRecipe? = document?.revisionForEditing(selectedRevisionID)?.recipe
+        return stock.map { base -> FilmRecipe in
+            if let savedRecipe, savedRecipe.id == base.id { return savedRecipe }
+            guard let saved = overrides[base.id] else { return base }
+            var resolved: FilmRecipe = base
+            resolved.applyControlValues(from: saved)
+            resolved.markUserModified(parentRecipeID: base.id)
+            return resolved
+        }
+    }
+
+    private func lookLibrarySheet() -> some View {
+        LookLibraryView(
+            recipes: editorRecipes,
+            selectedRecipeID: recipe?.id ?? "",
+            selectionIdentifierPrefix: "filmy-look",
+            subtitle: "Choose a look for this photo. Your original is unchanged.",
+            onSelect: { (candidate: FilmRecipe) in selectLook(candidate) },
+            onClose: { showingLookLibrary = false }
+        )
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+        .presentationBackground(FilmyTheme.background)
+        .presentationCornerRadius(28)
+    }
+
+    private func selectLook(_ candidate: FilmRecipe) {
+        guard !busy else { return }
+        showingLookLibrary = false
+        guard candidate.id != recipe?.id else { return }
+        recipe = candidate
+        startPreview()
+    }
+
+    private func detailsGroup(_ document: FilmyPhotoDocument, _ editing: FilmyPhotoRevision) -> some View {
+        DisclosureGroup("Details") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(document.capturedAt, format: .dateTime.month().day().year().hour().minute()).foregroundStyle(.secondary)
+                Text("\(editing.output.format.title) · \(editing.output.resolution.title) requested · \(editing.output.dynamicRange == .hdr ? "HDR PQ" : "SDR")")
+                    .font(.caption).monospacedDigit()
+                Text("Editing previews are SDR and limited to 1800 pixels. HDR is preserved in the saved HEIF when selected. \(saveActionName) renders from the retained original at the selected output resolution. Every save creates a new version.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 4)
+        }
+        .accessibilityIdentifier("filmy-edit-details")
+    }
+
+    private func finishRow(_ document: FilmyPhotoDocument) -> some View {
+        let isAX = dynamicTypeSize.isAccessibilitySize
+        let layout: AnyLayout = isAX
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 12))
+        return layout {
+            Text("Finish")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(FilmyTheme.secondary)
+                .accessibilityHidden(true)
+            finishTrack(document)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("filmy-edit-finish")
+    }
+
+    private func finishTrack(_ document: FilmyPhotoDocument) -> some View {
+        HStack(spacing: 0) {
+            finishSegment(.photo, title: "Photo", identifier: "filmy-edit-finish-photo", isDisabled: false)
+            finishSegment(.instantPrint, title: "Instant Print", identifier: "filmy-edit-finish-instant",
+                          isDisabled: document.hasLivePhoto)
+        }
+        .frame(maxWidth: .infinity)
+        .background(FilmyTheme.panel, in: Capsule())
+        .overlay(Capsule().stroke(FilmyTheme.line, lineWidth: 1))
+    }
+
+    private func finishSegment(_ target: PhotoFinish, title: String, identifier: String, isDisabled: Bool) -> some View {
+        let isSelected = finish == target
+        let traits: AccessibilityTraits = isSelected ? .isSelected : []
+        return Button {
+            selectFinish(target)
+        } label: {
+            trackSegmentLabel(title, isSelected: isSelected).frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.pressable)
+        .disabled(isDisabled)
+        .opacity(isDisabled ? 0.4 : 1)
+        .accessibilityLabel("Finish, \(title)")
+        .accessibilityAddTraits(traits)
+        .accessibilityIdentifier(identifier)
+    }
+
+    private func trackSegmentLabel(_ title: String, isSelected: Bool) -> some View {
+        Text(title)
+            .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+            .multilineTextAlignment(.center)
+            .minimumScaleFactor(0.8)
+            .font(.caption.weight(.bold))
+            .foregroundStyle(isSelected ? FilmyTheme.background : FilmyTheme.primary)
+            .padding(.horizontal, 12)
+            .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: 48)
+            .background {
+                if isSelected {
+                    Capsule().fill(FilmyTheme.accent).padding(3)
+                }
+            }
+            .contentShape(Rectangle())
+    }
+
+    private func selectFinish(_ new: PhotoFinish) {
+        guard new != finish else { return }
+        finish = new
+        startPreview()
+    }
+
+    /// A look or finish pick previews through the same render call as Save.
+    private func startPreview() {
+        Task {
+            developingPreview = true
+            await develop(save: false)
+            developingPreview = false
+        }
+    }
+
+    private var saveBar: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            messageLine
+            saveButton
+        }
+        .padding(.horizontal, FilmyTheme.pageMargin)
+        .padding(.vertical, 8)
+        .frame(maxWidth: 760)
+        .frame(maxWidth: .infinity)
+        .background(FilmyTheme.background)
+        .overlay(alignment: .top) { Divider() }
+    }
+
+    /// Reserves one footnote row so short messages never resize the photo;
+    /// long errors wrap in full, next to Save.
+    private var messageLine: some View {
+        ZStack(alignment: .leading) {
+            Text(" ").font(.footnote).hidden()
+            if let message {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(FilmyTheme.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("filmy-document-message")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var saveButton: some View {
+        if savesAsNewFrame {
+            Button("Save as new frame") { Task { await saveAsNewFrame() } }
+                .buttonStyle(.filmyPrimary)
+                .disabled(document == nil)
+                .accessibilityHint("Saves this look as a new version and adds it to your Roll as a new frame. This frame is kept.")
+                .accessibilityIdentifier("filmy-save-new-frame")
+        } else {
+            Button("Save version") { Task { await develop(save: true) } }
+                .buttonStyle(.filmyPrimary)
+                .disabled(document == nil)
+                .accessibilityIdentifier("filmy-save-version")
+        }
+    }
+
+    /// An unsaved look or finish: the selection differs from the version shown.
+    private var hasUnsavedChanges: Bool {
+        guard let recipe, let editing = document?.revisionForEditing(selectedRevisionID) else { return false }
+        return recipe.id != editing.recipe.id || finish != editing.finish
+    }
+
+    /// Only an unsaved pick reads Cancel; a saved version whose export failed
+    /// is kept in Originals, so closing then reads Done.
+    private var showsCancel: Bool { hasUnsavedChanges }
+
+    private var doneTitle: String { showsCancel ? "Cancel" : "Done" }
+
+    private var doneHint: String {
+        if hasUnsavedChanges { return "Closes without saving this look." }
+        if newFrameAwaitingExport != nil { return "Your saved version stays in Originals." }
+        return ""
+    }
+
     @ToolbarContentBuilder
     private var editLookToolbar: some ToolbarContent {
         if savesAsNewFrame {
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Done") { dismiss() }
+            ToolbarItem(placement: .cancellationAction) {
+                Button(doneTitle) { dismiss() }
                     .disabled(busy)
+                    .accessibilityHint(doneHint)
                     .accessibilityIdentifier("gallery-edit-look-done")
             }
         }
     }
 
-    private var imagePreview: some View {
-        Group {
-            if showingLive, let originalURL, let liveURL {
-                OriginalLivePhotoView(photoURL: originalURL, movieURL: liveURL)
-                    .frame(height: 400).accessibilityLabel("Original Live Photo. Touch and hold to play.")
-            } else if let image = showingOriginal ? originalPreview : preview {
-                Image(uiImage: image).resizable().scaledToFit().allowedDynamicRange(.high)
-                    .frame(maxHeight: 520).clipShape(RoundedRectangle(cornerRadius: 14))
-            } else if loadingRendition {
-                ProgressView("Loading version").frame(maxWidth: .infinity, minHeight: 180)
-            } else { ContentUnavailableView("Develop the original", systemImage: "camera.filters") }
-        }
-    }
+    private var displayedImage: UIImage? { showingOriginal ? originalPreview : preview }
 
     @ViewBuilder
-    private var developmentActions: some View {
-        if dynamicTypeSize.isAccessibilitySize {
-            VStack(spacing: 12) { developmentButtons }
+    private func imagePreview(maxBox: CGSize) -> some View {
+        if showingLive, let originalURL, let liveURL {
+            OriginalLivePhotoView(photoURL: originalURL, movieURL: liveURL)
+                .frame(width: maxBox.width, height: maxBox.height)
+                .accessibilityLabel("Original Live Photo. Touch and hold to play.")
+        } else if let image = displayedImage {
+            let fitted = CaptureReviewView.fittedSize(for: image.size, within: maxBox)
+            Image(uiImage: image).resizable().scaledToFit().allowedDynamicRange(.high)
+                .frame(width: fitted.width, height: fitted.height)
+                .clipShape(RoundedRectangle(cornerRadius: FilmyTheme.viewfinderCornerRadius))
+        } else if loadingRendition {
+            ProgressView("Loading version").frame(width: maxBox.width, height: min(maxBox.height, 240))
         } else {
-            HStack(spacing: 12) { developmentButtons }
-        }
-    }
-
-    @ViewBuilder
-    private var developmentButtons: some View {
-        Button("Preview look") { Task { await develop(save: false) } }
-            .buttonStyle(.bordered)
-            .frame(maxWidth: .infinity, minHeight: 44)
-        if savesAsNewFrame {
-            Button("Save as new frame") { Task { await saveAsNewFrame() } }
-                .buttonStyle(.borderedProminent)
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .accessibilityHint("Saves this look as a new version and adds it to your Roll as a new frame. This frame is kept.")
-                .accessibilityIdentifier("filmy-save-new-frame")
-        } else {
-            Button("Save version") { Task { await develop(save: true) } }
-                .buttonStyle(.borderedProminent)
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .accessibilityIdentifier("filmy-save-version")
+            ContentUnavailableView("Develop the original", systemImage: "camera.filters")
+                .frame(width: maxBox.width, height: min(maxBox.height, 240))
         }
     }
 
