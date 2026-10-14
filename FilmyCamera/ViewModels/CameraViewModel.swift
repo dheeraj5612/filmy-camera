@@ -369,6 +369,9 @@ final class CameraViewModel: ObservableObject {
     private var reconcileGeneration: UInt64 = 0
     /// Bumped by in-session inserts and removals; a reconcile that read before one reads again.
     private var owedMutationCount: UInt64 = 0
+    /// In-session inserts (true) and removals (false) in order; a reconcile that
+    /// kept losing the race replays the ones that landed after its last read.
+    private var owedMutationLog: [(id: UUID, inserted: Bool)] = []
     /// True while the notice's Save loop runs.
     @Published private(set) var isSavingPendingExports = false
     /// Session only, never persisted: Later hides the notice until the next cold launch.
@@ -391,6 +394,9 @@ final class CameraViewModel: ObservableObject {
     /// Test hook awaited once, after a reconcile read the store and before it
     /// publishes; nil in production. It lets a test start a newer reconcile.
     var afterOwedReadForTesting: (@MainActor () async -> Void)?
+    /// Test seams for an in-session insert or removal; unused in production.
+    func insertOwedPhotosExportForTesting(_ id: UUID) { insertOwedPhotosExport(id) }
+    func removeOwedPhotosExportForTesting(_ id: UUID) { removeOwedPhotosExport(id) }
     private var preservedUnknownOverrides: [String: FilmRecipe] = [:]
     private var queuedReviewRequest: (recipe: FilmRecipe, finish: PhotoFinish)?
     @Published var libraryPreferences = RecipeLibraryPreferences() {
@@ -743,12 +749,16 @@ final class CameraViewModel: ObservableObject {
 
     /// Reads the durable markers. A result is dropped when a newer reconcile
     /// started while it was being read; an in-session insert or removal makes
-    /// it read once more instead of losing the older owed captures.
+    /// it read once more instead of losing the older owed captures. When both
+    /// reads race with mutations, the last read is merged with those mutations.
     func reconcilePendingPhotosExports() async {
         reconcileGeneration &+= 1
         let generation = reconcileGeneration
+        var lastIDs: [UUID] = []
+        var lastLogStart = 0
         for _ in 0..<2 {
             let mutations = owedMutationCount
+            let logStart = owedMutationLog.count
             let ids = await photoStore.photosExportsOwed()
             if let hook = afterOwedReadForTesting {
                 afterOwedReadForTesting = nil
@@ -759,7 +769,23 @@ final class CameraViewModel: ObservableObject {
                 publishOwed(ids)
                 return
             }
+            lastIDs = ids
+            lastLogStart = logStart
         }
+        publishOwed(replayOwedMutations(onto: lastIDs, from: lastLogStart))
+    }
+
+    /// Applies the in-session inserts and removals logged since `start`, in order.
+    private func replayOwedMutations(onto ids: [UUID], from start: Int) -> [UUID] {
+        var merged = ids
+        for entry in owedMutationLog.dropFirst(start) {
+            if entry.inserted {
+                if !merged.contains(entry.id) { merged.append(entry.id) }
+            } else {
+                merged.removeAll(where: { $0 == entry.id })
+            }
+        }
+        return merged
     }
 
 #if DEBUG
@@ -787,12 +813,14 @@ final class CameraViewModel: ObservableObject {
 
     private func insertOwedPhotosExport(_ id: UUID) {
         owedMutationCount &+= 1
+        owedMutationLog.append((id: id, inserted: true))
         guard !owedPhotosExportIDs.contains(id) else { return }
         publishOwed(owedPhotosExportIDs + [id])
     }
 
     private func removeOwedPhotosExport(_ id: UUID) {
         owedMutationCount &+= 1
+        owedMutationLog.append((id: id, inserted: false))
         publishOwed(owedPhotosExportIDs.filter { $0 != id })
     }
 
@@ -859,7 +887,9 @@ final class CameraViewModel: ObservableObject {
     }
 
     private enum RecoveryDevelopOutcome {
-        case developed, failed, interrupted
+        /// skipped: nothing is owed any more. stillFinishing: another save of
+        /// this photo may still be running, so it is left owed for the next tap.
+        case developed, failed, interrupted, skipped, stillFinishing
     }
 
     /// Saves every owed photo to Photos, one at a time. Runs only from the
@@ -886,8 +916,13 @@ final class CameraViewModel: ObservableObject {
         var failed = 0
         var needsFullAccess = 0
         var stoppedForAccess = false
+        var interrupted = false
+        var stillFinishing = false
         idLoop: for id in ids {
-            if excludingInFlightCapture([id]).isEmpty { continue }
+            if excludingInFlightCapture([id]).isEmpty {
+                stillFinishing = true
+                continue
+            }
             guard await photoStore.isPhotosExportOwed(id) else { continue }
             guard let document = try? await photoStore.loadDocument(id) else {
                 failed += 1
@@ -899,7 +934,13 @@ final class CameraViewModel: ObservableObject {
                 case .failed:
                     failed += 1
                     continue idLoop
-                case .interrupted: break idLoop
+                case .skipped: continue idLoop
+                case .stillFinishing:
+                    stillFinishing = true
+                    continue idLoop
+                case .interrupted:
+                    interrupted = true
+                    break idLoop
                 }
             }
             do {
@@ -925,6 +966,8 @@ final class CameraViewModel: ObservableObject {
             saved: saved, failed: failed, needsFullAccess: needsFullAccess, stoppedForAccess: stoppedForAccess
         ) {
             showToast(summary.message, style: summary.isError ? .error : .success)
+        } else if interrupted || stillFinishing {
+            showToast("Still finishing a photo. Try Save again in a moment.", style: .info)
         }
     }
 
@@ -946,7 +989,7 @@ final class CameraViewModel: ObservableObject {
     /// originals does (stored inputs, no location). A render that overlapped
     /// the background is dropped and ends the run: the photo stays owed.
     private func developOwedDocument(_ document: FilmyPhotoDocument) async -> RecoveryDevelopOutcome {
-        guard let current = document.currentRevision else { return .failed }
+        guard var current = document.currentRevision else { return .failed }
         // Do not overlap a capture render.
         var waitedTicks = 0
         while isCapturing || isSaving {
@@ -954,6 +997,18 @@ final class CameraViewModel: ObservableObject {
             if Task.isCancelled || waitedTicks >= 300 { return .interrupted }
             waitedTicks += 1
             try? await Task.sleep(for: .milliseconds(200))
+        }
+        if waitedTicks > 0 {
+            // The capture we waited for may have been this very photo, now
+            // developed or linked; it is saving normally, not failing.
+            if excludingInFlightCapture([document.id]).isEmpty { return .stillFinishing }
+            // Deleted or linked while we waited: nothing is owed any more.
+            if !(await photoStore.isPhotosExportOwed(document.id)) { return .skipped }
+            guard let latest = try? await photoStore.loadDocument(document.id) else { return .failed }
+            if !(latest.photosAssetIdentifier?.isEmpty ?? true) { return .skipped }
+            guard let latestRevision = latest.currentRevision else { return .failed }
+            if latestRevision.renditionFilename != nil { return .stillFinishing }
+            current = latestRevision
         }
         let entry = backgroundEntryCount
         let data: Data

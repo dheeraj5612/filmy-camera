@@ -285,6 +285,7 @@ struct CameraScreen: View {
     @State private var isShowingManualControls = false
     @State private var isShowingLiveAdjustments = false
     @State private var isShowingLookDrawer = false
+    @State private var isShowingPendingOriginals = false
     @AppStorage("cameraGestureHintSeen.v1") private var gestureHintSeen = false
     private var gestureTips: CameraGestureTipProgress { .shared }
     @State private var originalPreviewOverride: Bool?
@@ -415,6 +416,8 @@ struct CameraScreen: View {
                         .padding(.leading, 14)
                         .viewfinderChrome(RoundedRectangle(cornerRadius: 16))
                         .accessibilityIdentifier("camera-lens-cleaning-tip")
+                    } else if showsPendingExportsCard {
+                        pendingExportsNotice
                     }
                 }
                 .padding(.horizontal, 16)
@@ -496,6 +499,9 @@ struct CameraScreen: View {
             Button("Keep photo", role: .cancel) { }
         } message: {
             Text("This photo has not been saved to Photos. Discarding cannot be undone.")
+        }
+        .sheet(isPresented: $isShowingPendingOriginals, onDismiss: reconcilePendingExports) {
+            pendingOriginalsSheet
         }
     }
 
@@ -801,6 +807,122 @@ struct CameraScreen: View {
             Text("Discard").frame(minHeight: 44)
         }
         .accessibilityIdentifier("capture-save-discard")
+    }
+
+    // MARK: - Owed Photos exports notice
+
+    private var showsPendingExportsCard: Bool {
+        viewModel.showsPendingPhotosExportsNotice && !isShowingLookDrawer
+    }
+
+    private func reconcilePendingExports() {
+        Task { await viewModel.reconcilePendingPhotosExports() }
+    }
+
+    private func savePendingExports() {
+        Task { await viewModel.savePendingPhotosExports(photoLibrary: photoLibrary) }
+    }
+
+    /// Non-nil only when Save would be refused again until the user changes
+    /// Photos access in Settings.
+    private var pendingExportsSettingsDetail: String? {
+        if PhotoLibraryAuthorizationPolicy.isRefused(photoLibrary.addOnlyAuthorizationStatus) {
+            return "Allow Photos access in Settings to save them."
+        }
+        let awaitingFullAccess: Bool = viewModel.pendingExportsAwaitFullAccessOnly
+        if awaitingFullAccess && PhotoLibraryAuthorizationPolicy.isRefused(photoLibrary.authorizationStatus) {
+            return "Live Photos need full Photos access in Settings."
+        }
+        return nil
+    }
+
+    /// Calm card: captures kept in Filmy that are not in Photos yet. No
+    /// danger colour; nothing is lost.
+    private var pendingExportsNotice: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            pendingExportsTitle
+            pendingExportsDetail
+            pendingExportsActions
+        }
+        .padding(14)
+        .viewfinderChrome(RoundedRectangle(cornerRadius: 16))
+        .dynamicTypeSize(.xSmall ... .accessibility1)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("camera-pending-exports")
+        .onAppear { viewModel.announcePendingPhotosExportsOnce() }
+    }
+
+    private var pendingExportsTitle: some View {
+        let title: String = CameraViewModel.pendingExportsTitle(count: viewModel.pendingPhotosExportIDs.count)
+        return Label(title, systemImage: "photo.badge.arrow.down")
+            .font(.subheadline.weight(.semibold))
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder
+    private var pendingExportsDetail: some View {
+        // At accessibility sizes the Settings button already says it, and the
+        // extra line would push the card into the viewfinder.
+        if let detail = pendingExportsSettingsDetail, !dynamicTypeSize.isAccessibilitySize {
+            Text(detail)
+                .font(.footnote)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var pendingExportsActions: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { pendingExportsButtons }
+            VStack(alignment: .leading, spacing: 8) { pendingExportsButtons }
+        }
+        .buttonStyle(.bordered)
+    }
+
+    @ViewBuilder
+    private var pendingExportsPrimaryButton: some View {
+        if pendingExportsSettingsDetail != nil {
+            Button(action: openSystemSettings) {
+                Text("Settings").frame(minHeight: FilmyTheme.minimumHitTarget)
+            }
+            .accessibilityLabel("Photos Settings")
+            .accessibilityIdentifier("camera-pending-exports-settings")
+        } else {
+            Button(action: savePendingExports) {
+                Text(viewModel.isSavingPendingExports ? "Saving" : "Save")
+                    .frame(minHeight: FilmyTheme.minimumHitTarget)
+            }
+            .disabled(viewModel.isSavingPendingExports)
+            .accessibilityLabel("Save to Photos")
+            .accessibilityIdentifier("camera-pending-exports-save")
+        }
+    }
+
+    @ViewBuilder
+    private var pendingExportsButtons: some View {
+        pendingExportsPrimaryButton
+        Button { isShowingPendingOriginals = true } label: {
+            Text("Show").frame(minHeight: FilmyTheme.minimumHitTarget)
+        }
+        .accessibilityLabel("Show in Filmy originals")
+        .accessibilityIdentifier("camera-pending-exports-show")
+        Button { viewModel.dismissPendingPhotosExportsNotice() } label: {
+            Text("Later").frame(minHeight: FilmyTheme.minimumHitTarget)
+        }
+        .accessibilityLabel("Later")
+        .accessibilityHint("Hides this until Filmy opens again.")
+        .accessibilityIdentifier("camera-pending-exports-later")
+    }
+
+    private var pendingOriginalsSheet: some View {
+        NavigationStack {
+            FilmyOriginalsView(photoLibrary: photoLibrary)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { isShowingPendingOriginals = false }
+                            .accessibilityIdentifier("camera-pending-exports-done")
+                    }
+                }
+        }
     }
 
     // MARK: - Shells
@@ -3081,7 +3203,7 @@ struct CameraScreen: View {
     /// frames.
     private var isFullHeightSheetOpen: Bool {
         isShowingLookLibrary || isShowingRecipeManager || recipeForDetail != nil
-            || isShowingSmartRecipes || isShowingCaptureSetup
+            || isShowingSmartRecipes || isShowingCaptureSetup || isShowingPendingOriginals
     }
 
     /// A nil size class counts as not compact, so it never pauses.
@@ -3811,6 +3933,7 @@ extension CameraScreen {
             && !isShowingManualControls && !isShowingCaptureSetup
             && !isShowingFujiMenu
             && !isShowingSmartRecipes
+            && !isShowingPendingOriginals
     }
     private var isSceneAutoViewfinderActive: Bool {
         isCameraVisibleForAssists && !countdown.state.isActive
@@ -3837,6 +3960,7 @@ extension CameraScreen {
         if isShowingLookLibrary { return "look-library" }
         if isShowingManualControls { return "manual-controls" }
         if isShowingCaptureSetup { return "capture-setup" }
+        if isShowingPendingOriginals { return "pending-originals" }
         if viewModel.reviewImage != nil { return "review-image" }
         if viewModel.isSaving { return "saving" }
         if camera.manualControls.isApplying { return "manual-controls-applying" }

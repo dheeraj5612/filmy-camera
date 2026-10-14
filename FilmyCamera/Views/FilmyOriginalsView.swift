@@ -1,5 +1,6 @@
 import CoreImage
 import ImageIO
+import Photos
 import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
@@ -13,6 +14,7 @@ struct FilmyOriginalsView: View {
     @State private var documents: [FilmyPhotoDocument] = []
     @State private var issue: String?
     @State private var hasLoaded = false
+    @State private var owedIDs: Set<UUID> = []
 
     var body: some View {
         List {
@@ -38,6 +40,11 @@ struct FilmyOriginalsView: View {
                             Text(document.capturedAt, format: .dateTime.month().day().hour().minute()).font(.caption)
                             Text(document.hasRAW ? "DNG retained" : document.hasLivePhoto ? "Live Photo retained" : "Original retained")
                                 .font(.caption).foregroundStyle(.secondary)
+                            if document.photosAssetIdentifier == nil && owedIDs.contains(document.id) {
+                                Text("Not in Photos yet")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                    .accessibilityIdentifier("filmy-document-photos-pending")
+                            }
                         }
                     }
                 }
@@ -56,6 +63,7 @@ struct FilmyOriginalsView: View {
         do {
             let inventory = try await FilmyPhotoStore.shared.inventory()
             documents = inventory.documents
+            owedIDs = await FilmyPhotoStore.shared.photosExportOwedIDs()
             issue = inventory.unreadableCount > 0 ? "\(inventory.unreadableCount) document(s) could not be read. Their files have not been deleted." : nil
         } catch { issue = error.localizedDescription }
     }
@@ -117,6 +125,8 @@ struct FilmyPhotoEditorView: View {
     @State private var selectedRevisionID: UUID?
     /// Version saved by Save as new frame whose Photos export has not succeeded yet.
     @State private var newFrameAwaitingExport: UUID?
+    /// The Photos link the document had before the first export of that version.
+    @State private var linkBeforeNewFrameExport: String?
 
     init(documentID: UUID, photoLibrary: PhotoLibraryService, savesAsNewFrame: Bool = false) {
         self.documentID = documentID
@@ -326,14 +336,30 @@ struct FilmyPhotoEditorView: View {
         if let pending = newFrameAwaitingExport, let current = document?.currentRevision,
            current.id == pending, selectedRevisionID == pending,
            recipe?.id == current.recipe.id, finish == current.finish {
-            if await export(asNewCopy: true) { newFrameAwaitingExport = nil }
+            let updatesLinkedCopy = await failedExportLinkedNewAsset()
+            if await export(asNewCopy: !updatesLinkedCopy, newCopyIfAssetMissing: updatesLinkedCopy) {
+                newFrameAwaitingExport = nil
+            }
             return
         }
         let before = document?.currentRevision?.id
         await develop(save: true)
         guard let after = document?.currentRevision?.id, after != before else { return }
         newFrameAwaitingExport = after
+        linkBeforeNewFrameExport = document?.photosAssetIdentifier
         if await export(asNewCopy: true) { newFrameAwaitingExport = nil }
+    }
+
+    /// True when the failed first export had already created and linked a new
+    /// Photos asset: the retry then updates that asset instead of making a
+    /// second one. Updating needs read-write access; under add-only a
+    /// duplicate is possible, a lost version is not, so the retry makes a copy.
+    private func failedExportLinkedNewAsset() async -> Bool {
+        guard let latest = try? await FilmyPhotoStore.shared.loadDocument(documentID) else { return false }
+        guard let linked = latest.photosAssetIdentifier, !linked.isEmpty,
+              linked != linkBeforeNewFrameExport else { return false }
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        return status == .authorized || status == .limited
     }
 
     private func develop(save: Bool) async {
@@ -387,7 +413,7 @@ struct FilmyPhotoEditorView: View {
     }
 
     @discardableResult
-    private func export(asNewCopy: Bool) async -> Bool {
+    private func export(asNewCopy: Bool, newCopyIfAssetMissing: Bool = false) async -> Bool {
         guard !busy else { return false }
         message = nil
         busy = true
@@ -406,6 +432,13 @@ struct FilmyPhotoEditorView: View {
             message = "Saved to Photos with original resources and reversible Filmy edits."
             return true
         } catch {
+            if newCopyIfAssetMissing, !asNewCopy, case FilmyPhotosExporter.ExportError.missingAsset = error {
+                // Filmy can no longer see the linked copy (deleted in Photos,
+                // or outside a limited selection): make a fresh asset instead of
+                // failing forever. A duplicate is possible, a lost version is not.
+                busy = false
+                return await export(asNewCopy: true)
+            }
             message = error.localizedDescription
             return false
         }

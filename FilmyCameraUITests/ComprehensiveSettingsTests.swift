@@ -564,6 +564,77 @@ final class ComprehensiveSettingsTests: XCTestCase {
         #endif
     }
 
+    func testPendingPhotosExportsNoticeIsCalmAndDismissible() throws {
+        #if targetEnvironment(simulator)
+        let app = makeApp()
+        app.launchArguments += ["-ui-testing-pending-exports", "-cameraGestureHintSeen.v1", "YES"]
+        app.launch()
+        assertPendingExportsNotice(app, largestText: false)
+
+        let show = app.buttons["camera-pending-exports-show"]
+        show.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["filmy-originals-library"].waitForExistence(timeout: 10),
+                      "Show must open the Filmy originals list")
+        attach("pending-exports-show-originals")
+        let done = app.buttons["camera-pending-exports-done"]
+        XCTAssertTrue(done.waitForExistence(timeout: 5))
+        done.tap()
+        let card = app.descendants(matching: .any)["camera-pending-exports"]
+        XCTAssertTrue(wait { !done.exists && card.exists }, "Done must return to the camera with the notice")
+
+        let later = app.buttons["camera-pending-exports-later"]
+        later.tap()
+        XCTAssertTrue(wait { !card.exists }, "Later must hide the notice")
+        XCTAssertTrue(app.buttons["Capture photo"].isHittable)
+        attach("pending-exports-later-hidden")
+
+        app.terminate()
+        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        assertPendingExportsNotice(app, largestText: true)
+        #else
+        throw XCTSkip("Needs the simulator pending-exports launch state")
+        #endif
+    }
+
+    private func assertPendingExportsNotice(_ app: XCUIApplication, largestText: Bool) {
+        let suffix = largestText ? "largest-text" : "default"
+        let card = app.descendants(matching: .any)["camera-pending-exports"]
+        XCTAssertTrue(card.waitForExistence(timeout: 20), "The pending exports notice must appear")
+        XCTAssertTrue(app.staticTexts["2 photos are not in Photos yet"].exists
+                        || card.label.contains("2 photos are not in Photos yet"),
+                      "The notice must count the captures that are not in Photos")
+        // UI testing forces Photos denied, so the primary action is Settings.
+        XCTAssertTrue(app.buttons["camera-pending-exports-settings"].exists)
+        XCTAssertFalse(app.buttons["camera-pending-exports-save"].exists)
+        let shutter = app.buttons["Capture photo"]
+        XCTAssertTrue(wait { shutter.exists && shutter.isHittable }, "The shutter must stay reachable under the notice")
+        // camera-preview is device-only in UI tests, so the viewfinder midpoint
+        // falls back to the window, which the portrait viewfinder fills.
+        let preview = app.descendants(matching: .any)["camera-preview"]
+        let midY: CGFloat = preview.exists ? preview.frame.midY : app.windows.firstMatch.frame.midY
+        if largestText {
+            // The capped card is taller than half of a 375 x 667 pt screen, so
+            // require only that it never covers the shutter.
+            XCTAssertLessThan(card.frame.maxY, shutter.frame.minY, "The notice must stay above the shutter")
+        } else {
+            XCTAssertLessThan(card.frame.maxY, midY, "The notice must sit in the top half of the viewfinder")
+        }
+        let ids: [String] = [
+            "camera-pending-exports-settings",
+            "camera-pending-exports-show",
+            "camera-pending-exports-later"
+        ]
+        for id in ids {
+            let button = app.buttons[id]
+            XCTAssertTrue(button.exists && button.isHittable, "\(id) must be hittable")
+            if largestText {
+                XCTAssertGreaterThanOrEqual(button.frame.height, 44, "\(id) must be at least 44 pt tall")
+            }
+        }
+        attach("pending-exports-notice-\(suffix)")
+    }
+
     private func makeApp() -> XCUIApplication {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()

@@ -71,7 +71,7 @@ final class CameraReviewSaveTests: XCTestCase {
     func testSaveAndDiscardAreBlockedWhileSaveIsInFlight() async throws {
         let (defaults, suiteName) = try makeDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
-        let viewModel = CameraViewModel(defaults: defaults)
+        let viewModel = makeModel(defaults: defaults)
         let saver = ControlledPhotoSaver()
 
         viewModel.saveReview(photoLibrary: saver)
@@ -99,7 +99,7 @@ final class CameraReviewSaveTests: XCTestCase {
     func testCameraCaptureSavesImmediatelyWithoutPresentingImportReview() throws {
         let (defaults, suiteName) = try makeDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
-        let model = CameraViewModel(defaults: defaults)
+        let model = makeModel(defaults: defaults)
         let saver = ControlledPhotoSaver()
         let photo = try capturedPhoto()
         let recipe = model.selectedRecipe
@@ -124,7 +124,7 @@ final class CameraReviewSaveTests: XCTestCase {
     func testCameraSaveFailureRetainsExactBytesAndBlocksOverwritingTheFrame() throws {
         let (defaults, suiteName) = try makeDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
-        let model = CameraViewModel(defaults: defaults)
+        let model = makeModel(defaults: defaults)
         let saver = ControlledPhotoSaver()
         let photo = try capturedPhoto()
         let recipe = model.selectedRecipe
@@ -152,7 +152,7 @@ final class CameraReviewSaveTests: XCTestCase {
     func testRepeatedAndLateSaveCallbacksCannotSettleAnotherAttempt() throws {
         let (defaults, suiteName) = try makeDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
-        let model = CameraViewModel(defaults: defaults)
+        let model = makeModel(defaults: defaults)
         let saver = ControlledPhotoSaver()
         let photo = try capturedPhoto()
         model.saveCapturedPhoto(photo, recipe: model.selectedRecipe, photoLibrary: saver)
@@ -207,7 +207,7 @@ final class CameraReviewSaveTests: XCTestCase {
             let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
             defer { try? FileManager.default.removeItem(at: root) }
             let store = FilmyPhotoStore(root: root)
-            let model = CameraViewModel(defaults: defaults, photoStore: store)
+            let model = makeModel(defaults: defaults, photoStore: store)
             let saver = ControlledPhotoSaver()
             let format = UIGraphicsImageRendererFormat()
             format.scale = 1
@@ -257,7 +257,7 @@ final class CameraReviewSaveTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         try Data([0]).write(to: root)
-        let model = CameraViewModel(defaults: defaults, photoStore: FilmyPhotoStore(root: root))
+        let model = makeModel(defaults: defaults, photoStore: FilmyPhotoStore(root: root))
         let saver = ControlledPhotoSaver()
         let camera = CameraService()
 
@@ -287,7 +287,7 @@ final class CameraReviewSaveTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let store = FilmyPhotoStore(root: root)
-        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let model = makeModel(defaults: defaults, photoStore: store)
         let saver = ControlledPhotoSaver()
         let source = try captureSourcePhoto()
         // Recognised as JPEG by the store, but cut off before the first
@@ -349,7 +349,7 @@ final class CameraReviewSaveTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let store = FilmyPhotoStore(root: root)
-        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let model = makeModel(defaults: defaults, photoStore: store)
         let saver = ControlledPhotoSaver()
         let camera = CameraService()
         let source = try captureSourcePhoto()
@@ -405,7 +405,7 @@ final class CameraReviewSaveTests: XCTestCase {
         let blockedRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: blockedRoot) }
         try Data([0]).write(to: blockedRoot)
-        let blockedModel = CameraViewModel(defaults: defaults, photoStore: FilmyPhotoStore(root: blockedRoot))
+        let blockedModel = makeModel(defaults: defaults, photoStore: FilmyPhotoStore(root: blockedRoot))
         let kept = try makeMovie()
         defer { try? FileManager.default.removeItem(at: kept) }
         let saver = ControlledPhotoSaver()
@@ -426,7 +426,7 @@ final class CameraReviewSaveTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let store = FilmyPhotoStore(root: root)
-        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let model = makeModel(defaults: defaults, photoStore: store)
         let released = try makeMovie()
         defer { try? FileManager.default.removeItem(at: released) }
         let unusable = CameraViewModel.RenderedPhoto(image: UIImage(), data: Data([0]), capturedAt: source.capturedAt)
@@ -470,7 +470,7 @@ final class CameraReviewSaveTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         try Data([0]).write(to: root)
         let store = FilmyPhotoStore(root: root)
-        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let model = makeModel(defaults: defaults, photoStore: store)
         let saver = ControlledPhotoSaver()
         let camera = CameraService()
         let counter = RenderCounter()
@@ -520,7 +520,7 @@ final class CameraReviewSaveTests: XCTestCase {
         defaults.set("instantPrint", forKey: "captureFinish")
         XCTAssertTrue(MembershipStore.shared.hasFullAccess)
         XCTAssertTrue(camera.proCaptureSettings.livePhoto)
-        let model = CameraViewModel(defaults: defaults)
+        let model = makeModel(defaults: defaults)
         let saver = ControlledPhotoSaver()
 
         model.capture(camera: camera, photoLibrary: saver)
@@ -534,7 +534,7 @@ final class CameraReviewSaveTests: XCTestCase {
     func testImportIsRefusedWhileACameraCaptureIsSavingOrAwaitsRetry() async throws {
         let (defaults, suiteName) = try makeDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
-        let model = CameraViewModel(defaults: defaults)
+        let model = makeModel(defaults: defaults)
         let saver = ControlledPhotoSaver()
         let photo = try capturedPhoto()
         let importData = try XCTUnwrap(try capturedPhoto().image.jpegData(compressionQuality: 0.9))
@@ -560,7 +560,7 @@ final class CameraReviewSaveTests: XCTestCase {
     func testImportLoadingCountsAsBusyUntilItEnds() async throws {
         let (defaults, suiteName) = try makeDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
-        let model = CameraViewModel(defaults: defaults)
+        let model = makeModel(defaults: defaults)
         let saver = ControlledPhotoSaver()
         let camera = CameraService()
         let importData = try XCTUnwrap(try capturedPhoto().image.jpegData(compressionQuality: 0.9))
@@ -608,7 +608,7 @@ final class CameraReviewSaveTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let model = CameraViewModel(defaults: defaults, photoStore: FilmyPhotoStore(root: root))
+        let model = makeModel(defaults: defaults, photoStore: FilmyPhotoStore(root: root))
         let saver = ControlledPhotoSaver()
         let source = try captureSourcePhoto()
         let photo = CameraService.CapturedPhoto(
@@ -685,7 +685,7 @@ final class CameraReviewSaveTests: XCTestCase {
         let root = tempStoreRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let store = FilmyPhotoStore(root: root)
-        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let model = makeModel(defaults: defaults, photoStore: store)
         let saver = ControlledPhotoSaver()
 
         let result = await model.developCapturedPhotoForTesting(
@@ -719,7 +719,7 @@ final class CameraReviewSaveTests: XCTestCase {
         let root = tempStoreRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let store = FilmyPhotoStore(root: root)
-        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let model = makeModel(defaults: defaults, photoStore: store)
         let saver = ControlledPhotoSaver()
 
         let result = await model.developCapturedPhotoForTesting(
@@ -746,7 +746,7 @@ final class CameraReviewSaveTests: XCTestCase {
         let root = tempStoreRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let store = FilmyPhotoStore(root: root)
-        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let model = makeModel(defaults: defaults, photoStore: store)
         let saver = ControlledPhotoSaver()
 
         // Render returns nothing: the original is kept and the export stays owed.
@@ -773,7 +773,7 @@ final class CameraReviewSaveTests: XCTestCase {
         let otherRoot = tempStoreRoot()
         defer { try? FileManager.default.removeItem(at: otherRoot) }
         let otherStore = FilmyPhotoStore(root: otherRoot)
-        let otherModel = CameraViewModel(defaults: defaults, photoStore: otherStore)
+        let otherModel = makeModel(defaults: defaults, photoStore: otherStore)
         let source = try captureSourcePhoto()
         let unusable = CameraViewModel.RenderedPhoto(image: UIImage(), data: Data([0]), capturedAt: source.capturedAt)
         let second = await otherModel.developCapturedPhotoForTesting(
@@ -794,7 +794,7 @@ final class CameraReviewSaveTests: XCTestCase {
         let root = tempStoreRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let store = FilmyPhotoStore(root: root)
-        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let model = makeModel(defaults: defaults, photoStore: store)
         let saver = ControlledPhotoSaver()
         let older = try await createOwedDocument(store, offset: -100)
 
@@ -823,7 +823,7 @@ final class CameraReviewSaveTests: XCTestCase {
         let root = tempStoreRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let store = FilmyPhotoStore(root: root)
-        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let model = makeModel(defaults: defaults, photoStore: store)
         let document = try await createOwedDocument(store, offset: 0)
 
         // The first reconcile reads [document]. Before it publishes, the
@@ -840,13 +840,99 @@ final class CameraReviewSaveTests: XCTestCase {
         XCTAssertTrue(model.pendingPhotosExportIDs.isEmpty)
     }
 
+    func testReconcilePublishesMergedSetWhenBothReadsRaceInSessionMutations() async throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let root = tempStoreRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = FilmyPhotoStore(root: root)
+        let model = makeModel(defaults: defaults, photoStore: store)
+        let older = try await createOwedDocument(store, offset: 1)
+
+        // First read: a new capture is inserted in session. Second read: the
+        // older one is linked and cleared in session. Both reads race, yet the
+        // published set must be the merged, correct one.
+        model.afterOwedReadForTesting = { [unowned model, unowned self] in
+            guard let created = try? await self.createOwedDocument(store, offset: 2) else { return }
+            model.insertOwedPhotosExportForTesting(created.id)
+            model.afterOwedReadForTesting = {
+                try? await store.linkPhotosAsset("A/L0/second", to: older.id)
+                model.removeOwedPhotosExportForTesting(older.id)
+            }
+        }
+        await model.reconcilePendingPhotosExports()
+
+        let owed = await store.photosExportsOwed()
+        XCTAssertEqual(owed.count, 1)
+        XCTAssertFalse(owed.contains(older.id))
+        XCTAssertEqual(model.owedPhotosExportIDs, owed)
+        XCTAssertEqual(model.pendingPhotosExportIDs, owed)
+    }
+
+    func testSavePendingInterruptedWithNothingSavedShowsInfoToastAndKeepsMarker() async throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let root = tempStoreRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = FilmyPhotoStore(root: root)
+        let model = makeModel(defaults: defaults, photoStore: store)
+        let undeveloped = try await createOwedDocument(store, offset: 1, developed: false)
+        let stub = PendingExportStub(store: store)
+        // The render finishes while the app reports the background: it is dropped.
+        model.isApplicationBackgroundedForTesting = { true }
+
+        await model.savePendingPhotosExports(photoLibrary: nil, export: { id in try await stub.export(id) })
+
+        XCTAssertTrue(stub.calls.isEmpty)
+        XCTAssertFalse(model.isSavingPendingExports)
+        XCTAssertEqual(model.toastStyle, .info)
+        XCTAssertEqual(model.toastMessage, "Still finishing a photo. Try Save again in a moment.")
+        XCTAssertTrue(markerExists(store, undeveloped.id), "The photo stays owed")
+        XCTAssertEqual(model.pendingPhotosExportIDs, [undeveloped.id])
+    }
+
+    func testSavePendingSkipsCaptureThatFinishedDevelopingWhileWaiting() async throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let root = tempStoreRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = FilmyPhotoStore(root: root)
+        let model = makeModel(defaults: defaults, photoStore: store)
+        let saver = ControlledPhotoSaver()
+        let racing = try await createOwedDocument(store, offset: 1, developed: false)
+        let firstRevision = try XCTUnwrap(racing.currentRevision)
+        let stub = PendingExportStub(store: store)
+
+        // A capture is saving, so the run waits before developing `racing`.
+        let started = await model.developCapturedPhotoForTesting(
+            try captureSourcePhoto(), recipe: model.selectedRecipe, camera: CameraService(), photoLibrary: saver
+        )
+        XCTAssertTrue(started)
+        XCTAssertTrue(model.isSaving)
+        let run = Task { @MainActor in
+            await model.savePendingPhotosExports(photoLibrary: nil, export: { id in try await stub.export(id) })
+        }
+        try await Task.sleep(for: .milliseconds(500))
+        // Meanwhile that photo gets its rendition from the normal capture path.
+        _ = try await store.addRevision(
+            racing.id, expectedRevisionID: firstRevision.id, recipe: FilmRecipe.builtIns[0], finish: .photo,
+            settings: ProCaptureSettings.legacy, renderedData: try capturedPhoto().data
+        )
+        saver.completeLast(with: .success(()))
+        await run.value
+
+        XCTAssertTrue(stub.calls.isEmpty, "A document that gained a rendition while waiting is skipped")
+        XCTAssertFalse((model.toastMessage ?? "").contains("could not be saved"))
+        XCTAssertFalse(model.isSavingPendingExports)
+    }
+
     func testSavePendingPhotosExportsExportsEachOnceAndNeverDiscardedOrLegacy() async throws {
         let (defaults, suiteName) = try makeDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let root = tempStoreRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let store = FilmyPhotoStore(root: root)
-        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let model = makeModel(defaults: defaults, photoStore: store)
         let undeveloped = try await createOwedDocument(store, offset: 1, developed: false)
         let developed = try await createOwedDocument(store, offset: 2)
         let discarded = try await createOwedDocument(store, offset: 3)
@@ -878,7 +964,7 @@ final class CameraReviewSaveTests: XCTestCase {
         let root = tempStoreRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let store = FilmyPhotoStore(root: root)
-        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let model = makeModel(defaults: defaults, photoStore: store)
         let first = try await createOwedDocument(store, offset: 1)
         let linkedLater = try await createOwedDocument(store, offset: 2)
         let deletedLater = try await createOwedDocument(store, offset: 3)
@@ -903,7 +989,7 @@ final class CameraReviewSaveTests: XCTestCase {
         let root = tempStoreRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let store = FilmyPhotoStore(root: root)
-        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let model = makeModel(defaults: defaults, photoStore: store)
         let live = try await createOwedDocument(store, offset: 1, live: true)
         let stillOne = try await createOwedDocument(store, offset: 2)
         let stillTwo = try await createOwedDocument(store, offset: 3)
@@ -932,7 +1018,7 @@ final class CameraReviewSaveTests: XCTestCase {
         let root = tempStoreRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let store = FilmyPhotoStore(root: root)
-        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let model = makeModel(defaults: defaults, photoStore: store)
         let first = try await createOwedDocument(store, offset: 1)
         let second = try await createOwedDocument(store, offset: 2)
         let third = try await createOwedDocument(store, offset: 3)
@@ -997,7 +1083,7 @@ final class CameraReviewSaveTests: XCTestCase {
         let root = tempStoreRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let store = FilmyPhotoStore(root: root)
-        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let model = makeModel(defaults: defaults, photoStore: store)
         _ = try await createOwedDocument(store, offset: 1)
 
         XCTAssertFalse(model.showsPendingPhotosExportsNotice, "Nothing is read until a reconcile")
@@ -1013,7 +1099,7 @@ final class CameraReviewSaveTests: XCTestCase {
         XCTAssertEqual(model.pendingPhotosExportIDs.count, 1, "The photo is still owed")
 
         // A cold launch reads the same durable marker and shows the notice again.
-        let relaunched = CameraViewModel(defaults: defaults, photoStore: store)
+        let relaunched = makeModel(defaults: defaults, photoStore: store)
         await relaunched.reconcilePendingPhotosExports()
         XCTAssertFalse(relaunched.pendingExportsNoticeDismissed)
         XCTAssertTrue(relaunched.showsPendingPhotosExportsNotice)
@@ -1025,7 +1111,7 @@ final class CameraReviewSaveTests: XCTestCase {
         let root = tempStoreRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let store = FilmyPhotoStore(root: root)
-        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let model = makeModel(defaults: defaults, photoStore: store)
         let saver = ControlledPhotoSaver()
         let camera = CameraService()
         XCTAssertFalse(model.holdsCaptureBackgroundTimeForTesting)
@@ -1058,7 +1144,7 @@ final class CameraReviewSaveTests: XCTestCase {
         let root = tempStoreRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let store = FilmyPhotoStore(root: root)
-        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let model = makeModel(defaults: defaults, photoStore: store)
         let saver = ControlledPhotoSaver()
         let renders = PendingRenderCounter()
         let hookCalls = PendingRenderCounter()
@@ -1095,7 +1181,7 @@ final class CameraReviewSaveTests: XCTestCase {
         let root = tempStoreRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let store = FilmyPhotoStore(root: root)
-        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let model = makeModel(defaults: defaults, photoStore: store)
         model.isApplicationBackgroundedForTesting = { false }
         let saver = ControlledPhotoSaver()
         let renders = PendingRenderCounter()
@@ -1138,7 +1224,7 @@ final class CameraReviewSaveTests: XCTestCase {
     }
 
     private func makeImportedReview(defaults: UserDefaults) async throws -> CameraViewModel {
-        let viewModel = CameraViewModel(defaults: defaults)
+        let viewModel = makeModel(defaults: defaults)
         try await importReview(into: viewModel)
         return viewModel
     }
@@ -1159,6 +1245,15 @@ final class CameraReviewSaveTests: XCTestCase {
         XCTAssertNotNil(viewModel.reviewImage)
         XCTAssertNotNil(viewModel.reviewRecipe)
         XCTAssertEqual(viewModel.reviewSource, .photoLibrary)
+    }
+
+    /// Every model starts in the foreground, so a hosted simulator that reports
+    /// `.background` cannot make a render look refused. Tests that mean to
+    /// simulate a background trip override this after construction.
+    private func makeModel(defaults: UserDefaults, photoStore: FilmyPhotoStore = .shared) -> CameraViewModel {
+        let model = CameraViewModel(defaults: defaults, photoStore: photoStore)
+        model.isApplicationBackgroundedForTesting = { false }
+        return model
     }
 
     private func makeDefaults() throws -> (UserDefaults, String) {

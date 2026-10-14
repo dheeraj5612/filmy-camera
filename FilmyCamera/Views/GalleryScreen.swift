@@ -1291,7 +1291,7 @@ private struct GalleryThumbnail: View {
                         .scaledToFill()
                 } else if imageLoadFailed {
                     VStack(spacing: 5) {
-                        Image(systemName: "photo.badge.exclamationmark")
+                        Image(systemName: "exclamationmark.triangle")
                             .font(.system(size: 18, weight: .medium))
                         Text("Unavailable")
                             .font(.system(.caption2, design: .rounded).weight(.semibold))
@@ -2087,7 +2087,7 @@ private struct GalleryDetailView: View {
                 )
         } else if imageLoadFailed {
             VStack(spacing: 14) {
-                Image(systemName: "photo.badge.exclamationmark")
+                Image(systemName: "exclamationmark.triangle")
                     .font(.system(size: 28, weight: .medium))
                     .foregroundStyle(FilmyTheme.secondary)
                 Eyebrow(text: "FRAME COULDN’T LOAD")
