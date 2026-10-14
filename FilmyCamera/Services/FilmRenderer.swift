@@ -553,10 +553,30 @@ public final class FilmRenderer {
         /// version; any other directory is stale and removed on first use.
         /// The directory itself is capped by count, oldest first, so slider
         /// drafts that pause long enough to persist cannot grow it unbounded.
-        private static let entryLimit = 240
-        private static let byteLimit = 32 * 1024 * 1024
+        /// 1_024 entries cover the ~760-look catalog plus edited drafts.
+        private static let entryLimit = 1_024
+        /// Callers request the default 264 x 160 swatch (42,240 pixels, about
+        /// 165 KB raw RGBA). A grained tile is close to incompressible and its
+        /// PNG size is unmeasured, so the byte cap is sized at 128 KB per tile
+        /// across the ~760-look catalog (about 95 MB) with headroom for drafts.
+        private static let byteLimit = 128 * 1024 * 1024
         private static let maximumEntryBytes = 5 * 1024 * 1024
+        /// A prune evicts down to this share of each limit so the next few
+        /// stores do not scan the directory again.
+        private static let pruneTargetPercent = 90
         private static let mutationLock = NSLock()
+        /// Running totals of the directory, guarded by `mutationLock`.
+        private nonisolated(unsafe) static var storedCount = 0
+        private nonisolated(unsafe) static var storedBytes = 0
+
+        /// Decides whether the totals call for a directory scan, and if so the
+        /// count and byte targets to evict down to.
+        private static func pruneTargets(
+            count: Int, bytes: Int
+        ) -> (count: Int, bytes: Int)? {
+            guard count > entryLimit || bytes > byteLimit else { return nil }
+            return (entryLimit * pruneTargetPercent / 100, byteLimit / 100 * pruneTargetPercent)
+        }
 
         private static let directoryURL: URL? = {
             guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
@@ -572,16 +592,24 @@ public final class FilmRenderer {
                     try? fileManager.removeItem(at: sibling)
                 }
             }
-            prune(in: url)
+            mutationLock.lock()
+            let survivors = prune(in: url, countTarget: entryLimit, byteTarget: byteLimit)
+            storedCount = survivors.count
+            storedBytes = survivors.bytes
+            mutationLock.unlock()
             return url
         }()
 
-        private static func prune(in directory: URL) {
+        /// Keeps the newest files within both targets, removes the rest, and
+        /// returns what survives. Callers hold `mutationLock`.
+        private static func prune(
+            in directory: URL, countTarget: Int, byteTarget: Int
+        ) -> (count: Int, bytes: Int) {
             let manager = FileManager.default
             let keys: Set<URLResourceKey> = [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey]
             guard let files = try? manager.contentsOfDirectory(
                 at: directory, includingPropertiesForKeys: Array(keys), options: .skipsHiddenFiles
-            ) else { return }
+            ) else { return (0, 0) }
             let entries = files.compactMap { url -> (URL, Date, Int)? in
                 guard let values = try? url.resourceValues(forKeys: keys), values.isRegularFile == true else { return nil }
                 return (url, values.contentModificationDate ?? .distantPast, max(values.fileSize ?? 0, 0))
@@ -589,13 +617,20 @@ public final class FilmRenderer {
             var bytes = 0
             var count = 0
             for (url, _, size) in entries {
-                if count >= entryLimit || size > byteLimit - bytes {
-                    try? manager.removeItem(at: url)
+                if count >= countTarget || size > byteTarget - bytes {
+                    do {
+                        try manager.removeItem(at: url)
+                    } catch {
+                        // An undeletable file still occupies the directory.
+                        bytes += size
+                        count += 1
+                    }
                 } else {
                     bytes += size
                     count += 1
                 }
             }
+            return (count, bytes)
         }
 
         private static func fileURL(for key: ThumbnailCacheKey) -> URL? {
@@ -634,9 +669,25 @@ public final class FilmRenderer {
             mutationLock.lock()
             defer { mutationLock.unlock() }
             do {
+                if !FileManager.default.fileExists(atPath: directoryURL.path) {
+                    storedCount = 0
+                    storedBytes = 0
+                }
                 try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+                let previous = try? url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+                let previousBytes = previous?.isRegularFile == true ? max(previous?.fileSize ?? 0, 0) : nil
                 try data.write(to: url, options: .atomic)
-                prune(in: directoryURL)
+                if let previousBytes {
+                    storedBytes -= previousBytes
+                } else {
+                    storedCount += 1
+                }
+                storedBytes += data.count
+                if let targets = pruneTargets(count: storedCount, bytes: storedBytes) {
+                    let survivors = prune(in: directoryURL, countTarget: targets.count, byteTarget: targets.bytes)
+                    storedCount = survivors.count
+                    storedBytes = survivors.bytes
+                }
             } catch {
                 // A cache miss must never make the live renderer fail.
             }
