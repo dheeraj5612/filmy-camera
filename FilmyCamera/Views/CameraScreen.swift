@@ -2879,7 +2879,8 @@ struct CameraScreen: View {
 
     private var showsGestureHint: Bool {
         guard !gestureHintSeen, let tip = gestureTips.tip, !Self.gestureHintSuppressed,
-              camera.isRunning, !isReviewing, !isShowingLookDrawer, !isShowingLiveAdjustments else { return false }
+              camera.isRunning, !isReviewing, !isShowingLookDrawer, !isShowingLiveAdjustments,
+              !isViewfinderCoveredBySheet, !isImporting else { return false }
         if tip == .drag && !canAdjustPreviewExposure { return false }
         return currentMidSlot == .none
     }

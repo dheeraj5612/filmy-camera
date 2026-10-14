@@ -324,9 +324,9 @@ struct SettingsView: View {
     }
 
     private var replayGesturesValue: String {
-        if gestureHintSeen { return "Hint already seen" }
-        if didReplayGestureHint { return "Hint turned back on" }
-        return "Hint not seen yet"
+        if gestureHintSeen { return "Tips already seen" }
+        if didReplayGestureHint { return "Tips turned back on" }
+        return "Tips not seen yet"
     }
 
     private func replayGestureHint() {
@@ -335,7 +335,7 @@ struct SettingsView: View {
         didReplayGestureHint = true
         gestureHintSeen = false
         if !alreadyConfirmed {
-            UIAccessibility.post(notification: .announcement, argument: "Gesture hint turned back on.")
+            UIAccessibility.post(notification: .announcement, argument: "Gesture tips turned back on.")
         }
     }
 

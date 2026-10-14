@@ -279,13 +279,13 @@ final class ComprehensiveSettingsTests: XCTestCase {
             setToggle(reveal(location, app), "1")
         }
 
-        // Replay gestures row: before the tap the value reads "Hint not seen yet" or "Hint already seen" depending on launch arguments, never "Hint turned back on", so the wait after the tap proves the tap.
+        // Replay gestures row: before the tap the value reads "Tips not seen yet" or "Tips already seen" depending on launch arguments, never "Tips turned back on", so the wait after the tap proves the tap.
         let replay = reveal(page.buttons["settings-replay-gestures"], app)
         XCTAssertGreaterThanOrEqual(replay.frame.height, 44)
         XCTAssertEqual(replay.label, "Replay gestures")
-        XCTAssertNotEqual(replay.value as? String, "Hint turned back on", "value before tap=\(String(describing: replay.value))")
+        XCTAssertNotEqual(replay.value as? String, "Tips turned back on", "value before tap=\(String(describing: replay.value))")
         replay.tap()
-        XCTAssertTrue(wait { replay.value as? String == "Hint turned back on" }, "value=\(String(describing: replay.value))")
+        XCTAssertTrue(wait { replay.value as? String == "Tips turned back on" }, "value=\(String(describing: replay.value))")
         attach("settings-replay-gestures-confirmed")
 
         // Largest text keeps the Location row reachable.
