@@ -62,7 +62,7 @@ jobs:
           project.save
           puts 'Capture sources and tests are members of their native targets.'
           RUBY
-          git add FilmyCamera/FilmyCameraApp.swift FilmyCamera/Services/CameraService.swift FilmyCamera/Info.plist project.yml FilmyCamera.xcodeproj
+          git add FilmyCamera/FilmyCameraApp.swift FilmyCamera/Services/CameraService.swift FilmyCamera/Info.plist Config/Info.Monetized.plist project.yml FilmyCamera.xcodeproj
           if ! git diff --cached --quiet; then
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'

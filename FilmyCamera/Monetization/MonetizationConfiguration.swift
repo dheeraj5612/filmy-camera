@@ -1,5 +1,9 @@
 import Foundation
 
+#if !FILMY_MONETIZATION_SDKS && !FILMY_MONETIZATION_FREE
+#error("FILMY_MONETIZATION_ENABLED must be exactly YES or NO")
+#endif
+
 // Public client identifiers only. Never ship provider private keys or service
 // accounts. Prices and introductory offers come from StoreKit, not these files.
 enum MonetizationConfiguration {
@@ -10,7 +14,11 @@ enum MonetizationConfiguration {
             return false
         }
         #endif
+        #if FILMY_MONETIZATION_SDKS
         return value("FilmyMonetizationEnabled").uppercased() == "YES"
+        #else
+        return false
+        #endif
     }
 
     static func value(_ key: String) -> String {

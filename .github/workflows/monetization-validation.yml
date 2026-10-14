@@ -23,6 +23,7 @@ on:
       - 'scripts/monetization/**'
       - 'project.yml'
       - 'FilmyCamera/Info.plist'
+      - 'Config/Info.Monetized.plist'
       - 'FilmyCamera/*.entitlements'
       - 'FilmyCamera/Resources/PrivacyInfo.xcprivacy'
       - 'scripts/testing/test_*.py'
@@ -55,9 +56,9 @@ jobs:
           unzip -q /tmp/xcodegen.zip -d .ci
           echo '6aa2b4da95304b343bea12890c59f9655aa428c08b351d57d592cfab4e88a9f1  .ci/xcodegen/bin/xcodegen' | shasum -a 256 --check
           .ci/xcodegen/bin/xcodegen generate
-          if [[ -n "$(git status --porcelain -- FilmyCamera.xcodeproj)" ]]; then
-            git status --short -- FilmyCamera.xcodeproj >&2
-            git --no-pager diff -- FilmyCamera.xcodeproj | head -200 >&2 || true
+          if [[ -n "$(git status --porcelain -- FilmyCamera.xcodeproj FilmyCamera/Info.plist)" ]]; then
+            git status --short -- FilmyCamera.xcodeproj FilmyCamera/Info.plist >&2
+            git --no-pager diff -- FilmyCamera.xcodeproj FilmyCamera/Info.plist | head -200 >&2 || true
             echo 'XcodeGen changed the committed project; update it intentionally and rerun the gate.' >&2
             exit 1
           fi
@@ -86,12 +87,14 @@ jobs:
         run: |
           set -euo pipefail
           xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.5' -derivedDataPath /tmp/FilmyMonetization -clonedSourcePackagesDirPath .spm-cache -resultBundlePath /tmp/FilmyMonetization.xcresult -parallel-testing-enabled NO -jobs 3 -only-testing:FilmyCameraTests/MembershipPolicyTests -only-testing:FilmyCameraTests/MembershipStoreTests -only-testing:FilmyCameraTests/MembershipStoreKitTests -only-testing:FilmyCameraUITests/MonetizationUITests CODE_SIGNING_ALLOWED=NO test 2>&1 | tee /tmp/monetization-tests.log
+          python3 scripts/monetization/sdk_gate.py app --expect monetized /tmp/FilmyMonetization/Build/Products/Debug-iphonesimulator/FilmyCamera.app 2>&1 | tee /tmp/monetization-sdk-gate-debug.log
       - name: Compile Release without debug entitlement fixtures
         if: success() || failure()
         shell: bash
         run: |
           set -euo pipefail
           xcodebuild -project FilmyCamera.xcodeproj -scheme FilmyCamera -configuration Release -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/FilmyMonetization -clonedSourcePackagesDirPath .spm-cache -jobs 3 CODE_SIGNING_ALLOWED=NO build 2>&1 | tee /tmp/monetization-release.log
+          python3 scripts/monetization/sdk_gate.py app --expect free /tmp/FilmyMonetization/Build/Products/Release-iphonesimulator/FilmyCamera.app 2>&1 | tee /tmp/monetization-sdk-gate-release.log
       - name: Archive exact source for review
         if: always()
         run: git archive --format=zip HEAD -o /tmp/filmy-monetization-source.zip

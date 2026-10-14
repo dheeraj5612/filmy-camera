@@ -2,6 +2,8 @@
 """Validate non-secret monetization source/configuration without network access."""
 import json
 import plistlib
+import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -30,9 +32,10 @@ def main():
         key = line.partition("=")[0].strip()
         assert not key.startswith(("FILMY_MONETIZATION_ENABLED[", "FILMY_ADS_ENABLED[", "FILMY_LEGAL_READY[")), line
     assert xcconfig_value("CODE_SIGN_ENTITLEMENTS", debug_cfg) == "FilmyCamera/FilmyCamera.entitlements"
-    # The app compares the uppercased value; Xcode drops trailing // comments.
-    release_flag = (xcconfig_value("FILMY_MONETIZATION_ENABLED", release_cfg) or "").upper()
+    # Exact case: the build settings derive the SDK link from this value, and only YES/NO select a branch.
+    release_flag = xcconfig_value("FILMY_MONETIZATION_ENABLED", release_cfg)
     assert release_flag in ("YES", "NO"), release_flag
+    assert xcconfig_value("FILMY_MONETIZATION_ENABLED", debug_cfg) == "YES", "Debug must stay monetized"
     monetized_release = release_flag == "YES"
     expected_release_entitlements = "FilmyCamera/FilmyCamera.entitlements" if monetized_release else "FilmyCamera/FilmyCamera.Release.entitlements"
     assert xcconfig_value("CODE_SIGN_ENTITLEMENTS", release_cfg) == expected_release_entitlements
@@ -44,8 +47,14 @@ def main():
     else:
         assert scheme.startswith("com.googleusercontent.apps.") and scheme != ""
     assert info["FilmyMonthlyProductID"] == "$(FILMY_MONTHLY_PRODUCT_ID)"
-    assert info["GADDelayAppMeasurementInit"] is True
-    assert info["FirebaseAnalyticsCollectionEnabled"] is False
+    monetized = plistlib.loads((ROOT / "Config/Info.Monetized.plist").read_bytes())
+    assert monetized["GADDelayAppMeasurementInit"] is True
+    assert monetized["FirebaseAnalyticsCollectionEnabled"] is False
+    sdk_keys = ("FilmyAdMobBannerID", "GADApplicationIdentifier", "GADDelayAppMeasurementInit",
+                "FirebaseAnalyticsCollectionEnabled", "GOOGLE_ANALYTICS_DEFAULT_ALLOW_AD_PERSONALIZATION_SIGNALS",
+                "CFBundleURLTypes", "SKAdNetworkItems")
+    for key in sdk_keys:
+        assert key not in info, f"FilmyCamera/Info.plist must not hold {key}; it belongs to Config/Info.Monetized.plist"
     assert "NSUserTrackingUsageDescription" not in info
     fields = {item["NSPrivacyCollectedDataType"] for item in privacy["NSPrivacyCollectedDataTypes"]}
     assert privacy["NSPrivacyTracking"] is False
@@ -72,6 +81,12 @@ def main():
     assert "storeKitConfiguration: StoreKit/Filmy.storekit" in project
     assert "product: FirebaseAnalytics" not in project
     assert "exactVersion: 12.14.0" in project and "exactVersion: 3.0.0" in project
+    assert "$(FILMY_MONETIZATION_LDFLAGS)" in project, "OTHER_LDFLAGS must derive -ObjC from the monetization flag"
+    assert '"-ObjC"' not in project, "project.yml must not hard-code -ObjC"
+    for mode in (["source"], ["plist", "--check"]):
+        result = subprocess.run([sys.executable, str(ROOT / "scripts/monetization/sdk_gate.py"), *mode],
+                                capture_output=True, text=True)
+        assert result.returncode == 0, result.stdout + result.stderr
     print("Monetization configuration, release defaults, privacy declarations and one-month StoreKit fixture: PASS")
 
 if __name__ == "__main__":

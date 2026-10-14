@@ -190,7 +190,7 @@ mkdir -p "$(dirname "${archive_path}")" "${derived_data_path}"
   "${xcodegen_path}" generate --spec project.yml
 )
 
-if ! git -C "${root_dir}" diff --exit-code -- FilmyCamera.xcodeproj; then
+if ! git -C "${root_dir}" diff --exit-code -- FilmyCamera.xcodeproj FilmyCamera/Info.plist; then
   echo "XcodeGen changed the committed project; update it intentionally and rerun the gate." >&2
   exit 1
 fi

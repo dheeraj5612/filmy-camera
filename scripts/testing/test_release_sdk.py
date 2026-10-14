@@ -170,7 +170,11 @@ class ReleaseSDKTests(unittest.TestCase):
         text = (ROOT / "scripts/release/validate-archive.sh").read_text()
         for key in ("FilmyMonetizationEnabled", "FilmyAdsEnabled", "GADApplicationIdentifier"):
             self.assertIn(f"plist_value {key}", text)
-        self.assertIn("ca-app-pub-[0-9]{16}~[0-9]{10}", text)
+        self.assertNotIn("ca-app-pub-", text)
+        self.assertIn('[[ -z "${built_admob_app_id}" ]]', text)
+        gate = 'python3 "${root_dir}/scripts/monetization/sdk_gate.py" app --expect free "${app_path}"'
+        self.assertEqual(text.count(gate), 1)
+        self.assertLess(text.index(gate), text.index("embedded.mobileprovision"))
         self.assertLess(text.index("plist_value FilmyMonetizationEnabled"), text.index("security cms"))
         guard = 'if [[ "${release_app_variant}" == "filmy" ]]; then'
         monetization_guard = '[[ "${built_monetization}" == "NO" ]]'
@@ -179,10 +183,19 @@ class ReleaseSDKTests(unittest.TestCase):
             self.assertEqual(text.count(line), 1, line)
         block_start = text.index(guard)
         block_end = text.index("\nfi\n", block_start)
-        for line in (monetization_guard, ads_guard):
+        for line in (monetization_guard, ads_guard, gate):
             self.assertLess(block_start, text.index(line))
             self.assertLess(text.index(line), block_end)
         self.assertLess(block_end, text.index("security cms"))
+
+    def test_ipa_validation_runs_free_sdk_gate_for_filmy_only(self):
+        text = (ROOT / "scripts/release/validate-ipa.sh").read_text()
+        gate = 'python3 "${root_dir}/scripts/monetization/sdk_gate.py" app --expect free "${app_path}"'
+        self.assertEqual(text.count(gate), 1)
+        guard = text.rindex('if [[ "${release_app_variant}" == "filmy" ]]; then', 0, text.index(gate))
+        self.assertLess(text.index("IPA is missing PrivacyInfo.xcprivacy"), guard)
+        self.assertLess(text.index(gate), text.index("embedded.mobileprovision"))
+        self.assertNotIn("\nfi\n", text[guard:text.index(gate)])
 
     def test_archive_help_is_available_without_xcode(self):
         result = subprocess.run(["bash", str(ROOT / "scripts/release/archive-device.sh"), "--help"],

@@ -10,6 +10,7 @@ import os
 import plistlib
 import re
 import subprocess
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "FilmyCamera/FilmyCameraApp.swift"
@@ -70,8 +71,10 @@ def main() -> None:
     info.update(descriptions)
     with INFO.open("wb") as file:
         plistlib.dump(info, file, sort_keys=False)
+    # Config/Info.Monetized.plist is the free plist plus the monetized-only keys; keep it in step.
+    subprocess.run([sys.executable, str(ROOT / "scripts/monetization/sdk_gate.py"), "plist", "--write"], check=True)
     if os.environ.get("GITHUB_ACTIONS") == "true":
-        paths = ["FilmyCamera/CaptureModes", "FilmyCameraTests/CaptureModesPolicyTests.swift",
+        paths = ["Config/Info.Monetized.plist", "FilmyCamera/CaptureModes", "FilmyCameraTests/CaptureModesPolicyTests.swift",
                  "FilmyCameraTests/CaptureModesProcessingTests.swift", "docs/capture-modes.md",
                  "scripts/integrate_capture_modes.py", "scripts/test-capture-modes-policy.sh",
                  "scripts/capture-modes-policy/main.swift"]
