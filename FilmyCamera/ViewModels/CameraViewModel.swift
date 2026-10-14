@@ -409,7 +409,41 @@ final class CameraViewModel: ObservableObject {
         if decoded.shouldRewrite || migratedRecipes.merging(preservedUnknownOverrides, uniquingKeysWith: { current, _ in current }) != decoded.recipes {
             persistRecipeOverrides()
         }
+        #if DEBUG
+        openReviewFixtureForUITestsIfRequested()
+        #endif
     }
+
+    #if DEBUG
+    /// UI-test seam: opens the import review on a generated photo so the
+    /// review layout can be tested on a plain simulator. Needs both
+    /// `-ui-testing` and `-ui-testing-review-fixture`; the import runs the
+    /// normal `importPhoto(data:camera:)` path, including its membership guard.
+    private func openReviewFixtureForUITestsIfRequested() {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard arguments.contains("-ui-testing"),
+              arguments.contains("-ui-testing-review-fixture") else { return }
+        let showsSaveError = arguments.contains("-ui-testing-review-save-error")
+
+        Task { @MainActor [weak self] in
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            format.opaque = true
+            let size = CGSize(width: 900, height: 1200)
+            let renderer = UIGraphicsImageRenderer(size: size, format: format)
+            let bandColors: [UIColor] = [.systemTeal, .systemOrange, .systemIndigo]
+            let data = renderer.jpegData(withCompressionQuality: 0.9) { context in
+                for (index, color) in bandColors.enumerated() {
+                    color.setFill()
+                    context.fill(CGRect(x: 0, y: CGFloat(index) * 400, width: size.width, height: 400))
+                }
+            }
+            await self?.importPhoto(data: data)
+            guard let self, showsSaveError, self.reviewImage != nil else { return }
+            self.saveErrorMessage = PhotoLibrarySaveError.writeFailed.errorDescription
+        }
+    }
+    #endif
 
     /// A slider round trip could persist an older G7 X default as a
     /// customization. Upgrade only unchanged v11/v12 looks; intentional edits

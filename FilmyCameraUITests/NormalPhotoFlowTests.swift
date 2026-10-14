@@ -104,11 +104,13 @@ final class NormalPhotoFlowTests: XCTestCase {
         returnToCameraFromRoll()
 
         try importSeededFixture(newerSavedFrameCount: countBefore)
-        // SwiftUI promotes the outer review identifier onto its sole scroll
-        // container when the accessibility layout has no pinned action bar.
+        // The review scroll keeps `review-content-scroll`, or inherits
+        // `review-screen`; Cancel and Save are pinned below it at every text size.
         let reviewScroll = app.scrollViews.matching(
             NSPredicate(format: "identifier IN %@", ["review-content-scroll", "review-screen"])
         ).firstMatch
+        assertReviewControl(app.buttons["review-save"], name: "Large-text pinned Save", containedInApp: true)
+        assertReviewControl(app.buttons["review-cancel"], name: "Large-text pinned Cancel", containedInApp: true)
         for (identifier, name) in [
             ("review-look-picker", "Large-text review look picker"),
             ("review-compare-original", "Large-text Original comparison"),
@@ -197,6 +199,10 @@ final class NormalPhotoFlowTests: XCTestCase {
         XCTAssertEqual(divider.value as? String, "Original 50 percent")
         let photo = app.descendants(matching: .any)["review-image"]
         XCTAssertTrue(photo.label.contains("Original on the left"))
+        // A hold on the photo is masked off while Split owns the photo.
+        photo.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6)).press(forDuration: 0.8)
+        XCTAssertEqual(split.value as? String, "On", "A hold must not leave Split")
+        XCTAssertEqual(divider.value as? String, "Original 50 percent", "A hold must not move the divider")
         let start = divider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         let end = start.withOffset(CGVector(dx: -photo.frame.width * 0.25, dy: 0))
         start.press(forDuration: 0.15, thenDragTo: end)
@@ -264,10 +270,23 @@ final class NormalPhotoFlowTests: XCTestCase {
         assertReviewControl(compare, name: "Original comparison")
         assertReviewControl(lookPicker, name: "Review look picker")
 
+        // Holding the photo peeks the original without latching a comparison.
+        let peekPhoto = app.descendants(matching: .any)["review-image"]
+        let photoFrameBeforePeek = peekPhoto.frame
+        peekPhoto.press(forDuration: 1.5)
+        XCTAssertEqual(compare.value as? String, "Look", "A hold must not latch the Original comparison")
+        XCTAssertTrue(peekPhoto.label.contains("Instant Print"), "A hold must leave the Instant Print look in place")
+        XCTAssertTrue(waitUntil(timeout: 30) { app.buttons["Save filtered photo"].isEnabled })
+
         compare.tap()
         XCTAssertTrue(waitUntil(timeout: 15) { compare.value as? String == "Original" })
         let photo = app.descendants(matching: .any)["review-image"]
         XCTAssertTrue(photo.label.contains("Original"), "Comparison must identify the source photo")
+        let originalFrame = photo.frame
+        XCTAssertEqual(originalFrame.minX, photoFrameBeforePeek.minX, accuracy: 1, "Original must not move the photo box")
+        XCTAssertEqual(originalFrame.minY, photoFrameBeforePeek.minY, accuracy: 1, "Original must not move the photo box")
+        XCTAssertEqual(originalFrame.width, photoFrameBeforePeek.width, accuracy: 1, "Original must not resize the photo box")
+        XCTAssertEqual(originalFrame.height, photoFrameBeforePeek.height, accuracy: 1, "Original must not resize the photo box")
         attachScreenshot(named: "review-original-portrait")
 
         lookPicker.tap()

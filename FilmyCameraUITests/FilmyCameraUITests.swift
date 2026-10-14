@@ -1182,6 +1182,288 @@ final class FilmyCameraUITests: XCTestCase {
         attachScreenshot(named: "accessibility-large-text-editor")
     }
 
+    func testImportReviewGivesThePhotoRoomAndHoldPeeksOriginal() throws {
+        let reviewApp = launchReviewFixture()
+        defer { reviewApp.terminate() }
+
+        let heading = reviewApp.staticTexts["review-heading"]
+        XCTAssertTrue(heading.waitForExistence(timeout: 15), "The fixture photo must open Edit photo")
+        XCTAssertEqual(heading.label, "Edit photo")
+        let save = reviewApp.buttons["review-save"]
+        let cancel = reviewApp.buttons["review-cancel"]
+        let lookPicker = reviewApp.buttons["review-look-picker"]
+        let compare = reviewApp.buttons["review-compare-original"]
+        let photoFinish = reviewApp.buttons["review-finish-photo"]
+        let printFinish = reviewApp.buttons["review-finish-instantPrint"]
+        let photo = reviewApp.descendants(matching: .any)["review-image"]
+
+        assertMinimumHitTarget(save, named: "Review Save")
+        XCTAssertEqual(save.label, "Save filtered photo")
+        XCTAssertLessThanOrEqual(save.frame.height, 60, "Save must stay on one line")
+        assertMinimumHitTarget(cancel, named: "Review Cancel")
+        let controls: [(XCUIElement, String)] = [
+            (lookPicker, "Review look picker"),
+            (compare, "Review Original comparison"),
+            (photoFinish, "Photo finish"),
+            (printFinish, "Instant Print finish")
+        ]
+        for (element, name) in controls {
+            assertMinimumHitTarget(element, named: name)
+        }
+        XCTAssertTrue(filterAppliedText(in: reviewApp).exists)
+
+        let phonePortrait = isPhonePortrait(reviewApp)
+        let reviewHeight = reviewScreenHeight(in: reviewApp)
+        if phonePortrait {
+            XCTAssertGreaterThanOrEqual(
+                photo.frame.height,
+                min(reviewHeight * 0.55, reviewHeight - 322) - 1,
+                "The photo needs at least 55 percent of the review height"
+            )
+            let gap = assertControlsClearOfPinnedBar(controls, photo: photo, in: reviewApp)
+            add(reviewNote("gap above pinned bar: \(gap) pt, photo \(photo.frame.height) pt of \(reviewHeight) pt"))
+            let filterApplied = filterAppliedText(in: reviewApp)
+            XCTAssertTrue(
+                filterApplied.frame.midY >= heading.frame.minY && filterApplied.frame.midY <= heading.frame.maxY,
+                "The resolution caption shares the heading row"
+            )
+            attachScreenshot(named: "review-photo-first-portrait")
+        }
+
+        let hint = reviewApp.staticTexts["review-peek-hint"]
+        if phonePortrait { XCTAssertTrue(hint.exists, "The peek hint shows until a hold has shown the original") }
+        XCTAssertEqual(compare.value as? String, "Look")
+        let photoFrame = photo.frame
+        let lookFrame = lookPicker.frame
+        photo.press(forDuration: 1.5)
+        XCTAssertTrue(waitUntil(timeout: 15) { save.isEnabled }, "Save must come back once the original is prepared")
+        photo.press(forDuration: 1.0)
+        if phonePortrait {
+            XCTAssertTrue(waitUntil(timeout: 5) { !hint.exists }, "A hold that showed the original retires the hint")
+        }
+        XCTAssertEqual(compare.value as? String, "Look", "A hold must not latch the Original comparison")
+        let split = reviewApp.buttons["review-compare-split"]
+        if split.exists { XCTAssertEqual(split.value as? String, "Off") }
+        XCTAssertFalse(photo.label.contains("Original"), "The photo returns to the look on release")
+        XCTAssertTrue(save.isEnabled)
+        XCTAssertFalse(reviewApp.staticTexts["review-render-error"].exists)
+        guard phonePortrait else { return }
+        assertFramesMatch(photo.frame, photoFrame, named: "Photo after a hold")
+
+        compare.tap()
+        XCTAssertTrue(waitUntil(timeout: 15) { compare.value as? String == "Original" })
+        XCTAssertTrue(photo.label.contains("Original"))
+        assertFramesMatch(photo.frame, photoFrame, named: "Photo in Original")
+        assertFramesMatch(lookPicker.frame, lookFrame, named: "Look picker in Original")
+        attachScreenshot(named: "review-peek-original-badge")
+        compare.tap()
+        XCTAssertTrue(waitUntil(timeout: 15) { compare.value as? String == "Look" })
+
+        printFinish.tap()
+        XCTAssertTrue(waitUntil(timeout: 30) { photo.label.contains("Instant Print") && save.isEnabled })
+        let printPhotoFrame = photo.frame
+        let printLookFrame = lookPicker.frame
+        compare.tap()
+        XCTAssertTrue(waitUntil(timeout: 15) { compare.value as? String == "Original" })
+        assertFramesMatch(photo.frame, printPhotoFrame, named: "Instant Print photo in Original")
+        assertFramesMatch(lookPicker.frame, printLookFrame, named: "Look picker over Instant Print Original")
+        XCTAssertTrue(printFinish.isHittable, "Instant Print must stay reachable in Original")
+    }
+
+    func testImportReviewPinsSaveErrorAboveSave() throws {
+        let reviewApp = launchReviewFixture(extraArguments: ["-ui-testing-review-save-error"])
+        defer { reviewApp.terminate() }
+
+        let retry = reviewApp.buttons["review-save-error-retry"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 15), "The save error must show Try Again")
+        assertMinimumHitTarget(retry, named: "Try Again")
+        let errorText = reviewApp.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH 'Photos could not save this frame'")
+        ).firstMatch
+        XCTAssertTrue(errorText.exists)
+        XCTAssertFalse(reviewApp.buttons["review-save-error-settings"].exists)
+        let save = reviewApp.buttons["review-save"]
+        let cancel = reviewApp.buttons["review-cancel"]
+        XCTAssertTrue(save.isHittable, "Save must stay hittable under a save error")
+        XCTAssertTrue(cancel.isHittable, "Cancel must stay hittable under a save error")
+        guard isPhonePortrait(reviewApp) else { return }
+
+        XCTAssertLessThanOrEqual(retry.frame.maxY, save.frame.minY)
+        XCTAssertLessThanOrEqual(retry.frame.maxY, cancel.frame.minY)
+        let photo = reviewApp.descendants(matching: .any)["review-image"]
+        let reviewHeight = reviewScreenHeight(in: reviewApp)
+        XCTAssertGreaterThanOrEqual(
+            photo.frame.height,
+            min(reviewHeight * 0.55, reviewHeight - 322) - 1,
+            "The banner must not shrink the photo"
+        )
+        let bannerTop = min(errorText.frame.minY, retry.frame.minY)
+        add(reviewNote("banner to Save top: \(save.frame.minY - bannerTop) pt", named: "review-save-error-heights"))
+
+        let scroll = reviewScrollView(in: reviewApp)
+        let compare = reviewApp.buttons["review-compare-original"]
+        let printFinish = reviewApp.buttons["review-finish-instantPrint"]
+        var compareWasHittable = compare.isHittable
+        var steps = 0
+        while steps < 10 {
+            if printFinish.isHittable && printFinish.frame.maxY <= bannerTop - 8 { break }
+            compareWasHittable = compareWasHittable || compare.isHittable
+            dragReviewScroll(scroll, by: 100)
+            steps += 1
+        }
+        compareWasHittable = compareWasHittable || compare.isHittable
+        XCTAssertTrue(
+            printFinish.isHittable && printFinish.frame.maxY <= bannerTop - 8,
+            "Finish must be reachable by scrolling above the pinned banner"
+        )
+        XCTAssertTrue(compareWasHittable, "Compare must be reachable by scrolling above the pinned banner")
+        attachScreenshot(named: "review-save-error-pinned")
+    }
+
+    func testImportReviewKeepsSaveAndCancelPinnedAtLargestText() throws {
+        let reviewApp = launchReviewFixture(extraArguments: [
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityXXXL"
+        ])
+        defer { reviewApp.terminate() }
+
+        let save = reviewApp.buttons["review-save"]
+        let cancel = reviewApp.buttons["review-cancel"]
+        XCTAssertTrue(reviewApp.staticTexts["review-heading"].waitForExistence(timeout: 15))
+        for (element, name) in [(save, "Largest-text Save"), (cancel, "Largest-text Cancel")] {
+            assertMinimumHitTarget(element, named: name)
+            assertContained(element, in: reviewApp, named: name)
+        }
+        XCTAssertFalse(save.frame.intersects(cancel.frame))
+        guard isPhonePortrait(reviewApp) else { return }
+
+        XCTAssertLessThanOrEqual(abs(save.frame.midY - cancel.frame.midY), 2, "Save and Cancel share one row")
+        XCTAssertLessThanOrEqual(save.frame.height, 80)
+        let photo = reviewApp.descendants(matching: .any)["review-image"]
+        let reviewHeight = reviewScreenHeight(in: reviewApp)
+        let scroll = reviewScrollView(in: reviewApp)
+        let pinnedTop = cancel.frame.minY - 10
+        var photoWhole = false
+        for _ in 0..<20 {
+            if photo.frame.minY >= scroll.frame.minY - 1 && photo.frame.maxY <= pinnedTop + 1 {
+                photoWhole = true
+                break
+            }
+            dragReviewScroll(scroll, by: 100)
+        }
+        XCTAssertGreaterThanOrEqual(photo.frame.height, reviewHeight * 0.55 - 1)
+        XCTAssertTrue(photoWhole, "The whole photo must be reachable above the pinned bar")
+        XCTAssertTrue(save.isHittable)
+        XCTAssertTrue(cancel.isHittable)
+        attachScreenshot(named: "review-large-text-pinned-save")
+    }
+
+    func testImportReviewKeepsControlsAboveTheBarAtLargerText() throws {
+        var gaps: [String] = []
+        for category in ["UICTContentSizeCategoryXL", "UICTContentSizeCategoryXXL", "UICTContentSizeCategoryXXXL"] {
+            let reviewApp = launchReviewFixture(extraArguments: ["-UIPreferredContentSizeCategoryName", category])
+            defer { reviewApp.terminate() }
+            let heading = reviewApp.staticTexts["review-heading"]
+            XCTAssertTrue(heading.waitForExistence(timeout: 15), category)
+            guard isPhonePortrait(reviewApp) else { return }
+
+            let photo = reviewApp.descendants(matching: .any)["review-image"]
+            let save = reviewApp.buttons["review-save"]
+            let reviewHeight = reviewScreenHeight(in: reviewApp)
+            XCTAssertGreaterThanOrEqual(
+                filterAppliedText(in: reviewApp).frame.minY,
+                heading.frame.maxY,
+                "The caption stacks under the heading at \(category)"
+            )
+            let controls: [(XCUIElement, String)] = [
+                (reviewApp.buttons["review-look-picker"], "Look picker at \(category)"),
+                (reviewApp.buttons["review-compare-original"], "Original comparison at \(category)"),
+                (reviewApp.buttons["review-finish-photo"], "Photo finish at \(category)"),
+                (reviewApp.buttons["review-finish-instantPrint"], "Instant Print finish at \(category)")
+            ]
+            let gap = assertControlsClearOfPinnedBar(controls, photo: photo, in: reviewApp)
+            XCTAssertGreaterThanOrEqual(photo.frame.height, reviewHeight - 408, category)
+            XCTAssertLessThanOrEqual(save.frame.height, 60, "Save stays on one line at \(category)")
+            gaps.append("\(category): gap \(gap) pt, photo \(photo.frame.height) pt of \(reviewHeight) pt")
+            if category == "UICTContentSizeCategoryXXXL" { attachScreenshot(named: "review-xxxlarge-portrait") }
+        }
+        add(reviewNote(gaps.joined(separator: "\n"), named: "review-large-text-gaps"))
+    }
+
+    private func launchReviewFixture(extraArguments: [String] = []) -> XCUIApplication {
+        MainActor.assumeIsolated {
+            let reviewApp = makeApplication()
+            reviewApp.launchArguments = [
+                "-ui-testing",
+                "-selectedRecipeID",
+                "classic-chrome",
+                "-ui-testing-review-fixture"
+            ] + extraArguments
+            reviewApp.launch()
+            return reviewApp
+        }
+    }
+
+    private func isPhonePortrait(_ target: XCUIApplication) -> Bool {
+        UIDevice.current.userInterfaceIdiom == .phone && target.frame.height > target.frame.width
+    }
+
+    /// Height of the review layout area (the view's `proxy.size.height`): the
+    /// review scroll view fills it, inside the safe area. The Capture modes bar
+    /// is not shown while an import review is open, so it is not a landmark.
+    private func reviewScreenHeight(in target: XCUIApplication) -> CGFloat {
+        reviewScrollView(in: target).frame.height
+    }
+
+    private func filterAppliedText(in target: XCUIApplication) -> XCUIElement {
+        target.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Filter applied'")).firstMatch
+    }
+
+    private func reviewScrollView(in target: XCUIApplication) -> XCUIElement {
+        target.scrollViews.matching(
+            NSPredicate(format: "identifier IN %@", ["review-content-scroll", "review-screen"])
+        ).firstMatch
+    }
+
+    private func dragReviewScroll(_ scroll: XCUIElement, by distance: CGFloat) {
+        let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -distance)))
+    }
+
+    /// Every control sits below the photo and at least 6 pt above the pinned
+    /// area (the bar top less its 10 pt padding). Returns the smallest gap.
+    private func assertControlsClearOfPinnedBar(
+        _ controls: [(XCUIElement, String)],
+        photo: XCUIElement,
+        in target: XCUIApplication
+    ) -> CGFloat {
+        let bar = target.descendants(matching: .any).matching(identifier: "review-action-bar").firstMatch
+        XCTAssertTrue(bar.exists, "The pinned action bar must exist")
+        let pinnedTop = bar.frame.minY - 10
+        var smallestGap = CGFloat.greatestFiniteMagnitude
+        for (element, name) in controls {
+            assertMinimumHitTarget(element, named: name)
+            XCTAssertGreaterThanOrEqual(element.frame.minY, photo.frame.maxY, name + " sits below the photo")
+            XCTAssertLessThanOrEqual(element.frame.maxY, pinnedTop - 6, name + " must clear the pinned area")
+            smallestGap = min(smallestGap, pinnedTop - element.frame.maxY)
+        }
+        return smallestGap
+    }
+
+    private func assertFramesMatch(_ actual: CGRect, _ expected: CGRect, named: String) {
+        XCTAssertEqual(actual.minX, expected.minX, accuracy: 1, named + " x")
+        XCTAssertEqual(actual.minY, expected.minY, accuracy: 1, named + " y")
+        XCTAssertEqual(actual.width, expected.width, accuracy: 1, named + " width")
+        XCTAssertEqual(actual.height, expected.height, accuracy: 1, named + " height")
+    }
+
+    private func reviewNote(_ text: String, named name: String = "review-measurement") -> XCTAttachment {
+        let attachment = XCTAttachment(string: text)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        return attachment
+    }
+
     func testMonochromeEditorHidesNoOpColorControls() throws {
         app.terminate()
 
