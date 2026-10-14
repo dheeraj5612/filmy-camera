@@ -371,11 +371,8 @@ final class SignalFrameUITests: XCTestCase {
         #endif
     }
 
-    /// Opens the "Camera and film" disclosure and returns the reachable film list button.
+    /// Returns the reachable film list button of the essentials row.
     private func openFilmPicker(_ app: XCUIApplication) -> XCUIElement {
-        let header = app.buttons["Camera and film"]
-        revealInPage(header, in: app)
-        header.tap()
         let open = app.buttons["capture-modes-film-picker-open"]
         revealInPage(open, in: app)
         assertReachable(open, in: app)

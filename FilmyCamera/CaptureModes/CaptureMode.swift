@@ -148,6 +148,11 @@ enum CaptureModesError: LocalizedError, Sendable {
     }
 }
 
+/// A control the essentials row can offer for the open mode.
+enum CaptureEssential: Equatable {
+    case film, zoom, exposure, microphone
+}
+
 enum CaptureModesPolicy {
     static let maximumMovieSeconds: Double = 180
     static let maximumPanoramaPixels: Double = 24_000_000
@@ -218,6 +223,42 @@ enum CaptureModesPolicy {
 
     static func supportsMacro(minimumFocusDistance: Int, autofocus: Bool) -> Bool {
         autofocus && minimumFocusDistance > 0 && minimumFocusDistance <= 50
+    }
+
+    /// The essentials row for the open mode, in display order. Spatial video has no film look, zoom or exposure here;
+    /// zoom and exposure appear only when the hardware range is wider than one step.
+    static func essentials(mode: CaptureMode, requestedMode: CaptureMode, maximumZoom: Double,
+                           minimumExposure: Double, maximumExposure: Double) -> [CaptureEssential] {
+        var items: [CaptureEssential] = []
+        if mode != .spatialVideo {
+            items.append(.film)
+            if maximumZoom > 1 { items.append(.zoom) }
+            if maximumExposure > minimumExposure { items.append(.exposure) }
+        }
+        if requestedMode.isVideo { items.append(.microphone) }
+        return items
+    }
+
+    /// Captions for the About sheet, in display order: video length, portrait depth, Camera Control.
+    static func modeNotes(requestedMode: CaptureMode, configuredMode: CaptureMode, controlsSupported: Bool) -> [String] {
+        var notes: [String] = []
+        if requestedMode.isVideo {
+            notes.append("Up to three minutes per clip. Keep Filmy open while developing the film look.")
+        }
+        if configuredMode == .portrait {
+            notes.append("Depth-based center-subject bokeh at f/4. The original depth-bearing HEIC is always retained.")
+        }
+        notes.append(controlsSupported ? "Camera Control: shutter, zoom, exposure, mode, film, and focus where supported."
+                     : "On-screen controls remain available without Camera Control hardware.")
+        return notes
+    }
+
+    /// The About sheet stays closed while a capture runs, so the Stop control is never covered.
+    static func allowsModeInfo(phase: CaptureModesPhase) -> Bool {
+        switch phase {
+        case .capturing, .recording, .processing: return false
+        case .stopped, .configuring, .ready, .unavailable: return true
+        }
     }
 
     /// Why a mode can be missing on some hardware, as a full sentence. Nil for modes every supported device offers.

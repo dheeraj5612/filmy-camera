@@ -216,4 +216,45 @@ final class CaptureModesPolicyTests: XCTestCase {
             }
         }
     }
+
+    func testEssentialsRowMatchesTheModeAndHardwareRanges() {
+        func essentials(_ mode: CaptureMode, requested: CaptureMode? = nil, zoom: Double = 1,
+                        minimum: Double = -2, maximum: Double = 2) -> [CaptureEssential] {
+            CaptureModesPolicy.essentials(mode: mode, requestedMode: requested ?? mode, maximumZoom: zoom,
+                                          minimumExposure: minimum, maximumExposure: maximum)
+        }
+        XCTAssertEqual(essentials(.photo), [.film, .exposure])
+        XCTAssertEqual(essentials(.photo, zoom: 3), [.film, .zoom, .exposure])
+        XCTAssertEqual(essentials(.filmVideo, zoom: 3), [.film, .zoom, .exposure, .microphone])
+        XCTAssertEqual(essentials(.filmVideo), [.film, .exposure, .microphone])
+        XCTAssertEqual(essentials(.spatialVideo, zoom: 3), [.microphone])
+        XCTAssertEqual(essentials(.photo, minimum: 0, maximum: 0), [.film])
+        XCTAssertEqual(essentials(.photo, zoom: 3, minimum: 1, maximum: 1), [.film, .zoom])
+        // The microphone follows the requested mode while the configured mode is still the old one.
+        XCTAssertEqual(essentials(.photo, requested: .filmVideo), [.film, .exposure, .microphone])
+    }
+
+    func testModeNotesKeepEveryCaption() {
+        let video = "Up to three minutes per clip. Keep Filmy open while developing the film look."
+        let portrait = "Depth-based center-subject bokeh at f/4. The original depth-bearing HEIC is always retained."
+        let supported = "Camera Control: shutter, zoom, exposure, mode, film, and focus where supported."
+        let unsupported = "On-screen controls remain available without Camera Control hardware."
+        XCTAssertEqual(CaptureModesPolicy.modeNotes(requestedMode: .photo, configuredMode: .photo, controlsSupported: true), [supported])
+        XCTAssertEqual(CaptureModesPolicy.modeNotes(requestedMode: .photo, configuredMode: .photo, controlsSupported: false), [unsupported])
+        XCTAssertEqual(CaptureModesPolicy.modeNotes(requestedMode: .filmVideo, configuredMode: .filmVideo, controlsSupported: false),
+                       [video, unsupported])
+        XCTAssertEqual(CaptureModesPolicy.modeNotes(requestedMode: .spatialVideo, configuredMode: .spatialVideo, controlsSupported: true),
+                       [video, supported])
+        XCTAssertEqual(CaptureModesPolicy.modeNotes(requestedMode: .portrait, configuredMode: .portrait, controlsSupported: true),
+                       [portrait, supported])
+    }
+
+    func testModeInfoOpensUnlessCapturing() {
+        for open in [CaptureModesPhase.configuring, .ready, .stopped, .unavailable] {
+            XCTAssertTrue(CaptureModesPolicy.allowsModeInfo(phase: open), open.rawValue)
+        }
+        for busy in [CaptureModesPhase.capturing, .recording, .processing] {
+            XCTAssertFalse(CaptureModesPolicy.allowsModeInfo(phase: busy), busy.rawValue)
+        }
+    }
 }

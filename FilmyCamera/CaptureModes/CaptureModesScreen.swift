@@ -12,6 +12,8 @@ struct CaptureModesScreen: View {
     @State private var showingCaptures = false
     @State private var showingReferencePicker = false
     @State private var showingFilmPicker = false
+    @State private var showingModeInfo = false
+    @State private var adjusting: Adjuster?
     @State private var referenceItem: PhotosPickerItem?
     @State private var referenceImage: UIImage?
     @State private var referenceBusy = false
@@ -23,6 +25,9 @@ struct CaptureModesScreen: View {
     @State private var referenceScale = 1.0
     @State private var closing = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private enum Adjuster { case zoom, exposure }
 
     init(camera: CameraService, recipe: FilmRecipe, recipes: [FilmRecipe], mode: CaptureMode, onClose: @escaping () -> Void) {
         self.camera = camera
@@ -31,7 +36,7 @@ struct CaptureModesScreen: View {
     }
 
     private var interactionBlocked: Bool {
-        showingCaptures || showingReferencePicker || showingFilmPicker || referenceBusy || model.analysis != nil
+        showingCaptures || showingReferencePicker || showingFilmPicker || showingModeInfo || referenceBusy || model.analysis != nil
             || model.errorMessage != nil || model.requestingPermission || closing
     }
 
@@ -74,6 +79,8 @@ struct CaptureModesScreen: View {
                 }
             } message: { Text(model.errorMessage ?? "") }
             .onChange(of: interactionBlocked) { _, blocked in model.setInteractionAllowed(!blocked) }
+            .onChange(of: model.requestedMode) { _, _ in adjusting = nil }
+            .onChange(of: model.canConfigure) { _, allowed in if !allowed { adjusting = nil } }
             .onChange(of: referenceItem) { _, item in
                 guard let item else { return }
                 referenceItem = nil
@@ -121,7 +128,7 @@ struct CaptureModesScreen: View {
             sizedViewfinder(geometry)
             statusBlock
             modePicker
-            captureOptions
+            essentials
             referenceOptions
         }
         .padding(.horizontal, 16)
@@ -330,54 +337,196 @@ struct CaptureModesScreen: View {
         }
     }
 
+    private var essentialItems: [CaptureEssential] {
+        CaptureModesPolicy.essentials(
+            mode: model.state.mode, requestedMode: model.requestedMode, maximumZoom: model.state.maximumZoom,
+            minimumExposure: model.state.minimumExposure, maximumExposure: model.state.maximumExposure)
+    }
+
+    private var essentials: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if essentialItems.contains(.film) { filmPickerButton }
+            if let adjuster = activeAdjuster(in: essentialItems) {
+                adjustRow(adjuster)
+            } else {
+                chipRow(essentialItems)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .opacity(model.state.controlsExpanded ? 0 : 1)
+        .allowsHitTesting(!model.state.controlsExpanded)
+        .accessibilityHidden(model.state.controlsExpanded)
+        .sheet(isPresented: $showingModeInfo) { modeInfoSheet }
+    }
+
+    private func activeAdjuster(in items: [CaptureEssential]) -> Adjuster? {
+        switch adjusting {
+        case .zoom?: return items.contains(.zoom) ? .zoom : nil
+        case .exposure?: return items.contains(.exposure) ? .exposure : nil
+        case nil: return nil
+        }
+    }
+
+    private func setAdjusting(_ value: Adjuster?) {
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { adjusting = value }
+    }
+
     private var filmPickerButton: some View {
         Button { showingFilmPicker = true } label: {
             HStack(spacing: 8) {
                 Label(model.state.recipeName.isEmpty ? "Choose film" : "Film: \(model.state.recipeName)", systemImage: "film")
+                    .lineLimit(pageScrolls ? 2 : 1)
+                    .truncationMode(.middle)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.secondary).accessibilityHidden(true)
             }
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
+            .font(.system(.subheadline, design: .rounded).weight(.bold))
+            .foregroundStyle(FilmyTheme.primary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, pageScrolls ? 6 : 0)
+            .frame(minHeight: FilmyTheme.minimumHitTarget)
+            .background(FilmyTheme.panel.opacity(0.94), in: RoundedRectangle(cornerRadius: 22))
+            .overlay(RoundedRectangle(cornerRadius: 22).stroke(FilmyTheme.lineStrong, lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: 22))
         }
+        .buttonStyle(.plain)
+        .disabled(!model.canConfigure)
+        .opacity(model.canConfigure ? 1 : 0.5)
         .accessibilityHint("Opens the film list")
         .accessibilityIdentifier("capture-modes-film-picker-open")
     }
 
-    private var captureOptions: some View {
-        DisclosureGroup("Camera and film") {
-            VStack(alignment: .leading, spacing: 14) {
-                if model.state.mode != .spatialVideo {
-                    filmPickerButton
-                    if model.state.maximumZoom > 1 {
-                        Text("Zoom \(model.state.zoom, specifier: "%.1f")×").accessibilityHidden(true)
-                        Slider(value: Binding(get: { model.state.zoom }, set: model.engine.setZoom), in: 1...max(1.01, model.state.maximumZoom))
-                            .accessibilityLabel("Zoom")
-                            .accessibilityValue(String(format: "%.1f times", model.state.zoom))
-                    }
-                    if model.state.maximumExposure > model.state.minimumExposure {
-                        Text("Exposure \(model.state.exposure, specifier: "%+.1f") EV").accessibilityHidden(true)
-                        Slider(value: Binding(get: { model.state.exposure }, set: model.engine.setExposure),
-                               in: model.state.minimumExposure...model.state.maximumExposure)
-                            .accessibilityLabel("Exposure compensation")
-                            .accessibilityValue(String(format: "%+.1f EV", model.state.exposure))
-                    }
-                }
-                if model.requestedMode.isVideo {
-                    Toggle("Record microphone audio", isOn: $model.wantsMicrophone)
-                        .onChange(of: model.wantsMicrophone) { _, _ in model.open(model.requestedMode) }
-                    Text("Up to three minutes per clip. Keep Filmy open while developing the film look.").font(.caption).foregroundStyle(.secondary)
-                }
-                if model.state.mode == .portrait {
-                    Text("Depth-based center-subject bokeh at f/4. The original depth-bearing HEIC is always retained.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Text(model.state.controlsSupported ? "Camera Control: shutter, zoom, exposure, mode, film, and focus where supported."
-                     : "On-screen controls remain available without Camera Control hardware.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }.padding(.top, 12).disabled(!model.canConfigure)
-        }.tint(.white)
+    /// Titled chips, then icon-only or value-only chips, then one chip per line: whichever fits the width without clipping.
+    private func chipRow(_ items: [CaptureEssential]) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { chips(items, compact: false) }
+            HStack(spacing: 8) { chips(items, compact: true) }
+            VStack(alignment: .leading, spacing: 8) { chips(items, compact: false) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder private func chips(_ items: [CaptureEssential], compact: Bool) -> some View {
+        if items.contains(.zoom) { zoomChip(compact: compact) }
+        if items.contains(.exposure) { exposureChip(compact: compact) }
+        if items.contains(.microphone) { microphoneChip(compact: compact) }
+        aboutChip
+    }
+
+    private func zoomChip(compact: Bool) -> some View {
+        let value = String(format: "%.1f\u{00D7}", model.state.zoom)
+        return Button { setAdjusting(.zoom) } label: {
+            Group {
+                if compact { Text(value) } else { Label(value, systemImage: "plus.magnifyingglass") }
+            }
+            .modifier(CaptureModesCapsuleStyle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!model.canConfigure)
+        .opacity(model.canConfigure ? 1 : 0.5)
+        .accessibilityLabel("Zoom")
+        .accessibilityValue(String(format: "%.1f times", model.state.zoom))
+        .accessibilityInputLabels(["Zoom", value])
+        .accessibilityHint("Opens the zoom slider")
+        .accessibilityIdentifier("capture-modes-zoom-chip")
+    }
+
+    private func exposureChip(compact: Bool) -> some View {
+        let value = String(format: "%+.1f EV", model.state.exposure)
+        return Button { setAdjusting(.exposure) } label: {
+            Group {
+                if compact { Text(value) } else { Label(value, systemImage: "plusminus.circle") }
+            }
+            .modifier(CaptureModesCapsuleStyle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!model.canConfigure)
+        .opacity(model.canConfigure ? 1 : 0.5)
+        .accessibilityLabel("Exposure")
+        .accessibilityValue(value)
+        .accessibilityInputLabels(["Exposure", "EV"])
+        .accessibilityHint("Opens the exposure slider")
+        .accessibilityIdentifier("capture-modes-exposure-chip")
+    }
+
+    /// Shows the request, as the old toggle did; the viewfinder chip says whether audio is actually on.
+    private func microphoneChip(compact: Bool) -> some View {
+        let wanted = model.wantsMicrophone
+        let text = wanted ? "Mic on" : "Mic off"
+        let symbol = wanted ? "mic" : "mic.slash"
+        return Button {
+            HapticFeedback.play(.selection)
+            model.wantsMicrophone.toggle()
+            model.open(model.requestedMode)
+        } label: {
+            Group {
+                if compact { Image(systemName: symbol) } else { Label(text, systemImage: symbol) }
+            }
+            .modifier(CaptureModesCapsuleStyle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!model.canConfigure)
+        .opacity(model.canConfigure ? 1 : 0.5)
+        .accessibilityLabel("Record microphone audio")
+        .accessibilityValue(wanted ? "On" : "Off")
+        .accessibilityInputLabels(["Record microphone audio", "Mic"])
+        .accessibilityHint("Records audio when microphone access is allowed. Changing it reopens the mode.")
+        .accessibilityIdentifier("capture-modes-mic-chip")
+    }
+
+    private var aboutChip: some View {
+        Button { showingModeInfo = true } label: {
+            Image(systemName: "info.circle").modifier(CaptureModesCapsuleStyle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!CaptureModesPolicy.allowsModeInfo(phase: model.state.phase))
+        .accessibilityLabel("About this mode")
+        .accessibilityIdentifier("capture-modes-about-open")
+    }
+
+    private func adjustRow(_ adjuster: Adjuster) -> some View {
+        HStack(spacing: 8) {
+            switch adjuster {
+            case .zoom: zoomSlider
+            case .exposure: exposureSlider
+            }
+            Text(adjuster == .zoom ? String(format: "%.1f\u{00D7}", model.state.zoom) : String(format: "%+.1f EV", model.state.exposure))
+                .font(.subheadline.monospacedDigit())
+                .fixedSize()
+                .accessibilityHidden(true)
+            Button { setAdjusting(nil) } label: {
+                Image(systemName: "checkmark").modifier(CaptureModesCapsuleStyle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(adjuster == .zoom ? "Done with zoom" : "Done with exposure")
+            .accessibilityIdentifier("capture-modes-adjust-done")
+        }
+        .disabled(!model.canConfigure)
+    }
+
+    private var zoomSlider: some View {
+        Slider(value: Binding(get: { model.state.zoom }, set: model.engine.setZoom), in: 1...max(1.01, model.state.maximumZoom))
+            .tint(.white)
+            .accessibilityLabel("Zoom")
+            .accessibilityValue(String(format: "%.1f times", model.state.zoom))
+    }
+
+    private var exposureSlider: some View {
+        Slider(value: Binding(get: { model.state.exposure }, set: model.engine.setExposure),
+               in: model.state.minimumExposure...model.state.maximumExposure)
+            .tint(.white)
+            .accessibilityLabel("Exposure compensation")
+            .accessibilityValue(String(format: "%+.1f EV", model.state.exposure))
+    }
+
+    private var modeInfoSheet: some View {
+        CaptureModeInfoSheet(
+            title: model.requestedMode.title,
+            guidance: model.requestedMode.guidance,
+            notes: CaptureModesPolicy.modeNotes(
+                requestedMode: model.requestedMode, configuredMode: model.state.mode, controlsSupported: model.state.controlsSupported),
+            unavailable: unavailableModes.compactMap { CaptureModesPolicy.unavailableReason(for: $0) })
     }
 
     private var referenceOptions: some View {
@@ -569,6 +718,51 @@ private struct CaptureModesCapsuleStyle: ViewModifier {
             .background(FilmyTheme.panel.opacity(0.94), in: Capsule())
             .overlay(Capsule().stroke(FilmyTheme.lineStrong, lineWidth: 1))
             .contentShape(Capsule())
+    }
+}
+
+/// What the open mode does, its notes, and the modes this device cannot offer.
+private struct CaptureModeInfoSheet: View {
+    let title: String
+    let guidance: String
+    let notes: [String]
+    let unavailable: [String]
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(guidance).font(.body)
+                    ForEach(notes, id: \.self) { note in
+                        Text(note).font(.footnote).foregroundStyle(.secondary)
+                    }
+                    if !unavailable.isEmpty { unavailableSection }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
+            }
+            .navigationTitle("About \(title)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }.accessibilityIdentifier("capture-modes-about-done")
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+        .presentationDetents([.medium, .large])
+    }
+
+    private var unavailableSection: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Not on this device").font(.footnote.weight(.semibold))
+            ForEach(unavailable, id: \.self) { reason in
+                Text(reason).font(.footnote)
+            }
+        }
+        .foregroundStyle(.secondary)
     }
 }
 
