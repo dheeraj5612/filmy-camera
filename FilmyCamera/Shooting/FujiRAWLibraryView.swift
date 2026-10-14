@@ -4,6 +4,91 @@ import UniformTypeIdentifiers
 
 private struct FujiDecodedPreview: @unchecked Sendable { let image: UIImage }
 
+/// Kind filter for the RAW library. Foundation-only so unit tests can call it.
+enum FujiOriginalFilter: String, CaseIterable, Identifiable, Sendable {
+    case all, raw, sources
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .all: return "All"
+        case .raw: return "RAW"
+        case .sources: return "Source JPEGs"
+        }
+    }
+    func apply(_ records: [FujiOriginalRecord]) -> [FujiOriginalRecord] {
+        switch self {
+        case .all: return records
+        case .raw: return records.filter { $0.isRAW }
+        case .sources: return records.filter { !$0.isRAW }
+        }
+    }
+    /// Offered only when the library holds both kinds; otherwise every filter equals All.
+    static func isOffered(for records: [FujiOriginalRecord]) -> Bool {
+        records.contains { $0.isRAW } && records.contains { !$0.isRAW }
+    }
+    static func summary(_ records: [FujiOriginalRecord]) -> String {
+        let raw: Int = records.filter { $0.isRAW }.count
+        let sources: Int = records.count - raw
+        return "\(raw) RAW, \(sources) source " + (sources == 1 ? "JPEG" : "JPEGs")
+    }
+}
+
+/// Value text for the RAW development sliders, in units. Clamps to the slider range before formatting.
+enum FujiRAWSliderFormat: Sendable {
+    case exposure, temperature, tint, percent
+    var range: ClosedRange<Double> {
+        switch self {
+        case .exposure: return -5...5
+        case .temperature: return 2000...12000
+        case .tint: return -150...150
+        case .percent: return 0...1
+        }
+    }
+    func text(_ value: Double, locale: Locale = .autoupdatingCurrent) -> String {
+        guard value.isFinite else { return "\u{2013}" }
+        let v: Double = min(max(value, range.lowerBound), range.upperBound)
+        switch self {
+        case .exposure:
+            let r: Double = (v * 10).rounded() / 10
+            let style = FloatingPointFormatStyle<Double>(locale: locale)
+                .precision(.fractionLength(1))
+                .sign(strategy: .always(includingZero: false))
+            return (r == 0 ? 0 : r).formatted(style) + " EV"
+        case .temperature:
+            let style = FloatingPointFormatStyle<Double>(locale: locale)
+                .precision(.fractionLength(0))
+                .grouping(.never)
+            return v.rounded().formatted(style) + " K"
+        case .tint:
+            let r: Double = v.rounded()
+            let style = FloatingPointFormatStyle<Double>(locale: locale)
+                .precision(.fractionLength(0))
+                .sign(strategy: .always(includingZero: false))
+            return (r == 0 ? 0 : r).formatted(style)
+        case .percent:
+            let style = FloatingPointFormatStyle<Double>.Percent(locale: locale)
+                .precision(.fractionLength(0))
+            return ((v * 100).rounded() / 100).formatted(style)
+        }
+    }
+}
+
+/// Icon plus word, so the kind is never carried by colour alone.
+private struct FujiOriginalKindBadge: View {
+    let isRAW: Bool
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: isRAW ? "camera.aperture" : "photo").accessibilityHidden(true)
+            Text(isRAW ? "RAW" : "Source JPEG").lineLimit(1)
+        }
+        .font(.caption.weight(.bold))
+        .foregroundStyle(FilmyTheme.primary)
+        .padding(.horizontal, 8).padding(.vertical, 3)
+        .background(FilmyTheme.panelRaised, in: Capsule())
+        .overlay(Capsule().strokeBorder(FilmyTheme.lineStrong, lineWidth: 1))
+    }
+}
+
 /// Library folders kept on disk whose record.json cannot be read. No delete action; an original with only a missing record can be restored.
 private struct FujiUnreadableRow: View {
     @ObservedObject var controller: FujiShootingController
@@ -42,6 +127,8 @@ struct FujiRAWLibraryView: View {
     @State private var reading = false
     @State private var error: String?
     @State private var deletion: FujiOriginalRecord?
+    @State private var kindFilter: FujiOriginalFilter = .all
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         List {
@@ -50,7 +137,7 @@ struct FujiRAWLibraryView: View {
                     set: { controller.change(\.captureRAW, to: $0) })).disabled(controller.settingsLocked)
                 Button(reading ? "Reading RAW…" : "Import a RAW file") { importing = true }
                     .frame(minHeight: 44).disabled(reading || controller.isBusy)
-                Text("Originals are retained on this device, outside Photos. Development never overwrites their bytes. Export an unchanged original for backup before deleting it or uninstalling Filmy.")
+                Text("Originals kept here stay on this device, not in Photos or Roll. Development never overwrites their bytes. Export an unchanged original for backup before deleting it or uninstalling Filmy.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
             if controller.pendingExportCount > 0 {
@@ -64,34 +151,13 @@ struct FujiRAWLibraryView: View {
             }
             if let error { Section { Text(error).foregroundStyle(.orange).font(.footnote) } }
             if let message = controller.errorMessage { Section { Text(message).foregroundStyle(.orange).font(.footnote) } }
-            Section("Originals and retained sequence sources") {
-                if controller.originals.isEmpty {
-                    ContentUnavailableView("No originals yet", systemImage: "camera.aperture",
-                        description: Text("Enable RAW on a supported lens or import a supported RAW file. Failed or retained composite sources also appear here."))
-                }
-                ForEach(controller.originals) { record in
-                    NavigationLink {
-                        FujiRAWDevelopView(controller: controller, viewModel: viewModel, photoLibrary: photoLibrary, original: record)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack {
-                                Text(record.isRAW ? "RAW" : "SOURCE JPEG").font(.caption2.weight(.bold).monospaced())
-                                Text(record.dynamicRange.title).font(.caption2.monospaced()).foregroundStyle(.secondary)
-                                Spacer()
-                                Text(record.capturedAt, style: .date).font(.caption2).foregroundStyle(.secondary)
-                            }
-                            Text(record.recipe.name).font(.headline)
-                            Text(record.label).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                        }.padding(.vertical, 6)
-                    }
-                    .swipeActions {
-                        Button("Delete original", role: .destructive) { deletion = record }.disabled(controller.isBusy || controller.isComposing)
-                    }
-                }
-            }
+            originalsSection
         }
         .navigationTitle("RAW Develop").navigationBarTitleDisplayMode(.inline)
         .task { await controller.reloadLibrary() }
+        .onChange(of: FujiOriginalFilter.isOffered(for: controller.originals)) { _, isOffered in
+            if !isOffered { kindFilter = .all }
+        }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.rawImage], allowsMultipleSelection: false) { result in
             do {
                 guard let url = try result.get().first else { return }
@@ -115,6 +181,55 @@ struct FujiRAWLibraryView: View {
             }
         } message: { Text("Developed copies in Photos are not deleted. This cannot be undone; export the original first to keep a backup.") }
     }
+
+    @ViewBuilder private var originalsSection: some View {
+        let offered: Bool = FujiOriginalFilter.isOffered(for: controller.originals)
+        let activeFilter: FujiOriginalFilter = offered ? kindFilter : .all
+        let shown: [FujiOriginalRecord] = activeFilter.apply(controller.originals)
+        Section {
+            if offered {
+                Picker("Show", selection: $kindFilter) {
+                    ForEach(FujiOriginalFilter.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.menu)
+                .accessibilityIdentifier("fuji-raw-filter")
+            }
+            if controller.originals.isEmpty {
+                ContentUnavailableView("No originals yet", systemImage: "camera.aperture",
+                    description: Text("Enable RAW on a supported lens or import a supported RAW file. Failed or retained composite sources also appear here."))
+            }
+            ForEach(shown) { record in
+                NavigationLink {
+                    FujiRAWDevelopView(controller: controller, viewModel: viewModel, photoLibrary: photoLibrary, original: record)
+                } label: {
+                    originalLabel(record)
+                }
+                .swipeActions {
+                    Button("Delete original", role: .destructive) { deletion = record }.disabled(controller.isBusy || controller.isComposing)
+                }
+            }
+        } header: {
+            Text("Your originals")
+        } footer: {
+            if !controller.originals.isEmpty { Text(FujiOriginalFilter.summary(controller.originals)) }
+        }
+    }
+
+    private func originalLabel(_ record: FujiOriginalRecord) -> some View {
+        let layout: AnyLayout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+            : AnyLayout(HStackLayout())
+        return VStack(alignment: .leading, spacing: 6) {
+            layout {
+                FujiOriginalKindBadge(isRAW: record.isRAW).layoutPriority(1)
+                Text(record.dynamicRange.title).font(.caption2.monospaced()).foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                Text(record.capturedAt, style: .date).font(.caption2).foregroundStyle(.secondary)
+            }
+            Text(record.recipe.name).font(.headline)
+            Text(record.label).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+        }.padding(.vertical, 6)
+    }
 }
 
 struct FujiRAWDevelopView: View {
@@ -131,6 +246,8 @@ struct FujiRAWDevelopView: View {
     @State private var editingRecipe = false
     @State private var renderGeneration = UUID()
     @State private var savedMessage: String?
+    @State private var saveError: String?
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     init(controller: FujiShootingController, viewModel: CameraViewModel, photoLibrary: PhotoLibraryService, original: FujiOriginalRecord) {
         self.controller = controller; self.viewModel = viewModel; self.photoLibrary = photoLibrary; self.original = original
@@ -155,7 +272,10 @@ struct FujiRAWDevelopView: View {
                         .font(.caption2.monospaced()).foregroundStyle(.secondary)
                 }
                 if let error { Text(error).font(.footnote).foregroundStyle(.orange) }
-                if let savedMessage { Text(savedMessage).font(.footnote) }
+                if dynamicTypeSize.isAccessibilitySize {
+                    if let saveError { Text(saveError).font(.footnote).foregroundStyle(.orange) }
+                    if let savedMessage { Text(savedMessage).font(.footnote) }
+                }
             }
             Section("Development recipe") {
                 Picker("Film recipe", selection: Binding(get: { draft.recipe.id }, set: { draft.recipe = viewModel.recipe(for: $0) })) {
@@ -165,7 +285,7 @@ struct FujiRAWDevelopView: View {
             }
             if original.isRAW {
                 Section("RAW exposure and white balance") {
-                    control("Exposure (EV)", value: $draft.adjustment.exposure, range: -5...5)
+                    control("Exposure", value: $draft.adjustment.exposure, format: .exposure)
                     Toggle("As-shot white balance", isOn: Binding(
                         get: { draft.adjustment.useAsShotWhiteBalance },
                         set: { asShot in
@@ -182,29 +302,17 @@ struct FujiRAWDevelopView: View {
                             }
                         }))
                     if !draft.adjustment.useAsShotWhiteBalance {
-                        control("Temperature (K)", value: $draft.adjustment.temperature, range: 2000...12000)
-                        control("Tint", value: $draft.adjustment.tint, range: -150...150)
+                        control("Temperature", value: $draft.adjustment.temperature, format: .temperature)
+                        control("Tint", value: $draft.adjustment.tint, format: .tint)
                     }
-                    control("Highlight shoulder", value: $draft.adjustment.highlightRecovery, range: 0...1)
-                    control("Shadow lift", value: $draft.adjustment.shadowLift, range: 0...1)
+                    control("Highlight shoulder", value: $draft.adjustment.highlightRecovery, format: .percent)
+                    control("Shadow lift", value: $draft.adjustment.shadowLift, format: .percent)
                     Text("Highlight development can use information present in the original. It cannot recover sensor-clipped detail. Capture DR protection is fixed by the original exposure, not applied retroactively.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
             Section {
-                Button(isSaving ? "Saving development…" : "Save development to Photos") {
-                    isSaving = true; error = nil; savedMessage = nil
-                    let snapshot = draft
-                    Task {
-                        defer { isSaving = false }
-                        do {
-                            try await controller.saveDevelopment(snapshot, photoLibrary: photoLibrary)
-                            if snapshot == draft { savedMessage = "Saved a developed copy. Original unchanged." }
-                        } catch is CancellationError {
-                            self.error = "Development canceled. The original is unchanged."
-                        } catch { self.error = error.localizedDescription }
-                    }
-                }.disabled(isSaving || controller.isBusy).frame(minHeight: 44)
+                if dynamicTypeSize.isAccessibilitySize { saveButton(inBar: false) }
                 Button("Revert to saved development") { draft = original }.disabled(isSaving).frame(minHeight: 44)
                 if let originalURL {
                     ShareLink(item: originalURL) { Label("Export unchanged original", systemImage: "square.and.arrow.up") }.frame(minHeight: 44)
@@ -213,6 +321,9 @@ struct FujiRAWDevelopView: View {
                     .font(.footnote).foregroundStyle(.secondary)
             }
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !dynamicTypeSize.isAccessibilitySize { saveBar }
+        }
         .navigationTitle("Develop Original").navigationBarTitleDisplayMode(.inline)
         .task {
             do { originalURL = try await controller.originalURL(original) }
@@ -220,6 +331,7 @@ struct FujiRAWDevelopView: View {
         }
         .task(id: draft) {
             savedMessage = nil
+            saveError = nil
             let generation = UUID(); renderGeneration = generation
             isRendering = true
             do {
@@ -246,6 +358,12 @@ struct FujiRAWDevelopView: View {
                 if generation == renderGeneration { self.error = error.localizedDescription; isRendering = false }
             }
         }
+        .onChange(of: savedMessage) { _, new in
+            if let new { UIAccessibility.post(notification: .announcement, argument: new) }
+        }
+        .onChange(of: saveError) { _, new in
+            if let new { UIAccessibility.post(notification: .announcement, argument: new) }
+        }
         .sheet(isPresented: $editingRecipe) {
             RecipeDetailView(recipe: draft.recipe, originalRecipe: viewModel.originalRecipe(for: draft.recipe.id),
                 isSelected: true, onSelect: { editingRecipe = false }, onCancel: { editingRecipe = false },
@@ -253,10 +371,57 @@ struct FujiRAWDevelopView: View {
                 onReset: { draft.recipe = viewModel.originalRecipe(for: draft.recipe.id) })
         }
     }
-    private func control(_ title: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
-        VStack(alignment: .leading) {
-            HStack { Text(title); Spacer(); Text(value.wrappedValue.formatted(.number.precision(.fractionLength(2)))).monospacedDigit() }
-            Slider(value: value, in: range).accessibilityLabel(title)
+    private var saveBar: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let status = saveError ?? savedMessage {
+                Label(status, systemImage: saveError == nil ? "checkmark.circle" : "exclamationmark.triangle")
+                    .font(.footnote).lineLimit(2)
+                    .foregroundStyle(saveError == nil ? FilmyTheme.primary : Color.orange)
+            }
+            saveButton(inBar: true)
+        }
+        .padding(.horizontal, FilmyLayout.compactHorizontalMargin)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
+        .background(.bar)
+    }
+
+    @ViewBuilder private func saveButton(inBar: Bool) -> some View {
+        let title: String = isSaving ? "Saving development…" : "Save development to Photos"
+        if inBar {
+            Button(title) { save() }
+                .buttonStyle(.filmyPrimary)
+                .disabled(isSaving || controller.isBusy)
+                .accessibilityIdentifier("fuji-develop-save")
+        } else {
+            Button { save() } label: {
+                Text(title).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            }
+            .disabled(isSaving || controller.isBusy)
+            .accessibilityIdentifier("fuji-develop-save")
+        }
+    }
+
+    private func save() {
+        error = nil; saveError = nil; savedMessage = nil
+        isSaving = true
+        let snapshot = draft
+        Task {
+            defer { isSaving = false }
+            do {
+                try await controller.saveDevelopment(snapshot, photoLibrary: photoLibrary)
+                if snapshot == draft { savedMessage = "Saved a developed copy. Original unchanged." }
+            } catch is CancellationError {
+                self.saveError = "Development canceled. The original is unchanged."
+            } catch { self.saveError = error.localizedDescription }
+        }
+    }
+
+    private func control(_ title: String, value: Binding<Double>, format: FujiRAWSliderFormat) -> some View {
+        let text: String = format.text(value.wrappedValue)
+        return VStack(alignment: .leading) {
+            HStack { Text(title); Spacer(); Text(text).monospacedDigit() }
+            Slider(value: value, in: format.range).accessibilityLabel(title).accessibilityValue(text)
         }
     }
 }

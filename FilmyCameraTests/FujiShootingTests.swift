@@ -773,6 +773,48 @@ final class FujiShootingTests: XCTestCase {
         let stored = try XCTUnwrap(defaults.data(forKey: "fuji.shooting.v1"))
         XCTAssertEqual(try JSONDecoder().decode(FujiPreferences.self, from: stored), controller.preferences)
     }
+
+    private func originalRecord(isRAW: Bool, label: String) -> FujiOriginalRecord {
+        FujiOriginalRecord(id: UUID(), capturedAt: Date(), isRAW: isRAW, sourceFilename: isRAW ? "source.dng" : "source.jpg",
+            sequenceID: UUID(), dynamicRange: .dr100, captureExposure: nil, recipe: recipe, adjustment: .init(),
+            cropFactor: 1, viewportWidth: 0, viewportHeight: 0, label: label)
+    }
+
+    func testOriginalFilterIsOfferedOnlyForMixedLibrariesAndCountsBothKinds() {
+        let raw = originalRecord(isRAW: true, label: "R")
+        let jpeg1 = originalRecord(isRAW: false, label: "J1")
+        let jpeg2 = originalRecord(isRAW: false, label: "J2")
+        XCTAssertFalse(FujiOriginalFilter.isOffered(for: [raw]))
+        XCTAssertFalse(FujiOriginalFilter.isOffered(for: [jpeg1]))
+        XCTAssertTrue(FujiOriginalFilter.isOffered(for: [raw, jpeg1]))
+        let mixed = [jpeg1, raw, jpeg2]
+        XCTAssertEqual(FujiOriginalFilter.raw.apply(mixed), [raw])
+        XCTAssertEqual(FujiOriginalFilter.sources.apply(mixed), [jpeg1, jpeg2])
+        XCTAssertEqual(FujiOriginalFilter.all.apply(mixed), mixed)
+        XCTAssertEqual(FujiOriginalFilter.summary([raw, jpeg1, jpeg2]), "1 RAW, 2 source JPEGs")
+        XCTAssertEqual(FujiOriginalFilter.summary([jpeg1]), "0 RAW, 1 source JPEG")
+    }
+
+    func testRAWSliderValuesReadInUnits() {
+        let posix = Locale(identifier: "en_US_POSIX")
+        XCTAssertEqual(FujiRAWSliderFormat.exposure.text(0.5, locale: posix), "+0.5 EV")
+        XCTAssertEqual(FujiRAWSliderFormat.exposure.text(-1.04, locale: posix), "-1.0 EV")
+        XCTAssertEqual(FujiRAWSliderFormat.exposure.text(0.04, locale: posix), "0.0 EV")
+        XCTAssertEqual(FujiRAWSliderFormat.exposure.text(-0.04, locale: posix), "0.0 EV")
+        XCTAssertEqual(FujiRAWSliderFormat.exposure.text(0.5, locale: Locale(identifier: "de_DE")), "+0,5 EV")
+        XCTAssertEqual(FujiRAWSliderFormat.temperature.text(5599.6, locale: posix), "5600 K")
+        XCTAssertEqual(FujiRAWSliderFormat.temperature.text(1e30, locale: posix), "12000 K")
+        XCTAssertEqual(FujiRAWSliderFormat.tint.text(3.2, locale: posix), "+3")
+        XCTAssertEqual(FujiRAWSliderFormat.tint.text(-12.7, locale: posix), "-13")
+        XCTAssertEqual(FujiRAWSliderFormat.tint.text(0.3, locale: posix), "0")
+        XCTAssertEqual(FujiRAWSliderFormat.tint.text(-0.3, locale: posix), "0")
+        XCTAssertEqual(FujiRAWSliderFormat.tint.text(-1e30, locale: posix), "-150")
+        XCTAssertEqual(FujiRAWSliderFormat.percent.text(0.5, locale: posix), "50%")
+        XCTAssertEqual(FujiRAWSliderFormat.percent.text(0.004, locale: posix), "0%")
+        XCTAssertEqual(FujiRAWSliderFormat.percent.text(1e30, locale: posix), "100%")
+        XCTAssertEqual(FujiRAWSliderFormat.exposure.text(.nan, locale: posix), "\u{2013}")
+        XCTAssertEqual(FujiRAWSliderFormat.exposure.text(.infinity, locale: posix), "\u{2013}")
+    }
 }
 
 /// Counts stores of the Fuji preferences blob; every other key passes through untouched.

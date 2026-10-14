@@ -2595,7 +2595,14 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertFalse(app.buttons["fuji-bank-recall-1"].exists, "A fresh suite has no saved C1")
         attachScreenshot(named: "fuji-banks-empty")
         app.navigationBars.buttons.element(boundBy: 0).tap()
-        // RAW library check (UX2-22) goes here.
+        guard openDetail("fuji-q-rawDevelopment", in: app, menuIsOpen: true) else {
+            XCTFail("RAW develop must open")
+            return
+        }
+        XCTAssertTrue(app.staticTexts["RAW Develop"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Originals kept here stay on this device'")).firstMatch.waitForExistence(timeout: 5))
+        attachScreenshot(named: "fuji-raw-library")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
         let qHint = app.buttons["fuji-hint-q"]
         XCTAssertTrue(swipeUntilHittable(qHint, in: app), "The Q footer hint must scroll into reach")
         XCTAssertEqual(qHint.value as? String, "Collapsed")
