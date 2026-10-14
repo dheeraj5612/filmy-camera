@@ -1211,6 +1211,13 @@ final class FilmyCameraUITests: XCTestCase {
         tune.tap()
         XCTAssertTrue(accessibilityApp.staticTexts["Recipe controls"].waitForExistence(timeout: 5))
         assertMinimumHitTarget(accessibilityApp.buttons["Done editing Muted Color"], named: "Done editing")
+        let done = accessibilityApp.buttons["Done editing Muted Color"]
+        XCTAssertLessThanOrEqual(done.frame.height, 72, "Done stays one line at the largest text")
+        XCTAssertLessThanOrEqual(
+            accessibilityApp.descendants(matching: .any)["recipe-detail-hero"].frame.maxY,
+            done.frame.minY,
+            "Recipe name and description fit above Done on the first screen"
+        )
         attachScreenshot(named: "accessibility-large-text-editor")
 
         // The Roll: at accessibility sizes Import leaves the pinned bar and sits in the page.

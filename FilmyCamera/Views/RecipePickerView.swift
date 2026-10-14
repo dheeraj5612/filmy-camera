@@ -467,6 +467,7 @@ struct RecipeDetailView: View {
     @State private var expandedSections: Set<EditorSection> = [.tone, .color]
     @State private var isShowingLookInfo = false
     @State private var showingSourceSettings = false
+    @State private var summaryWidth: CGFloat = 0
 
     init(
         recipe: FilmRecipe,
@@ -577,10 +578,10 @@ struct RecipeDetailView: View {
                 .frame(maxWidth: FilmyLayout.readableMaxWidth)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 20)
-                .padding(.top, 14)
                 .padding(.bottom, 24)
             }
             .accessibilityIdentifier("recipe-detail-scroll")
+            .padding(.top, 14)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             primaryAction
@@ -611,12 +612,16 @@ struct RecipeDetailView: View {
             HStack(spacing: 10) {
                 Image(systemName: primaryActionIcon)
                 Text(primaryActionTitle)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.8)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 1 : 2)
+                    .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 0.7 : 0.8)
                     .multilineTextAlignment(.center)
             }
         }
         .buttonStyle(.filmyPrimary)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+        .accessibilityShowsLargeContentViewer {
+            Label(primaryActionTitle, systemImage: primaryActionIcon)
+        }
         .accessibilityLabel(primaryActionAccessibilityLabel)
         .accessibilityHint(
             hasPendingChanges
@@ -689,7 +694,7 @@ struct RecipeDetailView: View {
         VStack(alignment: .leading, spacing: 14) {
             RecipeSwatch(recipe: draft, compact: false, showsLabel: false)
                 .frame(maxWidth: .infinity)
-                .frame(height: 180)
+                .frame(height: dynamicTypeSize.isAccessibilitySize ? 64 : 180)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
@@ -839,6 +844,11 @@ struct RecipeDetailView: View {
         if dynamicTypeSize.isAccessibilitySize {
             return [GridItem(.flexible())]
         }
+        // summaryWidth is the grid width inside the panel's 14 pt padding and the
+        // 20 pt screen margins (screen - 68): 375 pt gives 307, 390 pt gives 322.
+        if summaryWidth > 0 && summaryWidth < 320 {
+            return Array(repeating: GridItem(.flexible(), spacing: 8), count: 2)
+        }
         return Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
     }
 
@@ -865,6 +875,15 @@ struct RecipeDetailView: View {
                         .strokeBorder(FilmyTheme.line, lineWidth: 1)
                 }
                 .accessibilityElement(children: .combine)
+            }
+        }
+        .background {
+            GeometryReader { (proxy: GeometryProxy) in
+                Color.clear
+                    .onAppear { summaryWidth = proxy.size.width }
+                    .onChange(of: proxy.size.width) { _, newWidth in
+                        summaryWidth = newWidth
+                    }
             }
         }
     }
