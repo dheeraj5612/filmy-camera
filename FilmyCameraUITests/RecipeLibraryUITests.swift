@@ -1,0 +1,214 @@
+import XCTest
+
+@MainActor
+final class RecipeLibraryUITests: XCTestCase {
+    private var app: XCUIApplication!
+
+    private func launchApp() {
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
+        app = XCUIApplication()
+        app.launchEnvironment["FILMY_TEST_DEFAULTS_SUITE"] = "FilmyCameraUITests.RecipeLibrary.\(UUID().uuidString)"
+        app.launchArguments = ["-ui-testing", "-ui-testing-viewfinder-chrome", "-selectedRecipeID", "classic-chrome"]
+        app.launch()
+    }
+
+    func testOriginalPreviewToggleAndLookSelectionClearTheViewfinder() {
+        launchApp()
+        let menu = app.buttons["recipe-menu"]
+        let compare = app.buttons["camera-original-preview-toggle"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 10))
+        XCTAssertTrue(compare.exists)
+        let selectedLook = menu.label
+        let initialPreview = compare.value as? String
+
+        compare.tap()
+        XCTAssertNotEqual(compare.value as? String, initialPreview)
+        XCTAssertEqual(menu.label, selectedLook)
+        compare.tap()
+        XCTAssertEqual(compare.value as? String, initialPreview)
+
+        menu.tap()
+        let drawer = app.descendants(matching: .any)["recipe-drawer"]
+        XCTAssertTrue(drawer.waitForExistence(timeout: 5))
+        // Chrome preview on a simulator has no running camera, so the viewfinder is the placeholder.
+        let preview = app.descendants(matching: .any).matching(NSPredicate(format: "identifier IN %@", ["camera-preview", "camera-placeholder"])).firstMatch
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(
+            drawer.frame.minY - preview.frame.minY,
+            preview.frame.height * 0.6 - 1,
+            "The look picker leaves at least 60% of the viewfinder visible"
+        )
+        attach("camera-look-strip-open")
+
+        let alternate = app.buttons["recipe-g7x-compact"]
+        let picker = app.scrollViews["recipe-picker"]
+        for _ in 0..<3 where !alternate.isHittable { picker.swipeDown() }
+        XCTAssertTrue(alternate.waitForExistence(timeout: 5))
+        alternate.tap()
+        let lookChanged = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label CONTAINS 'G7 X Compact'"),
+            object: menu
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [lookChanged], timeout: 5), .completed)
+        XCTAssertTrue(drawer.exists, "Choosing a look keeps the look picker open")
+        XCTAssertEqual(alternate.value as? String, "Selected")
+        attach("camera-look-strip-after-pick")
+
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).tap()
+        XCTAssertTrue(drawer.exists, "A viewfinder tap focuses and leaves the look picker open")
+        XCTAssertTrue(menu.label.contains("G7 X Compact"))
+
+        // The swipe starts on a header icon: it closes the picker and fires nothing.
+        let library = app.buttons["look-library-open"]
+        XCTAssertTrue(library.isHittable)
+        let top = library.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        top.press(forDuration: 0.05, thenDragTo: top.withOffset(CGVector(dx: 0, dy: 90)))
+        let drawerClosed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: app.buttons["recipe-drawer-close"]
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [drawerClosed], timeout: 5), .completed)
+        XCTAssertFalse(app.buttons["look-library-close"].waitForExistence(timeout: 1.5),
+                       "A swipe down from the library icon never opens the look library")
+        XCTAssertTrue(menu.isHittable, "The camera is uncovered after the swipe")
+        XCTAssertTrue(menu.label.contains("G7 X Compact"))
+
+        menu.tap()
+        let close = app.buttons["recipe-drawer-close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5))
+        close.tap()
+        let closedAgain = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: close
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [closedAgain], timeout: 5), .completed)
+        XCTAssertTrue(menu.label.contains("G7 X Compact"))
+        XCTAssertEqual(compare.value as? String, initialPreview)
+    }
+
+    func testEnableAllHideAllUndoAndRelaunchPreserveTheCurrentLook() throws {
+        launchApp()
+        openManager()
+        let count = app.staticTexts["recipe-manager-active-count"]
+        XCTAssertTrue(count.waitForExistence(timeout: 5))
+        let defaults = try activeCounts()
+        XCTAssertGreaterThan(defaults.enabled, 0, count.label)
+        XCTAssertLessThan(defaults.enabled, defaults.total, count.label)
+        attach("recipe-packs-default")
+        app.buttons["recipe-manager-actions"].tap()
+        app.buttons["recipe-enable-all"].tap()
+        let all = try activeCounts()
+        XCTAssertGreaterThanOrEqual(all.total, 648)
+        XCTAssertEqual(all.enabled, all.total)
+        app.buttons["recipe-manager-actions"].tap()
+        app.buttons["recipe-hide-all"].tap()
+        XCTAssertEqual(try activeCounts().enabled, 0)
+        // A repeated no-op Hide all must not replace the real Undo snapshot.
+        app.buttons["recipe-manager-actions"].tap()
+        app.buttons["recipe-hide-all"].tap()
+        XCTAssertEqual(try activeCounts().enabled, 0)
+        app.buttons["recipe-manager-undo"].tap()
+        XCTAssertEqual(try activeCounts().enabled, all.total)
+        XCTAssertFalse(app.buttons["recipe-manager-undo"].exists)
+        app.buttons["recipe-manager-actions"].tap()
+        app.buttons["recipe-hide-all"].tap()
+        // Undo after a pack edit reverts that edit, not the earlier Hide all.
+        let packPredicate = NSPredicate(
+            format: "identifier BEGINSWITH 'recipe-pack-' AND NOT identifier BEGINSWITH 'recipe-pack-toggle-'")
+        let pack = app.buttons.matching(packPredicate).firstMatch
+        XCTAssertTrue(pack.waitForExistence(timeout: 5))
+        pack.tap()
+        let rowToggle = app.switches.matching(NSPredicate(format: "identifier BEGINSWITH 'manage-toggle-'")).firstMatch
+        XCTAssertTrue(rowToggle.waitForExistence(timeout: 5))
+        rowToggle.tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.buttons["recipe-manager-undo"].waitForExistence(timeout: 5))
+        XCTAssertEqual(try activeCounts().enabled, 1)
+        app.buttons["recipe-manager-undo"].tap()
+        XCTAssertEqual(try activeCounts().enabled, 0)
+        app.buttons["recipe-manager-done"].tap()
+        XCTAssertTrue(app.staticTexts["camera-looks-empty"].waitForExistence(timeout: 5))
+        attach("recipe-popup-empty-with-packs-recovery")
+        let before = app.buttons["recipe-menu"].label
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 10))
+        XCTAssertEqual(app.buttons["recipe-menu"].label, before)
+        openManager()
+        XCTAssertEqual(try activeCounts().enabled, 0)
+        // Hidden everywhere, the current look must still be selected and say so.
+        app.segmentedControls.buttons["Recipes"].firstMatch.tap()
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("Muted Color")
+        let current = app.buttons["manage-select-classic-chrome"]
+        XCTAssertTrue(current.waitForExistence(timeout: 8))
+        XCTAssertEqual(current.value as? String, "Current look, hidden from quick menu")
+        XCTAssertTrue(current.isSelected, "The current look keeps the selected trait while hidden")
+    }
+
+    func testSearchIndividualVisibilityAndPublishedSourceDetails() throws {
+        launchApp()
+        openManager()
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("123 Chrome")
+        let toggle = app.switches["manage-toggle-source-filmrecipes-123-chrome-78e134597cdf"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 8))
+        if app.keyboards.firstMatch.exists {
+            // On iPad the keyboard action key can be partially outside the
+            // app's accessibility frame, making XCTest's tap try to scroll it
+            // and fail with kAXErrorFailure. Return from the search field,
+            // then fall back to tapping a stable page title.
+            search.typeText("\n")
+            if app.keyboards.firstMatch.exists {
+                let title = app.staticTexts.matching(
+                    NSPredicate(format: "label == 'Recipe Packs' OR label == 'Recipes'")
+                ).firstMatch
+                if title.exists && title.isHittable { title.tap() }
+            }
+        }
+        let before = try activeCounts().enabled
+        let wasEnabled = toggle.value as? String == "1"
+        toggle.tap()
+        XCTAssertEqual(try activeCounts().enabled, before + (wasEnabled ? -1 : 1))
+        XCTAssertEqual(toggle.value as? String, wasEnabled ? "0" : "1")
+        attach("recipe-manager-search-individual-enabled")
+        let details = app.buttons["manage-source-source-filmrecipes-123-chrome-78e134597cdf"]
+        XCTAssertTrue(details.waitForExistence(timeout: 5))
+        details.tap()
+        XCTAssertTrue(app.buttons["recipe-source-done"].waitForExistence(timeout: 5))
+        attach("recipe-published-settings-and-comparison")
+        XCTAssertTrue(app.staticTexts["Original recipe"].exists || app.staticTexts["ORIGINAL RECIPE"].exists)
+        app.buttons["recipe-source-done"].tap()
+        XCTAssertTrue(app.collectionViews["recipe-manager-list"].waitForExistence(timeout: 5))
+    }
+
+    private func openManager() {
+        let menu = app.buttons["recipe-menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 10))
+        if !app.buttons["camera-recipe-packs"].exists { menu.tap() }
+        let packs = app.buttons["camera-recipe-packs"]
+        XCTAssertTrue(packs.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(packs.frame.height, 44)
+        packs.tap()
+        XCTAssertTrue(app.buttons["recipe-manager-done"].waitForExistence(timeout: 5))
+    }
+
+    private func activeCounts() throws -> (enabled: Int, total: Int) {
+        let label = app.staticTexts["recipe-manager-active-count"].label
+        let values = label.split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }
+        XCTAssertEqual(values.count, 2, label)
+        return (try XCTUnwrap(values.first), try XCTUnwrap(values.last))
+    }
+
+    private func attach(_ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+}

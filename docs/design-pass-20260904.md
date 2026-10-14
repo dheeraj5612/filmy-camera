@@ -6,7 +6,7 @@ The look drawer opens only when requested. Compact digital, color film, and mono
 
 Capture/import review and saved-frame detail use full-screen presentation. Review keeps metadata outside the photo and has one discard/save action pair. Its root-sized overlay avoids a second UIKit presentation during PhotosPicker dismissal, which could leave the status-bar and home-gesture insets missing on fast imports. Covered camera controls are accessibility-hidden, disabled, and excluded from hit testing; live recipe thumbnails detach. Review still uses the existing capture/save/pause/Retake state policy. Portrait iPad review enlarges the photo; only landscape uses a side panel. Action bars account for their actual height at larger text sizes; save errors remain scrollable. Roll and Settings retain a pinned return to the camera while scrolling.
 
-Neutral black surfaces keep attention on the image. Amber identifies compact digital looks and muted green identifies color film. The rendering recipes, image processing, export resolution, metadata, and save policy are unchanged in this UI pass.
+Neutral black surfaces keep attention on the image. Amber identifies compact digital looks and muted green identifies color film. Superseded: see Palette (current) in design-pass-20260812.md; look family tags move off lime in a later pass. The rendering recipes, image processing, export resolution, metadata, and save policy are unchanged in this UI pass.
 
 ## Design references
 

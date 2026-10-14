@@ -6,7 +6,7 @@
 
 - The histogram can be dragged, remembers its relative position, stays within measured camera controls, adapts to rotation, and offers reset and accessibility movement actions.
 - Roll detail supports previous/next swipes, buttons and a frame counter. Zoomed drags pan; changing frames cancels stale image requests and keeps sharing tied to the active frame.
-- The viewfinder supports horizontal look changes in library order and double-tap camera switching while preserving focus taps and pinch zoom.
+- The viewfinder supports horizontal look changes in library order and double-tap camera switching while preserving focus taps and pinch zoom. (Superseded by camera2a, 2026-10-14: a double tap no longer switches cameras; the flip lives on camera-switch-control and the VoiceOver Switch camera action.)
 - Removed the 120-identifier ownership truncation and 60-frame PhotoKit fetch limit, which otherwise hid older app-created photos. Ownership checks still exclude unrelated library photos.
 - Corrected Highlights, Incandescent WB and Underwater WB directions; adjusted G7 X red/blue separation after the highlight correction. The renderer is `core-image-parametric-v11`.
 - Fixed a collapsed Settings flash selector, increased the Pro Done target, and clamped camera-reported white-balance gains before front/back switching. These defects were found during acceptance; latest physical verification remains pending.
@@ -78,7 +78,7 @@ The 411-test core summary above is authoritative for policy/renderer cases. The 
 | Grid on/off and thirds / golden ratio / square / crosshair | All four choices and grid/shared Settings persistence passed in the targeted simulator UI case; encoded-photo absence remains. |
 | Level / histogram / zebras / focus peaking | Analysis/geometry policies and all aid-toggle simulator persistence passed. Actual overlay registration, known target correspondence and level calibration remain. |
 | Movable histogram / edges / persistence / rotation / reset | 11 geometry tests passed. Physical movement/outside-focus evidence exists, but full case failed. Final UI run, settled landscape and accessibility actions remain. |
-| Look swipe / double-tap switch / single-tap focus / pinch conflict | 7 gesture-policy tests passed. Physical case failed on shutter element lookup; final mixed-gesture and boundary acceptance remains. |
+| Look swipe / double-tap switch (removed in camera2a) / single-tap focus / pinch conflict | 7 gesture-policy tests passed. Physical case failed on shutter element lookup; final mixed-gesture and boundary acceptance remains. |
 | Focus/exposure lock / unlock; front/back and mirroring | Core mapping/control policies passed; complete physical controls, front capture and saved orientation remain. |
 | Lens / optical and digital zoom / Pro ISO, shutter, WB, tint, focus | Core hardware-bound policies passed; later manual hardware cases could not start. Dedicated supported-lens and sensor-metadata validation remain; bed scene cannot certify distant 5× detail. |
 | Flash Off/Auto/On and Settings segments | Core flash policies passed. Physical UI found the Settings selector collapsed to approximately 1 pt; it is now laid out full-width and Off selection passed before an incoming-call interruption. Complete persistence matrix and actual flash firing/Auto conditions remain. |

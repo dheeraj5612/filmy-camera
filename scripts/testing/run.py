@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -33,6 +34,12 @@ LANES = {
 GROUPS = {group for groups in LANES.values() for group in groups}
 PHYSICAL = {"device", "lens", "add-only", "capture-sheet", "performance"}
 PHOTOS_WRITES = {"device", "add-only", "capture-sheet"}
+CONFIGURATIONS = ("Debug", "Release")
+DEFAULT_CONFIGURATION = "Debug"
+LANE_DEFAULT_CONFIGURATIONS = {"store-media": "Release"}
+SCHEMES = ("FilmyCamera", "FilmyCameraStoreMedia")
+DEFAULT_SCHEME = "FilmyCamera"
+LANE_DEFAULT_SCHEMES = {"store-media": "FilmyCameraStoreMedia"}
 ENVIRONMENT = {
     "fixtures": {"FILMY_RUN_LARGE_ROLL_QA": "1"},
     "photos-e2e": {"FILMY_RUN_SEEDED_PHOTOS_E2E": "1"},
@@ -49,6 +56,8 @@ SIMULATOR_BOOT_TIMEOUT_SECONDS = 300
 SIMULATOR_MEDIA_TIMEOUT_SECONDS = 300
 SIMULATOR_SHUTDOWN_TIMEOUT_SECONDS = 60
 SIMULATOR_DELETE_TIMEOUT_SECONDS = 60
+SIMULATOR_APP_READY_TIMEOUT_SECONDS = 30
+APP_BUNDLE_IDENTIFIER = "com.dheeraj.filmycamera"
 REQUIRED_FIXTURE_SELECTOR = (
     "FilmyCameraTests/PhotoLibraryLargeRollTests/"
     "testActualPhotoKitRollIncludesAll160OwnedFramesAcrossServiceReload"
@@ -90,7 +99,10 @@ def inventory(root=ROOT, manifest_path=MANIFEST):
                 match = re.search(r"\bclass\s+(\w+)\s*:\s*XCTestCase\b", line)
                 if match and not line.lstrip().startswith("//"):
                     current_class = match.group(1)
-                match = re.match(r"\s*func\s+(test\w+)\s*\(", line)
+                match = re.match(
+                    r"\s*(?:@\w+(?:\([^)]*\))?\s+)*"
+                    r"(?:(?:override|final|public|open|internal|nonisolated)\s+)*"
+                    r"func\s+(test\w+)\s*\(", line)
                 if not match:
                     continue
                 class_id = f"{target}/{current_class}"
@@ -137,19 +149,53 @@ def validate_destination(lane, destination, allow_photos_writes):
     physical = re.search(r"(?:^|,)platform=iOS(?:,|$)", destination) is not None
     if lane in PHYSICAL and (not physical or "id=" not in destination):
         raise ValueError(f"{lane} requires an explicit physical iOS device destination")
-    if lane in {"unit", "integration", "core", "e2e", "ci", "photos-e2e", "store-media"} and not simulator:
+    if lane in {"unit", "integration", "core", "e2e", "ci", "photos-e2e", "fixtures", "store-media"} and not simulator:
         raise ValueError(f"{lane} requires an iOS Simulator destination")
+    if lane in {"ci", "photos-e2e", "fixtures", "store-media"} and re.search(r"(?:^|,)id=", destination) is None:
+        raise ValueError(f"{lane} needs platform=iOS Simulator,id=<udid> to clone an owned simulator")
     if lane in PHOTOS_WRITES and not allow_photos_writes:
         raise ValueError(f"{lane} can keep real photos; pass --allow-photos-writes to run it")
     if not simulator and not physical and lane != "device-build":
         raise ValueError("Use platform=iOS Simulator,id=... or platform=iOS,id=...")
 
 
-def xcode_command(destination, derived_data, coverage=False):
-    command = ["xcodebuild", "-project", "FilmyCamera.xcodeproj", "-scheme", "FilmyCamera",
+def validate_configuration(configuration):
+    if configuration not in CONFIGURATIONS:
+        choices = ", ".join(CONFIGURATIONS)
+        raise ValueError(f"Unsupported build configuration {configuration!r}; choose {choices}")
+    return configuration
+
+
+def configuration_for_lane(lane, requested=None):
+    configuration = requested or LANE_DEFAULT_CONFIGURATIONS.get(lane, DEFAULT_CONFIGURATION)
+    return validate_configuration(configuration)
+
+
+def validate_scheme(scheme):
+    if scheme not in SCHEMES:
+        choices = ", ".join(SCHEMES)
+        raise ValueError(f"Unsupported Xcode scheme {scheme!r}; choose {choices}")
+    return scheme
+
+
+def scheme_for_lane(lane, requested=None):
+    scheme = requested or LANE_DEFAULT_SCHEMES.get(lane, DEFAULT_SCHEME)
+    return validate_scheme(scheme)
+
+
+def xcode_command(destination, derived_data, coverage=False, configuration=None,
+                  scheme=DEFAULT_SCHEME):
+    validate_scheme(scheme)
+    command = ["xcodebuild", "-project", "FilmyCamera.xcodeproj", "-scheme", scheme,
                "-destination", destination, "-derivedDataPath", str(derived_data),
                "-parallel-testing-enabled", "NO", "-maximum-parallel-testing-workers", "1",
                "-enableCodeCoverage", "YES" if coverage else "NO"]
+    if configuration is not None:
+        validate_configuration(configuration)
+        command += ["-configuration", configuration]
+        if configuration == "Release":
+            # XCTest targets import the app with @testable in Release builds.
+            command += ["ENABLE_TESTABILITY=YES"]
     if "Simulator" in destination or destination == "generic/platform=iOS":
         command += ["CODE_SIGNING_ALLOWED=NO", "CODE_SIGNING_REQUIRED=NO"]
     return command
@@ -178,7 +224,8 @@ def fixture_test_environment(inherited=None):
 def build_input_digest(root=ROOT):
     paths = [root / "project.yml", root / "FilmyCamera.xcodeproj/project.pbxproj"]
     for directory in ("FilmyCamera", "FilmyCameraTests", "FilmyCameraUITests",
-                      "FilmyCamera.xcodeproj/xcshareddata"):
+                      "FilmyCamera.xcodeproj/xcshareddata",
+                      "FilmyCamera.xcodeproj/project.xcworkspace/xcshareddata", "Config", "StoreKit"):
         paths += [path for path in (root / directory).rglob("*")
                   if path.is_file() and not any(part.startswith(".") for part in path.relative_to(root).parts)]
     digest = hashlib.sha256()
@@ -189,17 +236,55 @@ def build_input_digest(root=ROOT):
     return digest.hexdigest()
 
 
-def build_stamp_path(derived_data, destination):
+def build_stamp_path(derived_data, destination, configuration=None, scheme=None):
     platform = "simulator" if "Simulator" in destination else "device"
-    return derived_data / f".filmy-test-build-{platform}.json"
+    if scheme is not None:
+        validate_scheme(scheme)
+    if configuration is None:
+        suffix = ""
+    else:
+        validate_configuration(configuration)
+        # Keep the established Debug stamp name so existing Debug lanes remain
+        # reusable. Release gets a distinct stamp and can never reuse Debug.
+        suffix = "" if configuration == DEFAULT_CONFIGURATION else f"-{configuration}"
+    if scheme is not None and scheme != DEFAULT_SCHEME:
+        # A UI-only scheme has different target membership and products even
+        # when it uses the same configuration as the main scheme.
+        suffix = f"-{scheme}" + suffix
+    return derived_data / f".filmy-test-build-{platform}{suffix}.json"
 
 
-def validate_build_stamp(path, input_digest, coverage, toolchain):
+def validate_build_stamp(path, input_digest, coverage, toolchain, configuration=None,
+                        scheme=None):
     if not path.exists():
         raise ValueError("No verified test build exists; run this runner without --skip-build first")
     stamp = json.loads(path.read_text())
-    if stamp != {"inputDigest": input_digest, "coverage": coverage, "toolchain": toolchain}:
-        raise ValueError("Test build is stale or uses different coverage/Xcode settings; rebuild without --skip-build")
+    expected = {"inputDigest": input_digest, "coverage": coverage, "toolchain": toolchain}
+    if configuration is not None:
+        validate_configuration(configuration)
+        expected["configuration"] = configuration
+        # Stamps written before configuration was tracked are known Debug
+        # products. Preserve their safe Debug reuse while rejecting them for
+        # Release, whose products use a separate stamp path.
+        if "configuration" not in stamp and configuration == DEFAULT_CONFIGURATION:
+            stamp = dict(stamp)
+            stamp["configuration"] = DEFAULT_CONFIGURATION
+    if scheme is not None:
+        validate_scheme(scheme)
+        expected["scheme"] = scheme
+        # Stamps written before scheme tracking belong to the established main
+        # Debug lane. Preserve that safe reuse, but never accept them for the
+        # dedicated UI-only scheme.
+        if "scheme" not in stamp and scheme == DEFAULT_SCHEME:
+            stamp = dict(stamp)
+            stamp["scheme"] = DEFAULT_SCHEME
+    if stamp != expected:
+        raise ValueError("Test build is stale or uses different scheme/configuration/coverage/Xcode settings; rebuild without --skip-build")
+
+
+def simulator_app_path(derived_data, configuration):
+    validate_configuration(configuration)
+    return derived_data / f"Build/Products/{configuration}-iphonesimulator/FilmyCamera.app"
 
 
 def run_logged(command, path, env=None):
@@ -232,6 +317,51 @@ def simctl(*arguments, timeout=SIMCTL_DEFAULT_TIMEOUT_SECONDS):
         raise ValueError(
             f"simctl {operation} timed out after {timeout} seconds"
         ) from error
+
+
+def simulator_launch_was_busy(log):
+    """Recognize only the transient install/launch race reported by CoreSimulator."""
+    if not log.exists():
+        return False
+    contents = log.read_text(errors="replace")
+    return (
+        "FBSOpenApplicationErrorDomain Code=6" in contents
+        and "is installing or uninstalling, and cannot be launched" in contents
+    )
+
+
+def wait_for_simulator_app(command):
+    """Wait until the tested app is fully installed before one bounded retry."""
+    try:
+        destination = command[command.index("-destination") + 1]
+    except (ValueError, IndexError) as error:
+        raise ValueError("Cannot resolve simulator destination for launch retry") from error
+    match = re.search(r"(?:^|,)id=([^,]+)", destination)
+    if not match:
+        raise ValueError("Cannot resolve simulator id for launch retry")
+    simulator = match.group(1)
+    deadline = time.monotonic() + SIMULATOR_APP_READY_TIMEOUT_SECONDS
+    consecutive_ready_probes = 0
+    while time.monotonic() < deadline:
+        probe = subprocess.run(
+            ["xcrun", "simctl", "get_app_container", simulator, APP_BUNDLE_IDENTIFIER],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=min(
+                SIMCTL_DEFAULT_TIMEOUT_SECONDS,
+                max(1, deadline - time.monotonic()),
+            ),
+        )
+        if probe.returncode == 0:
+            consecutive_ready_probes += 1
+            if consecutive_ready_probes == 2:
+                return
+        else:
+            consecutive_ready_probes = 0
+        time.sleep(1)
+    raise ValueError(
+        f"Simulator app installation did not settle within {SIMULATOR_APP_READY_TIMEOUT_SECONDS} seconds"
+    )
 
 
 def create_photos_simulator(destination, app_path=None):
@@ -320,12 +450,35 @@ def summarize_result(result, exit_code):
     if not result.exists():
         return {"status": "failed", "reason": "XCTest did not produce a result bundle", "exitCode": exit_code}
     command = ["xcrun", "xcresulttool", "get", "test-results", "summary", "--path", str(result), "--format", "json"]
-    summary = json.loads(subprocess.check_output(command, text=True))
+    try:
+        summary = json.loads(subprocess.check_output(command, text=True, timeout=600))
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError, ValueError) as error:
+        # json.JSONDecodeError is a ValueError. Report instead of aborting with exit 2.
+        return {"status": "failed", "passed": 0, "failed": 0, "skipped": 0, "exitCode": exit_code,
+                "reason": f"result bundle unreadable: {type(error).__name__}"}
     passed, failed, skipped = (summary.get(key, 0) for key in ("passedTests", "failedTests", "skippedTests"))
-    return {"status": "passed" if exit_code == 0 and passed > 0 and failed == 0 else "failed",
-            "passed": passed, "failed": failed, "skipped": skipped, "exitCode": exit_code,
-            "testFailures": summary.get("testFailures", []),
-            "devicesAndConfigurations": summary.get("devicesAndConfigurations", [])}
+    status = "passed" if exit_code == 0 and passed > 0 and failed == 0 else "failed"
+    result_summary = {"status": status,
+                      "passed": passed, "failed": failed, "skipped": skipped, "exitCode": exit_code,
+                      "xcodebuildExitCode": exit_code,
+                      "testFailures": summary.get("testFailures", []),
+                      "devicesAndConfigurations": summary.get("devicesAndConfigurations", [])}
+    if exit_code != 0 and failed == 0 and passed > 0:
+        result_summary["reason"] = (f"xcodebuild exited {exit_code} although the result bundle "
+                                    f"reports {passed} passed, 0 failed")
+        # xcodebuild can exit 133 after every test passed on iOS 27 simulators.
+        # 133 is the shell encoding of SIGTRAP (128+5); Popen reports the same
+        # event as -5. Trust the bundle only when it says Passed with nothing
+        # skipped or failed.
+        if (exit_code in (133, -signal.SIGTRAP) and summary.get("result") == "Passed" and skipped == 0
+                and not summary.get("testFailures")):
+            result_summary["status"] = "passed"
+            result_summary["exitCodeOverridden"] = True
+            del result_summary["reason"]
+    if (result_summary["status"] == "failed" and exit_code == 0 and passed == 0 and failed == 0
+            and "reason" not in result_summary):
+        result_summary["reason"] = f"No test passed ({skipped} skipped)"
+    return result_summary
 
 
 def require_complete_run(phase, selectors, summary):
@@ -349,15 +502,24 @@ def require_complete_run(phase, selectors, summary):
     if (phase in {"unit", "integration", "core", "e2e", "photos-e2e", "fixtures"}
             and summary.get("skipped", 0)
             and not optional_fixture_skip):
-        summary.update(status="failed", reason="Unexpected skipped tests in a deterministic lane")
+        reason = "Unexpected skipped tests in a deterministic lane"
+        if summary.get("reason"):
+            reason = f"{summary['reason']}; {reason}"
+        summary.update(status="failed", reason=reason)
     elif (optional_fixture_skip and summary.get("failed", 0) == 0
           and summary.get("exitCode", 0) == 0):
         # xcresult summaries with only an intentional skip have no passedTests,
         # so summarize_result cannot classify them as successful on its own.
         summary["status"] = "passed"
+        # Drop the all-skipped failure explanation: the skip is intentional here.
+        summary.pop("reason", None)
     actual_count = sum(summary.get(key, 0) for key in ("passed", "failed", "skipped"))
     if actual_count != len(selectors):
-        summary.update(status="failed", reason=f"Selected {len(selectors)} tests but XCTest reported {actual_count}; check target membership/build products")
+        reason = (f"Selected {len(selectors)} tests but XCTest reported {actual_count}; "
+                  "check target membership/build products")
+        if summary.get("reason"):
+            reason = f"{summary['reason']}; {reason}"
+        summary.update(status="failed", reason=reason)
 
 
 def run_isolated_photos_methods(command, selectors, result, output, environment, phase="photos-e2e"):
@@ -380,7 +542,35 @@ def run_isolated_photos_methods(command, selectors, result, output, environment,
         case_command = command + ["-resultBundlePath", str(case_result)]
         case_command += ["-only-testing:" + selector, "test-without-building"]
         code = run_logged(case_command, case_log, environment)
-        case_summary = summarize_result(case_result, code)
+        attempts = [{
+            "exitCode": code,
+            "resultBundle": case_result.name,
+            "log": case_log.name,
+        }]
+        effective_result = case_result
+        effective_log = case_log
+        logs = [case_log]
+        if code != 0 and simulator_launch_was_busy(case_log):
+            print(
+                f"Simulator was still installing the app for {selector}; retrying once",
+                file=sys.stderr,
+                flush=True,
+            )
+            wait_for_simulator_app(case_command)
+            retry_result = output / f"{result_prefix}-{index:02d}-{method}-retry-1.xcresult"
+            retry_log = output / f"filmycamera-{artifact_stem}-retry-1-test.log"
+            retry_command = list(case_command)
+            retry_command[retry_command.index("-resultBundlePath") + 1] = str(retry_result)
+            code = run_logged(retry_command, retry_log, environment)
+            attempts.append({
+                "exitCode": code,
+                "resultBundle": retry_result.name,
+                "log": retry_log.name,
+            })
+            effective_result = retry_result
+            effective_log = retry_log
+            logs.append(retry_log)
+        case_summary = summarize_result(effective_result, code)
         require_complete_run(phase, [selector], case_summary)
         if case_summary["status"] != "passed" and aggregate_exit_code == 0:
             aggregate_exit_code = code or 1
@@ -391,23 +581,28 @@ def run_isolated_photos_methods(command, selectors, result, output, environment,
             "failed": case_summary.get("failed", 0),
             "skipped": case_summary.get("skipped", 0),
             "exitCode": code,
-            "resultBundle": case_result.name,
-            "log": case_log.name,
+            "resultBundle": effective_result.name,
+            "log": effective_log.name,
+            "attempts": attempts,
             "reason": case_summary.get("reason"),
             "testFailures": case_summary.get("testFailures", []),
             "devicesAndConfigurations": case_summary.get("devicesAndConfigurations", []),
         })
-        case_logs.append(case_log)
+        if case_summary.get("exitCodeOverridden"):
+            case_results[-1]["exitCodeOverridden"] = True
+        case_logs.append(logs)
 
     aggregate_log = output / f"filmycamera-{phase}-test.log"
     with aggregate_log.open("w") as combined:
-        for case, case_log in zip(case_results, case_logs):
+        for case, logs in zip(case_results, case_logs):
             combined.write(f"===== {case['test']} =====\n")
-            if case_log.exists():
-                contents = case_log.read_text(errors="replace")
-                combined.write(contents)
-                if contents and not contents.endswith("\n"):
-                    combined.write("\n")
+            for case_log in logs:
+                if case_log.exists():
+                    combined.write(f"----- {case_log.name} -----\n")
+                    contents = case_log.read_text(errors="replace")
+                    combined.write(contents)
+                    if contents and not contents.endswith("\n"):
+                        combined.write("\n")
 
     merge_error = None
     try:
@@ -423,7 +618,7 @@ def run_isolated_photos_methods(command, selectors, result, output, environment,
     reasons = [case["reason"] for case in case_results if case["reason"]]
     if merge_error:
         reasons.append(merge_error)
-    return {
+    aggregate_summary = {
         "status": "passed" if aggregate_exit_code == 0 else "failed",
         "passed": sum(case["passed"] for case in case_results),
         "failed": sum(case["failed"] for case in case_results),
@@ -436,7 +631,10 @@ def run_isolated_photos_methods(command, selectors, result, output, environment,
         ],
         "mergedResultBundle": result.name if merge_error is None else None,
         "caseResults": case_results,
-    }, aggregate_exit_code
+    }
+    if any(case.get("exitCodeOverridden") for case in case_results):
+        aggregate_summary["exitCodeOverridden"] = True
+    return aggregate_summary, aggregate_exit_code
 
 
 def run_photos_permission_bootstrap(command, output, environment):
@@ -452,9 +650,11 @@ def run_photos_permission_bootstrap(command, output, environment):
     bootstrap_environment["TEST_RUNNER_FILMY_RUN_PHOTOS_PERMISSION_BOOTSTRAP"] = "1"
     code = run_logged(bootstrap_command, log, bootstrap_environment)
     summary = summarize_result(result, code)
-    if (code != 0 or summary.get("status") != "passed"
+    if (summary.get("status") != "passed"
             or summary.get("passed") != 1 or summary.get("failed", 0)
             or summary.get("skipped", 0)):
+        if summary.get("reason"):
+            print(f"reason: {summary['reason']}", file=sys.stderr)
         raise PhaseFailure(code or 1)
     return summary
 
@@ -467,6 +667,10 @@ def main(argv=None):
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--coverage", action="store_true", help="Collect coverage explicitly; off in routine CI")
+    parser.add_argument("--clean-stale-ci-artifacts", action="store_true",
+                        help="Remove old generated CI evidence before testing")
+    parser.add_argument("--configuration", choices=CONFIGURATIONS,
+                        help="Xcode build configuration (store-media defaults to Release; other lanes to Debug)")
     parser.add_argument("--allow-photos-writes", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
@@ -475,21 +679,27 @@ def main(argv=None):
         print(json.dumps({"declaredTests": len(tests), "groups": dict(sorted(Counter(tests.values()).items())),
                           "tests": tests}, indent=2))
         return 0
+    configuration = configuration_for_lane(args.lane, args.configuration)
+    scheme = scheme_for_lane(args.lane)
     destination = "generic/platform=iOS" if args.lane == "device-build" else args.destination
     validate_destination(args.lane, destination, args.allow_photos_writes)
     selected_phases = phases(args.lane, tests)
     if args.dry_run:
         print(json.dumps({"lane": args.lane, "destination": destination,
-                          "build": not args.skip_build, "phases": selected_phases}, indent=2))
+                          "configuration": configuration, "scheme": scheme,
+                          "build": not args.skip_build,
+                          "phases": selected_phases}, indent=2))
         return 0
+    if args.clean_stale_ci_artifacts:
+        subprocess.run([str(ROOT / "scripts/release/clean-ci-artifacts.sh")], check=True)
     output = (args.output_dir or ROOT / "build/test-runs" /
               (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + uuid.uuid4().hex[:6])).resolve()
     output.mkdir(parents=True, exist_ok=True)
     args.derived_data = args.derived_data.resolve()
-    base = xcode_command(destination, args.derived_data, args.coverage)
+    base = xcode_command(destination, args.derived_data, args.coverage, configuration, scheme)
     input_digest = build_input_digest()
     toolchain = subprocess.check_output(["xcodebuild", "-version"], text=True).strip()
-    stamp_path = build_stamp_path(args.derived_data, destination)
+    stamp_path = build_stamp_path(args.derived_data, destination, configuration, scheme)
     if not args.skip_build:
         # A failed replacement build must invalidate the previous verification.
         stamp_path.unlink(missing_ok=True)
@@ -500,9 +710,12 @@ def main(argv=None):
         if build_input_digest() != input_digest:
             raise ValueError("Source changed while building; rebuild before testing")
         stamp_path.write_text(json.dumps({"inputDigest": input_digest,
-                                         "coverage": args.coverage, "toolchain": toolchain}) + "\n")
+                                         "coverage": args.coverage, "toolchain": toolchain,
+                                         "configuration": configuration,
+                                         "scheme": scheme}) + "\n")
     else:
-        validate_build_stamp(stamp_path, input_digest, args.coverage, toolchain)
+        validate_build_stamp(stamp_path, input_digest, args.coverage, toolchain,
+                             configuration, scheme)
     for phase, selectors in selected_phases:
         if not selectors:
             raise ValueError(f"No tests selected for {phase}")
@@ -513,9 +726,10 @@ def main(argv=None):
             raise ValueError(f"Refusing to overwrite evidence: {result}; choose another --output-dir")
         started = time.monotonic()
         try:
-            app_path = (args.derived_data / "Build/Products/Debug-iphonesimulator/FilmyCamera.app")
+            app_path = simulator_app_path(args.derived_data, configuration)
             with isolated_photos_destination(phase, destination, app_path) as phase_destination:
-                command = xcode_command(phase_destination, args.derived_data, args.coverage)
+                command = xcode_command(phase_destination, args.derived_data, args.coverage,
+                                        configuration, scheme)
                 phase_environment = (fixture_test_environment()
                                      if phase == "fixtures" else test_environment(phase))
                 permission_bootstrap = None
@@ -546,7 +760,8 @@ def main(argv=None):
                                 "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
                                 "worktreeDirty": bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip()),
                                 "buildInputDigest": input_digest, "toolchain": toolchain,
-                                "coverageEnabled": args.coverage})
+                                "coverageEnabled": args.coverage, "configuration": configuration,
+                                "scheme": scheme})
                 if permission_bootstrap is not None:
                     summary["photosPermissionBootstrap"] = {
                         "selector": PHOTOS_PERMISSION_BOOTSTRAP_SELECTOR,
@@ -556,6 +771,8 @@ def main(argv=None):
                     }
                 (output / f"filmycamera-{phase}-summary.json").write_text(json.dumps(summary, indent=2) + "\n")
                 print(json.dumps({key: summary.get(key) for key in ("lane", "status", "passed", "failed", "skipped")}), flush=True)
+                if summary["status"] != "passed" and summary.get("reason"):
+                    print(f"reason: {summary['reason']}", file=sys.stderr, flush=True)
                 if summary["status"] != "passed":
                     # Carry the recorded failure as an exception so context-manager cleanup
                     # cannot replace its exit code with a secondary timeout.
@@ -566,6 +783,8 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    # Route SIGTERM through SystemExit so run_logged and simulator cleanup run.
+    signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(143))
     try:
         sys.exit(main())
     except (ValueError, subprocess.CalledProcessError) as error:

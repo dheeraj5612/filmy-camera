@@ -1,0 +1,720 @@
+import Combine
+import CoreImage
+import Foundation
+import UIKit
+import ImageIO
+import UniformTypeIdentifiers
+
+struct FujiSequenceRequest: Sendable {
+    let id = UUID()
+    let settings: FujiShootingSettings
+    let recipe: FilmRecipe
+    let filmRecipes: [FilmRecipe]
+    let viewport: CGSize
+    let finish: PhotoFinish
+    let grainSeed: UInt32
+    let shutterUptime: TimeInterval
+    /// Preview-buffer orientation when `viewport` was read; nil keeps the viewport as is.
+    var previewRotationAngle: CGFloat? = nil
+}
+
+@MainActor
+final class FujiShootingController: ObservableObject {
+    @Published var preferences: FujiPreferences {
+        didSet {
+            // Swift 6.4 re-runs this observer for the assignment below; the flag keeps one pass per outside write.
+            if isNormalizingPreferences { return }
+            let normalized = preferences.normalized()
+            if normalized != preferences {
+                isNormalizingPreferences = true
+                preferences = normalized
+                isNormalizingPreferences = false
+            }
+            do { defaults.set(try JSONEncoder().encode(preferences), forKey: "fuji.shooting.v1") }
+            catch { errorMessage = "Shooting settings could not be saved." }
+            refreshPreview()
+        }
+    }
+    private var isNormalizingPreferences = false
+    @Published private(set) var isBusy = false
+    @Published private(set) var status = ""
+    @Published var errorMessage: String?
+    @Published private(set) var progress: Double = 0
+    @Published private(set) var multipleCount = 0
+    @Published private(set) var pendingExportCount = 0
+    /// Library folders kept on disk whose record.json cannot be read. The Raw
+    /// library view should show "N captures need repair" when this is non-zero.
+    @Published private(set) var unreadableEntries: [FujiUnreadableEntry] = []
+    @Published private(set) var originals: [FujiOriginalRecord] = []
+    @Published private(set) var hybridImage: UIImage?
+    @Published private(set) var focusImage: UIImage?
+    @Published private(set) var ghostImage: UIImage?
+    @Published private(set) var focusContrast: Double = 0
+    @Published private(set) var bufferedCount = 0
+    private let defaults: UserDefaults
+    private let library: FujiCaptureLibrary
+    private let worker = FujiDevelopmentWorker()
+    private let previewWorker = FujiDevelopmentWorker()
+    private let sampler = FujiFrameSampler()
+    private weak var camera: CameraService?
+    private weak var viewModel: CameraViewModel?
+    private var frameHandlerID: UUID?
+    private var task: Task<Void, Never>?
+    private var developmentTask: Task<Void, Error>?
+    private var active = false
+    private var multipleRequest: FujiSequenceRequest?
+    private var multipleDeviceID: String?
+    private var multipleCapturedAt: Date?
+    private var multipleLocation: FujiCaptureLocation?
+    /// Non-RAW layer sources of a multiple exposure; removed only after the composite is exported.
+    private var multipleLayerIDs: [UUID] = []
+    private var appliedProfile: FujiAutoISOProfile?
+    private var profileDeviceID: String?
+    private var appliedPrimeLock = false
+    private var sensorRestorationFailed = false
+    @Published private(set) var settingUpPrime = false
+    private var idleTimerWasDisabled: Bool?
+    // NotificationCenter's opaque observer tokens are not Sendable. The
+    // controller is main-actor isolated, but Swift 6 runs deinit as
+    // nonisolated, so these two teardown-only references must explicitly opt
+    // out of isolation while remaining confined to this instance.
+    private nonisolated(unsafe) var memoryObserver: NSObjectProtocol?
+    private nonisolated(unsafe) var thermalObserver: NSObjectProtocol?
+
+    init(defaults explicitDefaults: UserDefaults? = nil, library: FujiCaptureLibrary = .shared) {
+        let arguments = ProcessInfo.processInfo.arguments
+        let isUITesting = arguments.contains("-ui-testing") || arguments.contains("-ui-testing-real-roll")
+            || arguments.contains("-ui-testing-onboarding")
+        let suite = isUITesting ? ProcessInfo.processInfo.environment["FILMY_TEST_DEFAULTS_SUITE"] : nil
+        let testDefaults = suite.flatMap { $0.hasPrefix("FilmyCameraUITests.") ? UserDefaults(suiteName: $0) : nil }
+        let defaults = explicitDefaults ?? testDefaults ?? .standard
+        self.defaults = defaults; self.library = library
+        let loaded = FujiPreferences.load(from: defaults)
+        preferences = loaded.preferences
+        if loaded.recovered { errorMessage = "Shooting settings were recovered to defaults. The previous data was kept for recovery." }
+        memoryObserver = NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    // An idle warning only drops buffered preview frames; a partly built multiple exposure is kept.
+                    if self.isBusy {
+                        self.cancel()
+                        self.errorMessage = "Shooting stopped because memory is low. Already saved frames and originals are kept."
+                    }
+                    self.sampler.reset()
+                }
+            }
+        thermalObserver = NotificationCenter.default.addObserver(forName: ProcessInfo.thermalStateDidChangeNotification,
+            object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    if ProcessInfo.processInfo.thermalState == .critical, self?.isBusy == true {
+                        self?.cancel()
+                        self?.errorMessage = "The device needs to cool down before another sequence."
+                    }
+                }
+            }
+    }
+
+    deinit {
+        if let memoryObserver { NotificationCenter.default.removeObserver(memoryObserver) }
+        if let thermalObserver { NotificationCenter.default.removeObserver(thermalObserver) }
+        task?.cancel()
+        if let frameHandlerID { camera?.removeFrameHandler(frameHandlerID) }
+    }
+
+    var settings: FujiShootingSettings { preferences.settings }
+    var isComposing: Bool { multipleRequest != nil }
+    var settingsLocked: Bool { isBusy || isComposing || settingUpPrime }
+    var validationMessage: String? {
+        do { _ = try FujiCapturePlan.make(settings); return nil }
+        catch { return error.localizedDescription }
+    }
+    var needsCoordinator: Bool { settings.needsCaptureCoordinator || isComposing }
+
+    func attach(camera: CameraService, viewModel: CameraViewModel, active: Bool) {
+        if self.camera !== camera {
+            if let frameHandlerID { self.camera?.removeFrameHandler(frameHandlerID) }
+            self.camera = camera
+            frameHandlerID = camera.installFrameHandler { [weak self] image in
+                self?.sampler.submit(image)
+            }
+        }
+        self.viewModel = viewModel
+        self.active = active
+        if !active { let discarded = multipleRequest != nil; cancel(); if discarded { errorMessage = "Multiple exposure discarded because the camera was paused." }; hybridImage = nil; focusImage = nil; bufferedCount = 0 }
+        refreshPreview()
+    }
+
+    /// Test seam: the private(set) preview images are otherwise only written by the sampler callback.
+    func setPreviewImagesForTesting(hybrid: UIImage?, focus: UIImage?) { hybridImage = hybrid; focusImage = focus }
+
+    func invalidatePreview() {
+        sampler.reset()
+        if hybridImage != nil { hybridImage = nil }
+        if focusImage != nil { focusImage = nil }
+        if bufferedCount != 0 { bufferedCount = 0 }
+        refreshPreview()
+    }
+
+    func refreshPreview() {
+        guard let camera, let viewModel else { return }
+        let visible = active && !isBusy && camera.isRunning
+        sampler.configure(settings: settings, recipe: viewModel.selectedRecipe, viewport: camera.previewViewportSize,
+                          active: visible) { [weak self] result in
+            Task { @MainActor [weak self] in
+                guard let self, self.active, !self.isBusy else { return }
+                self.hybridImage = result.inset.map { UIImage(cgImage: $0) }
+                self.focusImage = result.focus.map { UIImage(cgImage: $0) }
+                self.focusContrast = result.contrast
+                self.bufferedCount = result.bufferedCount
+            }
+        }
+        if settings.viewfinder != .hybrid, hybridImage != nil { hybridImage = nil }
+        if settings.focusAssist == .off, focusImage != nil { focusImage = nil }
+        let profile = active && camera.isRunning ? settings.autoISOProfile : nil
+        if !isBusy && (profile != appliedProfile || profileDeviceID != camera.manualControls.activeDeviceID) {
+            camera.configureFujiAutoISO(profile)
+            appliedProfile = profile; profileDeviceID = camera.manualControls.activeDeviceID
+        }
+        if active && camera.isRunning && !isBusy && !settingUpPrime && appliedPrimeLock != settings.lockPrimeLens {
+            settingUpPrime = true
+            Task { [weak self, weak camera] in
+                guard let self, let camera else { return }
+                defer { self.settingUpPrime = false }
+                do {
+                    try await camera.configureFujiPrimeLock(self.settings.lockPrimeLens)
+                    self.appliedPrimeLock = self.settings.lockPrimeLens
+                    self.sampler.reset()
+                } catch { self.errorMessage = error.localizedDescription }
+            }
+        }
+    }
+
+    func change<Value>(_ keyPath: WritableKeyPath<FujiShootingSettings, Value>, to value: Value) {
+        guard !settingsLocked else { return }
+        preferences.settings[keyPath: keyPath] = value
+    }
+
+    func bankIsDirty(_ bank: FujiShootingBank) -> Bool {
+        guard let camera, let viewModel else { return false }
+        return bank.settings != settings || bank.recipe != viewModel.selectedRecipe || bank.camera != preset(camera)
+    }
+
+    func saveBank(_ index: Int, name: String) {
+        guard (1...7).contains(index), !settingsLocked, let camera, let viewModel else { return }
+        let trimmed = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(32))
+        let bank = FujiShootingBank(id: index, name: trimmed.isEmpty ? "Custom \(index)" : trimmed,
+                                   recipe: viewModel.selectedRecipe, settings: settings, camera: preset(camera), savedAt: Date())
+        var updated = preferences
+        updated.banks.removeAll { $0.id == index }; updated.banks.append(bank); updated.selectedBank = index
+        preferences = updated
+        errorMessage = nil
+        status = "Saved C\(index). Changes are not written back until you save again."
+    }
+
+    /// Renames a saved bank in place. Only the name changes; setup, look, camera preset and save date stay as saved.
+    func renameBank(_ index: Int, name: String) {
+        guard (1...7).contains(index), !settingsLocked else { return }
+        guard let position = preferences.banks.firstIndex(where: { $0.id == index }) else { return }
+        let trimmed = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(32))
+        let resolved: String = trimmed.isEmpty ? "Custom \(index)" : trimmed
+        if preferences.banks[position].name == resolved { return }
+        var updated = preferences
+        updated.banks[position].name = resolved
+        preferences = updated
+    }
+
+    func recallBank(_ bank: FujiShootingBank) {
+        guard !settingsLocked, let camera, let viewModel else { return }
+        isBusy = true; status = "Recalling C\(bank.id)…"; errorMessage = nil
+        task = Task { [weak self] in
+            guard let self else { return }
+            defer { self.finishActivity() }
+            do {
+                if camera.isRunning { try await camera.applyFujiPreset(bank.camera) }
+                else if camera.availability != .simulator { throw FujiShootingError.unavailable }
+                try Task.checkCancellation()
+                viewModel.update(recipe: bank.recipe)
+                viewModel.select(recipe: bank.recipe)
+                defaults.set(bank.camera.aspect, forKey: "captureAspect")
+                defaults.set(bank.camera.timer, forKey: "captureDelay")
+                defaults.set(bank.camera.finish, forKey: "captureFinish")
+                var updated = preferences
+                updated.settings = bank.settings; updated.selectedBank = bank.id
+                preferences = updated
+                appliedProfile = nil; profileDeviceID = nil; appliedPrimeLock = false
+                status = "C\(bank.id) · \(bank.name)"
+            } catch is CancellationError {
+                errorMessage = "Recall canceled. Some camera controls may already have changed; recall the bank again."
+            } catch { errorMessage = error.localizedDescription }
+        }
+    }
+
+    private func preset(_ camera: CameraService) -> FujiCameraPreset {
+        let controls = camera.manualControls
+        return FujiCameraPreset(cameraPosition: camera.cameraPosition.rawValue, deviceID: controls.activeDeviceID,
+            zoom: Double(camera.zoomFactor), exposureBias: Double(camera.exposureBias),
+            manualISO: controls.exposureMode == .manual && settings.autoISOIndex == nil ? Double(controls.iso) : nil,
+            manualShutter: controls.exposureMode == .manual && settings.autoISOIndex == nil ? controls.exposureDurationSeconds : nil,
+            manualKelvin: controls.whiteBalanceMode == .manual ? Double(controls.kelvin) : nil,
+            manualTint: controls.whiteBalanceMode == .manual ? Double(controls.tint) : nil,
+            manualFocus: controls.focusMode == .manual ? Double(controls.lensPosition) : nil,
+            flashMode: camera.flashMode.rawValue, aspect: defaults.string(forKey: "captureAspect") ?? "viewfinder",
+            timer: defaults.integer(forKey: "captureDelay"), finish: defaults.string(forKey: "captureFinish") ?? "photo")
+    }
+
+    func capture(camera: CameraService, viewModel: CameraViewModel, photoLibrary: any PhotoSaving) {
+        guard !isBusy, !settingUpPrime, active, camera.isRunning else { return }
+        let request = multipleRequest ?? FujiSequenceRequest(settings: settings.normalized(), recipe: viewModel.selectedRecipe,
+            filmRecipes: settings.filmRecipeIDs.compactMap { id in viewModel.recipes.first { $0.id == id } },
+            viewport: camera.previewViewportSize, finish: PhotoFinish(rawValue: defaults.string(forKey: "captureFinish") ?? "") ?? .photo,
+            grainSeed: camera.previewGrainSeed, shutterUptime: ProcessInfo.processInfo.systemUptime,
+            previewRotationAngle: camera.previewRotationAngle)
+        do { _ = try FujiCapturePlan.make(request.settings) }
+        catch { errorMessage = error.localizedDescription; return }
+        guard ProcessInfo.processInfo.thermalState != .critical else { errorMessage = "Let the device cool before shooting."; return }
+        if request.settings.drive == .filmBracket && request.filmRecipes.count != 3 {
+            errorMessage = "Select three available film recipes in Q → BKT settings."; return
+        }
+        isBusy = true; progress = 0; errorMessage = nil; sensorRestorationFailed = false; status = request.settings.drive.title
+        keepScreenAwake()
+        task = Task { [weak self] in
+            guard let self else { return }
+            do { try await self.run(request, driver: camera, photoLibrary: photoLibrary) }
+            catch {
+                // Keep the more actionable "Sensor restoration failed" message.
+                if !self.sensorRestorationFailed {
+                    self.errorMessage = error is CancellationError ? FujiShootingError.cancelled.localizedDescription : error.localizedDescription
+                }
+                // A partly assembled multiple exposure remains usable after a
+                // capture error. Explicit cancel/background discards it.
+            }
+            self.finishActivity()
+            await self.reloadLibrary()
+        }
+    }
+
+    /// Cancellation is delivered to AVFoundation's pending continuation, not
+    /// merely recorded as a Task flag while a native callback is outstanding.
+    func run(_ request: FujiSequenceRequest, driver: any FujiCaptureDriver, photoLibrary: any PhotoSaving) async throws {
+        try await withTaskCancellationHandler {
+            try await execute(request, driver: driver, photoLibrary: photoLibrary)
+        } onCancel: { driver.cancelFujiCapture() }
+    }
+
+    private func execute(_ request: FujiSequenceRequest, driver: any FujiCaptureDriver, photoLibrary: any PhotoSaving) async throws {
+        let plan = try FujiCapturePlan.make(request.settings)
+        let settings = plan.settings
+        let variants = try Self.variants(for: request)
+        let custom = settings.autoISOIndex != nil || settings.dynamicRange != .dr100 || settings.drive == .dynamicRangeBracket
+            || settings.drive == .aeBracket || settings.drive == .computationalND || settings.drive.usesFocusSweep
+        let preFrames = settings.preShotSeconds > 0
+            ? await sampler.snapshot(at: request.shutterUptime, seconds: settings.preShotSeconds) : []
+        sampler.configure(settings: settings, recipe: request.recipe, viewport: request.viewport, active: false) { _ in }
+        var sensor: FujiSensorSnapshot?
+        for attempt in 0..<8 {
+            try Task.checkCancellation()
+            do {
+                sensor = try await driver.beginFujiCapture(requiresRAW: settings.needsRAW, requiresCustomExposure: custom,
+                                                           requiresFocus: settings.drive.usesFocusSweep)
+                break
+            } catch FujiShootingError.busy where attempt < 7 { try await Task.sleep(for: .milliseconds(60)) }
+        }
+        guard let sensor else { throw FujiShootingError.busy }
+        var captured: [FujiOriginalRecord] = []
+        var endAttempted = false
+        // A mid-sequence failure of a non-composite drive keeps the frames
+        // already captured: they are developed and the error is rethrown after.
+        var captureError: Error?
+        do {
+            try Task.checkCancellation()
+            if let multipleDeviceID, multipleDeviceID != sensor.deviceID {
+                throw FujiShootingError.invalidCombination("The lens changed. Cancel this multiple exposure before continuing.")
+            }
+            // Match the live Auto ISO loop in CameraService, which uses 24 mm times the user-facing zoom.
+            let focalLength = max(24 * Double(camera?.zoomFactor ?? 1), 12)
+            let base = settings.autoISOProfile.map { FujiMath.autoExposure(metered: sensor.exposure, profile: $0,
+                isoRange: sensor.isoRange, durationRange: sensor.durationRange, focalLength: focalLength) } ?? sensor.exposure
+            let exposures = try plan.steps.map { step -> FujiExposure? in
+                custom ? try FujiMath.shiftedExposure(base, stops: step.exposureOffset - step.dynamicRange.protectionStops,
+                    isoRange: sensor.isoRange, durationRange: sensor.durationRange) : nil
+            }
+            // Capture first, develop second. Only filenames/metadata accumulate;
+            // burst cadence is not throttled by FilmRenderer or Photos writes.
+            for (index, step) in plan.steps.enumerated() {
+                try Task.checkCancellation()
+                let start = ProcessInfo.processInfo.systemUptime
+                status = "Capturing \(settings.drive.title) · \(index + 1)/\(plan.steps.count)"
+                try await driver.prepareFujiFrame(transactionID: sensor.transactionID, exposure: exposures[index], focusPosition: step.focusPosition)
+                if step.focusPosition != nil { try await Task.sleep(for: .seconds(settings.focusInterval)) }
+                try Task.checkCancellation()
+                let frame = try await driver.captureFujiFrame(transactionID: sensor.transactionID, requiresRAW: settings.needsRAW)
+                let data = frame.rawData ?? frame.processedData
+                let label = settings.drive == .multipleExposure
+                    ? "Multiple exposure layer \(multipleCount + 1)/\(settings.multipleExposureCount)"
+                    : "\(settings.drive.title) \(index + 1)/\(plan.steps.count)"
+                let record = originalRecord(dataIsRAW: frame.rawData != nil, request: request, recipe: request.recipe,
+                    capturedAt: frame.capturedAt, step: step, exposure: frame.exposure, label: label,
+                    stillData: frame.processedData, location: frame.location)
+                try await library.retainOriginal(data, record: record)
+                try Task.checkCancellation()
+                if let expected = exposures[index], step.dynamicRange != .dr100 || settings.drive == .aeBracket {
+                    guard frame.exposure.product.isFinite, frame.exposure.product > 0,
+                          abs(log2(frame.exposure.product / expected.product)) < 0.15 else {
+                        throw FujiShootingError.invalidCombination("The camera did not honor the requested exposure. The original was kept without exporting a misleading DR/bracket result.")
+                    }
+                }
+                captured.append(record)
+                progress = 0.6 * Double(index + 1) / Double(plan.steps.count)
+                if index + 1 < plan.steps.count, step.delayAfter > 0, !settings.drive.usesFocusSweep {
+                    // Requested start-to-start interval; never emit a catch-up
+                    // burst when capture or disk latency exceeds the interval.
+                    let delay = max(0, step.delayAfter - (ProcessInfo.processInfo.systemUptime - start))
+                    if delay > 0 { try await Task.sleep(for: .seconds(delay)) }
+                }
+            }
+            endAttempted = true
+            try await driver.endFujiCapture(transactionID: sensor.transactionID)
+        } catch {
+            if endAttempted {
+                // The lease is already cleared, so a second end would report success.
+                sensorRestorationFailed = true
+                errorMessage = "Sensor restoration failed. Reopen the camera before continuing."
+            } else {
+                do { try await driver.endFujiCapture(transactionID: sensor.transactionID) }
+                catch {
+                    sensorRestorationFailed = true
+                    errorMessage = "Sensor restoration failed. Reopen the camera before continuing."
+                }
+            }
+            if error is CancellationError || settings.drive.isComposite || captured.isEmpty || sensorRestorationFailed { throw error }
+            captureError = error
+        }
+        try Task.checkCancellation()
+        if settings.drive.isComposite && multipleRequest == nil { await worker.reset() }
+        var lastData = Data()
+        var lastDate = Date()
+        var firstLocation: FujiCaptureLocation?
+        // A failed frame must not stop later frames from reaching the retry outbox.
+        var deferredError: Error? = captureError
+        for (index, record) in captured.enumerated() {
+            try Task.checkCancellation()
+            status = "Developing \(settings.drive.title) · \(index + 1)/\(captured.count)"
+            let data: Data
+            do { data = try await library.originalData(record) }
+            catch {
+                if error is CancellationError || settings.drive.isComposite { throw error }
+                if deferredError == nil { deferredError = error }
+                continue
+            }
+            lastData = data; lastDate = record.capturedAt
+            if firstLocation == nil { firstLocation = record.location }
+            if settings.drive.isComposite {
+                let thumbnail = try await worker.append(data: data, record: record, focusStack: settings.drive == .focusStack,
+                    blendMode: settings.drive == .computationalND ? .average : settings.blendMode)
+                try Task.checkCancellation()
+                if settings.drive == .multipleExposure {
+                    multipleRequest = request; multipleDeviceID = sensor.deviceID
+                    if multipleCapturedAt == nil { multipleCapturedAt = record.capturedAt }
+                    if multipleLocation == nil { multipleLocation = record.location }
+                    multipleCount += 1; ghostImage = UIImage(cgImage: thumbnail.image)
+                    if !record.isRAW { multipleLayerIDs.append(record.id) }
+                }
+            } else {
+                var variantError: Error?
+                for (recipe, label) in variants {
+                    try Task.checkCancellation()
+                    var edited = record; edited.recipe = recipe
+                    do {
+                        let result = try await worker.develop(data: data, record: edited, finish: request.finish, grainSeed: request.grainSeed)
+                        try await export(result.data, recipe: recipe, capturedAt: record.capturedAt,
+                                         label: "\(record.label) · \(label)", photoLibrary: photoLibrary)
+                    } catch {
+                        // Keep exporting the remaining variants even if one fails;
+                        // surface the first failure after all have been attempted.
+                        if variantError == nil { variantError = error }
+                    }
+                }
+                if let variantError {
+                    if variantError is CancellationError { throw variantError }
+                    if deferredError == nil { deferredError = variantError }
+                }
+            }
+            progress = 0.6 + 0.4 * Double(index + 1) / Double(captured.count)
+        }
+        try Task.checkCancellation()
+        let layerIDs = multipleLayerIDs
+        let completesLayers = settings.drive == .multipleExposure && multipleCount >= settings.multipleExposureCount
+        var persisted = false
+        // Layer sources go only after the composite is safely in the outbox. A source
+        // already deleted from the RAW library is not an error for a finished shot.
+        func removeLayerSources() async {
+            guard completesLayers, persisted, !settings.keepCompositeSources else { return }
+            for id in layerIDs { try? await library.removeOriginal(id: id) }
+        }
+        if settings.drive.isComposite {
+            if settings.drive != .multipleExposure || multipleCount >= settings.multipleExposureCount {
+                let capturedAt = multipleCapturedAt ?? lastDate
+                let result = try await worker.finish(recipe: request.recipe, sourceData: lastData, capturedAt: capturedAt,
+                                                     location: multipleLocation ?? firstLocation,
+                                                     finish: request.finish, grainSeed: request.grainSeed)
+                do {
+                    try await export(result.data, recipe: request.recipe, capturedAt: capturedAt,
+                                     label: settings.drive.title, photoLibrary: photoLibrary,
+                                     didPersist: { persisted = true; self.clearMultiple() })
+                } catch {
+                    await removeLayerSources()
+                    throw error
+                }
+                await worker.reset()
+                status = "Saved \(settings.drive.title) · \(result.width) × \(result.height)"
+            } else { status = "Multiple exposure \(multipleCount)/\(settings.multipleExposureCount) · Compose the next layer, then press the shutter." }
+        } else if deferredError == nil { status = "Saved \(settings.drive.title)." }
+        // Pre-shot writes follow the real shutter frame. Their date is the frame
+        // timestamp, not the later date at which development or Photos finishes.
+        for (index, frame) in preFrames.enumerated() {
+            try Task.checkCancellation()
+            do {
+                let data = try await Task.detached(priority: .utility) { try FujiFrameSampler.jpeg(frame) }.value
+                let record = originalRecord(dataIsRAW: false, request: request, recipe: request.recipe,
+                    capturedAt: frame.capturedAt, step: .init(), exposure: nil, label: "Pre-shot \(index + 1) · preview resolution",
+                    location: firstLocation)
+                let result = try await worker.develop(data: data, record: record, finish: request.finish, grainSeed: request.grainSeed)
+                try await export(result.data, recipe: request.recipe, capturedAt: frame.capturedAt,
+                                 label: record.label, photoLibrary: photoLibrary)
+            } catch {
+                if error is CancellationError { throw error }
+                if deferredError == nil { deferredError = error }
+            }
+        }
+        // Keep every original when any frame failed; the outbox holds the retryable copies.
+        if let deferredError {
+            if captureError != nil { status = "Saved \(captured.count) of \(plan.steps.count) · \(settings.drive.title)" }
+            throw deferredError
+        }
+        if settings.drive == .multipleExposure { await removeLayerSources(); return }
+        if settings.drive.isComposite && settings.keepCompositeSources { return }
+        // An original already removed from the RAW library is not an error for a saved shot.
+        for record in captured where !record.isRAW { try? await library.removeOriginal(id: record.id) }
+    }
+
+    static func variants(for request: FujiSequenceRequest) throws -> [(FilmRecipe, String)] {
+        switch request.settings.drive {
+        case .filmBracket:
+            guard request.filmRecipes.count == 3 else { throw FujiShootingError.invalidCombination("Select three film recipes.") }
+            return request.filmRecipes.map { ($0, $0.name) }
+        case .isoBracket:
+            return try [0, -request.settings.isoBracketStep, request.settings.isoBracketStep].map { offset in
+                var recipe = request.recipe
+                recipe.exposure += offset
+                guard FilmRecipe.Control.exposure.editorRange.contains(recipe.exposure) else {
+                    throw FujiShootingError.invalidCombination("The ISO bracket exceeds the recipe exposure range. Reduce the recipe's exposure first.")
+                }
+                return (recipe, String(format: "ISO BKT %+.2f EV · one source", offset))
+            }
+        case .whiteBalanceBracket:
+            return try [0, -request.settings.whiteBalanceStep, request.settings.whiteBalanceStep].map { offset in
+                var recipe = request.recipe
+                recipe.whiteBalance.temperature += Double(offset) * 0.036
+                guard (-1...1).contains(recipe.whiteBalance.temperature) else {
+                    throw FujiShootingError.invalidCombination("The WB bracket exceeds the recipe temperature range.")
+                }
+                return (recipe, "WB BKT \(offset) · one source")
+            }
+        default: return [(request.recipe, request.recipe.name)]
+        }
+    }
+
+    private func originalRecord(dataIsRAW: Bool, request: FujiSequenceRequest, recipe: FilmRecipe, capturedAt: Date,
+                                step: FujiCaptureStep, exposure: FujiExposure?, label: String,
+                                stillData: Data? = nil, location: FujiCaptureLocation? = nil) -> FujiOriginalRecord {
+        // Live frames are cropped in the still's axes; pre-shot frames (no stillData) stay preview-shaped.
+        let viewport: CGSize = stillData.map {
+            CameraFrameLayout.stillViewport(request.viewport,
+                stillPixelSize: CameraFrameLayout.orientedPixelSize(of: $0),
+                previewRotationAngle: request.previewRotationAngle)
+        } ?? request.viewport
+        return FujiOriginalRecord(id: UUID(), capturedAt: capturedAt, isRAW: dataIsRAW, sourceFilename: dataIsRAW ? "source.dng" : "source.jpg",
+            sequenceID: request.id, dynamicRange: step.dynamicRange,
+            captureExposure: exposure.map { FujiExposureRecord(iso: $0.iso, seconds: $0.seconds, bracketOffset: step.exposureOffset,
+                                                               protectedStops: step.dynamicRange.protectionStops) },
+            recipe: recipe, adjustment: .init(), cropFactor: request.settings.digitalCrop,
+            viewportWidth: viewport.width, viewportHeight: viewport.height, label: label,
+            location: location)
+    }
+
+    func export(_ data: Data, recipe: FilmRecipe, capturedAt: Date, label: String, photoLibrary: any PhotoSaving,
+                didPersist: () -> Void = {}) async throws {
+        let pending = try await library.enqueue(data, recipe: recipe, capturedAt: capturedAt, label: label)
+        pendingExportCount += 1
+        didPersist()
+        try Task.checkCancellation()
+        try await savePending(pending, data: data, photoLibrary: photoLibrary)
+    }
+
+    private func savePending(_ pending: FujiPendingExport, data: Data, photoLibrary: any PhotoSaving) async throws {
+        // PhotoLibraryService receives the full JPEG bytes; its UIImage is only
+        // a display/metadata companion, never a second full-size decode here.
+        let thumbnail = try await Task.detached(priority: .utility) {
+            guard let source = CIImage(data: data) else { throw FujiShootingError.processingFailed }
+            return try FujiImageProcessor.thumbnail(source, edge: 512)
+        }.value
+        let image = UIImage(cgImage: thumbnail.image)
+        // The service records the Photos placeholder identifier here before the
+        // commit completes, so a retry adopts the asset instead of duplicating it.
+        let receipt = await library.receiptURL(pending)
+        try await PhotosExportReceipt.$sidecar.withValue(receipt) { () async throws -> Void in
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                photoLibrary.save(image: image, imageData: data, recipe: pending.recipe, capturedAt: pending.capturedAt) {
+                    continuation.resume(with: $0.mapError { $0 as Error })
+                }
+            }
+        }
+        try await library.markExported(pending)
+        pendingExportCount = max(0, pendingExportCount - 1)
+    }
+
+    func retryExports(photoLibrary: any PhotoSaving) {
+        guard !isBusy else { return }
+        isBusy = true; errorMessage = nil; status = "Retrying Photos exports…"
+        task = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let pending = try await library.pendingExports()
+                var firstError: Error?
+                var saved = 0
+                for record in pending {
+                    try Task.checkCancellation()
+                    do {
+                        let data = try await library.exportData(record)
+                        try await savePending(record, data: data, photoLibrary: photoLibrary)
+                        saved += 1
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        if firstError == nil { firstError = error }
+                    }
+                }
+                if let firstError {
+                    let summary: String = "\(saved) of \(pending.count) saved"
+                    errorMessage = summary + ". " + firstError.localizedDescription
+                    status = summary
+                } else { status = "Pending exports saved." }
+            } catch is CancellationError {
+                errorMessage = FujiShootingError.cancelled.localizedDescription
+            } catch { errorMessage = error.localizedDescription }
+            finishActivity(); await reloadLibrary()
+        }
+    }
+
+    func cancel() {
+        task?.cancel()
+        developmentTask?.cancel()
+        camera?.cancelFujiCapture()
+        clearMultiple()
+        sampler.reset()
+        // Actor serialization ensures an in-flight append finishes before reset.
+        Task { await worker.reset() }
+        if isBusy { status = "Canceling and restoring sensor controls…" }
+    }
+
+    private func clearMultiple() {
+        multipleRequest = nil; multipleDeviceID = nil; multipleCapturedAt = nil; multipleLocation = nil
+        multipleCount = 0; ghostImage = nil; multipleLayerIDs = []
+    }
+
+    private func keepScreenAwake() {
+        if idleTimerWasDisabled == nil { idleTimerWasDisabled = UIApplication.shared.isIdleTimerDisabled }
+        UIApplication.shared.isIdleTimerDisabled = true
+    }
+
+    private func finishActivity() {
+        isBusy = false; task = nil
+        if let previous = idleTimerWasDisabled { UIApplication.shared.isIdleTimerDisabled = previous; idleTimerWasDisabled = nil }
+        refreshPreview()
+    }
+
+    func reloadLibrary() async {
+        do {
+            originals = try await library.originals()
+            pendingExportCount = try await library.pendingExports().count
+            let unreadableOriginals = try await library.unreadableOriginals()
+            let unreadableExports = try await library.unreadableExports()
+            unreadableEntries = unreadableOriginals + unreadableExports
+        }
+        catch { unreadableEntries = []; errorMessage = "The capture library could not be read: \(error.localizedDescription)" }
+    }
+
+    func importRAW(_ url: URL, recipe: FilmRecipe) async throws {
+        let hasAccess = url.startAccessingSecurityScopedResource()
+        defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
+        let data = try await Task.detached(priority: .userInitiated) {
+            let values = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+            guard values.isRegularFile == true, let size = values.fileSize, size > 0, size <= FujiCaptureLibrary.maximumImportBytes else {
+                throw FujiShootingError.invalidCombination("Choose a supported RAW file smaller than 200 MB.")
+            }
+            let data = try Data(contentsOf: url, options: .mappedIfSafe)
+            guard FujiImageProcessor.isRAW(data) else { throw FujiShootingError.unsupportedRAW }
+            _ = try FujiImageProcessor.decoded(data, isRAW: true, dynamicRange: .dr100, maximumEdge: 800)
+            return data
+        }.value
+        let type = CGImageSourceCreateWithData(data as CFData, nil).flatMap { CGImageSourceGetType($0) }
+        let sourceExtension = type.flatMap { UTType($0 as String)?.preferredFilenameExtension }?.lowercased() ?? "raw"
+        let safeExtension = FujiOriginalRecord.rawExtensions.contains(sourceExtension) ? sourceExtension : "raw"
+        let record = FujiOriginalRecord(id: UUID(), capturedAt: Date(), isRAW: true, sourceFilename: "source.\(safeExtension)", sequenceID: UUID(),
+            dynamicRange: .dr100, captureExposure: nil, recipe: recipe, adjustment: .init(), cropFactor: 1,
+            viewportWidth: 0, viewportHeight: 0, label: "Imported RAW · \(url.lastPathComponent)")
+        try await library.retainOriginal(data, record: record)
+        await reloadLibrary()
+    }
+
+    func developPreview(_ record: FujiOriginalRecord) async throws -> Data {
+        try Task.checkCancellation()
+        let data = try await library.originalData(record)
+        try Task.checkCancellation()
+        return try await previewWorker.develop(data: data, record: record, maximumEdge: 1200).data
+    }
+
+    /// As-shot temperature and tint of a RAW original, decoded off the main actor.
+    func asShotWhiteBalance(_ record: FujiOriginalRecord) async -> (Double, Double)? {
+        guard record.isRAW, let data = try? await library.originalData(record) else { return nil }
+        let result = await Task.detached(priority: .userInitiated) { FujiImageProcessor.asShotWhiteBalance(data) }.value
+        return result.map { ($0.temperature, $0.tint) }
+    }
+
+    func saveDevelopment(_ record: FujiOriginalRecord, photoLibrary: any PhotoSaving) async throws {
+        guard !settingsLocked else { throw FujiShootingError.busy }
+        isBusy = true; status = "Developing original…"; errorMessage = nil
+        keepScreenAwake()
+        defer { developmentTask = nil; finishActivity() }
+        let operation = Task { @MainActor in
+            try Task.checkCancellation()
+            try await library.updateOriginal(record)
+            let data = try await library.originalData(record)
+            try Task.checkCancellation()
+            let developmentWorker = FujiDevelopmentWorker()
+            let result = try await developmentWorker.develop(data: data, record: record)
+            try Task.checkCancellation()
+            try await export(result.data, recipe: record.recipe, capturedAt: record.capturedAt,
+                             label: "RAW development", photoLibrary: photoLibrary)
+            status = "Development saved. Original unchanged."
+            await reloadLibrary()
+        }
+        developmentTask = operation
+        try await withTaskCancellationHandler {
+            try await operation.value
+        } onCancel: { operation.cancel() }
+    }
+
+    func originalURL(_ record: FujiOriginalRecord) async throws -> URL { try await library.originalURL(record) }
+    /// Explicit repair of an original whose record.json is missing. The files stay in place.
+    func repairOriginal(_ entry: FujiUnreadableEntry, recipe: FilmRecipe) async {
+        guard !isBusy, entry.collection == "originals", entry.reason == "missing record.json" else { return }
+        errorMessage = nil
+        do { _ = try await library.adoptOrphanedOriginal(folder: entry.folder, recipe: recipe) }
+        catch { errorMessage = "This capture could not be repaired automatically. Its files were not changed." }
+        await reloadLibrary()
+    }
+
+    func deleteOriginal(_ record: FujiOriginalRecord) async throws { guard !isBusy, !isComposing else { throw FujiShootingError.busy }; try await library.removeOriginal(id: record.id); await reloadLibrary() }
+}

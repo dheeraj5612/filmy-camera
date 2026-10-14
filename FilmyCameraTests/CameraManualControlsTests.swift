@@ -462,6 +462,92 @@ final class CaptureWorkflowPolicyTests: XCTestCase {
         XCTAssertNil(PreviewAnalysisMath.horizonDegrees(x: .nan, y: -1))
         XCTAssertNil(PreviewAnalysisMath.horizonDegrees(x: .infinity, y: 0))
     }
+    func testLevelHysteresisKeepsPillThroughEntryThreshold() {
+        // Magnitude-squared 0.03 sits between the exit (0.0225) and entry (0.04) cut-offs.
+        let between = 0.03.squareRoot()
+        XCTAssertNil(PreviewAnalysisMath.horizonDegrees(x: between, y: 0))
+        XCTAssertNotNil(PreviewAnalysisMath.horizonDegrees(x: between, y: 0, wasShowing: true))
+        let below = 0.02.squareRoot()
+        XCTAssertNil(PreviewAnalysisMath.horizonDegrees(x: below, y: 0))
+        XCTAssertNil(PreviewAnalysisMath.horizonDegrees(x: below, y: 0, wasShowing: true))
+        let above = 0.05.squareRoot()
+        XCTAssertNotNil(PreviewAnalysisMath.horizonDegrees(x: above, y: 0))
+        XCTAssertNotNil(PreviewAnalysisMath.horizonDegrees(x: above, y: 0, wasShowing: true))
+    }
+    func testLevelLatchTicksOncePerCrossing() {
+        var latched = false
+        var edges = 0
+        for degrees: Double in [3, 0.9, 1.2, 0.5, 1.4, 1.6, 0.8] {
+            let next = PreviewAnalysisMath.isLevel(degrees: degrees, wasLevel: latched)
+            if next && !latched { edges += 1 }
+            latched = next
+        }
+        XCTAssertEqual(edges, 2)
+        XCTAssertFalse(PreviewAnalysisMath.isLevel(degrees: nil, wasLevel: false))
+        XCTAssertFalse(PreviewAnalysisMath.isLevel(degrees: nil, wasLevel: true))
+    }
+    func testZebraLevelEarlyMarksBelowStandard() throws {
+        let pixel: [UInt8] = [240, 240, 240, 255]
+        var early = PreviewAnalysisMath.Tuning.standard
+        early.zebraLevel = .early
+        let tuned = try XCTUnwrap(PreviewAnalysisMath.analyze(rgba: pixel, width: 1, height: 1, zebras: true, peaking: false, tuning: early))
+        let standard = try XCTUnwrap(PreviewAnalysisMath.analyze(rgba: pixel, width: 1, height: 1, zebras: true, peaking: false))
+        XCTAssertTrue(tuned.overlayRGBA.contains { $0 > 0 })
+        XCTAssertTrue(standard.overlayRGBA.allSatisfy { $0 == 0 })
+        XCTAssertEqual(tuned.clippedPixels, standard.clippedPixels)
+        XCTAssertEqual(standard.clippedPixels, 0)
+    }
+    func testPeakingStrengthAndColourTuning() throws {
+        var rgba = [UInt8](repeating: 255, count: 3 * 3 * 4)
+        let rows: [UInt8] = [100, 130, 160]
+        for y in 0..<3 {
+            for x in 0..<3 {
+                let offset = (y * 3 + x) * 4
+                for c in 0...2 { rgba[offset + c] = rows[y] }
+            }
+        }
+        var high = PreviewAnalysisMath.Tuning.standard
+        high.peakingStrength = .high
+        let marked = try XCTUnwrap(PreviewAnalysisMath.analyze(rgba: rgba, width: 3, height: 3, zebras: false, peaking: true, tuning: high))
+        let medium = try XCTUnwrap(PreviewAnalysisMath.analyze(rgba: rgba, width: 3, height: 3, zebras: false, peaking: true))
+        XCTAssertTrue(marked.overlayRGBA.contains { $0 > 0 })
+        XCTAssertTrue(medium.overlayRGBA.allSatisfy { $0 == 0 })
+        var yellow = high
+        yellow.peakingColor = .yellow
+        let yellowResult = try XCTUnwrap(PreviewAnalysisMath.analyze(rgba: rgba, width: 3, height: 3, zebras: false, peaking: true, tuning: yellow))
+        let center = (1 * 3 + 1) * 4
+        XCTAssertEqual(Array(yellowResult.overlayRGBA[center..<(center + 4)]), [207, 190, 35, 220])
+        for color in PreviewPeakingColor.allCases {
+            var tuning = high
+            tuning.peakingColor = color
+            let result = try XCTUnwrap(PreviewAnalysisMath.analyze(rgba: rgba, width: 3, height: 3, zebras: false, peaking: true, tuning: tuning))
+            XCTAssertTrue(result.overlayRGBA.contains { $0 > 0 })
+            for p in stride(from: 0, to: result.overlayRGBA.count, by: 4) {
+                for c in 0...2 { XCTAssertLessThanOrEqual(result.overlayRGBA[p + c], result.overlayRGBA[p + 3]) }
+            }
+        }
+    }
+    func testPreviewTuningStoredDefaultsAndFallback() throws {
+        let suite = "PreviewTuningTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertEqual(PreviewAnalysisMath.Tuning.stored(in: defaults), .standard)
+        defaults.set("bogus", forKey: PreviewAnalysisMath.Tuning.zebraLevelKey)
+        defaults.set("", forKey: PreviewAnalysisMath.Tuning.peakingColorKey)
+        defaults.set("11", forKey: PreviewAnalysisMath.Tuning.peakingStrengthKey)
+        XCTAssertEqual(PreviewAnalysisMath.Tuning.stored(in: defaults), .standard)
+        defaults.set("early", forKey: PreviewAnalysisMath.Tuning.zebraLevelKey)
+        defaults.set("yellow", forKey: PreviewAnalysisMath.Tuning.peakingColorKey)
+        defaults.set("high", forKey: PreviewAnalysisMath.Tuning.peakingStrengthKey)
+        let stored = PreviewAnalysisMath.Tuning.stored(in: defaults)
+        XCTAssertEqual(stored.zebraLevel, .early)
+        XCTAssertEqual(stored.peakingColor, .yellow)
+        XCTAssertEqual(stored.peakingStrength, .high)
+        let standard = PreviewAnalysisMath.Tuning.standard
+        XCTAssertEqual(standard.zebraLevel.rawValue, "standard")
+        XCTAssertEqual(standard.peakingColor.rawValue, "red")
+        XCTAssertEqual(standard.peakingStrength.rawValue, "medium")
+    }
     func testExactAspectFramesFitPortraitLandscapeAndTinyWindows() {
         for size in [CGSize(width: 390,height: 500), CGSize(width: 700,height: 250), CGSize(width: 800,height: 1100)] {
             for aspect in CaptureAspect.allCases where aspect != .viewfinder {

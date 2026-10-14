@@ -277,6 +277,69 @@ struct PreviewRenderState {
     mutating func invalidate() { generation &+= 1 }
 }
 
+/// Zebra warning level: the max-channel value at which stripes appear.
+enum PreviewZebraLevel: String, CaseIterable, Identifiable, Sendable {
+    case early, standard, clipped
+    var id: String { rawValue }
+    var threshold: Int {
+        switch self {
+        case .early: return 235
+        case .standard: return 250
+        case .clipped: return 255
+        }
+    }
+    var title: String {
+        switch self {
+        case .early: return "Early"
+        case .standard: return "Standard"
+        case .clipped: return "Clipped only"
+        }
+    }
+}
+
+/// Focus-peaking edge colour as premultiplied RGBA8 bytes at alpha 220, so
+/// each colour channel never exceeds the alpha channel.
+enum PreviewPeakingColor: String, CaseIterable, Identifiable, Sendable {
+    case red, yellow, blue, white
+    var id: String { rawValue }
+    var bytes: [UInt8] {
+        switch self {
+        case .red: return [220, 55, 55, 220]
+        case .yellow: return [207, 190, 35, 220]
+        case .blue: return [52, 121, 220, 220]
+        case .white: return [207, 207, 207, 220]
+        }
+    }
+    var title: String {
+        switch self {
+        case .red: return "Red"
+        case .yellow: return "Yellow"
+        case .blue: return "Blue"
+        case .white: return "White"
+        }
+    }
+}
+
+/// Focus-peaking sensitivity: a lower edge threshold marks more edges.
+enum PreviewPeakingStrength: String, CaseIterable, Identifiable, Sendable {
+    case low, medium, high
+    var id: String { rawValue }
+    var edgeThreshold: Int {
+        switch self {
+        case .low: return 110
+        case .medium: return 72
+        case .high: return 48
+        }
+    }
+    var title: String {
+        switch self {
+        case .low: return "Low"
+        case .medium: return "Medium"
+        case .high: return "High"
+        }
+    }
+}
+
 /// Display-referred, unfiltered preview analysis. Not a RAW histogram or a
 /// sensor-clipping meter. All input/output is bounded to 192 x 192 pixels.
 enum PreviewAnalysisMath {
@@ -288,7 +351,43 @@ enum PreviewAnalysisMath {
         let overlayRGBA: [UInt8]
     }
 
-    static func analyze(rgba: [UInt8], width: Int, height: Int, zebras: Bool, peaking: Bool) -> Result? {
+    /// UI-tunable preview aids. `standard` reproduces the original pixels.
+    struct Tuning: Equatable, Sendable {
+        static let zebraLevelKey = "zebraLevel.v1"
+        static let peakingColorKey = "peakingColor.v1"
+        static let peakingStrengthKey = "peakingStrength.v1"
+        static let standard = Tuning()
+
+        var zebraLevel: PreviewZebraLevel = .standard
+        var peakingColor: PreviewPeakingColor = .red
+        var peakingStrength: PreviewPeakingStrength = .medium
+
+        init() {}
+
+        /// Unknown raw values fall back per field to the standard value.
+        init(zebraRaw: String, colorRaw: String, strengthRaw: String) {
+            zebraLevel = PreviewZebraLevel(rawValue: zebraRaw) ?? .standard
+            peakingColor = PreviewPeakingColor(rawValue: colorRaw) ?? .red
+            peakingStrength = PreviewPeakingStrength(rawValue: strengthRaw) ?? .medium
+        }
+
+        static func stored(in defaults: UserDefaults) -> Tuning {
+            let zebraRaw: String = defaults.string(forKey: zebraLevelKey) ?? ""
+            let colorRaw: String = defaults.string(forKey: peakingColorKey) ?? ""
+            let strengthRaw: String = defaults.string(forKey: peakingStrengthKey) ?? ""
+            return Tuning(zebraRaw: zebraRaw, colorRaw: colorRaw, strengthRaw: strengthRaw)
+        }
+    }
+
+    /// Level latch: enter under 1.0 degree, stay level until 1.5 or more.
+    static func isLevel(degrees: Double?, wasLevel: Bool) -> Bool {
+        guard let degrees else { return false }
+        let limit: Double = wasLevel ? 1.5 : 1.0
+        return abs(degrees) < limit
+    }
+
+    static func analyze(rgba: [UInt8], width: Int, height: Int, zebras: Bool, peaking: Bool,
+                        tuning: Tuning = .standard) -> Result? {
         guard width > 0, height > 0, width <= maximumDimension, height <= maximumDimension,
               rgba.count == width * height * 4 else { return nil }
         let count = width * height
@@ -296,6 +395,9 @@ enum PreviewAnalysisMath {
         var histogram = [Int](repeating: 0, count: 64)
         var overlay = [UInt8](repeating: 0, count: count * 4)
         var clipped = 0
+        let zebraThreshold = tuning.zebraLevel.threshold
+        let edgeThreshold = tuning.peakingStrength.edgeThreshold
+        let edgeBytes = tuning.peakingColor.bytes
         for index in 0..<count {
             let offset = index * 4
             let r = Int(rgba[offset]), g = Int(rgba[offset + 1]), b = Int(rgba[offset + 2])
@@ -303,11 +405,11 @@ enum PreviewAnalysisMath {
             luma[index] = y
             histogram[min(y / 4, 63)] += 1
             // Warn on individual color-channel clipping, not just white pixels.
-            if max(r, g, b) >= 250 {
-                clipped += 1
-                if zebras, ((index % width + index / width) / 3).isMultiple(of: 2) {
-                    overlay[offset] = 180; overlay[offset + 1] = 156; overlay[offset + 3] = 180
-                }
+            let brightest = max(r, g, b)
+            // The clipped count stays fixed at 250 whatever the zebra level.
+            if brightest >= 250 { clipped += 1 }
+            if zebras, brightest >= zebraThreshold, ((index % width + index / width) / 3).isMultiple(of: 2) {
+                overlay[offset] = 180; overlay[offset + 1] = 156; overlay[offset + 3] = 180
             }
         }
         if peaking, width > 2, height > 2 {
@@ -315,17 +417,21 @@ enum PreviewAnalysisMath {
                 for x in 1..<(width - 1) {
                     let index = y * width + x
                     let edge = abs(luma[index + 1] - luma[index - 1]) + abs(luma[index + width] - luma[index - width])
-                    guard edge > 72, luma[index] > 20, luma[index] < 245 else { continue }
+                    guard edge > edgeThreshold, luma[index] > 20, luma[index] < 245 else { continue }
                     let offset = index * 4
-                    overlay[offset] = 220; overlay[offset + 1] = 55; overlay[offset + 2] = 55; overlay[offset + 3] = 220
+                    overlay[offset] = edgeBytes[0]; overlay[offset + 1] = edgeBytes[1]
+                    overlay[offset + 2] = edgeBytes[2]; overlay[offset + 3] = edgeBytes[3]
                 }
             }
         }
         return Result(histogram: histogram, clippedPixels: clipped, pixelCount: count, overlayRGBA: overlay)
     }
 
-    static func horizonDegrees(x: Double, y: Double) -> Double? {
-        guard x.isFinite, y.isFinite, x * x + y * y > 0.04 else { return nil }
+    /// `wasShowing` applies hysteresis: once the level is visible it stays until
+    /// tilt from flat drops under about 8.6 degrees (entry is about 11.5 degrees).
+    static func horizonDegrees(x: Double, y: Double, wasShowing: Bool = false) -> Double? {
+        let cutoff = wasShowing ? 0.0225 : 0.04
+        guard x.isFinite, y.isFinite, x * x + y * y > cutoff else { return nil }
         let degrees = atan2(x, -y) * 180 / .pi
         // The nearest portrait/landscape axis is level in any orientation.
         return degrees - (degrees / 90).rounded() * 90

@@ -3,7 +3,10 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 work_dir="$(mktemp -d -t filmycamera-uuid-test)"
-trap 'rm -rf "${work_dir}"' EXIT HUP INT TERM
+trap 'rm -rf "${work_dir}"' EXIT
+trap "exit 129" HUP
+trap "exit 130" INT
+trap "exit 143" TERM
 
 mock_bin="${work_dir}/bin"
 mkdir -p "${mock_bin}"

@@ -415,7 +415,7 @@ final class CameraManualHardwareTests: XCTestCase {
 
         camera.focus(at: tapPoint)
         try await waitFor("Tap meters the requested point and monitors subject changes") {
-            wide.focusMode == .continuousAutoFocus && wide.exposureMode == .continuousAutoExposure
+            wide.focusMode == .autoFocus && wide.exposureMode == .continuousAutoExposure
                 && matches(wide.focusPointOfInterest, tapPoint) && matches(wide.exposurePointOfInterest, tapPoint)
                 && wide.isSubjectAreaChangeMonitoringEnabled
         }
@@ -424,7 +424,7 @@ final class CameraManualHardwareTests: XCTestCase {
         camera.focus(at: newerTapPoint)
         try await waitFor("A newer tap replaces the previous subject target") {
             matches(wide.focusPointOfInterest, newerTapPoint) && matches(wide.exposurePointOfInterest, newerTapPoint)
-                && wide.focusMode == .continuousAutoFocus && wide.exposureMode == .continuousAutoExposure
+                && wide.focusMode == .autoFocus && wide.exposureMode == .continuousAutoExposure
                 && wide.isSubjectAreaChangeMonitoringEnabled
         }
         camera.subjectAreaDidChange(deviceID: wide.uniqueID, observedAt: olderSubjectChangeTime)
@@ -432,7 +432,7 @@ final class CameraManualHardwareTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(300))
         XCTAssertTrue(matches(wide.focusPointOfInterest, newerTapPoint), "An older event must not discard the newer tap")
         XCTAssertTrue(matches(wide.exposurePointOfInterest, newerTapPoint))
-        XCTAssertEqual(wide.focusMode, .continuousAutoFocus)
+        XCTAssertEqual(wide.focusMode, .autoFocus)
         XCTAssertEqual(wide.exposureMode, .continuousAutoExposure)
         XCTAssertTrue(wide.isSubjectAreaChangeMonitoringEnabled)
         XCTAssertFalse(camera.isFocusExposureLocked)
@@ -583,7 +583,7 @@ final class CameraManualHardwareTests: XCTestCase {
         let manualExposurePoint = wide.exposurePointOfInterest
         camera.focus(at: tapPoint)
         try await waitFor("Tap autofocus preserves manual exposure") {
-            matches(wide.focusPointOfInterest, tapPoint) && wide.focusMode == .continuousAutoFocus
+            matches(wide.focusPointOfInterest, tapPoint) && wide.focusMode == .autoFocus
                 && wide.exposureMode == .custom && wide.isSubjectAreaChangeMonitoringEnabled
         }
         postSubjectChange(from: wide)

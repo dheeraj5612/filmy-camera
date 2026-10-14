@@ -16,6 +16,8 @@ on:
       # the push gate on main.
       - "docs/app-store/**"
       - "docs/release-checklist.md"
+      - "Config/**"
+      - "StoreKit/**"
       - "project.yml"
       - ".github/workflows/ios-build.yml"
   pull_request: {}
@@ -92,7 +94,7 @@ jobs:
           ios_changed=false
           release_scripts_changed=false
 
-          if grep -Eq '^(FilmyCamera/|FilmyCameraTests/|FilmyCameraUITests/|FilmyCamera\.xcodeproj/|scripts/testing/|docs/app-store/screenshots/demo-source/|project\.yml$|\.github/workflows/ios-build\.yml$)' <<<"${changed_files}"; then
+          if grep -Eq '^(FilmyCamera/|FilmyCameraTests/|FilmyCameraUITests/|FilmyCamera\.xcodeproj/|scripts/testing/|docs/app-store/screenshots/demo-source/|Config/|StoreKit/|project\.yml$|\.github/workflows/ios-build\.yml$)' <<<"${changed_files}"; then
             ios_changed=true
           fi
           if grep -Eq '^(scripts/release/|scripts/ci/|project\.yml$|FilmyCamera\.xcodeproj/|FilmyCamera/Info\.plist$|FilmyCamera/Resources/PrivacyInfo\.xcprivacy$|docs/app-store/|docs/release-checklist\.md$|\.github/workflows/ios-build\.yml$)' <<<"${changed_files}"; then
@@ -108,10 +110,11 @@ jobs:
     # trustworthy output; a skipped dependent job can otherwise look green.
     if: always() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.ios_changed == 'true')
     runs-on: macos-15
-    # The 128-look renderer suite, full UI suite, and isolated Photos flows run
-    # sequentially. Hosted runs can spend over 45 minutes reaching the final
-    # Photos flows; keep enough bounded time to finish and retain evidence.
-    timeout-minutes: 65
+    # The renderer suite, full UI suite, and isolated Photos flows run
+    # sequentially. A green hosted run has taken about 125 minutes (build 12,
+    # unit and integration 35, UI 48, Photos flows 30), so 120 cancelled it
+    # before the result and evidence were kept.
+    timeout-minutes: 180
     # Xcode 16.4 ships iOS 18.5 on the hosted runner. Keep one stable lane so
     # the required `build-and-test` check name does not become a matrix suffix.
     env:
@@ -187,13 +190,30 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if ! git diff --exit-code -- FilmyCamera.xcodeproj; then
+          if [[ -n "$(git status --porcelain -- FilmyCamera.xcodeproj)" ]]; then
+            git status --short -- FilmyCamera.xcodeproj >&2
+            git --no-pager diff -- FilmyCamera.xcodeproj | head -200 >&2 || true
             echo "XcodeGen changed the committed project; update it intentionally and rerun the gate." >&2
             exit 1
           fi
 
       - name: Validate release project configuration
         run: scripts/release/validate-project.sh
+
+      - name: Run host policy gates (Gallery mutation checks, Scene Auto core)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! python3 scripts/testing/check_policy_regressions.py --mutation-checks \
+            --output-dir "${RUNNER_TEMP}/policy-regressions"; then
+            for log in "${RUNNER_TEMP}"/policy-regressions/*.log; do
+              [ -f "${log}" ] || continue
+              echo "==> ${log}" >&2
+              tail -n 200 "${log}" >&2
+            done
+            exit 1
+          fi
+          bash scripts/testing/test-scene-auto-core.sh
 
       - name: Select an available iPhone simulator
         id: simulator
@@ -288,10 +308,26 @@ jobs:
         run: |
           # Release the first simulator's memory before booting the Photos fixture device.
           xcrun simctl shutdown "${DEVICE_ID}"
+          # Sample the app while the lane runs: a hung save leaves its
+          # main-thread stack in the logs artifact instead of only a UI timeout.
+          (
+            n=0
+            while [ "${n}" -lt 90 ] && sleep 30; do
+              pid="$(pgrep -f 'FilmyCamera\.app/FilmyCamera( |$)' | head -1 || true)"
+              [ -n "${pid}" ] || continue
+              n=$((n + 1))
+              sample "${pid}" 1 -mayDie \
+                -file "${RUNNER_TEMP}/filmycamera-photos-e2e-sample-${n}.log" >/dev/null 2>&1 || true
+            done
+          ) &
+          sampler=$!
+          status=0
           python3 scripts/testing/run.py photos-e2e --skip-build \
             --destination "${DESTINATION}" \
             --derived-data "${RUNNER_TEMP}/FilmyCameraDerivedData" \
-            --output-dir "${RUNNER_TEMP}"
+            --output-dir "${RUNNER_TEMP}" || status=$?
+          kill "${sampler}" 2>/dev/null || true
+          exit "${status}"
 
       - name: Compile physical-device test branches when requested
         if: github.event_name == 'workflow_dispatch' && inputs.include_device_build
@@ -541,8 +577,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          bash -n scripts/ci/*.sh scripts/release/*.sh
-          shellcheck --severity=warning scripts/ci/*.sh scripts/release/*.sh
+          for script in scripts/ci/*.sh scripts/release/*.sh; do bash -n "${script}"; done
+          shellcheck -x --severity=warning scripts/ci/*.sh scripts/release/*.sh
           bash scripts/release/test-private-temp.sh
           bash scripts/release/test-macho-uuid-validation.sh
           scripts/release/validate-store-metadata.sh --final

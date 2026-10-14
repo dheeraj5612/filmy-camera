@@ -12,8 +12,9 @@ fi
 
 private_key_regex="$(printf '%s' '-----BEGIN ' '([A-Z0-9]+ )*' 'PRIVATE KEY-----')"
 auth_key_regex="$(printf '%s' 'Auth' 'Key_' '[A-Za-z0-9]{10,}' '\.p8')"
-key_id_regex="$(printf '%s' 'FILMY_ASC_KEY' '_ID=' '[A-Za-z0-9]{10}')"
-issuer_id_regex="$(printf '%s' 'FILMY_ASC_ISSUER' '_ID=' '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}')"
+credential_separator_regex="$(printf '%s' '[' '"' "'" ']?' '[[:space:]]*[:=][[:space:]]*' '[' '"' "'" ']?')"
+key_id_regex="$(printf '%s' 'FILMY_ASC_KEY' '_ID' "${credential_separator_regex}" '[A-Za-z0-9]{10}')"
+issuer_id_regex="$(printf '%s' 'FILMY_ASC_ISSUER' '_ID' "${credential_separator_regex}" '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}')"
 secret_pattern="${private_key_regex}|${auth_key_regex}|${key_id_regex}|${issuer_id_regex}"
 private_key_prefix="-----BEGIN"
 private_key_suffix=" PRIVATE KEY-----"
@@ -22,6 +23,26 @@ for private_key_modifier in '' OPENSSH RSA EC; do
   private_key_header="${private_key_prefix}${private_key_modifier:+ ${private_key_modifier}}${private_key_suffix}"
   grep -E -q -e "${secret_pattern}" <<<"${private_key_header}" || {
     echo "Credential scan pattern regression for a private-key header; failing closed." >&2
+    exit 1
+  }
+done
+
+key_id_fixtures=(
+  "$(printf '%s%s' 'FILMY_ASC_KEY' '_ID=ABCDE12345')"
+  "$(printf '%s%s' 'FILMY_ASC_KEY' '_ID: ABCDE12345')"
+  "$(printf '%s%s' 'FILMY_ASC_KEY' '_ID="ABCDE12345"')"
+  "$(printf '%s%s' 'FILMY_ASC_KEY' "_ID: 'ABCDE12345'")"
+  "$(printf '%s%s' 'FILMY_ASC_KEY' '_ID": "ABCDE12345"')"
+)
+issuer_fixture_value='12345678-1234-1234-1234-123456789abc'
+issuer_id_fixtures=(
+  "$(printf '%s%s' 'FILMY_ASC_ISSUER' "_ID=${issuer_fixture_value}")"
+  "$(printf '%s%s' 'FILMY_ASC_ISSUER' "_ID: ${issuer_fixture_value}")"
+  "$(printf '%s%s' 'FILMY_ASC_ISSUER' "_ID=\"${issuer_fixture_value}\"")"
+)
+for credential_fixture in "${key_id_fixtures[@]}" "${issuer_id_fixtures[@]}"; do
+  grep -E -q -e "${secret_pattern}" <<<"${credential_fixture}" || {
+    echo "Credential scan pattern regression for an App Store Connect identifier; failing closed." >&2
     exit 1
   }
 done

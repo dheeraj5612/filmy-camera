@@ -1,25 +1,12 @@
 import XCTest
 
-/// Real UI interactions with isolated preferences; physical captures are
-/// retained as review screenshots and are not written to the user's library.
+/// Real UI interactions with isolated preferences; editor screenshots are
+/// retained for review.
 @MainActor
 final class ComprehensiveSettingsTests: XCTestCase {
     func testEveryRecipeEditorSettingChangesAndResetRestoresTheLook() {
-        continueAfterFailure = false
-        let app = makeApp()
-        #if targetEnvironment(simulator)
-        app.launchArguments = ["-ui-testing", "-selectedRecipeID", "classic-chrome"]
-        #else
-        app.launchArguments = ["-ui-testing-real-roll", "-selectedRecipeID", "classic-chrome"]
-        #endif
-        app.launch()
+        let app = openRecipeEditor(recipeID: "classic-chrome", tuneTitle: "Tune Muted Color")
         defer { app.terminate() }
-        XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 20))
-        app.buttons["recipe-menu"].tap()
-        let tune = app.buttons["Tune Muted Color"]
-        XCTAssertTrue(tune.waitForExistence(timeout: 5))
-        tune.tap()
-        XCTAssertTrue(app.staticTexts["Recipe controls"].waitForExistence(timeout: 5))
 
         for label in ["Exposure", "Highlights", "Shadows", "Contrast"] { exerciseSlider(label, app) }
         for title in ["AUTO", "DR100", "DR200", "DR400"] {
@@ -28,6 +15,13 @@ final class ComprehensiveSettingsTests: XCTestCase {
         for title in ["AUTO", "Off", "Weak", "Strong"] {
             choose("recipe-choice-D Range Priority", title, app)
         }
+        finishRecipeEditor(app, attachmentName: "tone-recipe-editor-settings-modified")
+    }
+
+    func testEveryRecipeEditorColorAndWhiteBalanceChangesAndResetRestoresTheLook() {
+        let app = openRecipeEditor(recipeID: "classic-chrome", tuneTitle: "Tune Muted Color")
+        defer { app.terminate() }
+
         exerciseSlider("Color", app)
         for (id, options) in [
             ("recipe-choice-Color Chrome", ["Off", "Weak", "Strong"]),
@@ -39,14 +33,59 @@ final class ComprehensiveSettingsTests: XCTestCase {
             for title in options { choose(id, title, app) }
         }
         for label in ["Color temperature", "Warmth", "Tint"] { exerciseSlider(label, app) }
+        finishRecipeEditor(app, attachmentName: "color-recipe-editor-settings-modified")
+    }
+
+    func testEveryRecipeEditorTextureAndFinishChangesAndResetRestoresTheLook() {
+        let app = openRecipeEditor(recipeID: "classic-chrome", tuneTitle: "Tune Muted Color")
+        defer { app.terminate() }
+
         expandSection("Texture", app)
         for label in ["Sharpness", "Noise reduction", "Clarity"] { exerciseSlider(label, app) }
         expandSection("Finish", app)
         for title in ["Off", "Weak", "Strong"] { choose("recipe-choice-Grain Effect", title, app) }
         for title in ["Small", "Large"] { choose("recipe-choice-Grain Size", title, app) }
         for label in ["Vignette", "Halation"] { exerciseSlider(label, app) }
+        finishRecipeEditor(app, attachmentName: "texture-finish-recipe-editor-settings-modified")
+    }
+
+    func testRecipeEditorResetClearsCombinedCrossSectionDraft() {
+        let app = openRecipeEditor(recipeID: "classic-chrome", tuneTitle: "Tune Muted Color")
+        defer { app.terminate() }
+
+        exerciseSlider("Exposure", app)
+        exerciseSlider("Color", app)
+        expandSection("Texture", app)
+        exerciseSlider("Sharpness", app)
+        expandSection("Finish", app)
+        exerciseSlider("Vignette", app)
+        let hero = app.descendants(matching: .any)["recipe-detail-hero"]
+        XCTAssertTrue(hero.exists)
+        XCTAssertTrue((hero.value as? String ?? "").contains("Edited"), "Hero must report the edited draft")
+        finishRecipeEditor(app, attachmentName: "combined-recipe-editor-settings-modified")
+    }
+
+    private func openRecipeEditor(recipeID: String, tuneTitle: String) -> XCUIApplication {
+        continueAfterFailure = false
+        let app = makeApp()
+        #if targetEnvironment(simulator)
+        app.launchArguments = ["-ui-testing", "-selectedRecipeID", recipeID]
+        #else
+        app.launchArguments = ["-ui-testing-real-roll", "-selectedRecipeID", recipeID]
+        #endif
+        app.launch()
+        XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 20))
+        app.buttons["recipe-menu"].tap()
+        let tune = app.buttons[tuneTitle]
+        XCTAssertTrue(tune.waitForExistence(timeout: 5))
+        tune.tap()
+        XCTAssertTrue(app.staticTexts["Recipe controls"].waitForExistence(timeout: 5))
+        return app
+    }
+
+    private func finishRecipeEditor(_ app: XCUIApplication, attachmentName: String) {
         XCTAssertTrue(app.buttons["Apply changes to Muted Color"].isEnabled)
-        attach("all-recipe-editor-settings-modified")
+        attach(attachmentName)
         reveal(app.buttons["Reset recipe controls"], app).tap()
         XCTAssertTrue(app.buttons["Done editing Muted Color"].waitForExistence(timeout: 5),
                       "Reset must remove the entire draft, including all edited sections")
@@ -81,6 +120,9 @@ final class ComprehensiveSettingsTests: XCTestCase {
         choose("capture-delay-picker", "5s", app)
         choose("capture-aspect-picker", "3:2", app)
         choose("capture-guide-picker", "Golden ratio", app)
+        choose("capture-zebra-level", "Early", app)
+        choose("capture-peaking-color", "Yellow", app)
+        choose("capture-peaking-strength", "High", app)
         closeSetup(app)
         app.terminate()
         app.launch()
@@ -90,6 +132,9 @@ final class ComprehensiveSettingsTests: XCTestCase {
         assertChoice(reveal(app.descendants(matching: .any)["capture-delay-picker"], app), "5s")
         assertChoice(reveal(app.descendants(matching: .any)["capture-aspect-picker"], app), "3:2")
         assertChoice(reveal(app.descendants(matching: .any)["capture-guide-picker"], app), "Golden ratio")
+        assertChoice(reveal(app.descendants(matching: .any)["capture-zebra-level"], app), "Early")
+        assertChoice(reveal(app.descendants(matching: .any)["capture-peaking-color"], app), "Yellow")
+        assertChoice(reveal(app.descendants(matching: .any)["capture-peaking-strength"], app), "High")
         for id in toggles { XCTAssertEqual(reveal(app.switches[id], app).value as? String, "1", id) }
         attach("every-capture-option-restored")
         closeSetup(app)
@@ -119,6 +164,176 @@ final class ComprehensiveSettingsTests: XCTestCase {
                        "Settings and Capture setup must share the grid preference")
     }
 
+    func testResetCameraSettingsRestoresCaptureSetupAndSettingsToggles() {
+        continueAfterFailure = false
+        let app = makeApp()
+        app.launch()
+        defer { app.terminate() }
+        openSetup(app)
+        choose("capture-delay-picker", "5s", app)
+        choose("capture-aspect-picker", "3:2", app)
+        choose("capture-finish-picker", "Instant Print", app)
+        setToggle(reveal(app.switches["capture-zebras-toggle"], app), "1")
+        setToggle(reveal(app.switches["capture-peaking-toggle"], app), "1")
+        choose("capture-zebra-level", "Early", app)
+        choose("capture-peaking-color", "Yellow", app)
+        choose("capture-peaking-strength", "High", app)
+        closeSetup(app)
+        app.buttons["settings-tab"].tap()
+        setToggle(reveal(app.switches["Framing grid"], app), "0")
+        setToggle(reveal(app.switches["Haptic feedback"], app), "0")
+        setToggle(reveal(app.switches["Mirror front camera"], app), "0")
+        setToggle(reveal(app.switches["Date stamp"], app), "1")
+        reveal(app.buttons["settings-reset-camera"], app).tap()
+        let confirm = app.buttons["Reset"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.tap()
+        XCTAssertTrue(app.staticTexts["Camera settings reset."].waitForExistence(timeout: 5))
+        XCTAssertEqual(reveal(app.switches["Framing grid"], app).value as? String, "1")
+        XCTAssertEqual(reveal(app.switches["Haptic feedback"], app).value as? String, "1")
+        XCTAssertEqual(reveal(app.switches["Mirror front camera"], app).value as? String, "1")
+        XCTAssertEqual(reveal(app.switches["Date stamp"], app).value as? String, "0")
+        app.buttons["settings-back-to-camera"].tap()
+        XCTAssertTrue(app.buttons["capture-setup-open"].waitForExistence(timeout: 20))
+        XCTAssertEqual(app.buttons["capture-setup-open"].value as? String, "Timer Off, Fit screen")
+        openSetup(app)
+        assertChoice(reveal(app.descendants(matching: .any)["capture-delay-picker"], app), "Off")
+        assertChoice(reveal(app.descendants(matching: .any)["capture-aspect-picker"], app), "Fit screen")
+        assertChoice(reveal(app.descendants(matching: .any)["capture-finish-picker"], app), "Photo")
+        XCTAssertEqual(reveal(app.switches["capture-zebras-toggle"], app).value as? String, "0")
+        XCTAssertEqual(reveal(app.switches["capture-peaking-toggle"], app).value as? String, "0")
+        // The tuning pickers are hidden while their toggle is off: re-enable,
+        // assert the restored defaults, then turn both aids off again.
+        setToggle(reveal(app.switches["capture-zebras-toggle"], app), "1")
+        setToggle(reveal(app.switches["capture-peaking-toggle"], app), "1")
+        assertChoice(reveal(app.descendants(matching: .any)["capture-zebra-level"], app), "Standard")
+        assertChoice(reveal(app.descendants(matching: .any)["capture-peaking-color"], app), "Red")
+        assertChoice(reveal(app.descendants(matching: .any)["capture-peaking-strength"], app), "Medium")
+        setToggle(reveal(app.switches["capture-zebras-toggle"], app), "0")
+        setToggle(reveal(app.switches["capture-peaking-toggle"], app), "0")
+        closeSetup(app)
+    }
+
+    func testSettingsGroupsSavedPhotoSettingsAndReplaysGestureHint() {
+        continueAfterFailure = false
+        let app = makeApp()
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["settings-tab"].waitForExistence(timeout: 20))
+        app.buttons["settings-tab"].tap()
+        let page = app.scrollViews["settings-scroll"]
+        XCTAssertTrue(page.waitForExistence(timeout: 5))
+
+        // Sections appear in order in one downward pass.
+        let names = ["CAMERA", "SAVED PHOTOS", "PERMISSIONS", "STORAGE", "ABOUT", "RESET"]
+        let headers: [XCUIElement] = names.map { page.staticTexts[$0] }
+        for index in 0..<headers.count {
+            let header = reveal(headers[index], app, requireHittable: false, diagnosticName: names[index])
+            XCTAssertTrue(header.exists, "\(names[index]) section header must exist")
+            if index > 0 {
+                let previous = headers[index - 1]
+                XCTAssertTrue(!previous.exists || previous.frame.minY < header.frame.minY,
+                              "\(names[index - 1]) must come before \(names[index])")
+            }
+        }
+        XCTAssertFalse(page.staticTexts["CAPTURE"].exists)
+        XCTAssertFalse(page.staticTexts["ACCESS"].exists)
+        reveal(headers[0], app, requireHittable: false)
+        attach("settings-grouped-sections")
+
+        // Grouping: Camera controls above Saved photos, Saved photo settings above Permissions.
+        let saved = headers[1]
+        let perms = headers[2]
+        let haptic = reveal(page.switches["Haptic feedback"], app, requireHittable: false)
+        XCTAssertTrue(!saved.exists || haptic.frame.minY < saved.frame.minY)
+        let replayRow = reveal(page.buttons["settings-replay-gestures"], app, requireHittable: false)
+        XCTAssertTrue(!saved.exists || replayRow.frame.minY < saved.frame.minY)
+        let date = reveal(page.switches["Date stamp"], app, requireHittable: false)
+        XCTAssertTrue(!saved.exists || saved.frame.minY < date.frame.minY)
+        XCTAssertTrue(!perms.exists || date.frame.minY < perms.frame.minY)
+        let mirror = reveal(page.switches["Mirror front camera"], app, requireHittable: false)
+        XCTAssertTrue(!saved.exists || saved.frame.minY < mirror.frame.minY)
+        XCTAssertTrue(!perms.exists || mirror.frame.minY < perms.frame.minY)
+        XCTAssertTrue(!date.exists || date.frame.minY < mirror.frame.minY)
+        let location = page.switches["settings-location-tagging"]
+        reveal(location, app, requireHittable: false)
+        XCTAssertTrue(!saved.exists || saved.frame.minY < location.frame.minY)
+        XCTAssertTrue(!perms.exists || location.frame.minY < perms.frame.minY)
+        XCTAssertTrue(!mirror.exists || mirror.frame.minY < location.frame.minY)
+
+        // One merged Location row.
+        let access = page.descendants(matching: .any)["settings-location-access"]
+        XCTAssertEqual(page.descendants(matching: .any).matching(identifier: "settings-location-access").count, 1)
+        XCTAssertEqual(page.switches.matching(identifier: "settings-location-tagging").count, 1)
+        XCTAssertEqual(page.switches.matching(NSPredicate(format: "label == 'Location tagging'")).count, 1)
+        XCTAssertTrue(access.label.hasPrefix("Location tag"), "label=\(access.label)")
+        XCTAssertEqual(page.staticTexts.matching(NSPredicate(format: "label == 'Location'")).count, 0)
+
+        // The state line follows the toggle.
+        setToggle(reveal(location, app), "1")
+        let onLines = [
+            "On. Filmy reads location only while the camera is open.",
+            "On, but iPhone location is off for Filmy.",
+            "On. iPhone asks the first time you open the camera."
+        ]
+        let offLine = "Off. Photos are not tagged with where you took them."
+        XCTAssertTrue(wait { onLines.contains { access.label.contains($0) } }, "label=\(access.label)")
+        attach("settings-saved-photos")
+        let fix = page.buttons["location-permission-settings"]
+        let denied = access.label.contains(onLines[1])
+        if denied {
+            reveal(fix, app)
+            XCTAssertGreaterThanOrEqual(fix.frame.minY, location.frame.maxY)
+            XCTAssertTrue(!perms.exists || fix.frame.minY < perms.frame.minY)
+            XCTAssertTrue(fix.label.contains("Turn on location in Settings"), "label=\(fix.label)")
+            attach("settings-location-denied-action")
+            setToggle(reveal(location, app), "0")
+            XCTAssertTrue(wait { access.label.contains(offLine) }, "label=\(access.label)")
+            XCTAssertTrue(reveal(fix, app, requireHittable: false).exists)
+            setToggle(reveal(location, app), "1")
+        } else {
+            XCTAssertFalse(fix.exists)
+            setToggle(reveal(location, app), "0")
+            XCTAssertTrue(wait { access.label.contains(offLine) }, "label=\(access.label)")
+            XCTAssertFalse(fix.exists)
+            setToggle(reveal(location, app), "1")
+        }
+
+        // Replay gestures row: before the tap the value reads "Tips not seen yet" or "Tips already seen" depending on launch arguments, never "Tips turned back on", so the wait after the tap proves the tap.
+        let replay = reveal(page.buttons["settings-replay-gestures"], app)
+        XCTAssertGreaterThanOrEqual(replay.frame.height, 44)
+        XCTAssertEqual(replay.label, "Replay gestures")
+        XCTAssertNotEqual(replay.value as? String, "Tips turned back on", "value before tap=\(String(describing: replay.value))")
+        replay.tap()
+        XCTAssertTrue(wait { replay.value as? String == "Tips turned back on" }, "value=\(String(describing: replay.value))")
+        attach("settings-replay-gestures-confirmed")
+
+        // Largest text keeps the Location row reachable.
+        app.terminate()
+        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        XCTAssertTrue(app.buttons["settings-tab"].waitForExistence(timeout: 20))
+        app.buttons["settings-tab"].tap()
+        let tag = reveal(page.switches["settings-location-tagging"], app)
+        XCTAssertTrue(tag.isHittable)
+        XCTAssertTrue(access.exists)
+        XCTAssertGreaterThanOrEqual(access.frame.height, 44)
+        attach("settings-saved-photos-largest-text")
+    }
+
+    func testGrainSizeIsDisabledWhileGrainEffectIsOff() {
+        let app = openRecipeEditor(recipeID: "classic-chrome", tuneTitle: "Tune Muted Color")
+        defer { app.terminate() }
+
+        expandSection("Finish", app)
+        choose("recipe-choice-Grain Effect", "Off", app)
+        let size = reveal(app.descendants(matching: .any)["recipe-choice-Grain Size"], app,
+                          requireHittable: false, diagnosticName: "recipe-choice-Grain Size")
+        XCTAssertFalse(size.isEnabled, "Grain Size changes nothing while Grain Effect is Off")
+        choose("recipe-choice-Grain Effect", "Weak", app)
+        XCTAssertTrue(size.isEnabled)
+    }
+
     func testMonochromeEditorAxesChangeAndReset() {
         continueAfterFailure = false
         let app = makeApp()
@@ -146,6 +361,27 @@ final class ComprehensiveSettingsTests: XCTestCase {
         reveal(app.buttons["Reset recipe controls"], app).tap()
         XCTAssertTrue(app.buttons["Done editing Neutral Monochrome"].waitForExistence(timeout: 5))
         app.buttons["Done editing Neutral Monochrome"].tap()
+    }
+
+    func testSepiaEditorHidesNoOpColorControls() {
+        continueAfterFailure = false
+        let app = makeApp()
+        #if targetEnvironment(simulator)
+        app.launchArguments = ["-ui-testing", "-selectedRecipeID", "sepia-archive"]
+        #else
+        app.launchArguments = ["-ui-testing-real-roll", "-selectedRecipeID", "sepia-archive"]
+        #endif
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 20))
+        app.buttons["recipe-menu"].tap()
+        let tune = app.buttons["Tune Sepia Archive"]
+        XCTAssertTrue(tune.waitForExistence(timeout: 5))
+        tune.tap()
+        XCTAssertTrue(app.staticTexts["Monochrome recipe"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.sliders["Color"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["recipe-choice-Color Chrome"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["fx-blue-control"].exists)
     }
 
     func testPhysicalEveryAspectAndTimerCapturesThenFrontCameraReturnsLive() throws {
@@ -194,6 +430,229 @@ final class ComprehensiveSettingsTests: XCTestCase {
         XCTAssertTrue(wait { cameraSwitch.value as? String == originalPosition })
         requireLive(app)
         #endif
+    }
+
+    func testAccessSectionUsesPlainPermissionWords() throws {
+        #if targetEnvironment(simulator)
+        continueAfterFailure = false
+        let app = makeApp()
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["settings-tab"].waitForExistence(timeout: 20))
+        app.buttons["settings-tab"].tap()
+
+        let photos = reveal(app.buttons["photos-permission-settings"], app)
+        XCTAssertTrue(photos.label.contains("Turn on Photos in Settings"), photos.label)
+        let save = reveal(app.buttons["photos-save-permission-settings"], app)
+        XCTAssertTrue(save.label.contains("Allow saving new photos"), save.label)
+        for button in [photos, save] {
+            XCTAssertGreaterThanOrEqual(button.frame.width, 44)
+            XCTAssertGreaterThanOrEqual(button.frame.height, 44)
+        }
+        XCTAssertEqual(
+            app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Open System Settings'")).count, 0)
+        XCTAssertTrue(app.staticTexts["Photos access is off for Filmy."].exists)
+        let photosBadge = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Photos, Off'")).firstMatch
+        XCTAssertTrue(photosBadge.exists, "The Photos badge must read its subject and state")
+        attach("settings-access-plain-words")
+        let cameraBadge = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Camera, Simulator'")).firstMatch
+        XCTAssertTrue(cameraBadge.exists, "The Camera badge must read its subject and state")
+
+        app.terminate()
+        app.launch()
+        let sceneAuto = app.descendants(matching: .any)["scene-auto-control"]
+        XCTAssertTrue(sceneAuto.waitForExistence(timeout: 20))
+        sceneAuto.tap()
+        let toggle = app.buttons["scene-auto-toggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        let shortLine = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS 'for this session. Your look stays.'")).firstMatch
+        XCTAssertTrue(shortLine.waitForExistence(timeout: 2), toggle.label)
+        let oldProse = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS 'Settles before adapting'")).firstMatch
+        XCTAssertFalse(oldProse.exists)
+        attach("scene-auto-menu-short-lines")
+        #else
+        throw XCTSkip("Needs the forced Photos-denied UI-test state")
+        #endif
+    }
+
+    func testStorageExplainerAndInlineClearCacheConfirmation() throws {
+        #if targetEnvironment(simulator)
+        continueAfterFailure = false
+        let app = makeApp()
+        app.launchArguments += ["-ui-testing-cache-confirm"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["settings-tab"].waitForExistence(timeout: 20))
+        app.buttons["settings-tab"].tap()
+
+        let clear = reveal(app.buttons["clear-local-cache"], app, requireHittable: false)
+        let places = ["photos", "roll", "captures"].map { app.descendants(matching: .any)["settings-storage-place-\($0)"] }
+        let photosPlace = reveal(places[0], app, requireHittable: false)
+        XCTAssertTrue(app.staticTexts["Where your photos are"].exists)
+        for place in places { XCTAssertTrue(place.exists, place.identifier) }
+        XCTAssertTrue(photosPlace.label.contains("saves here by itself"), photosPlace.label)
+        XCTAssertGreaterThanOrEqual(photosPlace.frame.minY, clear.frame.maxY, "The explainer sits below the clear row")
+        attach("settings-storage-where-photos-are")
+
+        let confirm = app.buttons["confirm-clear-local-cache"]
+        let keep = app.buttons["keep-local-cache"]
+        let row = reveal(app.buttons["clear-local-cache"], app)
+        XCTAssertEqual(row.value as? String, "Available")
+        row.tap()
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        XCTAssertTrue(keep.waitForExistence(timeout: 5))
+        XCTAssertTrue(confirm.isHittable && keep.isHittable)
+        XCTAssertGreaterThanOrEqual(confirm.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(keep.frame.height, 44)
+        XCTAssertTrue(app.buttons["Keep cache"].exists)
+        XCTAssertEqual(app.popovers.count + app.sheets.count, 0, "The confirmation is inline, not a popover")
+        XCTAssertLessThanOrEqual(keep.frame.maxY, confirm.frame.minY)
+        XCTAssertTrue(app.staticTexts["Clear cache?"].exists)
+        attach("settings-clear-cache-inline-confirm")
+
+        keep.tap()
+        XCTAssertTrue(wait { !confirm.exists })
+        XCTAssertEqual(row.value as? String, "Available")
+        XCTAssertTrue(row.isHittable)
+        row.tap()
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.tap()
+        XCTAssertTrue(wait { !confirm.exists })
+        XCTAssertTrue(row.exists)
+
+        app.terminate()
+        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        XCTAssertTrue(app.buttons["settings-tab"].waitForExistence(timeout: 20))
+        app.buttons["settings-tab"].tap()
+        reveal(app.buttons["clear-local-cache"], app).tap()
+        XCTAssertTrue(wait { keep.isHittable && confirm.isHittable },
+                      "Keep and Clear must both be reachable without scrolling at the largest text size")
+        attach("settings-clear-cache-inline-confirm-largest-text")
+        #else
+        throw XCTSkip("Needs the forced Photos-denied UI-test state")
+        #endif
+    }
+
+    func testOnboardingStartingLooksGridAndPermissionNote() throws {
+        #if targetEnvironment(simulator)
+        continueAfterFailure = false
+        let app = makeApp()
+        app.launchArguments += ["-ui-testing-onboarding"]
+        app.launch()
+        defer { app.terminate() }
+
+        let ids = ["g7x-compact", "classic-chrome", "nostalgic-negative", "acros-monochrome"]
+        let tiles = ids.map { app.buttons["onboarding-recipe-\($0)"] }
+        let t0 = tiles[0], t1 = tiles[1], t2 = tiles[2], t3 = tiles[3]
+        let cont = app.buttons["onboarding-continue"]
+        XCTAssertTrue(t0.waitForExistence(timeout: 15))
+        for tile in tiles {
+            XCTAssertTrue(tile.isHittable, tile.identifier)
+            XCTAssertGreaterThanOrEqual(tile.frame.height, 44, tile.identifier)
+        }
+        XCTAssertTrue(cont.isHittable)
+        XCTAssertLessThanOrEqual(t3.frame.maxY, cont.frame.minY)
+        XCTAssertLessThanOrEqual(abs(t0.frame.minY - t1.frame.minY), 2)
+        XCTAssertLessThanOrEqual(t0.frame.maxX, t1.frame.minX + 1)
+        XCTAssertGreaterThanOrEqual(t2.frame.minY, t0.frame.maxY)
+        XCTAssertLessThanOrEqual(abs(t2.frame.minX - t0.frame.minX), 2)
+        XCTAssertLessThanOrEqual(abs(t3.frame.minX - t1.frame.minX), 2)
+        XCTAssertGreaterThan(t0.frame.width, 140)
+        XCTAssertLessThanOrEqual(abs(t0.frame.width - t1.frame.width), 2)
+        XCTAssertEqual(t0.value as? String, "Selected")
+        t1.tap()
+        XCTAssertTrue(wait { t1.value as? String == "Selected" })
+
+        let note = app.staticTexts["onboarding-permission-note"]
+        XCTAssertTrue(note.exists)
+        XCTAssertTrue(note.label.contains("camera") && note.label.contains("Photos"), note.label)
+        XCTAssertGreaterThanOrEqual(
+            note.frame.minY, app.staticTexts["onboarding-save-explanation"].frame.maxY - 1)
+        if app.frame.height >= 870 {
+            XCTAssertTrue(app.scrollViews["onboarding-content"].frame.contains(note.frame))
+            XCTAssertLessThanOrEqual(note.frame.maxY, cont.frame.minY)
+        }
+        attach("onboarding-starting-looks-grid")
+        cont.tap()
+        XCTAssertTrue(app.buttons["roll-tab"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.descendants(matching: .any)["onboarding-screen"].exists)
+        #else
+        throw XCTSkip("Needs the simulator onboarding launch state")
+        #endif
+    }
+
+    func testPendingPhotosExportsNoticeIsCalmAndDismissible() throws {
+        #if targetEnvironment(simulator)
+        let app = makeApp()
+        app.launchArguments += ["-ui-testing-pending-exports", "-cameraGestureHintSeen.v1", "YES"]
+        app.launch()
+        assertPendingExportsNotice(app, largestText: false)
+
+        let show = app.buttons["camera-pending-exports-show"]
+        show.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["filmy-originals-library"].waitForExistence(timeout: 10),
+                      "Show must open the Filmy originals list")
+        attach("pending-exports-show-originals")
+        let done = app.buttons["camera-pending-exports-done"]
+        XCTAssertTrue(done.waitForExistence(timeout: 5))
+        done.tap()
+        let card = app.descendants(matching: .any)["camera-pending-exports"]
+        XCTAssertTrue(wait { !done.exists && card.exists }, "Done must return to the camera with the notice")
+
+        let later = app.buttons["camera-pending-exports-later"]
+        later.tap()
+        XCTAssertTrue(wait { !card.exists }, "Later must hide the notice")
+        XCTAssertTrue(app.buttons["Capture photo"].isHittable)
+        attach("pending-exports-later-hidden")
+
+        app.terminate()
+        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        assertPendingExportsNotice(app, largestText: true)
+        #else
+        throw XCTSkip("Needs the simulator pending-exports launch state")
+        #endif
+    }
+
+    private func assertPendingExportsNotice(_ app: XCUIApplication, largestText: Bool) {
+        let suffix = largestText ? "largest-text" : "default"
+        let card = app.descendants(matching: .any)["camera-pending-exports"]
+        XCTAssertTrue(card.waitForExistence(timeout: 20), "The pending exports notice must appear")
+        XCTAssertTrue(app.staticTexts["2 photos are not in Photos yet"].exists
+                        || card.label.contains("2 photos are not in Photos yet"),
+                      "The notice must count the captures that are not in Photos")
+        // UI testing forces Photos denied, so the primary action is Settings.
+        XCTAssertTrue(app.buttons["camera-pending-exports-settings"].exists)
+        XCTAssertFalse(app.buttons["camera-pending-exports-save"].exists)
+        let shutter = app.buttons["Capture photo"]
+        XCTAssertTrue(wait { shutter.exists && shutter.isHittable }, "The shutter must stay reachable under the notice")
+        // camera-preview is device-only in UI tests, so the viewfinder midpoint
+        // falls back to the window, which the portrait viewfinder fills.
+        let preview = app.descendants(matching: .any)["camera-preview"]
+        let midY: CGFloat = preview.exists ? preview.frame.midY : app.windows.firstMatch.frame.midY
+        if largestText {
+            // The capped card is taller than half of a 375 x 667 pt screen, so
+            // require only that it never covers the shutter.
+            XCTAssertLessThan(card.frame.maxY, shutter.frame.minY, "The notice must stay above the shutter")
+        } else {
+            XCTAssertLessThan(card.frame.maxY, midY, "The notice must sit in the top half of the viewfinder")
+        }
+        let ids: [String] = [
+            "camera-pending-exports-settings",
+            "camera-pending-exports-show",
+            "camera-pending-exports-later"
+        ]
+        for id in ids {
+            let button = app.buttons[id]
+            XCTAssertTrue(button.exists && button.isHittable, "\(id) must be hittable")
+            if largestText {
+                XCTAssertGreaterThanOrEqual(button.frame.height, 44, "\(id) must be at least 44 pt tall")
+            }
+        }
+        attach("pending-exports-notice-\(suffix)")
     }
 
     private func makeApp() -> XCUIApplication {
@@ -250,7 +709,7 @@ final class ComprehensiveSettingsTests: XCTestCase {
     }
 
     private func choose(_ id: String, _ title: String, _ app: XCUIApplication) {
-        let picker = reveal(app.descendants(matching: .any)[id], app)
+        let picker = reveal(app.descendants(matching: .any)[id], app, diagnosticName: id)
         picker.tap()
         let option = app.buttons[title]
         XCTAssertTrue(option.waitForExistence(timeout: 5))
@@ -282,17 +741,37 @@ final class ComprehensiveSettingsTests: XCTestCase {
                       file: file, line: line)
     }
 
-    private func reveal(_ control: XCUIElement, _ app: XCUIApplication, requireHittable: Bool = true) -> XCUIElement {
+    @discardableResult
+    private func reveal(_ control: XCUIElement, _ app: XCUIApplication,
+                        requireHittable: Bool = true,
+                        diagnosticName: String = "unresolved control") -> XCUIElement {
         let form = app.descendants(matching: .any)["capture-setup-form"]
         let editor = app.descendants(matching: .any)["recipe-detail-scroll"]
         let scroll = form.exists ? form : (editor.exists ? editor : app.scrollViews.firstMatch)
-        for _ in 0..<22 {
+        // A native iPad Form can require more than one viewport of travel when
+        // keyboard or large-text settings change its content height.
+        let settings = app.scrollViews["settings-scroll"]
+        let returnBar = app.buttons["settings-back-to-camera"]
+        for attempt in 0..<40 {
             var viewport = scroll.frame.intersection(app.frame)
+            // The pinned Settings return bar is opaque and can report a
+            // control under it as hittable, so exclude the strip it covers.
+            if settings.exists && returnBar.exists {
+                let top = returnBar.frame.maxY + 12
+                if top > viewport.minY {
+                    viewport.size.height = max(0, viewport.maxY - top)
+                    viewport.origin.y = top
+                }
+            }
             let action = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Apply changes to ' OR label BEGINSWITH 'Done editing '")).firstMatch
             if editor.exists && action.exists {
                 viewport.size.height = max(0, min(viewport.height, action.frame.minY - viewport.minY - 8))
             }
-            if control.exists && (!requireHittable || control.isHittable) && viewport.contains(control.frame) { return control }
+            if control.exists && (!requireHittable || control.isHittable) {
+                // SwiftUI can report a one-pixel edge mismatch between the
+                // hosted collection view and its accessibility frame.
+                if viewport.insetBy(dx: -2, dy: -2).contains(control.frame) { return control }
+            }
             let downward = control.exists && control.frame.midY < viewport.midY
             // Use a measured, bounded movement in the editor's margin. A
             // full-height swipe can jump past a nearby slider and alternate
@@ -307,19 +786,32 @@ final class ComprehensiveSettingsTests: XCTestCase {
                 let origin = app.coordinate(withNormalizedOffset: .zero)
                 origin.withOffset(CGVector(dx: start.x - app.frame.minX, dy: start.y - app.frame.minY))
                     .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: end.x - app.frame.minX, dy: end.y - app.frame.minY)))
+            } else if form.exists && !control.exists {
+                // A SwiftUI Form can virtualize an off-screen row on iPad, so
+                // an unresolved target gives us no frame from which to infer
+                // the direction. Search from both ends instead of repeatedly
+                // swiping toward the bottom when the target is absent.
+                if attempt < 20 { scroll.swipeDown() } else { scroll.swipeUp() }
+            } else if !form.exists && settings.exists {
+                // A measured drag in the page margin; a fling can overshoot
+                // and leave the target under the pinned return bar.
+                let from = settings.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: downward ? 0.35 : 0.65))
+                let to = settings.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: downward ? 0.65 : 0.35))
+                from.press(forDuration: 0.05, thenDragTo: to)
             } else if downward { scroll.swipeDown() } else { scroll.swipeUp() }
         }
-        let diagnostics = XCTAttachment(string: "Target: \(control.debugDescription)\nScroll: \(scroll.debugDescription)")
+        let container = form.exists ? "capture-setup-form" : (editor.exists ? "recipe-detail-scroll" : "first scroll view")
+        let diagnostics = XCTAttachment(string: "Target: \(diagnosticName)\nScroll container: \(container)")
         diagnostics.name = "unrevealed-control-geometry"
         diagnostics.lifetime = .keepAlways
         add(diagnostics)
         attach("unrevealed-control")
-        XCTFail("Could not fully reveal \(control.identifier.isEmpty ? control.label : control.identifier)")
+        XCTFail("Could not fully reveal \(diagnosticName)")
         return control
     }
 
     private func exerciseSlider(_ title: String, _ app: XCUIApplication) {
-        let slider = reveal(app.sliders[title], app)
+        let slider = reveal(app.sliders[title], app, diagnosticName: title)
         slider.adjust(toNormalizedSliderPosition: 0.1)
         let low = slider.value as? String
         slider.adjust(toNormalizedSliderPosition: 0.9)
@@ -330,7 +822,7 @@ final class ComprehensiveSettingsTests: XCTestCase {
         let section = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", title + ",")).firstMatch
         // Disclosure groups expose the title and description together.
         let fallback = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", title)).firstMatch
-        reveal(section.exists ? section : fallback, app).tap()
+        reveal(section.exists ? section : fallback, app, diagnosticName: title).tap()
     }
 
     private func setToggle(_ row: XCUIElement, _ value: String) {
@@ -371,9 +863,32 @@ final class ComprehensiveSettingsTests: XCTestCase {
             "label BEGINSWITH 'Photo in your gallery'")).firstMatch
         XCTAssertTrue(frame.waitForExistence(timeout: 20) && frame.isHittable)
         let dimensions = frame.value as? String
-        let parts = dimensions?.split(separator: "x").compactMap { Double($0) }
+        // XCTest exposes the localized AX value (for example,
+        // "3,024x4,032"), so remove grouping characters before parsing.
+        let parts: [Double]? = dimensions.flatMap { value in
+            let components = value.split(separator: "x", omittingEmptySubsequences: false)
+            guard components.count == 2 else { return nil }
+            let groupingSeparators = Set([
+                Locale.current.groupingSeparator ?? ",",
+                ","
+            ])
+            let parsed = components.compactMap { component -> Double? in
+                let normalized = component.filter {
+                    !$0.isWhitespace && !groupingSeparators.contains(String($0))
+                }
+                guard !normalized.isEmpty, normalized.allSatisfy({ $0.isNumber }) else {
+                    return nil
+                }
+                return Double(String(normalized))
+            }
+            guard parsed.count == 2 else { return nil }
+            return parsed
+        }
         XCTAssertEqual(parts?.count, 2, "The saved gallery tile must expose persisted pixel dimensions")
         if let parts, parts.count == 2 {
+            XCTAssertTrue(parts.allSatisfy { $0 > 0 }, "The saved gallery tile must expose positive pixel dimensions")
+        }
+        if let parts, parts.count == 2, parts.allSatisfy({ $0 > 0 }) {
             XCTAssertEqual(parts[0] / parts[1], Double(expectedRatio), accuracy: 0.03,
                            "The saved gallery asset must preserve the selected crop")
         }

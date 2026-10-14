@@ -1,14 +1,19 @@
 import SwiftUI
 import UIKit
 
-/// Enforce the same portrait contract for presented UIKit controllers as for
-/// SwiftUI, including the system share and photo-picker presentations.
+/// Keep UIKit presentations aligned with the camera's device-specific
+/// orientation contract, including sharing and photo selection.
 final class FilmyAppDelegate: NSObject, UIApplicationDelegate {
+    func applicationDidReceiveMemoryWarning(_ application: UIApplication) {
+        FilmRenderer.purgeTransientCaches()
+        Task { await RecipeSwatchRenderer.shared.purgeCache() }
+    }
+
     func application(
         _ application: UIApplication,
         supportedInterfaceOrientationsFor window: UIWindow?
     ) -> UIInterfaceOrientationMask {
-        .portrait
+        UIDevice.current.userInterfaceIdiom == .pad ? .all : .portrait
     }
 }
 
@@ -66,14 +71,14 @@ struct FilmyCameraApp: App {
         WindowGroup {
             Group {
                 if !isShowingOnboarding {
-                    ContentView(
+                    CaptureModesRoot(
                         camera: camera,
                         cameraViewModel: cameraViewModel,
                         photoLibrary: photoLibrary
                     )
                 } else {
                     OnboardingView(
-                        recipes: cameraViewModel.recipes,
+                        recipes: cameraViewModel.recipes.filter { MembershipStore.shared.allowsRecipe($0.id) },
                         initialRecipeID: cameraViewModel.selectedRecipeID,
                         onSelectRecipe: { cameraViewModel.select(recipe: $0) }
                     ) {
@@ -83,6 +88,7 @@ struct FilmyCameraApp: App {
                 }
             }
             .defaultAppStorage(preferences)
+            .modifier(MonetizationRootModifier(camera: camera, viewModel: cameraViewModel))
         }
     }
 }

@@ -30,6 +30,13 @@ struct CaptureReviewView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var comparison = ReviewComparisonState()
     @State private var isShowingLookLibrary = false
+    @State private var isConfirmingRetake = false
+    @State private var openingRecipeID: String?
+    @State private var openingFinish: PhotoFinish?
+    @GestureState private var isPeekingOriginal = false
+    /// Interface state only: the hold-to-peek hint retires once a hold has
+    /// really shown the original.
+    @AppStorage("reviewPeekHintSeen.v1") private var peekHintSeen = false
 
     var body: some View {
         ZStack {
@@ -63,10 +70,10 @@ struct CaptureReviewView: View {
                     // Dynamic Type sizes.
                     ScrollView(showsIndicators: false) {
                         VStack(spacing: 0) {
-                            header
+                            header(showsMetadata: true)
                                 .padding(.horizontal, 20)
-                                .padding(.top, 16)
-                                .padding(.bottom, 12)
+                                .padding(.top, 8)
+                                .padding(.bottom, 8)
 
                             // Short screens and accessibility text put tools first;
                             // the photograph must not push Compare below the fold.
@@ -83,42 +90,29 @@ struct CaptureReviewView: View {
                             .padding(.horizontal, 16)
 
                             if proxy.size.width <= proxy.size.height && !dynamicTypeSize.isAccessibilitySize {
-                                reviewControls(wide: isPortraitTablet)
+                                reviewControls(wide: isPortraitTablet, tight: !isPortraitTablet)
                                     .padding(.horizontal, 20)
-                                    .padding(.top, 16)
+                                    .padding(.top, 12)
                             }
 
                             if dynamicTypeSize.isAccessibilitySize {
-                                actionBar
-                                    .padding(.horizontal, 20)
-                                    .padding(.top, 14)
-                            }
-
-                            metadataBlock
-                                .padding(.horizontal, 20)
-                                .padding(.top, 12)
-
-                            if let saveErrorMessage {
-                                saveError(saveErrorMessage)
+                                saveDisclosure()
+                                    .frame(maxWidth: .infinity)
                                     .padding(.horizontal, 20)
                                     .padding(.top, 14)
                             }
                         }
-                        .padding(.bottom, 16)
+                        .padding(.bottom, 8)
                         .frame(maxWidth: .infinity)
                     }
                     .accessibilityIdentifier("review-content-scroll")
-                    .safeAreaInset(edge: .bottom, spacing: 0) {
-                        if !dynamicTypeSize.isAccessibilitySize {
-                            actionBar
-                                .frame(maxWidth: FilmyLayout.readableMaxWidth)
-                                .frame(maxWidth: .infinity)
-                                .padding(.horizontal, 20)
-                                .padding(.top, 14)
-                                .padding(.bottom, 8)
-                                .background(FilmyTheme.background)
-                                .overlay(alignment: .top) { FilmyTheme.line.frame(height: 1) }
+                    .onChange(of: saveErrorMessage) { oldValue, newValue in
+                        if let newValue, oldValue != nil {
+                            UIAccessibility.post(notification: .announcement, argument: newValue)
                         }
+                    }
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        pinnedBottomArea
                     }
                 }
             }
@@ -146,6 +140,10 @@ struct CaptureReviewView: View {
         }
         .onAppear {
             comparison.reset()
+            if openingRecipeID == nil {
+                openingRecipeID = recipe.id
+                openingFinish = finish
+            }
         }
         .onChange(of: recipe.id) { _, _ in
             comparison.reset()
@@ -167,6 +165,25 @@ struct CaptureReviewView: View {
         }
     }
 
+    /// Save error, Cancel and Save stay on screen at every text size. The text
+    /// is capped at accessibility1 so the bar stays one row.
+    private var pinnedBottomArea: some View {
+        VStack(spacing: 10) {
+            if let saveErrorMessage {
+                saveError(saveErrorMessage, pinned: true)
+            }
+            actionBar(showsDisclosure: !dynamicTypeSize.isAccessibilitySize)
+        }
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+        .frame(maxWidth: FilmyLayout.readableMaxWidth)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 20)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
+        .background(FilmyTheme.background)
+        .overlay(alignment: .top) { FilmyTheme.line.frame(height: 1) }
+    }
+
     private func usesSidePanel(for size: CGSize) -> Bool {
         guard size.width > size.height else { return false }
 
@@ -185,15 +202,41 @@ struct CaptureReviewView: View {
         return min(max(size.width * 0.26, 300), 380)
     }
 
+    /// Fixed chrome below the photo box on a phone in portrait, in points:
+    /// header 44, controls 172, bottom padding 8, pinned bar 96. These are
+    /// arithmetic from font metrics, measured by the review UI tests.
+    private static let phoneChromeHeight: CGFloat = 320
+    private static let tabletChromeHeight: CGFloat = 360
+    /// Extra height when a render error row shows under the controls.
+    private static let renderErrorAllowance: CGFloat = 56
+    private static let xLargeChromeAllowance: CGFloat = 48
+    private static let xxLargeChromeAllowance: CGFloat = 56
+    private static let xxxLargeChromeAllowance: CGFloat = 76
+
+    /// Stacked header, two-line disclosure and wrapped Finish titles at the
+    /// three sizes above Large that are not accessibility sizes.
+    private var largeTextChromeAllowance: CGFloat {
+        switch dynamicTypeSize {
+        case .xLarge: return Self.xLargeChromeAllowance
+        case .xxLarge: return Self.xxLargeChromeAllowance
+        case .xxxLarge: return Self.xxxLargeChromeAllowance
+        default: return 0
+        }
+    }
+
     private func reviewPreviewHeight(for size: CGSize, isPortraitTablet: Bool) -> CGFloat {
         let idealHeight = size.height * (isPortraitTablet ? 0.78 : 0.64)
         guard !dynamicTypeSize.isAccessibilitySize else { return idealHeight }
 
         // A wide portrait iPad keeps look, comparison, and finish in one row.
-        // Reserve that row (or the taller phone chooser) plus the pinned save
-        // disclosure so the photo and controls fit without covering each other.
-        let fixedChromeHeight: CGFloat = isPortraitTablet ? 360 : 446
-        return min(idealHeight, max(size.height - fixedChromeHeight, 160))
+        if isPortraitTablet {
+            return min(idealHeight, max(size.height - Self.tabletChromeHeight, 160))
+        }
+        var chrome = Self.phoneChromeHeight + largeTextChromeAllowance
+        if let reviewRenderErrorMessage, !reviewRenderErrorMessage.isEmpty {
+            chrome += Self.renderErrorAllowance
+        }
+        return min(idealHeight, max(size.height - chrome, 160))
     }
 
     private func sidePanel(compact: Bool = false) -> some View {
@@ -202,9 +245,9 @@ struct CaptureReviewView: View {
         return VStack(spacing: 0) {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: compact ? 10 : 18) {
-                    header
+                    header(showsMetadata: false)
                     if !compact {
-                        metadataBlock
+                        metadataBlock()
                     }
                     reviewControls(stacked: !compact, compact: compact)
 
@@ -235,19 +278,41 @@ struct CaptureReviewView: View {
         }
     }
 
-    private var header: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Text(isImported ? "Edit photo" : "Review")
-                .font(.title2.weight(.bold))
-                .foregroundStyle(FilmyTheme.primary)
-                .accessibilityAddTraits(.isHeader)
-                .accessibilityIdentifier("review-heading")
-            Spacer(minLength: 8)
-            Label("New copy", systemImage: "square.on.square")
-                .font(.caption.weight(.medium))
-                .foregroundStyle(FilmyTheme.secondary)
+    private var reviewTitle: some View {
+        Text(isImported ? "Edit photo" : "Review")
+            .font(.title2.weight(.bold))
+            .foregroundStyle(FilmyTheme.primary)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityIdentifier("review-heading")
+    }
+
+    @ViewBuilder
+    private func header(showsMetadata: Bool) -> some View {
+        if showsMetadata && dynamicTypeSize <= .large {
+            HStack(alignment: .center, spacing: 12) {
+                reviewTitle
+                    .fixedSize()
+                metadataBlock(trailing: true)
+            }
+        } else if showsMetadata {
+            VStack(alignment: .leading, spacing: 4) {
+                reviewTitle
+                metadataBlock()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            reviewTitle
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
+
+    private var isPeekShowingOriginal: Bool { isPeekingOriginal && reviewOriginalImage != nil }
+
+    private var showsOriginalFrame: Bool { isShowingOriginal || isPeekShowingOriginal }
+
+    private var canPeekOriginal: Bool { comparison.mode == .look && !isSaving }
+
+    private var showsPeekHint: Bool { !peekHintSeen && canPeekOriginal }
 
     private var isShowingOriginal: Bool { comparison.mode == .original }
 
@@ -271,59 +336,119 @@ struct CaptureReviewView: View {
     }
 
     private func framePreview(maxWidth: CGFloat, maxHeight: CGFloat) -> some View {
+        // The box follows the look image, so Original, Split and a peek never
+        // change its size or move a control.
         let fitted = Self.fittedSize(
-            for: displayImage.size,
+            for: image.size,
             within: CGSize(width: maxWidth, height: maxHeight)
         )
 
-        return VStack(spacing: 8) {
-            ZStack {
-                Image(uiImage: displayImage)
+        return photoStack(fitted: fitted)
+            .frame(maxWidth: .infinity)
+    }
+
+    private func photoLayers(fitted: CGSize) -> some View {
+        ZStack {
+            Image(uiImage: displayImage)
+                .resizable()
+                .scaledToFit()
+                .frame(width: fitted.width, height: fitted.height)
+
+            if comparison.mode == .split, let original = reviewOriginalImage, supportsSplit {
+                Image(uiImage: original)
                     .resizable()
                     .scaledToFit()
                     .frame(width: fitted.width, height: fitted.height)
-
-                if comparison.mode == .split, let original = reviewOriginalImage, supportsSplit {
-                    Image(uiImage: original)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: fitted.width, height: fitted.height)
-                        .mask(alignment: .leading) {
-                            Rectangle()
-                                .frame(width: fitted.width * comparison.originalFraction)
-                        }
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                    comparisonDivider(in: fitted)
-                }
+                    .mask(alignment: .leading) {
+                        Rectangle()
+                            .frame(width: fitted.width * comparison.originalFraction)
+                    }
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                comparisonDivider(in: fitted)
             }
-            .frame(width: fitted.width, height: fitted.height)
+        }
+        .frame(width: fitted.width, height: fitted.height)
+    }
+
+    private var reviewImageLabel: String {
+        if comparison.mode == .split {
+            return "Original on the left, \(recipe.name) on the right"
+        }
+        if showsOriginalFrame {
+            return "Original source photo, without the Filmy look"
+        }
+        if isImported {
+            return "Imported photo with \(recipe.name), \(finishTitle(finish)), \(resolutionCaption)"
+        }
+        return "Captured frame with \(recipe.name), \(finishTitle(finish)), \(resolutionCaption)"
+    }
+
+    private func photoStack(fitted: CGSize) -> some View {
+        photoLayers(fitted: fitted)
+            .overlay(alignment: .bottom) {
+                comparisonBadges(width: fitted.width)
+            }
+            .contentShape(Rectangle())
+            .simultaneousGesture(peekGesture, including: canPeekOriginal ? .all : .subviews)
+            .onChange(of: isPeekingOriginal) { _, peeking in
+                if peeking { beginOriginalPeek() }
+            }
+            .onChange(of: isPeekShowingOriginal) { _, shown in
+                if shown { peekHintSeen = true }
+            }
             .coordinateSpace(name: "review-comparison-space")
             .accessibilityElement(children: comparison.mode == .split ? .contain : .ignore)
             .accessibilityIdentifier("review-image")
-            .accessibilityLabel(
-                comparison.mode == .split
-                    ? "Original on the left, \(recipe.name) on the right"
-                    : isShowingOriginal
-                        ? "Original source photo, without the Filmy look"
-                        : isImported
-                            ? "Imported photo with \(recipe.name), \(finishTitle(finish)), \(resolutionCaption)"
-                            : "Captured frame with \(recipe.name), \(finishTitle(finish)), \(resolutionCaption)"
-            )
+            .accessibilityLabel(reviewImageLabel)
+            .accessibilityHint(canPeekOriginal ? "Double tap and hold to see the original" : "")
+    }
 
-            if comparison.mode != .look {
-                HStack(spacing: 8) {
-                    Text("Original")
-                    Spacer(minLength: 0)
-                    if comparison.mode == .split { Text(recipe.name) }
-                }
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(FilmyTheme.comparison)
-                .frame(width: fitted.width)
-                .accessibilityHidden(true)
+    /// Hold the photo for about 0.3 s to see the original while the finger is
+    /// down. View state only: it never selects a comparison mode.
+    private var peekGesture: some Gesture {
+        LongPressGesture(minimumDuration: 0.3, maximumDistance: 12)
+            .sequenced(before: DragGesture(minimumDistance: 0))
+            .updating($isPeekingOriginal) {
+                (value: SequenceGesture<LongPressGesture, DragGesture>.Value, state: inout Bool, _: inout Transaction) in
+                if case .second(true, _) = value { state = true }
+            }
+    }
+
+    private func beginOriginalPeek() {
+        HapticFeedback.play(.selection)
+        if reviewOriginalImage == nil, !isPreparingReviewOriginal, !isRenderingReview {
+            Task { await onPrepareReviewOriginal() }
+        }
+    }
+
+    @ViewBuilder
+    private func comparisonBadges(width: CGFloat) -> some View {
+        let split = comparison.mode == .split
+        HStack(alignment: .bottom, spacing: 0) {
+            if showsOriginalFrame || (split && comparison.originalFraction >= 0.25) {
+                comparisonBadge("Original")
+            }
+            Spacer(minLength: 0)
+            if split && comparison.originalFraction <= 0.75 {
+                comparisonBadge(recipe.name)
+                    .frame(maxWidth: width * 0.5, alignment: .trailing)
             }
         }
-        .frame(maxWidth: .infinity)
+    }
+
+    private func comparisonBadge(_ title: String) -> some View {
+        Text(title)
+            .font(.caption.weight(.bold))
+            .foregroundStyle(FilmyTheme.background)
+            .lineLimit(1)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(FilmyTheme.primary, in: Capsule())
+            .overlay { Capsule().strokeBorder(.black, lineWidth: 1) }
+            .padding(8)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 
     private func comparisonDivider(in size: CGSize) -> some View {
@@ -341,7 +466,7 @@ struct CaptureReviewView: View {
                 .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(FilmyTheme.background)
                 .frame(width: 44, height: 44)
-                .background(FilmyTheme.comparison, in: Circle())
+                .background(FilmyTheme.primary, in: Circle())
                 .overlay { Circle().strokeBorder(.black, lineWidth: 2) }
                 .contentShape(Circle())
                 .gesture(
@@ -366,7 +491,7 @@ struct CaptureReviewView: View {
     }
 
     private var displayImage: UIImage {
-        if isShowingOriginal, let reviewOriginalImage {
+        if showsOriginalFrame, let reviewOriginalImage {
             return reviewOriginalImage
         }
         return image
@@ -406,11 +531,13 @@ struct CaptureReviewView: View {
     private func reviewControls(
         stacked: Bool = false,
         compact: Bool = false,
-        wide: Bool = false
+        wide: Bool = false,
+        tight: Bool = false
     ) -> some View {
         let usesAccessibleControlStack = dynamicTypeSize.isAccessibilitySize && !compact
+        let rowSpacing: CGFloat = tight ? 8 : 10
 
-        return VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: rowSpacing) {
             if wide && !dynamicTypeSize.isAccessibilitySize {
                 HStack(alignment: .top, spacing: 10) {
                     lookPicker
@@ -431,33 +558,31 @@ struct CaptureReviewView: View {
                     comparisonControls
                 }
             } else {
-                // Preserve readable names on small iPhones. Comparison has
-                // two explicit actions; it must not squeeze the active look.
-                VStack(alignment: .leading, spacing: 10) {
+                // Preserve readable names on small iPhones. Comparison is one
+                // Look, Original, Split track; it must not squeeze the
+                // active look.
+                VStack(alignment: .leading, spacing: rowSpacing) {
                     lookPicker
-                    comparisonControls
+                    if tight {
+                        HStack(spacing: 8) {
+                            comparisonControls
+                            compareRowNote
+                        }
+                    } else {
+                        comparisonControls
+                    }
                 }
             }
 
             if (!wide || dynamicTypeSize.isAccessibilitySize) && !usesAccessibleControlStack {
-                finishPicker(stacked: stacked || dynamicTypeSize.isAccessibilitySize)
+                finishPicker(
+                    stacked: stacked || dynamicTypeSize.isAccessibilitySize,
+                    showsCaption: !tight
+                )
             }
 
-            if isRenderingReview || isPreparingReviewOriginal {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .tint(FilmyTheme.filmAccent)
-                    Text(
-                        isRenderingReview
-                            ? "Developing \(pendingReviewRecipeName)…"
-                            : "Preparing original…"
-                    )
-                        .font(.system(.caption, design: .rounded).weight(.semibold))
-                        .foregroundStyle(FilmyTheme.secondary)
-                }
-                .frame(minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("review-render-status")
+            if !tight && (isRenderingReview || isPreparingReviewOriginal) {
+                renderStatusRow
             }
 
             if let reviewRenderErrorMessage, !reviewRenderErrorMessage.isEmpty {
@@ -472,9 +597,68 @@ struct CaptureReviewView: View {
         }
     }
 
+    private var renderStatusRow: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .tint(FilmyTheme.primary)
+            Text(
+                isRenderingReview
+                    ? "Developing \(pendingReviewRecipeName)…"
+                    : "Preparing original…"
+            )
+                .font(.system(.caption, design: .rounded).weight(.semibold))
+                .foregroundStyle(FilmyTheme.secondary)
+                .lineLimit(2)
+                .minimumScaleFactor(0.85)
+        }
+        .frame(minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("review-render-status")
+    }
+
+    /// The slot beside Original and Split in the phone portrait layout. It
+    /// holds one thing at a time, so the row never changes height.
+    @ViewBuilder
+    private var compareRowNote: some View {
+        if isRenderingReview || isPreparingReviewOriginal {
+            renderStatusRow
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else if selectedReviewFinish == .instantPrint {
+            finishNote
+        } else if showsPeekHint {
+            peekHint
+        } else {
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var finishNote: some View {
+        // Short on purpose: the slot beside Original and Split is about 127 pt
+        // wide on a 375 pt phone and shrinks at larger text.
+        Text("\(finishTitle(selectedReviewFinish)): white border")
+            .font(.caption)
+            .foregroundStyle(FilmyTheme.secondary)
+            .lineLimit(2)
+            .minimumScaleFactor(0.8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityHidden(true)
+    }
+
+    private var peekHint: some View {
+        Text("Hold photo for original")
+            .font(.caption)
+            .foregroundStyle(FilmyTheme.secondary)
+            .lineLimit(2)
+            .minimumScaleFactor(0.8)
+            .multilineTextAlignment(.leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .allowsHitTesting(false)
+            .accessibilityIdentifier("review-peek-hint")
+    }
+
     private func panelActions(compact: Bool) -> some View {
         VStack(spacing: 10) {
-            saveDisclosure
+            saveDisclosure()
             if compact && !dynamicTypeSize.isAccessibilitySize {
                 HStack(spacing: 8) {
                     retakeButton
@@ -495,11 +679,13 @@ struct CaptureReviewView: View {
         }
     }
 
-    private func finishPicker(stacked: Bool) -> some View {
+    private func finishPicker(stacked: Bool, showsCaption: Bool = true) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Finish")
-                .font(.system(.caption2, design: .rounded).weight(.bold))
-                .foregroundStyle(FilmyTheme.tertiary)
+            if showsCaption {
+                Text("Finish")
+                    .font(.system(.caption2, design: .rounded).weight(.bold))
+                    .foregroundStyle(FilmyTheme.tertiary)
+            }
 
             Group {
                 if stacked {
@@ -515,7 +701,7 @@ struct CaptureReviewView: View {
                 }
             }
 
-            if selectedReviewFinish == .instantPrint {
+            if showsCaption && selectedReviewFinish == .instantPrint {
                 Text(finishDescription(selectedReviewFinish))
                     .font(.caption)
                     .foregroundStyle(FilmyTheme.secondary)
@@ -528,24 +714,29 @@ struct CaptureReviewView: View {
 
     private func finishButton(_ candidate: PhotoFinish) -> some View {
         let isSelected = selectedReviewFinish == candidate
+        let unselectedIcon = candidate == .instantPrint ? "rectangle.inset.filled" : "rectangle"
+        let iconName = isSelected ? "checkmark.circle.fill" : unselectedIcon
+        let inkColor = isSelected ? FilmyTheme.accent : FilmyTheme.secondary
+        let strokeColor = isSelected ? FilmyTheme.accent : FilmyTheme.lineStrong
+        let strokeWidth: CGFloat = isSelected ? 2 : 1
         return Button {
             guard !isSaving, !isPreparingReviewOriginal else { return }
             comparison.reset()
             onApplyReviewFinish(candidate)
         } label: {
-            Label(finishTitle(candidate), systemImage: candidate == .instantPrint ? "rectangle.inset.filled" : "rectangle")
+            Label(finishTitle(candidate), systemImage: iconName)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(isSelected ? FilmyTheme.background : FilmyTheme.secondary)
+                .foregroundStyle(inkColor)
                 .lineLimit(2)
             .frame(maxWidth: .infinity, minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
             .padding(.horizontal, 12)
             .background(
-                isSelected ? FilmyTheme.filmAccent : FilmyTheme.panel,
+                FilmyTheme.panel,
                 in: RoundedRectangle(cornerRadius: 14, style: .continuous)
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(isSelected ? FilmyTheme.filmAccent : FilmyTheme.lineStrong, lineWidth: 1)
+                    .strokeBorder(strokeColor, lineWidth: strokeWidth)
             }
         }
         .buttonStyle(.pressable)
@@ -559,6 +750,31 @@ struct CaptureReviewView: View {
     }
 
     private var lookPicker: some View {
+        #if G7_APP
+        HStack(spacing: 8) {
+            Image(systemName: "film")
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Look")
+                    .font(.system(.caption2, design: .rounded).weight(.bold))
+                    .foregroundStyle(FilmyTheme.tertiary)
+                Text("G7X Compact")
+                    .font(.system(.subheadline, design: .rounded).weight(.bold))
+                    .foregroundStyle(FilmyTheme.primary)
+            }
+            Spacer(minLength: 4)
+            Image(systemName: "lock.fill")
+                .font(.system(.caption2, weight: .bold))
+                .accessibilityHidden(true)
+        }
+        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+        .padding(.horizontal, 12)
+        .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .accessibilityIdentifier("review-look-locked")
+        .accessibilityLabel("G7X Compact look")
+        .accessibilityHint("G7X Camera uses one fixed look")
+        .frame(maxWidth: .infinity)
+        #else
         Button {
             HapticFeedback.play(.selection)
             isShowingLookLibrary = true
@@ -592,38 +808,121 @@ struct CaptureReviewView: View {
         .accessibilityValue(pendingReviewRecipeName)
         .accessibilityHint("Choose a Compact, Film, or Monochrome look for this photo")
         .frame(maxWidth: .infinity)
+        #endif
     }
 
     private var comparisonControls: some View {
         comparisonControlGroup(stacked: false)
     }
 
+    @ViewBuilder
     private func comparisonControlGroup(stacked: Bool) -> some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            comparisonPills(stacked: stacked)
+        } else {
+            comparisonTrack
+        }
+    }
+
+    private func comparisonPills(stacked: Bool) -> some View {
         let layout = stacked
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
             : AnyLayout(HStackLayout(spacing: 8))
         return layout {
-            compareButton
+            compareButton(segmented: false)
             if supportsSplit {
-                Button {
-                    requestComparison(comparison.mode == .split ? .look : .split)
-                } label: {
-                    Label(comparison.mode == .split ? "Done" : "Split", systemImage: "rectangle.lefthalf.filled")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(comparison.mode == .split ? FilmyTheme.background : FilmyTheme.comparison)
-                        .padding(.horizontal, 12)
-                        .frame(minHeight: 48)
-                        .background(comparison.mode == .split ? FilmyTheme.comparison : FilmyTheme.panel, in: Capsule())
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(.pressable)
-                .disabled(isSaving || isRenderingReview || isPreparingReviewOriginal)
-                .accessibilityIdentifier("review-compare-split")
-                .accessibilityLabel("Split comparison")
-                .accessibilityValue(comparison.mode == .split ? "On" : "Off")
-                .accessibilityHint("Compare original and look at the same position. Drag the divider on the photo.")
+                splitButton(segmented: false)
             }
         }
+    }
+
+    private var comparisonTrack: some View {
+        HStack(spacing: 0) {
+            lookSegment
+            compareButton(segmented: true)
+            if supportsSplit {
+                splitButton(segmented: true)
+            }
+        }
+        .background(FilmyTheme.panel, in: Capsule())
+        .overlay { Capsule().strokeBorder(FilmyTheme.line, lineWidth: 1) }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("review-compare-picker")
+    }
+
+    private func trackSegmentLabel(_ title: String, isSelected: Bool, showsProgress: Bool = false) -> some View {
+        HStack(spacing: 6) {
+            if showsProgress {
+                ProgressView().tint(isSelected ? FilmyTheme.background : FilmyTheme.primary)
+            }
+            Text(title)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .font(.caption.weight(.bold))
+        .foregroundStyle(isSelected ? FilmyTheme.background : FilmyTheme.primary)
+        .padding(.horizontal, 12)
+        .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: 48)
+        .background {
+            if isSelected {
+                Capsule().fill(FilmyTheme.accent).padding(3)
+            }
+        }
+        .contentShape(Rectangle())
+    }
+
+    private func pillLabel(_ title: String, icon: String, isSelected: Bool, showsProgress: Bool = false) -> some View {
+        HStack(spacing: 7) {
+            if showsProgress {
+                ProgressView().tint(isSelected ? FilmyTheme.background : FilmyTheme.primary)
+            } else {
+                Image(systemName: isSelected ? "checkmark" : icon)
+            }
+            Text(title)
+                .lineLimit(1)
+        }
+        .font(.caption.weight(.bold))
+        .foregroundStyle(isSelected ? FilmyTheme.background : FilmyTheme.primary)
+        .padding(.horizontal, 12)
+        .frame(minHeight: 48)
+        .background(isSelected ? FilmyTheme.accent : FilmyTheme.panel, in: Capsule())
+        .contentShape(Capsule())
+    }
+
+    private var lookSegment: some View {
+        Button {
+            guard comparison.mode != .look else { return }
+            requestComparison(.look)
+        } label: {
+            trackSegmentLabel("Look", isSelected: comparison.mode == .look)
+        }
+        .buttonStyle(.pressable)
+        .disabled(isSaving || isRenderingReview || isPreparingReviewOriginal)
+        .accessibilityIdentifier("review-compare-look")
+        .accessibilityLabel("Look")
+        .accessibilityInputLabels(["Look", "Show look"])
+        .accessibilityAddTraits(comparison.mode == .look ? .isSelected : [])
+        .accessibilityHint("Shows the photo with the applied look")
+    }
+
+    private func splitButton(segmented: Bool) -> some View {
+        Button {
+            requestComparison(comparison.mode == .split ? .look : .split)
+        } label: {
+            if segmented {
+                trackSegmentLabel("Split", isSelected: comparison.mode == .split)
+            } else {
+                pillLabel("Split", icon: "rectangle.lefthalf.filled", isSelected: comparison.mode == .split)
+            }
+        }
+        .buttonStyle(.pressable)
+        .disabled(isSaving || isRenderingReview || isPreparingReviewOriginal)
+        .accessibilityIdentifier("review-compare-split")
+        .accessibilityLabel("Split comparison")
+        .accessibilityValue(comparison.mode == .split ? "On" : "Off")
+        .accessibilityInputLabels(["Split", "Split comparison"])
+        .accessibilityAddTraits(comparison.mode == .split ? .isSelected : [])
+        .accessibilityHint("Compare original and look at the same position. Drag the divider on the photo.")
     }
 
     private func requestComparison(_ mode: ReviewComparisonState.Mode) {
@@ -634,31 +933,23 @@ struct CaptureReviewView: View {
         }
     }
 
-    private var compareButton: some View {
+    private func compareButton(segmented: Bool) -> some View {
         Button {
             requestComparison(isShowingOriginal ? .look : .original)
         } label: {
-            HStack(spacing: 7) {
-                if isPreparingReviewOriginal {
-                    ProgressView().tint(FilmyTheme.comparison)
-                } else {
-                    Image(systemName: "circle.lefthalf.filled")
-                }
-                Text(isShowingOriginal ? "Show look" : "Original")
-                    .lineLimit(1)
+            if segmented {
+                trackSegmentLabel("Original", isSelected: isShowingOriginal, showsProgress: isPreparingReviewOriginal)
+            } else {
+                pillLabel("Original", icon: "circle.lefthalf.filled", isSelected: isShowingOriginal, showsProgress: isPreparingReviewOriginal)
             }
-            .font(.caption.weight(.bold))
-            .foregroundStyle(isShowingOriginal ? FilmyTheme.background : FilmyTheme.comparison)
-            .padding(.horizontal, 12)
-            .frame(minHeight: 48)
-            .background(isShowingOriginal ? FilmyTheme.comparison : FilmyTheme.panel, in: Capsule())
-            .contentShape(Capsule())
         }
         .buttonStyle(.pressable)
         .disabled(isSaving || isRenderingReview || isPreparingReviewOriginal)
         .accessibilityIdentifier("review-compare-original")
         .accessibilityLabel("Compare with original")
         .accessibilityValue(isShowingOriginal ? "Original" : "Look")
+        .accessibilityInputLabels(["Original", "Compare with original"])
+        .accessibilityAddTraits(isShowingOriginal ? .isSelected : [])
         .accessibilityHint(
             reviewOriginalImage == nil
                 ? "Loads the original source photo for comparison"
@@ -666,14 +957,26 @@ struct CaptureReviewView: View {
         )
     }
 
-    private var metadataBlock: some View {
-        Label(resolutionCaption, systemImage: "photo")
-            .font(.system(.caption).weight(.medium))
-            .foregroundStyle(FilmyTheme.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("review-metadata")
+    @ViewBuilder
+    private func metadataBlock(trailing: Bool = false) -> some View {
+        if trailing {
+            Label(resolutionCaption, systemImage: "photo")
+                .font(.system(.caption).weight(.medium))
+                .foregroundStyle(FilmyTheme.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("review-metadata")
+        } else {
+            Label(resolutionCaption, systemImage: "photo")
+                .font(.system(.caption).weight(.medium))
+                .foregroundStyle(FilmyTheme.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("review-metadata")
+        }
     }
 
     /// Largest size with the image's aspect ratio that fits inside `bounds`.
@@ -691,32 +994,18 @@ struct CaptureReviewView: View {
         )
     }
 
-    private func saveError(_ message: String) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label(message, systemImage: "exclamationmark.triangle.fill")
-                .font(.system(.footnote, design: .rounded).weight(.semibold))
-                .foregroundStyle(FilmyTheme.danger)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityAddTraits(.isStaticText)
-
-            if saveErrorRequiresSettings {
-                Button("Open Photos Settings", action: onOpenSettings)
-                    .font(.system(.footnote, design: .rounded).weight(.bold))
-                    .foregroundStyle(FilmyTheme.accent)
-                    .frame(minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
-                    .accessibilityIdentifier("review-save-error-settings")
-                    .accessibilityHint("Opens Filmy Camera Photos permissions")
-            } else {
-                Button("Try Again", action: onSave)
-                    .font(.system(.footnote, design: .rounded).weight(.bold))
-                    .foregroundStyle(FilmyTheme.accent)
-                    .frame(minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
-                    .disabled(isSaving || isRenderingReview || isPreparingReviewOriginal)
-                    .accessibilityIdentifier("review-save-error-retry")
-                    .accessibilityHint("Retries saving this finished photo")
-            }
+    private func saveError(_ message: String, pinned: Bool = false) -> some View {
+        let sideBySide = pinned && !saveErrorRequiresSettings && !dynamicTypeSize.isAccessibilitySize
+        let layout = sideBySide
+            ? AnyLayout(HStackLayout(alignment: .center, spacing: 12))
+            : AnyLayout(VStackLayout(alignment: .leading, spacing: pinned ? 4 : 10))
+        return layout {
+            saveErrorMessageLabel(message)
+            saveErrorAction
         }
-        .padding(14)
+        .id("review-save-error")
+        .onAppear { UIAccessibility.post(notification: .announcement, argument: message) }
+        .padding(pinned ? 10 : 14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(FilmyTheme.danger.opacity(0.1), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
@@ -725,41 +1014,94 @@ struct CaptureReviewView: View {
         }
     }
 
-    private var actionBar: some View {
-        VStack(spacing: 10) {
-            saveDisclosure
-            if dynamicTypeSize.isAccessibilitySize {
-                VStack(spacing: 10) {
-                    retakeButton
-                    keepFrameButton
-                }
-            } else {
-                HStack(spacing: 10) {
-                    retakeButton
-                    keepFrameButton
-                }
+    private func saveErrorMessageLabel(_ message: String) -> some View {
+        Label(message, systemImage: "exclamationmark.triangle.fill")
+            .font(.system(.footnote, design: .rounded).weight(.semibold))
+            .foregroundStyle(FilmyTheme.danger)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityAddTraits(.isStaticText)
+    }
+
+    @ViewBuilder
+    private var saveErrorAction: some View {
+        if saveErrorRequiresSettings {
+            Button("Open Photos Settings", action: onOpenSettings)
+                .font(.system(.footnote, design: .rounded).weight(.bold))
+                .foregroundStyle(FilmyTheme.accent)
+                .frame(minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
+                .accessibilityIdentifier("review-save-error-settings")
+                .accessibilityHint("Opens Filmy Camera Photos permissions")
+        } else {
+            Button("Try again", action: onSave)
+                .font(.system(.footnote, design: .rounded).weight(.bold))
+                .foregroundStyle(FilmyTheme.accent)
+                .frame(minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
+                .disabled(isSaving || isRenderingReview || isPreparingReviewOriginal)
+                .accessibilityIdentifier("review-save-error-retry")
+                .accessibilityHint("Retries saving this finished photo")
+        }
+    }
+
+    private func actionBar(showsDisclosure: Bool) -> some View {
+        VStack(spacing: 8) {
+            if showsDisclosure {
+                saveDisclosure(lineLimit: dynamicTypeSize > .large ? 2 : 1)
             }
+            actionButtonRow
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("review-action-bar")
     }
 
-    private var saveDisclosure: some View {
+    @ViewBuilder
+    private var actionButtonRow: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            HStack(spacing: 10) {
+                retakeButton
+                    .labelStyle(.titleOnly)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                keepFrameButton
+                    .labelStyle(.titleOnly)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            }
+        } else {
+            HStack(spacing: 10) {
+                retakeButton
+                keepFrameButton
+            }
+        }
+    }
+
+    private func saveDisclosure(lineLimit: Int? = nil) -> some View {
         Text(comparison.mode != .look
              ? "Saves \(recipe.name) · \(finishTitle(finish)), not the original preview."
              : isImported
-                ? "Save a new copy. Your original stays unchanged."
+                ? "New copy in Photos. Your original stays unchanged."
                 : "Only the finished photo is saved to Photos.")
             .font(.caption)
             .foregroundStyle(FilmyTheme.secondary)
             .multilineTextAlignment(.center)
+            .lineLimit(lineLimit)
+            .minimumScaleFactor(lineLimit == nil ? 1 : 0.8)
             .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var hasUnsavedLookChanges: Bool {
+        guard !isImported else { return false }
+        return recipe.id != openingRecipeID || finish != openingFinish
     }
 
     private var retakeButton: some View {
         Button {
-            HapticFeedback.play(.discard)
-            onRetake()
+            if hasUnsavedLookChanges {
+                isConfirmingRetake = true
+            } else {
+                HapticFeedback.play(.discard)
+                onRetake()
+            }
         } label: {
             Label(
                 isImported ? "Cancel" : "Retake",
@@ -767,8 +1109,18 @@ struct CaptureReviewView: View {
             )
         }
         .buttonStyle(.filmySecondary)
+        .accessibilityShowsLargeContentViewer()
         .accessibilityIdentifier("review-cancel")
         .disabled(isSaving)
+        .confirmationDialog("Discard this photo?", isPresented: $isConfirmingRetake, titleVisibility: .visible) {
+            Button("Discard and retake", role: .destructive) {
+                HapticFeedback.play(.discard)
+                onRetake()
+            }
+            Button("Keep editing", role: .cancel) { }
+        } message: {
+            Text("Your look and finish choices for this photo will be lost.")
+        }
     }
 
     private var keepFrameAccessibilityLabel: String {
@@ -787,14 +1139,17 @@ struct CaptureReviewView: View {
                     ProgressView()
                         .tint(FilmyTheme.background)
                 } else {
-                    Label("Save to Photos", systemImage: "square.and.arrow.down")
+                    Label("Save", systemImage: "square.and.arrow.down")
                 }
             }
         }
         .buttonStyle(.filmyPrimary)
+        .accessibilityShowsLargeContentViewer()
         .accessibilityIdentifier("review-save")
         .disabled(isSaving || isRenderingReview || isPreparingReviewOriginal)
+        // The spoken name starts with the visible word "Save" (label in name).
         .accessibilityLabel(keepFrameAccessibilityLabel)
+        .accessibilityInputLabels(["Save", "Save to Photos", "Keep frame", "Save filtered photo"])
         .accessibilityHint("Saves the finished photo to your Photos library")
     }
 }

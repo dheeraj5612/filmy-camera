@@ -223,6 +223,77 @@ final class CameraReviewEditingTests: XCTestCase {
         XCTAssertTrue(saver.requests.isEmpty)
     }
 
+    func testOrientedPixelSizeAppliesExifAxisSwap() throws {
+        for orientation in 1...4 {
+            let data = try wideJPEG(width: 40, height: 30, orientation: orientation)
+            XCTAssertEqual(CameraFrameLayout.orientedPixelSize(of: data), CGSize(width: 40, height: 30))
+        }
+        for orientation in 5...8 {
+            let data = try wideJPEG(width: 40, height: 30, orientation: orientation)
+            XCTAssertEqual(CameraFrameLayout.orientedPixelSize(of: data), CGSize(width: 30, height: 40))
+        }
+        XCTAssertNil(CameraFrameLayout.orientedPixelSize(of: Data()))
+        XCTAssertNil(CameraFrameLayout.orientedPixelSize(of: Data([1, 2, 3])))
+    }
+
+    func testSidewaysStillRendersTheWideFrameThroughTheBakedViewport() throws {
+        func rendered(orientation: Int, viewport: CGSize, angle: CGFloat) throws -> (viewport: CGSize, size: CGSize) {
+            let data = try wideJPEG(width: 40, height: 30, orientation: orientation)
+            let baked = CameraFrameLayout.stillViewport(
+                viewport,
+                stillPixelSize: CameraFrameLayout.orientedPixelSize(of: data),
+                previewRotationAngle: angle
+            )
+            let source = CameraViewModel.ReviewRenderSource(
+                data: data,
+                capturedAt: Date(timeIntervalSince1970: 1_725_552_645),
+                mode: .camera(
+                    viewportSize: baked,
+                    previewDrawableSize: CGSize(width: 400, height: 600),
+                    flashFired: false,
+                    grainSeed: 0x17A3
+                ),
+                normalizedSubjectRegions: []
+            )
+            let original = try XCTUnwrap(CameraViewModel.renderReviewOriginal(source: source))
+            let cg = try XCTUnwrap(original.cgImage)
+            return (baked, CGSize(width: cg.width, height: cg.height))
+        }
+
+        let sideways = try rendered(orientation: 1, viewport: CGSize(width: 3, height: 4), angle: 90)
+        XCTAssertEqual(sideways.viewport, CGSize(width: 4, height: 3))
+        XCTAssertEqual(sideways.size, CGSize(width: 40, height: 30))
+
+        let landscapeRight = try rendered(orientation: 3, viewport: CGSize(width: 3, height: 4), angle: 90)
+        XCTAssertEqual(landscapeRight.viewport, CGSize(width: 4, height: 3))
+        XCTAssertEqual(landscapeRight.size, CGSize(width: 40, height: 30))
+
+        let portraitHeld = try rendered(orientation: 6, viewport: CGSize(width: 3, height: 4), angle: 90)
+        XCTAssertEqual(portraitHeld.viewport, CGSize(width: 3, height: 4))
+        XCTAssertEqual(portraitHeld.size, CGSize(width: 30, height: 40))
+
+        let rotatingUI = try rendered(orientation: 1, viewport: CGSize(width: 4, height: 3), angle: 0)
+        XCTAssertEqual(rotatingUI.viewport, CGSize(width: 4, height: 3))
+        XCTAssertEqual(rotatingUI.size, CGSize(width: 40, height: 30))
+
+        // Without the bake the raw portrait viewport crops a strip.
+        let rawData = try wideJPEG(width: 40, height: 30, orientation: 1)
+        let strip = CameraViewModel.ReviewRenderSource(
+            data: rawData,
+            capturedAt: Date(timeIntervalSince1970: 1_725_552_645),
+            mode: .camera(
+                viewportSize: CGSize(width: 3, height: 4),
+                previewDrawableSize: CGSize(width: 400, height: 600),
+                flashFired: false,
+                grainSeed: 0x17A3
+            ),
+            normalizedSubjectRegions: []
+        )
+        let stripCG = try XCTUnwrap(try XCTUnwrap(CameraViewModel.renderReviewOriginal(source: strip)).cgImage)
+        XCTAssertEqual(stripCG.width, 22)
+        XCTAssertEqual(stripCG.height, 30)
+    }
+
     func testCameraSourceRendersPreserveCropOrientationFlashDateAndSubjectMapping() throws {
         let sourceData = try orientedQuadrantJPEG(orientation: 6)
         let capturedAt = Date(timeIntervalSince1970: 1_725_552_645)

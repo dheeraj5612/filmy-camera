@@ -24,10 +24,17 @@ VARIANTS = (
 )
 
 
+def srgb_profile() -> bytes:
+    profile = bytearray(ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes())
+    # Bytes 24-35 are the ICC creation date; zeroed so PNGs are reproducible.
+    profile[24:36] = bytes(12)
+    return bytes(profile)
+
+
 def render() -> None:
     ASSETS.mkdir(parents=True, exist_ok=True)
     DOCUMENTS.mkdir(parents=True, exist_ok=True)
-    profile = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+    profile = srgb_profile()
     images = []
     for filename, background, ink, appearance in VARIANTS:
         image = Image.new("RGB", (4096, 4096), background)
@@ -42,10 +49,10 @@ def render() -> None:
         if appearance:
             entry["appearances"] = [{"appearance": "luminosity", "value": appearance}]
         images.append(entry)
-    (ASSETS / "Contents.json").write_text(json.dumps({"images": images, "info": {"author": "xcode", "version": 1}}, indent=2) + "\n")
+    (ASSETS / "Contents.json").write_text(json.dumps({"images": images, "info": {"author": "xcode", "version": 1}}, indent=2) + "\n", encoding="utf-8")
     paths = "".join('<polygon points="' + " ".join(f"{x},{y}" for x, y in p) + '"/>' for p in POLYGONS)
-    (DOCUMENTS / "mark.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="#FF7854"><title>Filmy Signal Frame — original F monogram</title>' + paths + '</svg>\n')
-    (DOCUMENTS / "icon-master.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"><title>FilmyCam Signal Frame icon master</title><path fill="#FF7854" d="M0 0h1024v1024H0z"/><g transform="translate(128 128) scale(24)" fill="#090909">' + paths + '</g></svg>\n')
+    (DOCUMENTS / "mark.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="#FF7854"><title>Filmy Signal Frame — original F monogram</title>' + paths + '</svg>\n', encoding="utf-8")
+    (DOCUMENTS / "icon-master.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"><title>FilmyCam Signal Frame icon master</title><path fill="#FF7854" d="M0 0h1024v1024H0z"/><g transform="translate(128 128) scale(24)" fill="#090909">' + paths + '</g></svg>\n', encoding="utf-8")
 
 
 if __name__ == "__main__":

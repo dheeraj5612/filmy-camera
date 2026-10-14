@@ -233,6 +233,17 @@ import ImageIO
 /// Always-on catalog acceptance. Uses bundled/synthetic fixtures, never skips
 /// for absent private photographs and never writes to the user's Photos.
 final class CatalogRenderAcceptanceTests: XCTestCase {
+    func testRenderEveryBundledSourceRecipeWithPreviewPhotoAndExportEvidence() throws {
+        XCTAssertTrue(RecipeCatalog.loadIssues.isEmpty)
+        XCTAssertGreaterThanOrEqual(RecipeCatalog.records.count, 500)
+        for recipe in RecipeCatalog.sourcedRecipes { try verifyRecipe(recipe.id) }
+    }
+
+    func testRenderAllTwentyCameraFoundationsWithPreviewPhotoAndExportEvidence() throws {
+        XCTAssertEqual(RecipeCatalog.cameraBaselines.count, 20)
+        for recipe in RecipeCatalog.cameraBaselines { try verifyRecipe(recipe.id) }
+    }
+
     func testRender_provia_standard() throws { try verifyRecipe("provia-standard") }
     func testRender_classic_chrome() throws { try verifyRecipe("classic-chrome") }
     func testRender_velvia_vivid() throws { try verifyRecipe("velvia-vivid") }
@@ -269,6 +280,13 @@ final class CatalogRenderAcceptanceTests: XCTestCase {
     func testRender_pacific_blues() throws { try verifyRecipe("pacific-blues") }
     func testRender_green_800() throws { try verifyRecipe("green-800") }
     func testRender_hp5_texture() throws { try verifyRecipe("hp5-texture") }
+    func testRender_negative_ektar_100() throws { try verifyRecipe("negative-ektar-100") }
+    func testRender_negative_ultramax_400() throws { try verifyRecipe("negative-ultramax-400") }
+    func testRender_negative_superia_400() throws { try verifyRecipe("negative-superia-400") }
+    func testRender_negative_pro_400h() throws { try verifyRecipe("negative-pro-400h") }
+    func testRender_negative_portra_160() throws { try verifyRecipe("negative-portra-160") }
+    func testRender_negative_portra_400() throws { try verifyRecipe("negative-portra-400") }
+    func testRender_negative_portra_800() throws { try verifyRecipe("negative-portra-800") }
     func testRender_negative_portrait_160() throws { try verifyRecipe("negative-portrait-160") }
     func testRender_negative_portrait_400() throws { try verifyRecipe("negative-portrait-400") }
     func testRender_negative_portrait_800() throws { try verifyRecipe("negative-portrait-800") }
@@ -285,6 +303,10 @@ final class CatalogRenderAcceptanceTests: XCTestCase {
     func testRender_negative_winter_200() throws { try verifyRecipe("negative-winter-200") }
     func testRender_negative_travel_400() throws { try verifyRecipe("negative-travel-400") }
     func testRender_negative_faded_album() throws { try verifyRecipe("negative-faded-album") }
+    func testRender_slide_ektachrome_e100() throws { try verifyRecipe("slide-ektachrome-e100") }
+    func testRender_slide_kodachrome_25() throws { try verifyRecipe("slide-kodachrome-25") }
+    func testRender_slide_kodachrome_64() throws { try verifyRecipe("slide-kodachrome-64") }
+    func testRender_slide_kodachrome_200() throws { try verifyRecipe("slide-kodachrome-200") }
     func testRender_slide_chrome_50() throws { try verifyRecipe("slide-chrome-50") }
     func testRender_slide_chrome_100() throws { try verifyRecipe("slide-chrome-100") }
     func testRender_slide_mountain_50() throws { try verifyRecipe("slide-mountain-50") }
@@ -337,6 +359,9 @@ final class CatalogRenderAcceptanceTests: XCTestCase {
     func testRender_experimental_violet_hour() throws { try verifyRecipe("experimental-violet-hour") }
     func testRender_experimental_solar_gold() throws { try verifyRecipe("experimental-solar-gold") }
     func testRender_experimental_washed_cyan() throws { try verifyRecipe("experimental-washed-cyan") }
+    func testRender_monochrome_tri_x_400() throws { try verifyRecipe("monochrome-tri-x-400") }
+    func testRender_monochrome_hp5_plus() throws { try verifyRecipe("monochrome-hp5-plus") }
+    func testRender_monochrome_delta_3200() throws { try verifyRecipe("monochrome-delta-3200") }
     func testRender_monochrome_silver_100() throws { try verifyRecipe("monochrome-silver-100") }
     func testRender_monochrome_silver_400() throws { try verifyRecipe("monochrome-silver-400") }
     func testRender_monochrome_silver_1600() throws { try verifyRecipe("monochrome-silver-1600") }

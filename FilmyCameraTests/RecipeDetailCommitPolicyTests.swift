@@ -81,4 +81,24 @@ final class RecipeDetailCommitPolicyTests: XCTestCase {
             .update(draft)
         )
     }
+
+    func testLookCharacterMirrorsControlSummaryAndLeavesRecipeUnchanged() throws {
+        let classic = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == "classic-chrome" })
+        let compact = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == "g7x-compact" })
+        let copy = classic
+
+        let line = LookCharacter.line(for: classic)
+        XCTAssertEqual(line, LookCharacter.line(for: classic))
+        for pair in classic.controlSummary {
+            XCTAssertTrue(line.contains(pair.1), "\(pair.1) missing from \(line)")
+        }
+        XCTAssertTrue(LookCharacter.line(for: compact).contains("Subtle warmth"))
+
+        let mono = try XCTUnwrap(FilmRecipe.builtIns.first { $0.filmBase.supportsMonochromaticColorAxes })
+        XCTAssertTrue(LookCharacter.line(for: mono).contains("Color: Black and white"))
+        let colorValue = LookCharacter.pairs(for: mono).first { $0.0 == "Color" }?.1
+        XCTAssertEqual(colorValue, "Black and white")
+
+        XCTAssertEqual(classic, copy)
+    }
 }

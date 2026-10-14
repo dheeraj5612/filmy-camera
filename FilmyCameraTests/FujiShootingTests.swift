@@ -1,0 +1,984 @@
+import Combine
+import CoreImage
+import CoreLocation
+import ImageIO
+import UIKit
+import XCTest
+@testable import FilmyCamera
+
+@MainActor
+final class FujiShootingTests: XCTestCase {
+    private var recipe: FilmRecipe { FilmRecipe.builtIns[0] }
+
+    func testAllDriveModesHaveBoundedCapturePlans() throws {
+        for drive in FujiDrive.allCases {
+            var settings = FujiShootingSettings()
+            settings.drive = drive
+            let plan = try FujiCapturePlan.make(settings)
+            XCTAssertFalse(plan.steps.isEmpty, drive.rawValue)
+            XCTAssertLessThanOrEqual(plan.steps.count, 120, drive.rawValue)
+        }
+    }
+
+    func testFilmISOAndWBBracketsShareOneSensorFrame() throws {
+        for drive in [FujiDrive.filmBracket, .isoBracket, .whiteBalanceBracket] {
+            var settings = FujiShootingSettings()
+            settings.drive = drive
+            XCTAssertEqual(try FujiCapturePlan.make(settings).steps.count, 1)
+        }
+    }
+
+    func testAEBracketOrdersAndStopSpacing() {
+        XCTAssertEqual(FujiMath.bracketOffsets(count: 5, step: 0.5, order: .centerFirst), [0, -0.5, 0.5, -1, 1])
+        XCTAssertEqual(FujiMath.bracketOffsets(count: 3, step: 1, order: .ascending), [-1, 0, 1])
+        XCTAssertEqual(FujiMath.bracketOffsets(count: 3, step: 1, order: .descending), [1, 0, -1])
+    }
+
+    func testDRBracketRequiresThreeDistinctProtectedRAWCaptures() throws {
+        var settings = FujiShootingSettings()
+        settings.drive = .dynamicRangeBracket
+        let plan = try FujiCapturePlan.make(settings)
+        XCTAssertTrue(settings.needsRAW)
+        XCTAssertEqual(plan.steps.map(\.dynamicRange), [.dr100, .dr200, .dr400])
+        XCTAssertEqual(plan.steps.map { $0.dynamicRange.protectionStops }, [0, 1, 2])
+    }
+
+    func testDRExposureChangesSensorProductRatherThanMetadataOnly() throws {
+        let base = FujiExposure(iso: 200, seconds: 1.0 / 125)
+        let result = try FujiMath.shiftedExposure(base, stops: -2, isoRange: 50...3200, durationRange: (1.0 / 8000)...1)
+        XCTAssertEqual(result.iso, 200, accuracy: 0.01)
+        XCTAssertEqual(result.seconds, 1.0 / 500, accuracy: 0.000001)
+        XCTAssertEqual(result.product, base.product / 4, accuracy: 0.000001)
+    }
+
+    func testUnattainableDRExposureFailsBeforeShooting() {
+        XCTAssertThrowsError(try FujiMath.shiftedExposure(.init(iso: 50, seconds: 1.0 / 8000), stops: -2,
+                                                         isoRange: 50...3200, durationRange: (1.0 / 8000)...1))
+    }
+
+    func testAutoISOUsesBaseISOInBrightLight() {
+        let result = FujiMath.autoExposure(metered: .init(iso: 100, seconds: 1.0 / 500),
+            profile: .init(minimumISO: 100, maximumISO: 800, minimumShutterSeconds: 1.0 / 125),
+            isoRange: 50...6400, durationRange: (1.0 / 8000)...1)
+        XCTAssertEqual(result.iso, 100, accuracy: 0.01)
+        XCTAssertEqual(result.seconds, 1.0 / 500, accuracy: 0.000001)
+    }
+
+    func testAutoISORaisesISOBeforeDroppingBelowPreferredShutter() {
+        let result = FujiMath.autoExposure(metered: .init(iso: 100, seconds: 1.0 / 30),
+            profile: .init(minimumISO: 100, maximumISO: 800, minimumShutterSeconds: 1.0 / 125),
+            isoRange: 50...6400, durationRange: (1.0 / 8000)...1)
+        XCTAssertEqual(result.iso, 100 * 125 / 30, accuracy: 0.01)
+        XCTAssertEqual(result.seconds, 1.0 / 125, accuracy: 0.000001)
+    }
+
+    func testAutoISOSlowsShutterAtISOCeilingAndHonorsHardwareRange() {
+        let result = FujiMath.autoExposure(metered: .init(iso: 100, seconds: 0.2),
+            profile: .init(minimumISO: 100, maximumISO: 800, minimumShutterSeconds: 1.0 / 125),
+            isoRange: 50...6400, durationRange: (1.0 / 8000)...1)
+        XCTAssertEqual(result.iso, 800, accuracy: 0.01)
+        XCTAssertEqual(result.seconds, 0.025, accuracy: 0.000001)
+    }
+
+    func testFocalLengthRuleUsesMotionMultiplier() {
+        let profile = FujiAutoISOProfile(minimumISO: 100, maximumISO: 3200, minimumShutterSeconds: 0.1,
+                                         useFocalLengthRule: true, motionMultiplier: 2)
+        let result = FujiMath.autoExposure(metered: .init(iso: 100, seconds: 0.1), profile: profile,
+            isoRange: 50...6400, durationRange: (1.0 / 8000)...1, focalLength: 50)
+        XCTAssertEqual(result.seconds, 0.01, accuracy: 0.000001)
+        XCTAssertEqual(result.iso, 1000, accuracy: 0.01)
+    }
+
+    func testSettingsNormalizationBoundsMemoryAndRejectsNonfiniteValues() {
+        var settings = FujiShootingSettings()
+        settings.digitalCrop = .infinity; settings.ndStops = 100; settings.burstCount = Int.max
+        settings.preShotSeconds = .nan; settings.focusCount = -5; settings.bracketCount = 42
+        settings.autoISOProfiles = []; settings.autoISOIndex = 999; settings.filmRecipeIDs = []
+        let clean = settings.normalized()
+        XCTAssertEqual(clean.digitalCrop, 1)
+        XCTAssertEqual(clean.ndStops, 5)
+        XCTAssertEqual(clean.burstCount, 20)
+        XCTAssertEqual(clean.preShotSeconds, 0)
+        XCTAssertEqual(clean.focusCount, 2)
+        XCTAssertEqual(clean.bracketCount, 3)
+        XCTAssertEqual(clean.autoISOProfiles.count, 3)
+        XCTAssertNil(clean.autoISOIndex)
+        XCTAssertEqual(clean.filmRecipeIDs.count, 3)
+    }
+
+    func testPreShotRejectsRAWAndDriveCombinations() {
+        var settings = FujiShootingSettings()
+        settings.preShotSeconds = 1
+        XCTAssertNoThrow(try FujiCapturePlan.make(settings))
+        settings.captureRAW = true
+        XCTAssertThrowsError(try FujiCapturePlan.make(settings))
+        settings.captureRAW = false; settings.drive = .continuousLow
+        XCTAssertThrowsError(try FujiCapturePlan.make(settings))
+    }
+
+    func testFocusSweepContainsBothEndpointsAndCanReverse() throws {
+        XCTAssertEqual(FujiMath.focusPositions(near: 0.2, far: 0.8, count: 3)[1], 0.5, accuracy: 0.00001)
+        XCTAssertEqual(FujiMath.focusPositions(near: 1, far: 0, count: 3), [1, 0.5, 0])
+        var settings = FujiShootingSettings()
+        settings.drive = .focusStack; settings.focusNear = 0.5; settings.focusFar = 0.5
+        XCTAssertThrowsError(try FujiCapturePlan.make(settings))
+    }
+
+    func testNDUsesPowerOfTwoFramesAndNeverChangesExposureByDarkening() throws {
+        var settings = FujiShootingSettings()
+        settings.drive = .computationalND; settings.ndStops = 4
+        let plan = try FujiCapturePlan.make(settings)
+        XCTAssertEqual(plan.steps.count, 16)
+        XCTAssertTrue(plan.steps.allSatisfy { $0.exposureOffset == 0 })
+    }
+
+    func testNaturalViewAndOVFDoNotChangeCaptureRecipeOrCrop() {
+        var settings = FujiShootingSettings()
+        settings.digitalCrop = 2
+        XCTAssertEqual(settings.previewCrop, 2)
+        settings.viewfinder = .hybrid
+        XCTAssertEqual(settings.previewCrop, 1)
+        XCTAssertEqual(settings.digitalCrop, 2)
+        XCTAssertTrue(settings.showsNaturalPreview)
+    }
+
+    func testPreferencesRoundTripKeepsSevenExplicitBanksAndOrderedQMenu() throws {
+        var preferences = FujiPreferences()
+        preferences.banks = (1...9).map { .init(id: $0, name: "  Custom \($0)  ", recipe: recipe,
+            settings: .init(), camera: .init(), savedAt: Date(timeIntervalSince1970: 100)) }
+        preferences.quickControls = [.drive, .banks, .drive, .rawDevelopment]
+        preferences.selectedBank = 9
+        let restored = try JSONDecoder().decode(FujiPreferences.self, from: JSONEncoder().encode(preferences)).normalized()
+        XCTAssertEqual(restored.banks.map(\.id), Array(1...7))
+        XCTAssertEqual(restored.banks[0].name, "Custom 1")
+        XCTAssertEqual(restored.quickControls, [.drive, .banks, .rawDevelopment])
+        XCTAssertNil(restored.selectedBank)
+    }
+
+    func testCorruptSettingsAreRecoverableInsteadOfSilentlyOverwritten() throws {
+        let suite = "FujiShootingTests.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let damaged = Data("{invalid".utf8)
+        defaults.set(damaged, forKey: "fuji.shooting.v1")
+        let result = FujiPreferences.load(from: defaults)
+        XCTAssertTrue(result.recovered)
+        XCTAssertEqual(defaults.data(forKey: "fuji.shooting.recovery"), damaged)
+    }
+
+    @MainActor
+    func testControllerLoadsAndPersistsAnExplicitPreferenceSuite() throws {
+        let suite = "FujiShootingTests.Controller.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let standardBefore = UserDefaults.standard.data(forKey: "fuji.shooting.v1")
+        var stored = FujiPreferences()
+        stored.selectedBank = 3
+        stored.banks = [.init(id: 3, name: "Isolated C3", recipe: recipe, settings: .init(), camera: .init(),
+                              savedAt: Date(timeIntervalSince1970: 123))]
+        defaults.set(try JSONEncoder().encode(stored), forKey: "fuji.shooting.v1")
+
+        let controller = FujiShootingController(defaults: defaults)
+        XCTAssertEqual(controller.preferences.selectedBank, 3)
+        XCTAssertEqual(controller.preferences.banks.first?.name, "Isolated C3")
+        XCTAssertEqual(UserDefaults.standard.data(forKey: "fuji.shooting.v1"), standardBefore,
+                       "An explicit preference suite must not write to standard defaults")
+    }
+
+    @MainActor
+    func testInvalidatePreviewWithNoStateDoesNotPublish() throws {
+        let suite = "FujiShootingTests.Invalidate.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let controller = FujiShootingController(defaults: defaults)
+        XCTAssertNil(controller.hybridImage)
+        XCTAssertNil(controller.focusImage)
+        XCTAssertEqual(controller.bufferedCount, 0)
+        var sends = 0
+        let cancellable = controller.objectWillChange.sink { sends += 1 }
+        defer { cancellable.cancel() }
+
+        controller.invalidatePreview()
+        sends = 0
+        controller.invalidatePreview()
+        XCTAssertEqual(sends, 0, "objectWillChange sends on invalidatePreview() with nothing attached")
+    }
+
+    @MainActor
+    func testInvalidatePreviewClearsDisplayedImagesAndPublishes() throws {
+        let suite = "FujiShootingTests.InvalidateImages.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let controller = FujiShootingController(defaults: defaults)
+        controller.setPreviewImagesForTesting(hybrid: UIImage(), focus: UIImage())
+        XCTAssertNotNil(controller.hybridImage)
+        var sends = 0
+        let cancellable = controller.objectWillChange.sink { sends += 1 }
+        defer { cancellable.cancel() }
+
+        controller.invalidatePreview()
+        XCTAssertGreaterThan(sends, 0, "Clearing displayed preview images must notify observers")
+        XCTAssertNil(controller.hybridImage)
+        XCTAssertNil(controller.focusImage)
+    }
+
+    func testCompletionGateAllowsOnlyOneCallbackAcrossConcurrentRacers() async {
+        let completed = expectation(description: "exactly one callback")
+        completed.assertForOverFulfill = true
+        let gate = FujiCompletionGate<Int> { _ in completed.fulfill() }
+        await withTaskGroup(of: Void.self) { group in
+            for index in 0..<100 { group.addTask { gate.finish(.success(index)) } }
+        }
+        await fulfillment(of: [completed], timeout: 2)
+        XCTAssertFalse(gate.finish(.failure(FujiShootingError.cancelled)))
+    }
+
+    func testPreShotRingNeverReturnsFutureFramesOrUnboundedHistory() throws {
+        let image = try XCTUnwrap(UIImage(data: jpeg()).flatMap(\.cgImage))
+        var ring = FujiPreShotRing()
+        for index in 0..<40 {
+            ring.append(.init(image: image, capturedAt: Date(), uptime: Double(index) / 10), seconds: 1.5)
+        }
+        XCTAssertLessThanOrEqual(ring.frames.count, 16)
+        XCTAssertLessThanOrEqual(ring.byteCount, FujiPreShotRing.maximumBytes)
+        XCTAssertTrue(ring.snapshot(at: 3.5, seconds: 1).allSatisfy { $0.uptime <= 3.5 && $0.uptime >= 2.5 })
+        let count = ring.frames.count
+        ring.append(.init(image: image, capturedAt: Date(), uptime: 0.1), seconds: 1.5)
+        XCTAssertEqual(ring.frames.count, count)
+        ring.clear()
+        XCTAssertEqual(ring.byteCount, 0)
+    }
+
+    func testDigitalCropIsCenteredAndDoesNotUpscaleOutput() {
+        let input = CIImage(color: .white).cropped(to: CGRect(x: 0, y: 0, width: 400, height: 300))
+        let cropped = FujiImageProcessor.crop(input, factor: 2)
+        XCTAssertEqual(cropped.extent, CGRect(x: 0, y: 0, width: 200, height: 150))
+        let square = FujiImageProcessor.crop(input, factor: 2, viewport: CGSize(width: 1, height: 1))
+        XCTAssertEqual(square.extent.width, 150, accuracy: 1)
+        XCTAssertEqual(square.extent.height, 150, accuracy: 1)
+    }
+
+    func testJPEGCannotMasqueradeAsProtectedRAW() {
+        let data = jpeg()
+        XCTAssertFalse(FujiImageProcessor.isRAW(data))
+        XCTAssertThrowsError(try FujiImageProcessor.decoded(data, isRAW: false, dynamicRange: .dr400))
+        XCTAssertThrowsError(try FujiImageProcessor.decoded(data, isRAW: true, dynamicRange: .dr100))
+    }
+
+    func testLinearDevelopmentRestoresMiddleGrayAndRollsOffHighlights() throws {
+        let middle = CIImage(color: CIColor(red: 0.045, green: 0.045, blue: 0.045, colorSpace: FujiImageProcessor.linearSpace)!)
+            .cropped(to: CGRect(x: 0, y: 0, width: 8, height: 8))
+        let restored = try XCTUnwrap(FujiImageProcessor.developLinear(middle, gain: 4, recovery: 0.5, shadows: 0))
+        XCTAssertEqual(pixel(restored)[0], 0.18, accuracy: 0.005)
+        let bright = middle.applyingFilter("CIExposureAdjust", parameters: [kCIInputEVKey: 4])
+        let protected = try XCTUnwrap(FujiImageProcessor.developLinear(bright, gain: 4, recovery: 0.5, shadows: 0))
+        XCTAssertGreaterThan(pixel(protected)[0], 0.6)
+        XCTAssertLessThan(pixel(protected)[0], 1)
+    }
+
+    func testTemporalAverageIsLinearLightRatherThanGammaAverage() {
+        let black = CIImage(color: .black).cropped(to: CGRect(x: 0, y: 0, width: 8, height: 8))
+        let white = CIImage(color: .white).cropped(to: black.extent)
+        let result = FujiImageProcessor.blend(black, white, count: 2, mode: .average)
+        XCTAssertEqual(pixel(result)[0], 0.5, accuracy: 0.01)
+        XCTAssertEqual(pixel(result)[3], 1, accuracy: 0.01)
+    }
+
+    func testFocusFusionPreservesFlatTieInsteadOfReplacingIt() throws {
+        let image = CIImage(color: .gray).cropped(to: CGRect(x: 0, y: 0, width: 32, height: 32))
+        let merged = try FujiImageProcessor.fuse(image, score: FujiImageProcessor.sharpness(image), candidate: image)
+        XCTAssertEqual(merged.0.extent, image.extent)
+        XCTAssertEqual(pixel(merged.0)[0], pixel(image)[0], accuracy: 0.01)
+    }
+
+    func testOriginalBytesSurviveSidecarEditingAndRelaunch() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = FujiCaptureLibrary(root: root)
+        let data = jpeg()
+        var record = original()
+        try await library.retainOriginal(data, record: record)
+        record.adjustment.exposure = 1.5
+        try await library.updateOriginal(record)
+        let reopened = FujiCaptureLibrary(root: root)
+        let records = try await reopened.originals()
+        let bytes = try await reopened.originalData(record)
+        XCTAssertEqual(records.first?.adjustment.exposure, 1.5)
+        XCTAssertEqual(bytes, data)
+        do { try await reopened.retainOriginal(Data([0]), record: record); XCTFail("Original must not be overwritten") }
+        catch { XCTAssertEqual(error as? FujiShootingError, .storageFailed) }
+    }
+
+    func testOutboxSurvivesRelaunchAndDeletesOnlyOnAcknowledgment() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = FujiCaptureLibrary(root: root)
+        let data = jpeg()
+        let pending = try await library.enqueue(data, recipe: recipe, capturedAt: Date(), label: "Test")
+        let reopened = FujiCaptureLibrary(root: root)
+        let exports = try await reopened.pendingExports()
+        XCTAssertEqual(exports.map(\.id), [pending.id])
+        let bytes = try await reopened.exportData(pending)
+        XCTAssertEqual(bytes, data)
+        try await reopened.markExported(pending)
+        let remaining = try await reopened.pendingExports()
+        XCTAssertTrue(remaining.isEmpty)
+    }
+
+    func testDevelopedFujiStillCarriesRecordLocationAndLegacyRecordsDecode() async throws {
+        let worker = FujiDevelopmentWorker()
+        let source = jpeg()
+        var record = original()
+        let untagged = try await worker.develop(data: source, record: record)
+        XCTAssertNil(gpsDictionary(in: untagged.data))
+        let fix = CLLocation(coordinate: CLLocationCoordinate2D(latitude: 37.5, longitude: -122.25), altitude: 12,
+                             horizontalAccuracy: 5, verticalAccuracy: 5, timestamp: Date())
+        record.location = FujiCaptureLocation(fix)
+        let tagged = try await worker.develop(data: source, record: record)
+        let gps = try XCTUnwrap(gpsDictionary(in: tagged.data))
+        XCTAssertEqual(gps[kCGImagePropertyGPSLatitude as String] as? Double ?? 0, 37.5, accuracy: 0.0001)
+        XCTAssertEqual(gps[kCGImagePropertyGPSLatitudeRef as String] as? String, "N")
+        XCTAssertEqual(gps[kCGImagePropertyGPSLongitude as String] as? Double ?? 0, 122.25, accuracy: 0.0001)
+        XCTAssertEqual(gps[kCGImagePropertyGPSLongitudeRef as String] as? String, "W")
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
+        object.removeValue(forKey: "location")
+        let legacy = try JSONDecoder().decode(FujiOriginalRecord.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertNil(legacy.location)
+        XCTAssertEqual(legacy.id, record.id)
+    }
+
+    func testOriginalFilenameCannotEscapeLibraryDirectory() {
+        let record = FujiOriginalRecord(id: UUID(), capturedAt: Date(), isRAW: true, sourceFilename: "../../outside.dng",
+            sequenceID: UUID(), dynamicRange: .dr100, captureExposure: nil, recipe: recipe, adjustment: .init(),
+            cropFactor: 1, viewportWidth: 0, viewportHeight: 0, label: "Malicious filename")
+        XCTAssertFalse(record.hasSafeSourceFilename)
+    }
+
+    func testFilmBracketCapturesOnceRestoresBeforeSavingAndExportsThreeLooks() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = FujiCaptureLibrary(root: root)
+        let controller = FujiShootingController(library: library)
+        let driver = FujiTestDriver(data: jpeg())
+        let saver = FujiTestSaver(driver: driver)
+        var settings = FujiShootingSettings(); settings.drive = .filmBracket
+        try await controller.run(request(settings), driver: driver, photoLibrary: saver)
+        XCTAssertEqual(driver.counts.captures, 1)
+        XCTAssertEqual(driver.counts.restores, 1)
+        XCTAssertEqual(saver.savedCount, 3)
+        XCTAssertTrue(saver.restoredBeforeEverySave)
+        let pending = try await library.pendingExports()
+        XCTAssertTrue(pending.isEmpty)
+    }
+
+    func testSensorFailureAlwaysRestoresLeaseWithoutSaving() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let controller = FujiShootingController(library: FujiCaptureLibrary(root: root))
+        let driver = FujiTestDriver(data: jpeg(), failure: .timedOut)
+        let saver = FujiTestSaver(driver: driver)
+        do { try await controller.run(request(.init()), driver: driver, photoLibrary: saver); XCTFail("Expected failure") }
+        catch { XCTAssertEqual(error as? FujiShootingError, .timedOut) }
+        XCTAssertEqual(driver.counts.restores, 1)
+        XCTAssertEqual(saver.savedCount, 0)
+    }
+
+    func testFailedPhotosSaveKeepsOriginalAndExactRenderedExport() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = FujiCaptureLibrary(root: root)
+        let controller = FujiShootingController(library: library)
+        let driver = FujiTestDriver(data: jpeg())
+        let saver = FujiTestSaver(driver: driver, failSave: true)
+        do { try await controller.run(request(.init()), driver: driver, photoLibrary: saver); XCTFail("Expected failure") }
+        catch { XCTAssertEqual(error as? PhotoLibrarySaveError, .accessDenied) }
+        let pending = try await library.pendingExports()
+        let originals = try await library.originals()
+        XCTAssertEqual(pending.count, 1)
+        XCTAssertEqual(originals.count, 1)
+        let data = try await library.exportData(XCTUnwrap(pending.first))
+        XCTAssertEqual(data, saver.lastData)
+        XCTAssertEqual(driver.counts.restores, 1)
+    }
+
+    func testSidewaysFrameRecordStoresStillAxisViewport() async throws {
+        func storedViewport(_ viewport: CGSize, angle: CGFloat?) async throws -> CGSize {
+            let root = temporaryRoot()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let library = FujiCaptureLibrary(root: root)
+            let controller = FujiShootingController(library: library)
+            let driver = FujiTestDriver(data: jpeg())
+            let saver = FujiTestSaver(driver: driver, failSave: true)
+            var sequence = request(.init())
+            sequence = FujiSequenceRequest(settings: sequence.settings, recipe: sequence.recipe, filmRecipes: sequence.filmRecipes,
+                viewport: viewport, finish: .photo, grainSeed: 1, shutterUptime: 0, previewRotationAngle: angle)
+            do { try await controller.run(sequence, driver: driver, photoLibrary: saver) } catch {}
+            let originals = try await library.originals()
+            XCTAssertEqual(originals.count, 1)
+            let record = try XCTUnwrap(originals.first)
+            return CGSize(width: record.viewportWidth, height: record.viewportHeight)
+        }
+        let sideways = try await storedViewport(CGSize(width: 3, height: 4), angle: 90)
+        XCTAssertEqual(sideways, CGSize(width: 4, height: 3))
+        let rotatingUI = try await storedViewport(CGSize(width: 3, height: 4), angle: 0)
+        XCTAssertEqual(rotatingUI, CGSize(width: 3, height: 4))
+        let unchanged = try await storedViewport(CGSize(width: 4, height: 3), angle: nil)
+        XCTAssertEqual(unchanged, CGSize(width: 4, height: 3))
+    }
+
+    func testFailedBurstSaveQueuesEveryFrameForRetryAndKeepsOriginals() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = FujiCaptureLibrary(root: root)
+        let controller = FujiShootingController(library: library)
+        let driver = FujiTestDriver(data: jpeg())
+        let saver = FujiTestSaver(driver: driver, failSave: true)
+        var settings = FujiShootingSettings(); settings.drive = .continuousHigh; settings.burstCount = 3
+        do { try await controller.run(request(settings), driver: driver, photoLibrary: saver); XCTFail("Expected failure") }
+        catch { XCTAssertEqual(error as? PhotoLibrarySaveError, .accessDenied) }
+        let pending = try await library.pendingExports()
+        let originals = try await library.originals()
+        XCTAssertEqual(pending.count, 3)
+        XCTAssertEqual(originals.count, 3)
+        XCTAssertEqual(driver.counts.captures, 3)
+    }
+
+    func testSensorRestoreFailureAfterSuccessfulCaptureIsReportedAndShotKept() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = FujiCaptureLibrary(root: root)
+        let controller = FujiShootingController(library: library)
+        let driver = FujiTestDriver(data: jpeg(), failFirstEnd: true)
+        let saver = FujiTestSaver(driver: driver)
+        do { try await controller.run(request(.init()), driver: driver, photoLibrary: saver); XCTFail("Expected failure") }
+        catch { XCTAssertEqual(error as? FujiShootingError, .timedOut) }
+        XCTAssertEqual(controller.errorMessage, "Sensor restoration failed. Reopen the camera before continuing.")
+        XCTAssertEqual(driver.counts.restores, 1)
+        let originals = try await library.originals()
+        XCTAssertEqual(originals.count, 1)
+    }
+
+    func testMidSequenceCaptureFailureKeepsCapturedFrameAndRestoresSensor() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = FujiCaptureLibrary(root: root)
+        let controller = FujiShootingController(library: library)
+        let driver = FujiTestDriver(data: jpeg(), failOnCapture: 2)
+        let saver = FujiTestSaver(driver: driver)
+        var settings = FujiShootingSettings(); settings.drive = .continuousHigh; settings.burstCount = 3
+        do { try await controller.run(request(settings), driver: driver, photoLibrary: saver); XCTFail("Expected failure") }
+        catch { XCTAssertEqual(error as? FujiShootingError, .timedOut) }
+        XCTAssertEqual(driver.counts.restores, 1)
+        let originals = try await library.originals()
+        let pending = try await library.pendingExports()
+        XCTAssertEqual(originals.count, 1)
+        XCTAssertTrue(pending.isEmpty)
+        // The frame captured before the failure is still developed and saved.
+        XCTAssertEqual(saver.savedCount, 1)
+    }
+
+    func testShutterTextReadsAsFractionsAndGuardsOddValues() {
+        XCTAssertEqual(FujiMath.shutterText(1.0 / 125), "1/125 s")
+        XCTAssertEqual(FujiMath.shutterText(1.0 / 8000), "1/8000 s")
+        XCTAssertEqual(FujiMath.shutterText(2), "2.0 s")
+        XCTAssertEqual(FujiMath.shutterText(0.7), "0.7 s")
+        XCTAssertEqual(FujiMath.shutterText(0.5), "0.5 s")
+        XCTAssertEqual(FujiMath.shutterText(1.0 / 3), "0.3 s")
+        XCTAssertEqual(FujiMath.shutterText(0.25), "1/4 s")
+        XCTAssertEqual(FujiMath.shutterText(0), "Auto")
+        XCTAssertEqual(FujiMath.shutterText(.nan), "Auto")
+        XCTAssertEqual(FujiMath.shutterText(.leastNonzeroMagnitude), "<1/1000000 s")
+    }
+
+    func testAsShotWhiteBalanceIsNilWithoutMetadata() {
+        XCTAssertNil(FujiImageProcessor.asShotWhiteBalance(jpeg()))
+    }
+
+    func testCompositeCaptureFailureExportsNothing() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = FujiCaptureLibrary(root: root)
+        let controller = FujiShootingController(library: library)
+        let driver = FujiTestDriver(data: jpeg(), failOnCapture: 2)
+        let saver = FujiTestSaver(driver: driver)
+        var settings = FujiShootingSettings(); settings.drive = .computationalND; settings.ndStops = 1
+        do { try await controller.run(request(settings), driver: driver, photoLibrary: saver); XCTFail("Expected failure") }
+        catch { XCTAssertEqual(error as? FujiShootingError, .timedOut) }
+        XCTAssertEqual(driver.counts.restores, 1)
+        XCTAssertEqual(saver.savedCount, 0)
+    }
+
+    func testMultipleExposureKeepsLayerSourcesUntilCompositeExported() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = FujiCaptureLibrary(root: root)
+        let controller = FujiShootingController(library: library)
+        let driver = FujiTestDriver(data: jpeg())
+        let saver = FujiTestSaver(driver: driver)
+        var settings = FujiShootingSettings(); settings.drive = .multipleExposure; settings.multipleExposureCount = 2
+        settings.keepCompositeSources = false
+        try await controller.run(request(settings), driver: driver, photoLibrary: saver)
+        let afterFirst = try await library.originals()
+        XCTAssertEqual(afterFirst.count, 1)
+        XCTAssertEqual(saver.savedCount, 0)
+        try await controller.run(request(settings), driver: driver, photoLibrary: saver)
+        let afterFinal = try await library.originals()
+        XCTAssertTrue(afterFinal.isEmpty)
+        XCTAssertEqual(saver.savedCount, 1)
+    }
+
+    func testMultipleExposureSourcesRemovedWhenPhotosSaveFailsAfterPersist() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = FujiCaptureLibrary(root: root)
+        let controller = FujiShootingController(library: library)
+        let driver = FujiTestDriver(data: jpeg())
+        let saver = FujiTestSaver(driver: driver, failSave: true)
+        var settings = FujiShootingSettings(); settings.drive = .multipleExposure; settings.multipleExposureCount = 2
+        settings.keepCompositeSources = false
+        try await controller.run(request(settings), driver: driver, photoLibrary: saver)
+        do { try await controller.run(request(settings), driver: driver, photoLibrary: saver); XCTFail("Expected save failure") }
+        catch {}
+        let pending = try await library.pendingExports()
+        let originals = try await library.originals()
+        XCTAssertEqual(pending.count, 1)
+        XCTAssertTrue(originals.isEmpty)
+    }
+
+    func testMultipleExposureRefusesLayerOnDifferentLens() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = FujiCaptureLibrary(root: root)
+        let controller = FujiShootingController(library: library)
+        let driver = FujiTestDriver(data: jpeg(), deviceIDs: ["wide", "ultra"])
+        let saver = FujiTestSaver(driver: driver)
+        var settings = FujiShootingSettings(); settings.drive = .multipleExposure; settings.multipleExposureCount = 3
+        try await controller.run(request(settings), driver: driver, photoLibrary: saver)
+        XCTAssertEqual(driver.counts.restores, 1)
+        do { try await controller.run(request(settings), driver: driver, photoLibrary: saver); XCTFail("Expected failure") }
+        catch {
+            guard case .invalidCombination = error as? FujiShootingError else { return XCTFail("Unexpected error \(error)") }
+        }
+        XCTAssertEqual(driver.counts.restores, 2)
+        XCTAssertEqual(driver.counts.captures, 1)
+        XCTAssertEqual(saver.savedCount, 0)
+    }
+
+    func testRetryExportsSavesReadableEntriesAndKeepsTheFailedOne() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = FujiCaptureLibrary(root: root)
+        let controller = FujiShootingController(library: library)
+        let base = Date()
+        var queued: [FujiPendingExport] = []
+        for offset in 0..<3 {
+            queued.append(try await library.enqueue(jpeg(), recipe: recipe, capturedAt: base.addingTimeInterval(Double(offset)), label: "Retry \(offset)"))
+        }
+        let first = queued[0]
+        try FileManager.default.removeItem(at: root.appendingPathComponent("outbox/\(first.id.uuidString)/image.jpg"))
+        let saver = FujiTestSaver(driver: FujiTestDriver(data: jpeg()))
+        controller.retryExports(photoLibrary: saver)
+        while controller.isBusy { await Task.yield() }
+        XCTAssertEqual(saver.savedCount, 2)
+        let pending = try await library.pendingExports()
+        XCTAssertEqual(pending.map(\.id), [first.id])
+        XCTAssertNotNil(controller.errorMessage)
+        XCTAssertEqual(controller.status, "2 of 3 saved")
+        XCTAssertEqual(controller.errorMessage?.hasPrefix("2 of 3 saved. "), true)
+    }
+
+    func testAdoptOrphanedOriginalRestoresOldFolderAndRefusesFreshOrRecordedOnes() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = FujiCaptureLibrary(root: root)
+        let id = UUID()
+        let folder = root.appendingPathComponent("originals/\(id.uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try jpeg().write(to: folder.appendingPathComponent("source.jpg"))
+        do { _ = try await library.adoptOrphanedOriginal(folder: folder, recipe: recipe); XCTFail("Expected refusal of fresh folder") }
+        catch { XCTAssertEqual(error as? FujiShootingError, .storageFailed) }
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-120)], ofItemAtPath: folder.path)
+        let before = try await library.unreadableOriginals()
+        XCTAssertEqual(before.map(\.reason), ["missing record.json"])
+        let listed = try await library.originals()
+        XCTAssertTrue(listed.isEmpty)
+        let record = try await library.adoptOrphanedOriginal(folder: folder, recipe: recipe)
+        XCTAssertEqual(record.id, id)
+        XCTAssertFalse(record.isRAW)
+        let after = try await library.originals()
+        let unreadable = try await library.unreadableOriginals()
+        XCTAssertEqual(after.map(\.id), [id])
+        XCTAssertTrue(unreadable.isEmpty)
+        do { _ = try await library.adoptOrphanedOriginal(folder: folder, recipe: recipe); XCTFail("Expected refusal once recorded") }
+        catch { XCTAssertEqual(error as? FujiShootingError, .storageFailed) }
+    }
+
+    private func request(_ settings: FujiShootingSettings) -> FujiSequenceRequest {
+        .init(settings: settings, recipe: recipe, filmRecipes: Array(FilmRecipe.builtIns.prefix(3)),
+              viewport: CGSize(width: 4, height: 3), finish: .photo, grainSeed: 1, shutterUptime: 0)
+    }
+    private func original() -> FujiOriginalRecord {
+        .init(id: UUID(), capturedAt: Date(), isRAW: false, sourceFilename: "source.jpg", sequenceID: UUID(),
+              dynamicRange: .dr100, captureExposure: nil, recipe: recipe, adjustment: .init(), cropFactor: 1,
+              viewportWidth: 0, viewportHeight: 0, label: "Test original")
+    }
+    private func gpsDictionary(in data: Data) -> [String: Any]? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any] else { return nil }
+        return properties[kCGImagePropertyGPSDictionary as String] as? [String: Any]
+    }
+    private func temporaryRoot() -> URL { FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString) }
+    private func jpeg() -> Data {
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        return UIGraphicsImageRenderer(size: CGSize(width: 160, height: 120), format: format).jpegData(withCompressionQuality: 0.95) { context in
+            UIColor(white: 0.5, alpha: 1).setFill(); context.fill(CGRect(x: 0, y: 0, width: 160, height: 120))
+        }
+    }
+    private func pixel(_ image: CIImage) -> [Float] {
+        var result = [Float](repeating: 0, count: 4)
+        FujiImageProcessor.context.render(image, toBitmap: &result, rowBytes: 16,
+            bounds: CGRect(x: image.extent.midX, y: image.extent.midY, width: 1, height: 1),
+            format: .RGBAf, colorSpace: FujiImageProcessor.linearSpace)
+        return result
+    }
+
+    func testViewfinderStateIsNilForSingleFrameWithoutBank() {
+        XCTAssertNil(FujiViewfinderState.make(settings: FujiShootingSettings(), activeBank: nil))
+    }
+
+    func testViewfinderStateNamesBankDriveBracketAndND() throws {
+        var settings = FujiShootingSettings()
+        let bankOnly = FujiViewfinderState.make(settings: settings, activeBank: 3)
+        XCTAssertEqual(bankOnly?.text, "C3")
+        XCTAssertEqual(bankOnly?.spoken, "Bank C3")
+
+        settings.drive = .aeBracket
+        settings.bracketCount = 5
+        XCTAssertEqual(FujiViewfinderState.make(settings: settings, activeBank: nil)?.text, "AE BKT ×5")
+        XCTAssertEqual(try FujiCapturePlan.make(settings).steps.count, 5)
+
+        settings.drive = .computationalND
+        settings.ndStops = 4
+        let nd = FujiViewfinderState.make(settings: settings, activeBank: nil)
+        XCTAssertEqual(nd?.text, "ND 4")
+        XCTAssertEqual(nd?.spoken, "Computational ND, 4 stops, 16 frames")
+        XCTAssertEqual(try FujiCapturePlan.make(settings).steps.count, 16)
+
+        var burst = FujiShootingSettings()
+        burst.drive = .continuousHigh
+        XCTAssertEqual(FujiViewfinderState.make(settings: burst, activeBank: nil)?.text, "CONT H ×5")
+
+        settings.drive = .interval
+        settings.intervalCount = 120
+        XCTAssertEqual(FujiViewfinderState.make(settings: settings, activeBank: nil)?.text, "INTERVAL ×120")
+
+        settings.drive = .focusStack
+        settings.focusCount = 20
+        XCTAssertEqual(FujiViewfinderState.make(settings: settings, activeBank: nil)?.text, "FOCUS STACK ×20")
+
+        var both = FujiShootingSettings()
+        both.drive = .aeBracket
+        let state = FujiViewfinderState.make(settings: both, activeBank: 1)
+        XCTAssertEqual(state?.text, "C1 · AE BKT ×3")
+        XCTAssertEqual(state?.spoken, "Bank C1, AE bracketing, 3 frames")
+    }
+
+    func testViewfinderStateCoversEveryDriveWithoutReusingDriveTitles() {
+        var texts = Set<String>()
+        for drive in FujiDrive.allCases where drive != .single {
+            var settings = FujiShootingSettings()
+            settings.drive = drive
+            let state = FujiViewfinderState.make(settings: settings, activeBank: nil)
+            XCTAssertNotNil(state, drive.rawValue)
+            XCTAssertFalse(state?.text.isEmpty ?? true, drive.rawValue)
+            XCTAssertNotEqual(state?.spoken, drive.title, drive.rawValue)
+            XCTAssertTrue(texts.insert(state?.text ?? "").inserted, "\(drive.rawValue) text must be unique")
+        }
+    }
+
+    func testViewfinderBankIsNamedOnlyWhileSetupMatchesTheBank() {
+        let saved = FujiShootingSettings()
+        XCTAssertEqual(FujiViewfinderState.activeBank(id: 1, saved: saved, current: saved, lookOrCameraEdited: false), 1)
+        var current = saved
+        current.drive = .aeBracket
+        XCTAssertNil(FujiViewfinderState.activeBank(id: 1, saved: saved, current: current, lookOrCameraEdited: false))
+        current = saved
+        current.captureRAW = true
+        XCTAssertNil(FujiViewfinderState.activeBank(id: 1, saved: saved, current: current, lookOrCameraEdited: false))
+        XCTAssertNil(FujiViewfinderState.activeBank(id: 1, saved: saved, current: saved, lookOrCameraEdited: true))
+    }
+
+    func testViewfinderStateMarksSetupsThePlanRefuses() {
+        var settings = FujiShootingSettings()
+        settings.drive = .aeBracket
+        XCTAssertEqual(FujiViewfinderState.make(settings: settings, activeBank: nil)?.isBlocked, false)
+
+        settings.preShotSeconds = 0.5
+        let state = FujiViewfinderState.make(settings: settings, activeBank: nil)
+        XCTAssertEqual(state?.isBlocked, true)
+        XCTAssertThrowsError(try FujiCapturePlan.make(settings))
+        XCTAssertEqual(state?.spoken.hasSuffix("cannot shoot, open Q"), true)
+        XCTAssertEqual(state?.text, "AE BKT ×3")
+
+        var focus = FujiShootingSettings()
+        focus.drive = .focusBracket
+        focus.focusNear = 0.5
+        focus.focusFar = 0.5
+        XCTAssertEqual(FujiViewfinderState.make(settings: focus, activeBank: nil)?.isBlocked, true)
+
+        var single = FujiShootingSettings()
+        single.preShotSeconds = 0.5
+        single.captureRAW = true
+        let refused = FujiViewfinderState.make(settings: single, activeBank: nil)
+        XCTAssertEqual(refused?.isBlocked, true)
+        XCTAssertEqual(refused?.text, "CHECK Q")
+        XCTAssertEqual(refused?.spoken, "Single frame, cannot shoot, open Q")
+        single.captureRAW = false
+        XCTAssertNil(FujiViewfinderState.make(settings: single, activeBank: nil))
+    }
+
+    func testRenameSavedBankKeepsItsSetup() throws {
+        let suite = "FujiShootingTests.Rename.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let controller = FujiShootingController(defaults: defaults)
+        var seeded = FujiPreferences()
+        var drive = FujiShootingSettings()
+        drive.drive = .aeBracket
+        seeded.banks = [FujiShootingBank(id: 2, name: "Old", recipe: recipe, settings: drive, camera: .init(),
+                                         savedAt: Date(timeIntervalSince1970: 100))]
+        seeded.selectedBank = 2
+        controller.preferences = seeded
+        let before = controller.preferences
+
+        controller.renameBank(2, name: "  Night walk  ")
+        let renamed = try XCTUnwrap(controller.preferences.banks.first)
+        let original = try XCTUnwrap(before.banks.first)
+        XCTAssertEqual(renamed.name, "Night walk")
+        XCTAssertEqual(renamed.recipe, original.recipe)
+        XCTAssertEqual(renamed.settings, original.settings)
+        XCTAssertEqual(renamed.camera, original.camera)
+        XCTAssertEqual(renamed.savedAt, original.savedAt)
+        XCTAssertEqual(controller.preferences.selectedBank, 2)
+        let stored = try XCTUnwrap(defaults.data(forKey: "fuji.shooting.v1"))
+        XCTAssertEqual(try JSONDecoder().decode(FujiPreferences.self, from: stored), controller.preferences)
+
+        controller.renameBank(2, name: "   ")
+        XCTAssertEqual(controller.preferences.banks.first?.name, "Custom 2")
+        controller.renameBank(2, name: String(repeating: "x", count: 40))
+        XCTAssertEqual(controller.preferences.banks.first?.name.count, 32)
+
+        let unchanged = controller.preferences
+        controller.renameBank(5, name: "Nope")
+        controller.renameBank(0, name: "Nope")
+        controller.renameBank(8, name: "Nope")
+        XCTAssertEqual(controller.preferences, unchanged)
+    }
+
+    func testUseDriveChangeIsReflectedInViewfinderState() throws {
+        let suite = "FujiShootingTests.UseDrive.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let controller = FujiShootingController(defaults: defaults)
+        let before = controller.settings
+        XCTAssertNil(FujiViewfinderState.make(settings: before, activeBank: nil))
+
+        controller.change(\.drive, to: .aeBracket)
+
+        var expected = before
+        expected.drive = .aeBracket
+        XCTAssertEqual(controller.settings, expected, "Only drive may differ after a Use button")
+        XCTAssertEqual(FujiViewfinderState.make(settings: controller.settings, activeBank: nil)?.text, "AE BKT ×3")
+        let stored = try XCTUnwrap(defaults.data(forKey: "fuji.shooting.v1"))
+        XCTAssertEqual(try JSONDecoder().decode(FujiPreferences.self, from: stored), controller.preferences)
+    }
+
+    func testOutOfRangeWriteEndsNormalizedInMemoryAndInStoredBlob() throws {
+        let suite = "FujiShootingTests.OutOfRange.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let controller = FujiShootingController(defaults: defaults)
+        controller.change(\.burstCount, to: 99)
+        XCTAssertEqual(controller.settings.burstCount, 20)
+        let stored = try XCTUnwrap(defaults.data(forKey: "fuji.shooting.v1"))
+        let decoded = try JSONDecoder().decode(FujiPreferences.self, from: stored)
+        XCTAssertEqual(decoded.settings.burstCount, 20)
+        XCTAssertEqual(decoded, controller.preferences)
+    }
+
+    func testOneOutsideWriteStoresTheBlobExactlyOnce() throws {
+        let suite = "FujiShootingTests.WriteCount.\(UUID())"
+        let base = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { base.removePersistentDomain(forName: suite) }
+        let counting = FujiWriteCountingDefaults(suiteName: suite)!
+        let controller = FujiShootingController(defaults: counting)
+        XCTAssertEqual(counting.writes, 0, "Init must not store the blob")
+
+        controller.change(\.drive, to: .aeBracket)
+        XCTAssertEqual(counting.writes, 1, "A write that is already normal stores once")
+
+        counting.writes = 0
+        controller.change(\.burstCount, to: 99)
+        XCTAssertEqual(controller.settings.burstCount, 20)
+        XCTAssertEqual(counting.writes, 1, "A write that normalization changes still stores once")
+    }
+
+    func testNormalizedIsIdempotentForOutOfRangePreferences() {
+        var sample = FujiPreferences()
+        sample.settings.digitalCrop = 9
+        sample.settings.burstCount = 99
+        sample.settings.bracketCount = 4
+        sample.settings.intervalCount = 1000
+        sample.settings.autoISOProfiles[0].minimumISO = 5
+        sample.settings.autoISOProfiles[1].maximumISO = 1_000_000
+        sample.settings.autoISOProfiles[1].motionMultiplier = 99
+        sample.settings.autoISOIndex = 7
+        let once = sample.normalized()
+        XCTAssertNotEqual(once, sample)
+        XCTAssertEqual(once.normalized(), once)
+    }
+
+    func testTwoWritesInARowBothLand() throws {
+        let suite = "FujiShootingTests.TwoWrites.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let controller = FujiShootingController(defaults: defaults)
+        controller.change(\.drive, to: .aeBracket)
+        controller.change(\.burstCount, to: 12)
+        XCTAssertEqual(controller.settings.drive, .aeBracket)
+        XCTAssertEqual(controller.settings.burstCount, 12)
+        let stored = try XCTUnwrap(defaults.data(forKey: "fuji.shooting.v1"))
+        XCTAssertEqual(try JSONDecoder().decode(FujiPreferences.self, from: stored), controller.preferences)
+    }
+
+    private func originalRecord(isRAW: Bool, label: String) -> FujiOriginalRecord {
+        FujiOriginalRecord(id: UUID(), capturedAt: Date(), isRAW: isRAW, sourceFilename: isRAW ? "source.dng" : "source.jpg",
+            sequenceID: UUID(), dynamicRange: .dr100, captureExposure: nil, recipe: recipe, adjustment: .init(),
+            cropFactor: 1, viewportWidth: 0, viewportHeight: 0, label: label)
+    }
+
+    func testOriginalFilterIsOfferedOnlyForMixedLibrariesAndCountsBothKinds() {
+        let raw = originalRecord(isRAW: true, label: "R")
+        let jpeg1 = originalRecord(isRAW: false, label: "J1")
+        let jpeg2 = originalRecord(isRAW: false, label: "J2")
+        XCTAssertFalse(FujiOriginalFilter.isOffered(for: [raw]))
+        XCTAssertFalse(FujiOriginalFilter.isOffered(for: [jpeg1]))
+        XCTAssertTrue(FujiOriginalFilter.isOffered(for: [raw, jpeg1]))
+        let mixed = [jpeg1, raw, jpeg2]
+        XCTAssertEqual(FujiOriginalFilter.raw.apply(mixed), [raw])
+        XCTAssertEqual(FujiOriginalFilter.sources.apply(mixed), [jpeg1, jpeg2])
+        XCTAssertEqual(FujiOriginalFilter.all.apply(mixed), mixed)
+        XCTAssertEqual(FujiOriginalFilter.summary([raw, jpeg1, jpeg2]), "1 RAW, 2 source JPEGs")
+        XCTAssertEqual(FujiOriginalFilter.summary([jpeg1]), "0 RAW, 1 source JPEG")
+    }
+
+    func testRAWSliderValuesReadInUnits() {
+        let posix = Locale(identifier: "en_US_POSIX")
+        XCTAssertEqual(FujiRAWSliderFormat.exposure.text(0.5, locale: posix), "+0.5 EV")
+        XCTAssertEqual(FujiRAWSliderFormat.exposure.text(-1.04, locale: posix), "-1.0 EV")
+        XCTAssertEqual(FujiRAWSliderFormat.exposure.text(0.04, locale: posix), "0.0 EV")
+        XCTAssertEqual(FujiRAWSliderFormat.exposure.text(-0.04, locale: posix), "0.0 EV")
+        XCTAssertEqual(FujiRAWSliderFormat.exposure.text(0.5, locale: Locale(identifier: "de_DE")), "+0,5 EV")
+        XCTAssertEqual(FujiRAWSliderFormat.temperature.text(5599.6, locale: posix), "5600 K")
+        XCTAssertEqual(FujiRAWSliderFormat.temperature.text(1e30, locale: posix), "12000 K")
+        XCTAssertEqual(FujiRAWSliderFormat.tint.text(3.2, locale: posix), "+3")
+        XCTAssertEqual(FujiRAWSliderFormat.tint.text(-12.7, locale: posix), "-13")
+        XCTAssertEqual(FujiRAWSliderFormat.tint.text(0.3, locale: posix), "0")
+        XCTAssertEqual(FujiRAWSliderFormat.tint.text(-0.3, locale: posix), "0")
+        XCTAssertEqual(FujiRAWSliderFormat.tint.text(-1e30, locale: posix), "-150")
+        XCTAssertEqual(FujiRAWSliderFormat.percent.text(0.5, locale: posix), "50%")
+        XCTAssertEqual(FujiRAWSliderFormat.percent.text(0.004, locale: posix), "0%")
+        XCTAssertEqual(FujiRAWSliderFormat.percent.text(1e30, locale: posix), "100%")
+        XCTAssertEqual(FujiRAWSliderFormat.exposure.text(.nan, locale: posix), "\u{2013}")
+        XCTAssertEqual(FujiRAWSliderFormat.exposure.text(.infinity, locale: posix), "\u{2013}")
+    }
+
+    func testRAWTileValueCountsKeptRAWOriginals() {
+        let raw1 = originalRecord(isRAW: true, label: "R1")
+        let raw2 = originalRecord(isRAW: true, label: "R2")
+        let jpeg = originalRecord(isRAW: false, label: "J")
+        XCTAssertEqual(FujiOriginalFilter.tileValue(captureRAW: false, records: []), "Off")
+        XCTAssertEqual(FujiOriginalFilter.tileValue(captureRAW: true, records: []), "On")
+        XCTAssertEqual(FujiOriginalFilter.tileValue(captureRAW: true, records: [raw1, raw2, jpeg]), "On · 2 kept")
+        XCTAssertEqual(FujiOriginalFilter.tileValue(captureRAW: false, records: [raw1]), "Off · 1 kept")
+        XCTAssertEqual(FujiOriginalFilter.tileValue(captureRAW: true, records: [jpeg]), "On")
+    }
+
+    func testBankScrollTargetsOnlySavedNonFirstActiveBank() {
+        let saved: Set<Int> = [1, 3, 5]
+        XCTAssertEqual(FujiBankScroll.target(selectedBank: 5, savedIDs: saved, accessibilitySize: true), "bank-5")
+        XCTAssertEqual(FujiBankScroll.target(selectedBank: 3, savedIDs: saved, accessibilitySize: true), "bank-3")
+        XCTAssertNil(FujiBankScroll.target(selectedBank: 5, savedIDs: saved, accessibilitySize: false))
+        XCTAssertNil(FujiBankScroll.target(selectedBank: nil, savedIDs: saved, accessibilitySize: true))
+        XCTAssertNil(FujiBankScroll.target(selectedBank: 1, savedIDs: saved, accessibilitySize: true))
+        XCTAssertNil(FujiBankScroll.target(selectedBank: 4, savedIDs: saved, accessibilitySize: true))
+    }
+
+    func testDevelopPreviewPinsOnlyOnTallDefaultTextScreens() {
+        XCTAssertEqual(FujiDevelopLayout.pinnedPreviewHeight(available: 734, accessibilitySize: false), 279)
+        XCTAssertNil(FujiDevelopLayout.pinnedPreviewHeight(available: 700, accessibilitySize: false))
+        XCTAssertNil(FujiDevelopLayout.pinnedPreviewHeight(available: 603, accessibilitySize: false))
+        XCTAssertEqual(FujiDevelopLayout.pinnedPreviewHeight(available: 2000, accessibilitySize: false), 340)
+        XCTAssertNil(FujiDevelopLayout.pinnedPreviewHeight(available: 734, accessibilitySize: true))
+        XCTAssertNil(FujiDevelopLayout.pinnedPreviewHeight(available: .nan, accessibilitySize: false))
+    }
+}
+
+/// Counts stores of the Fuji preferences blob; every other key passes through untouched.
+private final class FujiWriteCountingDefaults: UserDefaults, @unchecked Sendable {
+    var writes = 0
+    override func set(_ value: Any?, forKey defaultName: String) {
+        if defaultName == "fuji.shooting.v1" { writes += 1 }
+        super.set(value, forKey: defaultName)
+    }
+}
+
+private final class FujiTestDriver: FujiCaptureDriver, @unchecked Sendable {
+    private let data: Data
+    private let failure: FujiShootingError?
+    private let failFirstEnd: Bool
+    private let failOnCapture: Int?
+    private let lock = NSLock()
+    private var deviceIDs: [String]
+    private var captures = 0
+    private var restores = 0
+    var counts: (captures: Int, restores: Int) { lock.withLock { (captures, restores) } }
+    init(data: Data, failure: FujiShootingError? = nil, failFirstEnd: Bool = false,
+         failOnCapture: Int? = nil, deviceIDs: [String] = []) {
+        self.data = data; self.failure = failure; self.failFirstEnd = failFirstEnd
+        self.failOnCapture = failOnCapture; self.deviceIDs = deviceIDs
+    }
+    func beginFujiCapture(requiresRAW: Bool, requiresCustomExposure: Bool, requiresFocus: Bool) async throws -> FujiSensorSnapshot {
+        let deviceID = lock.withLock { () -> String in deviceIDs.isEmpty ? "fake" : deviceIDs.removeFirst() }
+        return .init(transactionID: UUID(), deviceID: deviceID, exposure: .init(iso: 100, seconds: 1.0 / 125),
+              isoRange: 50...6400, durationRange: (1.0 / 8000)...1, lensPosition: 0.5, supportsFocus: true, supportsRAW: false)
+    }
+    func prepareFujiFrame(transactionID: UUID, exposure: FujiExposure?, focusPosition: Double?) async throws {}
+    func captureFujiFrame(transactionID: UUID, requiresRAW: Bool) async throws -> FujiCapturedFrame {
+        let number = lock.withLock { () -> Int in captures += 1; return captures }
+        if let failure { throw failure }
+        if let failOnCapture, number == failOnCapture { throw FujiShootingError.timedOut }
+        return .init(processedData: data, rawData: nil, capturedAt: Date(), exposure: .init(iso: 100, seconds: 1.0 / 125), lensPosition: 0.5)
+    }
+    func endFujiCapture(transactionID: UUID) async throws {
+        let first = lock.withLock { () -> Bool in restores += 1; return restores == 1 }
+        if failFirstEnd && first { throw FujiShootingError.timedOut }
+    }
+    func cancelFujiCapture() {}
+}
+
+@MainActor
+private final class FujiTestSaver: PhotoSaving {
+    let driver: FujiTestDriver
+    let failSave: Bool
+    private(set) var savedCount = 0
+    private(set) var restoredBeforeEverySave = true
+    private(set) var lastData: Data?
+    init(driver: FujiTestDriver, failSave: Bool = false) { self.driver = driver; self.failSave = failSave }
+    func save(image: UIImage, imageData: Data?, recipe: FilmRecipe, capturedAt: Date,
+              completion: @escaping @MainActor (Result<Void, PhotoLibrarySaveError>) -> Void) {
+        savedCount += 1; lastData = imageData
+        restoredBeforeEverySave = restoredBeforeEverySave && driver.counts.restores > 0
+        completion(failSave ? .failure(.accessDenied) : .success(()))
+    }
+}

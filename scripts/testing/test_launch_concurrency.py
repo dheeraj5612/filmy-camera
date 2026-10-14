@@ -31,5 +31,18 @@ class LaunchConcurrencyTests(unittest.TestCase):
         )
 
 
+class ChangeScopeTests(unittest.TestCase):
+    def test_config_and_storekit_changes_trigger_the_ios_gate(self):
+        root = Path(__file__).resolve().parents[2]
+        workflow = (root / ".github/workflows/ios-build.yml").read_text()
+        match = re.search(r"if grep -Eq '(\^\(FilmyCamera/[^']*)' <<<", workflow)
+        self.assertIsNotNone(match, "ios_changed regex not found")
+        pattern = match.group(1)
+        for path in ("Config/Monetization.Release.xcconfig", "StoreKit/Filmy.storekit"):
+            self.assertTrue(re.search(pattern, path), path)
+        self.assertIn('- "Config/**"', workflow)
+        self.assertIn('- "StoreKit/**"', workflow)
+
+
 if __name__ == "__main__":
     unittest.main()

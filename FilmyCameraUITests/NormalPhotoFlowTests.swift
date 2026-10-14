@@ -101,15 +101,16 @@ final class NormalPhotoFlowTests: XCTestCase {
         try ensureRecipe(id: "g7x-compact", name: "G7 X Compact")
         openRoll()
         let countBefore = try waitForRollFrameCount()
-        app.buttons["roll-back-to-camera"].tap()
-        XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 10))
+        returnToCameraFromRoll()
 
         try importSeededFixture(newerSavedFrameCount: countBefore)
-        // SwiftUI promotes the outer review identifier onto its sole scroll
-        // container when the accessibility layout has no pinned action bar.
+        // The review scroll keeps `review-content-scroll`, or inherits
+        // `review-screen`; Cancel and Save are pinned below it at every text size.
         let reviewScroll = app.scrollViews.matching(
             NSPredicate(format: "identifier IN %@", ["review-content-scroll", "review-screen"])
         ).firstMatch
+        assertReviewControl(app.buttons["review-save"], name: "Large-text pinned Save", containedInApp: true)
+        assertReviewControl(app.buttons["review-cancel"], name: "Large-text pinned Cancel", containedInApp: true)
         for (identifier, name) in [
             ("review-look-picker", "Large-text review look picker"),
             ("review-compare-original", "Large-text Original comparison"),
@@ -119,23 +120,27 @@ final class NormalPhotoFlowTests: XCTestCase {
             XCTAssertTrue(revealFully(control, in: reviewScroll), "\(name) must scroll fully into view")
             assertReviewControl(control, name: name, containedInApp: true)
         }
+        XCTAssertTrue(
+            waitForDisappearance(app.buttons["open-capture-modes"], timeout: 2),
+            "Capture modes must not sit under the import review"
+        )
         attachScreenshot(named: "review-large-text")
 
         XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }
         XCTAssertTrue(
-            waitUntil(timeout: 10) { app.frame.height > app.frame.width },
-            "Large-text review must stay portrait after device rotation before compact-layout checks"
+            waitForRotatedGeometry(timeout: 10),
+            "Large-text review must settle in the expected geometry after device rotation before compact-layout checks"
         )
         let landscapeFinish = app.buttons["review-finish-instantPrint"]
         let landscapeScroll = reviewScroll
         XCTAssertTrue(
             revealFully(landscapeFinish, in: landscapeScroll),
-            "Large-text portrait-locked Instant Print must scroll fully into view"
+            "Large-text rotated Instant Print must scroll fully into view"
         )
         assertReviewControl(
             landscapeFinish,
-            name: "Large-text portrait-locked Instant Print",
+            name: "Large-text rotated Instant Print",
             containedInApp: true
         )
         landscapeFinish.tap()
@@ -144,22 +149,22 @@ final class NormalPhotoFlowTests: XCTestCase {
                 app.descendants(matching: .any)["review-image"].label.contains("Instant Print")
                     && app.buttons["Save filtered photo"].isEnabled
             },
-            "Large-text portrait-locked review must finish rendering Instant Print"
+            "Large-text rotated review must finish rendering Instant Print"
         )
 
         let save = app.buttons["Save filtered photo"]
         XCTAssertTrue(
             revealFully(save, in: landscapeScroll),
-            "Large-text portrait-locked Save must scroll fully into view"
+            "Large-text rotated Save must scroll fully into view"
         )
-        assertReviewControl(save, name: "Large-text portrait-locked Save", containedInApp: true)
+        assertReviewControl(save, name: "Large-text rotated Save", containedInApp: true)
 
         let cancel = app.buttons["Cancel"]
         XCTAssertTrue(
             revealFully(cancel, in: landscapeScroll),
-            "Large-text portrait-locked Cancel must scroll fully into view"
+            "Large-text rotated Cancel must scroll fully into view"
         )
-        assertReviewControl(cancel, name: "Large-text portrait-locked Cancel", containedInApp: true)
+        assertReviewControl(cancel, name: "Large-text rotated Cancel", containedInApp: true)
         cancel.tap()
         let review = app.descendants(matching: .any)["review-screen"]
         XCTAssertTrue(waitForDisappearance(review, timeout: 10), "Cancel must dismiss imported review")
@@ -194,6 +199,10 @@ final class NormalPhotoFlowTests: XCTestCase {
         XCTAssertEqual(divider.value as? String, "Original 50 percent")
         let photo = app.descendants(matching: .any)["review-image"]
         XCTAssertTrue(photo.label.contains("Original on the left"))
+        // A hold on the photo is masked off while Split owns the photo.
+        photo.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6)).press(forDuration: 0.8)
+        XCTAssertEqual(split.value as? String, "On", "A hold must not leave Split")
+        XCTAssertEqual(divider.value as? String, "Original 50 percent", "A hold must not move the divider")
         let start = divider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         let end = start.withOffset(CGVector(dx: -photo.frame.width * 0.25, dy: 0))
         start.press(forDuration: 0.15, thenDragTo: end)
@@ -261,10 +270,23 @@ final class NormalPhotoFlowTests: XCTestCase {
         assertReviewControl(compare, name: "Original comparison")
         assertReviewControl(lookPicker, name: "Review look picker")
 
+        // Holding the photo peeks the original without latching a comparison.
+        let peekPhoto = app.descendants(matching: .any)["review-image"]
+        let photoFrameBeforePeek = peekPhoto.frame
+        peekPhoto.press(forDuration: 1.5)
+        XCTAssertEqual(compare.value as? String, "Look", "A hold must not latch the Original comparison")
+        XCTAssertTrue(peekPhoto.label.contains("Instant Print"), "A hold must leave the Instant Print look in place")
+        XCTAssertTrue(waitUntil(timeout: 30) { app.buttons["Save filtered photo"].isEnabled })
+
         compare.tap()
         XCTAssertTrue(waitUntil(timeout: 15) { compare.value as? String == "Original" })
         let photo = app.descendants(matching: .any)["review-image"]
         XCTAssertTrue(photo.label.contains("Original"), "Comparison must identify the source photo")
+        let originalFrame = photo.frame
+        XCTAssertEqual(originalFrame.minX, photoFrameBeforePeek.minX, accuracy: 1, "Original must not move the photo box")
+        XCTAssertEqual(originalFrame.minY, photoFrameBeforePeek.minY, accuracy: 1, "Original must not move the photo box")
+        XCTAssertEqual(originalFrame.width, photoFrameBeforePeek.width, accuracy: 1, "Original must not resize the photo box")
+        XCTAssertEqual(originalFrame.height, photoFrameBeforePeek.height, accuracy: 1, "Original must not resize the photo box")
         attachScreenshot(named: "review-original-portrait")
 
         lookPicker.tap()
@@ -294,31 +316,31 @@ final class NormalPhotoFlowTests: XCTestCase {
         XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }
         XCTAssertTrue(
-            waitUntil(timeout: 10) { app.frame.height > app.frame.width },
-            "The review must stay portrait after device rotation before layout assertions"
+            waitForRotatedGeometry(timeout: 10),
+            "The review must settle in the expected geometry after device rotation before layout assertions"
         )
-        assertReviewControl(compare, name: "Portrait-locked Original comparison", containedInApp: true)
-        assertReviewControl(lookPicker, name: "Portrait-locked review look picker", containedInApp: true)
-        assertReviewControl(printFinish, name: "Portrait-locked Instant Print", containedInApp: true)
+        assertReviewControl(compare, name: "Rotated Original comparison", containedInApp: true)
+        assertReviewControl(lookPicker, name: "Rotated review look picker", containedInApp: true)
+        assertReviewControl(printFinish, name: "Rotated Instant Print", containedInApp: true)
         assertReviewControl(
             app.buttons["Save filtered photo"],
-            name: "Portrait-locked Save filtered photo",
+            name: "Rotated Save filtered photo",
             containedInApp: true
         )
         let landscapePhoto = app.descendants(matching: .any)["review-image"]
-        XCTAssertTrue(landscapePhoto.waitForExistence(timeout: 10), "Portrait-locked review must keep its photo visible")
+        XCTAssertTrue(landscapePhoto.waitForExistence(timeout: 10), "Rotated review must keep its photo visible")
         XCTAssertTrue(
             app.frame.insetBy(dx: -1, dy: -1).contains(landscapePhoto.frame),
-            "Portrait-locked review photo must remain inside the app frame"
+            "Rotated review photo must remain inside the app frame"
         )
         XCTAssertGreaterThan(
             landscapePhoto.frame.height,
             120,
-            "Portrait-locked review must reserve usable height for the fitted photo"
+            "Rotated review must reserve usable height for the fitted photo"
         )
         XCTAssertTrue(
             landscapePhoto.frame.intersection(app.buttons["Save filtered photo"].frame).isNull,
-            "Portrait-locked actions must not cover the fitted photo"
+            "Rotated actions must not cover the fitted photo"
         )
         attachScreenshot(named: "review-monochrome-landscape")
 
@@ -363,7 +385,7 @@ final class NormalPhotoFlowTests: XCTestCase {
         if containedInApp {
             XCTAssertTrue(
                 app.frame.insetBy(dx: -1, dy: -1).contains(element.frame),
-                "\(name) must remain entirely inside the landscape app frame"
+                "\(name) must remain entirely inside the settled app frame"
             )
         }
     }
@@ -420,10 +442,13 @@ final class NormalPhotoFlowTests: XCTestCase {
         app?.terminate()
         XCUIDevice.shared.orientation = .portrait
         app = XCUIApplication()
-        // Deliberately omit -ui-testing so PhotosPicker and the real save path
-        // are exercised against the disposable seeded library.
+        // Deliberately omit the exact -ui-testing flag so PhotosPicker and the
+        // real save path are exercised against the disposable seeded library.
+        // This narrower prefix keeps premium entitlement deterministic without
+        // replacing PhotoKit or the camera services used by this lane.
+        app.launchArguments = ["-ui-testing-photos-e2e"]
         if let contentSizeCategory {
-            app.launchArguments = ["-UIPreferredContentSizeCategoryName", contentSizeCategory]
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", contentSizeCategory]
         }
         app.launch()
 
@@ -434,7 +459,7 @@ final class NormalPhotoFlowTests: XCTestCase {
         app.tap()
         XCTAssertTrue(
             waitUntil(timeout: 10) { app.frame.height >= app.frame.width },
-            "The normal Photos flow must launch in settled portrait geometry"
+            "The normal Photos flow must settle in the explicitly requested portrait geometry"
         )
         XCTAssertTrue(app.buttons["Open roll"].waitForExistence(timeout: 15))
     }
@@ -467,10 +492,21 @@ final class NormalPhotoFlowTests: XCTestCase {
             waitUntil(timeout: 10) { currentLook.label.contains(name) },
             "Selecting \(name) must update the current look"
         )
-        let close = app.buttons["recipe-drawer-close"]
-        XCTAssertTrue(close.waitForExistence(timeout: 5), "The look drawer must remain dismissible")
-        close.tap()
-        XCTAssertTrue(waitForDisappearance(close, timeout: 5), "Selecting a look must leave the camera controls available")
+        XCTAssertTrue(app.descendants(matching: .any)["recipe-drawer"].exists)
+        app.buttons["recipe-drawer-close"].tap()
+        XCTAssertTrue(
+            waitForDisappearance(app.buttons["recipe-drawer-close"], timeout: 5),
+            "Closing the look picker must leave the camera controls available"
+        )
+    }
+
+    private func waitForRotatedGeometry(timeout: TimeInterval) -> Bool {
+        waitUntil(timeout: timeout) {
+            if UIDevice.current.userInterfaceIdiom == .pad {
+                return app.frame.width > app.frame.height
+            }
+            return app.frame.height >= app.frame.width
+        }
     }
 
     private func importSeededFixture(newerSavedFrameCount: Int? = nil) throws {
@@ -480,12 +516,11 @@ final class NormalPhotoFlowTests: XCTestCase {
         } else {
             openRoll()
             newerFrames = try waitForRollFrameCount()
-            app.buttons["roll-back-to-camera"].tap()
-            XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 10))
         }
-        let importPhoto = app.buttons["import-photo"]
-        XCTAssertTrue(importPhoto.waitForExistence(timeout: 10))
-        importPhoto.tap()
+        if !app.buttons["roll-import-photo"].exists { app.buttons["roll-tab"].tap() }
+        let rollImport = app.buttons["roll-import-photo"]
+        XCTAssertTrue(rollImport.waitForExistence(timeout: 10))
+        rollImport.tap()
 
         let photos = app.images.matching(
             NSPredicate(format: "identifier == 'PXGGridLayout-Info'")
@@ -545,7 +580,8 @@ final class NormalPhotoFlowTests: XCTestCase {
             // vertical scroll view. Resolve vertical clipping first so a
             // coordinate derived from the tile can never land on the camera
             // controls below the drawer.
-            let pickerViewport = picker.frame.intersection(app.frame).insetBy(dx: 1, dy: 1)
+            // The 76 pt row has no vertical slack, so allow 1 pt for fractional frames.
+            let pickerViewport = picker.frame.intersection(app.frame).insetBy(dx: 1, dy: -1)
             let frame = element.frame
             guard pickerViewport.width > 20, pickerViewport.height > 20 else {
                 return false
@@ -564,7 +600,7 @@ final class NormalPhotoFlowTests: XCTestCase {
                     return false
                 }
             } else {
-                let railViewport = rail.frame.intersection(pickerViewport).insetBy(dx: 1, dy: 1)
+                let railViewport = rail.frame.intersection(pickerViewport).insetBy(dx: 1, dy: -1)
                 guard railViewport.width > 20, railViewport.height > 20 else {
                     return false
                 }
@@ -720,6 +756,24 @@ final class NormalPhotoFlowTests: XCTestCase {
         )
     }
 
+    private func returnToCameraFromRoll() {
+        let back = app.buttons["roll-back-to-camera"]
+        let menu = app.buttons["recipe-menu"]
+        for attempt in 1...3 {
+            var tapped = false
+            if back.waitForExistence(timeout: 5), back.isHittable {
+                back.tap()
+                tapped = true
+            }
+            if menu.waitForExistence(timeout: 10) { return }
+            // CI run 38345928864: the button dimmed (press recognized) but the
+            // Roll stayed up. Keep evidence so a recurring ignored press shows.
+            let name = tapped ? "roll-back-to-camera-ignored-attempt-\(attempt)" : "roll-back-to-camera-not-hittable-attempt-\(attempt)"
+            attachScreenshot(named: name)
+        }
+        XCTFail("Back to camera must reach the viewfinder")
+    }
+
     private func openRoll() {
         let openRoll = app.buttons["Open roll"]
         XCTAssertTrue(openRoll.waitForExistence(timeout: 10))
@@ -730,17 +784,30 @@ final class NormalPhotoFlowTests: XCTestCase {
         // disposable simulator was pre-seeded. Resolve the in-app CTA and the
         // subsequent system prompt while waiting for Roll's loaded or empty
         // state; a missing count is never treated as an empty Roll.
-        var requestedReadAccess = false
-        let loaded = waitUntil(timeout: 30) {
+        var readAccessRequests = 0
+        var lastReadAccessRequest = Date.distantPast
+        var sawSystemPrompt = false
+        let loaded = waitUntil(timeout: 40) {
             if rollFrameCount() != nil { return true }
-            if tapPhotosPermissionPromptIfPresent() { return false }
+            if tapPhotosPermissionPromptIfPresent() {
+                sawSystemPrompt = true
+                return false
+            }
 
             // Request once, then handle the system alert directly. Repeated
             // CTA taps can be replayed after XCTest dismisses the alert onto
             // the newly positioned "Make your first frame" button.
+            // CI run 38493415557: the press landed on the button's centre, no
+            // prompt followed and the CTA stayed for 30 s. Ask one more time,
+            // only while no prompt has shown for 10 s after the first request.
             let permission = app.buttons["Allow Photos access"]
-            if !requestedReadAccess, permission.exists, permission.isHittable {
-                requestedReadAccess = true
+            let isFirstRequest = readAccessRequests == 0
+            let isRetry = readAccessRequests == 1 && !sawSystemPrompt
+                && Date().timeIntervalSince(lastReadAccessRequest) > 10
+            if isFirstRequest || isRetry, permission.exists, permission.isHittable {
+                if isRetry { attachScreenshot(named: "roll-photos-request-ignored") }
+                readAccessRequests += 1
+                lastReadAccessRequest = Date()
                 permission.tap()
             }
             return rollFrameCount() != nil
@@ -748,7 +815,8 @@ final class NormalPhotoFlowTests: XCTestCase {
         if !loaded {
             XCTFail(
                 "Roll did not publish a loaded frame count or empty state after Photos permission handling. " +
-                "Permission UI: \(photosPermissionPromptDescription())\nAccessibility tree:\n\(app.debugDescription)"
+                "Permission UI: \(photosPermissionPromptDescription()), requests: \(readAccessRequests), " +
+                "system prompt seen: \(sawSystemPrompt)\nAccessibility tree:\n\(app.debugDescription)"
             )
         }
     }
@@ -788,11 +856,12 @@ final class NormalPhotoFlowTests: XCTestCase {
     }
 
     private func rollFrameCount() -> Int? {
-        for label in app.staticTexts.allElementsBoundByIndex.map(\.label)
-            where label.hasSuffix(" frames") {
-            if let count = Int(label.dropLast(" frames".count)) {
-                return count
-            }
+        let countLabel = app.staticTexts.matching(
+            NSPredicate(format: "label ENDSWITH %@", " frames")
+        ).firstMatch
+        if countLabel.exists,
+           let count = Int(countLabel.label.dropLast(" frames".count)) {
+            return count
         }
         if app.staticTexts["Your frames will live here"].exists
             || app.staticTexts["Your selected roll is empty"].exists {

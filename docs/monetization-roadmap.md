@@ -1,5 +1,7 @@
 # Monetization roadmap
 
+**Historical September 5 proposal.** The September 15 implementation supersedes the trial, access, account and advertising decisions below. See [current monetization behavior and setup](monetization.md). No watermark is added by the current request. Earlier build statements remain historical.
+
 Status: future product direction recorded September 5, 2026. This is a plan, not implemented behavior. Build 8 has no paywall, subscription trial, or export watermark.
 
 ## Current launch

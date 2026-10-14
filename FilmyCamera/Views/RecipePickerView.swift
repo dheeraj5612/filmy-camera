@@ -9,43 +9,58 @@ struct RecipePickerView: View {
     @Binding var selectedRecipeID: String
     let onOpenDetail: (FilmRecipe) -> Void
     let compact: Bool
+    let favoriteIDs: Set<String>
+    let showsFavoriteBadges: Bool
+    let onToggleFavorite: ((FilmRecipe) -> Void)?
+    let keepsOrder: Bool
+    let listMarker: ListMarker?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     init(
         recipes: [FilmRecipe],
         selectedRecipeID: Binding<String>,
         onOpenDetail: @escaping (FilmRecipe) -> Void,
-        compact: Bool = false
+        compact: Bool = false,
+        favoriteIDs: Set<String> = [],
+        showsFavoriteBadges: Bool = true,
+        onToggleFavorite: ((FilmRecipe) -> Void)? = nil,
+        keepsOrder: Bool = false,
+        listMarker: ListMarker? = nil
     ) {
         self.recipes = recipes
         _selectedRecipeID = selectedRecipeID
         self.onOpenDetail = onOpenDetail
         self.compact = compact
+        self.favoriteIDs = favoriteIDs
+        self.showsFavoriteBadges = showsFavoriteBadges
+        self.onToggleFavorite = onToggleFavorite
+        self.keepsOrder = keepsOrder
+        self.listMarker = listMarker
     }
 
+    /// Names a flat, ordered list (Recent or Results) in the drawer.
+    struct ListMarker: Equatable {
+        let title: String
+        let systemImage: String
+        let count: Int
+    }
+
+    /// AX grid tiles stretch to the column width; the width here is the floor.
     private var swatchSize: CGSize {
-        if compact {
-            return dynamicTypeSize.isAccessibilitySize
-                ? CGSize(width: 146, height: 90)
-                : CGSize(width: 126, height: 88)
+        if dynamicTypeSize.isAccessibilitySize {
+            return CGSize(width: 140, height: 56)
         }
         // Regular widths (iPad) have room for a slightly larger swatch.
         return horizontalSizeClass == .regular
-            ? CGSize(width: 96, height: 70)
-            : CGSize(width: 78, height: 58)
+            ? CGSize(width: 88, height: 56)
+            : CGSize(width: 64, height: 40)
     }
 
-    private var tileSpacing: CGFloat {
-        compact ? 10 : 10
-    }
-
-    /// Captions stay outside the photograph at every text size.
-    @ScaledMetric(relativeTo: .caption) private var captionSpace: CGFloat = 36
-    private var railHeight: CGFloat {
-        swatchSize.height + captionSpace + 12
+    /// Swatch, 3 pt gap, a 2-line name (32 pt) and 1 pt of top rail padding.
+    private var rowHeight: CGFloat {
+        swatchSize.height + 3 + 32 + 1
     }
 
     /// Put the compact digital profile in the first glance of the rail. Its
@@ -53,7 +68,7 @@ struct RecipePickerView: View {
     /// compare the G7 X option with film recipes without a long horizontal
     /// hunt. IDs and the relative order of every other recipe stay intact.
     private var presentationRecipes: [FilmRecipe] {
-        guard let compactProfile = recipes.first(where: { $0.filmBase == .compactDigital }) else {
+        guard !keepsOrder, let compactProfile = recipes.first(where: { $0.filmBase == .compactDigital }) else {
             return recipes
         }
         return [compactProfile] + recipes.filter { $0.id != compactProfile.id }
@@ -79,6 +94,14 @@ struct RecipePickerView: View {
             case .compact: return "camera.fill"
             case .film: return "film"
             case .monochrome: return "circle.lefthalf.filled"
+            }
+        }
+
+        var shortTitle: String {
+            switch self {
+            case .compact: return "Digital"
+            case .film: return "Film"
+            case .monochrome: return "Mono"
             }
         }
     }
@@ -109,115 +132,334 @@ struct RecipePickerView: View {
     }
 
     var body: some View {
-        if compact {
-            expandedPicker
+        if dynamicTypeSize.isAccessibilitySize {
+            accessibleGrid
+        } else if compact {
+            groupPager
+        } else if let listMarker {
+            HStack(spacing: 4) {
+                listMarkerView(listMarker)
+                standardRail
+            }
         } else {
             standardRail
         }
     }
 
+    // MARK: Scrolling helpers
+
+    private func scroll(_ proxy: ScrollViewProxy, to id: String, anchor: UnitPoint) {
+        if reduceMotion {
+            proxy.scrollTo(id, anchor: anchor)
+        } else {
+            withAnimation(.snappy(duration: 0.24)) {
+                proxy.scrollTo(id, anchor: anchor)
+            }
+        }
+    }
+
+    private func section(holding id: String) -> RecipeGroupSection? {
+        groupedRecipes.first { (candidate: RecipeGroupSection) -> Bool in
+            candidate.recipes.contains { (recipe: FilmRecipe) -> Bool in recipe.id == id }
+        }
+    }
+
+    private func nextSection(after section: RecipeGroupSection) -> RecipeGroupSection {
+        let all = groupedRecipes
+        guard let index = all.firstIndex(where: { (candidate: RecipeGroupSection) -> Bool in
+            candidate.id == section.id
+        }) else {
+            return section
+        }
+        return all[(index + 1) % all.count]
+    }
+
+    private func centerSelectedSection(_ proxy: ScrollViewProxy, animated: Bool) {
+        guard let target = section(holding: selectedRecipeID) else { return }
+        if animated {
+            scroll(proxy, to: target.id, anchor: .top)
+        } else {
+            proxy.scrollTo(target.id, anchor: .top)
+        }
+    }
+
+    private func centerSelectedTile(
+        _ proxy: ScrollViewProxy,
+        in section: RecipeGroupSection,
+        animated: Bool
+    ) {
+        let holdsSelection = section.recipes.contains { (recipe: FilmRecipe) -> Bool in
+            recipe.id == selectedRecipeID
+        }
+        guard holdsSelection else { return }
+        if animated {
+            scroll(proxy, to: selectedRecipeID, anchor: .center)
+        } else {
+            proxy.scrollTo(selectedRecipeID, anchor: .center)
+        }
+    }
+
+    // MARK: Favorites and search results
+
     private var standardRail: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: tileSpacing) {
+                LazyHStack(alignment: .top, spacing: 10) {
                     ForEach(presentationRecipes) { recipe in
-                        recipeButton(for: recipe)
+                        recipeButton(for: recipe, inGrid: false)
                             .id(recipe.id)
                     }
                 }
                 .scrollTargetLayout()
                 .padding(.horizontal, 4)
-                .padding(.vertical, 6)
+                .padding(.top, 1)
             }
-            .scrollClipDisabled()
             .scrollTargetBehavior(.viewAligned)
             .contentMargins(.horizontal, 4, for: .scrollContent)
-            .frame(height: railHeight)
+            .frame(height: rowHeight)
             .onAppear {
                 proxy.scrollTo(selectedRecipeID, anchor: .center)
             }
             .onChange(of: selectedRecipeID) { _, newValue in
-                if reduceMotion {
-                    proxy.scrollTo(newValue, anchor: .center)
-                } else {
-                    withAnimation(.snappy(duration: 0.24)) {
-                        proxy.scrollTo(newValue, anchor: .center)
-                    }
-                }
+                scroll(proxy, to: newValue, anchor: .center)
             }
             .accessibilityIdentifier("recipe-rail")
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("recipe-picker")
-        .accessibilityLabel("Film recipe picker. Swipe left or right to browse looks.")
+        .accessibilityLabel("Look picker. Swipe left or right to browse looks.")
     }
 
-    /// The drawer is intentionally grouped by the kind of camera decision it
-    /// represents. A compact profile and a monochrome look should not be
-    /// hidden in one undifferentiated strip of thumbnails.
-    private var expandedPicker: some View {
-        ScrollViewReader { outerProxy in
-            ScrollView(.vertical, showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: 14) {
-                    ForEach(groupedRecipes) { section in
-                        let group = section.group
-                        let recipes = section.recipes
-                        VStack(alignment: .leading, spacing: 7) {
-                        HStack(spacing: 7) {
-                            Image(systemName: group.symbol)
-                                .font(.system(.caption, weight: .bold))
-                                .foregroundStyle(groupAccent(group))
-                                .accessibilityHidden(true)
-                            Text(group.title.uppercased())
-                                .font(.system(.caption, design: .rounded).weight(.bold))
-                                .tracking(0.8)
-                                .foregroundStyle(groupAccent(group))
-                            Text("\(recipes.count)")
-                                .font(.system(.caption2, design: .monospaced).weight(.bold))
-                                .foregroundStyle(FilmyTheme.tertiary)
-                            Spacer(minLength: 0)
-                        }
+    // MARK: Default sizes: vertical pager of per-group rails
 
-                            ScrollViewReader { rowProxy in
-                                ScrollView(.horizontal, showsIndicators: false) {
-                                    LazyHStack(alignment: .top, spacing: 10) {
-                                        ForEach(recipes) { recipe in
-                                            recipeButton(for: recipe)
-                                                .id(recipe.id)
-                                        }
-                                    }
-                                    .padding(.horizontal, 2)
-                                    .padding(.vertical, 2)
-                                }
-                                .scrollClipDisabled()
-                                .accessibilityIdentifier("recipe-group-\(group.id)")
-                                .onAppear {
-                                    if recipes.contains(where: { $0.id == selectedRecipeID }) {
-                                        rowProxy.scrollTo(selectedRecipeID, anchor: .center)
-                                    }
-                                }
-                            }
-                        }
-                        .id(section.id)
+    /// One 76 pt row per group. The rows page vertically; each row is a
+    /// group marker followed by a horizontal rail of that group's looks.
+    private var groupPager: some View {
+        ScrollViewReader { outer in
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 0) {
+                    ForEach(groupedRecipes) { section in
+                        groupRow(section, outer: outer)
+                            .containerRelativeFrame(.vertical)
+                            .id(section.id)
                     }
                 }
-                .padding(.horizontal, 8)
+                .scrollTargetLayout()
+            }
+            .scrollTargetBehavior(.paging)
+            .frame(height: rowHeight)
+            .accessibilityIdentifier("recipe-picker")
+            .accessibilityLabel("Look picker grouped by digital, film, and monochrome looks")
+            .onAppear {
+                centerSelectedSection(outer, animated: false)
+            }
+            .onChange(of: selectedRecipeID) { _, _ in
+                centerSelectedSection(outer, animated: true)
+            }
+        }
+    }
+
+    private func groupRow(_ section: RecipeGroupSection, outer: ScrollViewProxy) -> some View {
+        HStack(spacing: 4) {
+            groupMarker(section, outer: outer, isHeader: false)
+            groupRail(section)
+        }
+    }
+
+    private func groupRail(_ section: RecipeGroupSection) -> some View {
+        ScrollViewReader { row in
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: 6) {
+                    ForEach(section.recipes) { recipe in
+                        recipeButton(for: recipe, inGrid: false)
+                            .id(recipe.id)
+                    }
+                }
+                .padding(.horizontal, 2)
+                .padding(.top, 1)
+            }
+            .accessibilityIdentifier("recipe-group-\(section.group.id)")
+            .onAppear {
+                centerSelectedTile(row, in: section, animated: false)
+            }
+            .onChange(of: selectedRecipeID) { _, _ in
+                centerSelectedTile(row, in: section, animated: true)
+            }
+        }
+    }
+
+    // MARK: Accessibility sizes: grouped two-column grid
+
+    private var gridColumns: [GridItem] {
+        [GridItem(.adaptive(minimum: 140), spacing: 10, alignment: .top)]
+    }
+
+    private var accessibleGrid: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 14) {
+                    if keepsOrder, let listMarker {
+                        listHeaderView(listMarker)
+                        flatGrid
+                    } else {
+                        ForEach(groupedRecipes) { section in
+                            gridSection(section, proxy: proxy)
+                                .id(section.id)
+                        }
+                    }
+                }
+                .padding(.horizontal, 4)
                 .padding(.vertical, 4)
             }
+            .scrollIndicatorsFlash(onAppear: true)
+            .accessibilityIdentifier("recipe-picker")
             .onAppear {
-                if let section = groupedRecipes.first(where: { $0.recipes.contains(where: { $0.id == selectedRecipeID }) }) {
-                    outerProxy.scrollTo(section.id, anchor: .center)
+                proxy.scrollTo(selectedRecipeID, anchor: .center)
+            }
+            .onChange(of: selectedRecipeID) { _, newValue in
+                scroll(proxy, to: newValue, anchor: .center)
+            }
+        }
+    }
+
+    private var flatGrid: some View {
+        LazyVGrid(columns: gridColumns, spacing: 12) {
+            ForEach(presentationRecipes) { recipe in
+                recipeButton(for: recipe, inGrid: true)
+                    .id(recipe.id)
+            }
+        }
+    }
+
+    private func gridSection(_ section: RecipeGroupSection, proxy: ScrollViewProxy) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            groupMarker(section, outer: proxy, isHeader: true)
+            LazyVGrid(columns: gridColumns, spacing: 12) {
+                ForEach(section.recipes) { recipe in
+                    recipeButton(for: recipe, inGrid: true)
+                        .id(recipe.id)
                 }
             }
         }
-        // Landscape phones have very little vertical room once the drawer
-        // header and capture controls are accounted for. Keep the drawer
-        // bounded and let its grouped rows scroll inside that space.
-        .frame(maxHeight: verticalSizeClass == .compact
-            ? (dynamicTypeSize.isAccessibilitySize ? 220 : 190)
-            : (dynamicTypeSize.isAccessibilitySize ? 390 : 330))
-        .accessibilityIdentifier("recipe-picker")
-        .accessibilityLabel("Film recipe picker grouped by compact, film, and monochrome looks")
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("recipe-group-\(section.group.id)")
+    }
+
+    // MARK: Group marker
+
+    private func groupMarker(
+        _ section: RecipeGroupSection,
+        outer: ScrollViewProxy,
+        isHeader: Bool
+    ) -> some View {
+        let next = nextSection(after: section)
+        let count = section.recipes.count
+        let canAdvance = groupedRecipes.count > 1
+        return Button {
+            scroll(outer, to: next.id, anchor: .top)
+        } label: {
+            if isHeader {
+                headerMarkerLabel(section, showsChevron: canAdvance)
+            } else {
+                railMarkerLabel(section, showsChevron: canAdvance)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("recipe-group-marker-\(section.group.id)")
+        .accessibilityLabel("\(section.group.title), \(count) looks")
+        .accessibilityHint(canAdvance ? "Shows \(next.group.title) looks" : "")
+        .disabled(!canAdvance)
+    }
+
+    private func railMarkerLabel(_ section: RecipeGroupSection, showsChevron: Bool) -> some View {
+        let group = section.group
+        return VStack(spacing: 2) {
+            Image(systemName: group.symbol)
+                .font(.system(.caption, weight: .bold))
+                .foregroundStyle(groupAccent(group))
+            Text(group.shortTitle)
+                .font(.system(.caption2, design: .rounded).weight(.bold))
+                .foregroundStyle(groupAccent(group))
+                .lineLimit(1)
+            Text("\(section.recipes.count)")
+                .font(.system(.caption2, design: .monospaced).weight(.bold))
+                .foregroundStyle(FilmyTheme.tertiary)
+            Image(systemName: "chevron.down")
+                .font(.system(.caption2, weight: .bold))
+                .foregroundStyle(groupAccent(group))
+                .opacity(showsChevron ? 1 : 0)
+        }
+        .dynamicTypeSize(...DynamicTypeSize.xLarge)
+        .frame(width: 52, height: rowHeight)
+        .contentShape(Rectangle())
+    }
+
+    private func headerMarkerLabel(_ section: RecipeGroupSection, showsChevron: Bool) -> some View {
+        let group = section.group
+        return HStack(spacing: 7) {
+            Image(systemName: group.symbol)
+                .font(.system(.caption, weight: .bold))
+                .foregroundStyle(groupAccent(group))
+            Text(group.title.uppercased())
+                .font(.system(.caption, design: .rounded).weight(.bold))
+                .tracking(0.8)
+                .foregroundStyle(groupAccent(group))
+            Text("\(section.recipes.count)")
+                .font(.system(.caption2, design: .monospaced).weight(.bold))
+                .foregroundStyle(FilmyTheme.tertiary)
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.down")
+                .font(.system(.caption2, weight: .bold))
+                .foregroundStyle(groupAccent(group))
+                .opacity(showsChevron ? 1 : 0)
+        }
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+
+    private func listMarkerView(_ marker: ListMarker) -> some View {
+        VStack(spacing: 2) {
+            Image(systemName: marker.systemImage)
+                .font(.system(.caption, weight: .bold))
+                .foregroundStyle(FilmyTheme.accent)
+            Text(marker.title)
+                .font(.system(.caption2, design: .rounded).weight(.bold))
+                .foregroundStyle(FilmyTheme.accent)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Text("\(marker.count)")
+                .font(.system(.caption2, design: .monospaced).weight(.bold))
+                .foregroundStyle(FilmyTheme.tertiary)
+        }
+        .dynamicTypeSize(...DynamicTypeSize.xLarge)
+        .frame(width: 52, height: rowHeight)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(listMarkerAccessibilityLabel(marker))
+        .accessibilityIdentifier("recipe-list-marker")
+    }
+
+    private func listHeaderView(_ marker: ListMarker) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: marker.systemImage)
+                .font(.system(.caption, weight: .bold))
+                .foregroundStyle(FilmyTheme.accent)
+            Text(marker.title.uppercased())
+                .font(.system(.caption, design: .rounded).weight(.bold))
+                .tracking(0.8)
+                .foregroundStyle(FilmyTheme.accent)
+            Text("\(marker.count)")
+                .font(.system(.caption2, design: .monospaced).weight(.bold))
+                .foregroundStyle(FilmyTheme.tertiary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(listMarkerAccessibilityLabel(marker))
+        .accessibilityIdentifier("recipe-list-marker")
+    }
+
+    private func listMarkerAccessibilityLabel(_ marker: ListMarker) -> String {
+        let looks: String = marker.count == 1 ? "1 look" : "\(marker.count) looks"
+        return "\(marker.title), \(looks)"
     }
 
     private func groupAccent(_ group: RecipeGroup) -> Color {
@@ -228,26 +470,43 @@ struct RecipePickerView: View {
         }
     }
 
-    private func recipeButton(for recipe: FilmRecipe) -> some View {
+    // MARK: Tiles
+
+    private func recipeButton(for recipe: FilmRecipe, inGrid: Bool) -> some View {
         let isSelected = selectedRecipeID == recipe.id
+        let isFavorite = favoriteIDs.contains(recipe.id)
+        let favoriteTitle: String = isFavorite ? "Remove from favorites" : "Add to favorites"
+        let baseLabel: String = "\(recipe.name), \(recipe.descriptor)"
 
         return Button {
             withAnimation(reduceMotion ? nil : .snappy(duration: 0.22)) {
                 selectedRecipeID = recipe.id
             }
         } label: {
-            recipeTile(recipe)
+            recipeTile(recipe, inGrid: inGrid)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("recipe-\(recipe.id)")
-        .accessibilityLabel("\(recipe.name), \(recipe.descriptor)")
+        .accessibilityLabel(isFavorite ? "\(baseLabel), Favorite" : baseLabel)
         .accessibilityValue(isSelected ? "Selected" : "Not selected")
-        .accessibilityHint("Double tap to select this look. Use the View recipe details action for more information.")
+        .accessibilityHint("Selects this look. The picker stays open.")
         .accessibilityAction(named: "View recipe details") {
             onOpenDetail(recipe)
         }
+        .accessibilityActions {
+            if let onToggleFavorite {
+                Button(favoriteTitle) { onToggleFavorite(recipe) }
+            }
+        }
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .contextMenu {
+            if let onToggleFavorite {
+                Button {
+                    onToggleFavorite(recipe)
+                } label: {
+                    Label(favoriteTitle, systemImage: isFavorite ? "heart.slash" : "heart")
+                }
+            }
             Button {
                 onOpenDetail(recipe)
             } label: {
@@ -256,30 +515,92 @@ struct RecipePickerView: View {
         }
     }
 
-    private func recipeTile(_ recipe: FilmRecipe) -> some View {
-        let isSelected = selectedRecipeID == recipe.id
+    private func nameFont(isSelected: Bool) -> Font {
+        .system(.caption, design: .rounded).weight(isSelected ? .bold : .semibold)
+    }
 
-        return VStack(spacing: 6) {
-            RecipeSwatch(
-                recipe: recipe,
-                isSelected: isSelected,
-                compact: compact,
-                showsLabel: false
-            )
-            .frame(width: swatchSize.width, height: swatchSize.height)
-            .clipShape(Rectangle())
+    private func nameColor(isSelected: Bool) -> Color {
+        isSelected ? FilmyTheme.accent : Color.white.opacity(0.72)
+    }
 
+    private func selectedBadge(isSelected: Bool) -> some View {
+        Group {
+            if isSelected {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.caption2)
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(Color.black, FilmyTheme.accent)
+                    .padding(2)
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func favoriteBadge(isFavorite: Bool) -> some View {
+        if isFavorite {
+            Image(systemName: "heart.circle.fill")
+                .font(.caption2)
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(Color.white, Color.black.opacity(0.6))
+                .padding(2)
+                .accessibilityHidden(true)
+        }
+    }
+
+    @ViewBuilder
+    private func tileSwatch(_ recipe: FilmRecipe, isSelected: Bool, isFavorite: Bool, inGrid: Bool) -> some View {
+        let swatch = RecipeSwatch(
+            recipe: recipe,
+            isSelected: isSelected,
+            compact: true,
+            showsLabel: false
+        )
+        if inGrid {
+            swatch
+                .frame(maxWidth: .infinity)
+                .frame(height: swatchSize.height)
+                .clipShape(Rectangle())
+                .overlay(alignment: .topTrailing) { selectedBadge(isSelected: isSelected) }
+                .overlay(alignment: .topLeading) { favoriteBadge(isFavorite: isFavorite) }
+        } else {
+            swatch
+                .frame(width: swatchSize.width, height: swatchSize.height)
+                .clipShape(Rectangle())
+                .overlay(alignment: .topTrailing) { selectedBadge(isSelected: isSelected) }
+                .overlay(alignment: .topLeading) { favoriteBadge(isFavorite: isFavorite) }
+        }
+    }
+
+    @ViewBuilder
+    private func tileName(_ recipe: FilmRecipe, isSelected: Bool, inGrid: Bool) -> some View {
+        if inGrid {
             Text(recipe.name)
-                    .font(.system(
-                        dynamicTypeSize.isAccessibilitySize ? .caption : .caption2,
-                        design: .rounded
-                    ).weight(isSelected ? .bold : .semibold))
-                    .foregroundStyle(isSelected ? FilmyTheme.accent : Color.white.opacity(0.72))
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                    .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 0.82 : 0.78)
-                    .multilineTextAlignment(.center)
-                    .frame(width: swatchSize.width + 8)
-                    .fixedSize(horizontal: false, vertical: dynamicTypeSize.isAccessibilitySize)
+                .font(nameFont(isSelected: isSelected))
+                .foregroundStyle(nameColor(isSelected: isSelected))
+                .lineLimit(3)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            Text(recipe.name)
+                .font(nameFont(isSelected: isSelected))
+                .foregroundStyle(nameColor(isSelected: isSelected))
+                .dynamicTypeSize(DynamicTypeSize.large ... DynamicTypeSize.xLarge)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .minimumScaleFactor(0.85)
+                .allowsTightening(true)
+                .frame(width: swatchSize.width + 8, height: 32, alignment: .top)
+        }
+    }
+
+    private func recipeTile(_ recipe: FilmRecipe, inGrid: Bool) -> some View {
+        let isSelected = selectedRecipeID == recipe.id
+        let showsBadge: Bool = showsFavoriteBadges && favoriteIDs.contains(recipe.id)
+
+        return VStack(spacing: 3) {
+            tileSwatch(recipe, isSelected: isSelected, isFavorite: showsBadge, inGrid: inGrid)
+            tileName(recipe, isSelected: isSelected, inGrid: inGrid)
         }
         // Do not dim unselected photographs: their colors are the decision.
         .contentShape(Rectangle())
@@ -415,6 +736,24 @@ enum RecipeDetailCommitPolicy {
     }
 }
 
+/// One-line character of a look, built from the same pairs as the control chips.
+enum LookCharacter {
+    static func pairs(for recipe: FilmRecipe) -> [(String, String)] {
+        let base: [(String, String)] = recipe.controlSummary
+        guard recipe.filmBase.supportsMonochromaticColorAxes else { return base }
+        return base.map { (pair: (String, String)) -> (String, String) in
+            pair.0 == "Color" ? ("Color", "Black and white") : pair
+        }
+    }
+
+    static func line(for recipe: FilmRecipe) -> String {
+        let parts: [String] = pairs(for: recipe).map { (pair: (String, String)) -> String in
+            "\(pair.0): \(pair.1)"
+        }
+        return parts.joined(separator: " \u{00B7} ")
+    }
+}
+
 struct RecipeDetailView: View {
     private enum EditorSection: String, CaseIterable, Identifiable {
         case tone
@@ -463,8 +802,11 @@ struct RecipeDetailView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var draft: FilmRecipe
+    @State private var isConfirmingDiscard = false
     @State private var expandedSections: Set<EditorSection> = [.tone, .color]
     @State private var isShowingLookInfo = false
+    @State private var showingSourceSettings = false
+    @State private var summaryWidth: CGFloat = 0
 
     init(
         recipe: FilmRecipe,
@@ -493,8 +835,13 @@ struct RecipeDetailView: View {
                 VStack(alignment: .leading, spacing: 22) {
                     BackToCameraButton(
                         accessibilityIdentifier: "recipe-back-to-camera",
-                        action: onCancel
+                        action: requestCancel
                     )
+                    .confirmationDialog("Discard changes?", isPresented: $isConfirmingDiscard, titleVisibility: .visible) {
+                        Button("Discard", role: .destructive, action: onCancel)
+                        Button("Keep editing", role: .cancel) { }
+                    }
+                    .interactiveDismissDisabled(hasPendingChanges)
 
                     hero
 
@@ -517,7 +864,7 @@ struct RecipeDetailView: View {
                                     Text("About this look")
                                         .font(.system(.headline, design: .rounded).weight(.bold))
                                         .foregroundStyle(FilmyTheme.primary)
-                                    Text(isShowingLookInfo ? "Description and camera reference" : "Description, reference, and provenance")
+                                    Text(isShowingLookInfo ? "Description and camera reference" : lookCharacterLine)
                                         .font(.system(.caption, design: .rounded).weight(.medium))
                                         .foregroundStyle(FilmyTheme.secondary)
                                 }
@@ -534,7 +881,7 @@ struct RecipeDetailView: View {
                         .accessibilityIdentifier("recipe-info-toggle")
                         .accessibilityLabel("About this look")
                         .accessibilityValue(isShowingLookInfo ? "Expanded" : "Collapsed")
-                        .accessibilityHint("Shows the description, camera reference, and provenance")
+                        .accessibilityHint("\(lookCharacterLine). Shows the description, camera reference, and provenance")
 
                         if isShowingLookInfo {
                             VStack(alignment: .leading, spacing: 18) {
@@ -549,6 +896,11 @@ struct RecipeDetailView: View {
                                     publicReferenceCard
                                 }
 
+                                if recipe.provenance.cameraSource != nil {
+                                    Button("Published settings and source") { showingSourceSettings = true }
+                                        .frame(minHeight: 48)
+                                        .accessibilityIdentifier("recipe-source-open")
+                                }
                                 provenanceNote
                             }
                             .padding(.top, 10)
@@ -565,10 +917,10 @@ struct RecipeDetailView: View {
                 .frame(maxWidth: FilmyLayout.readableMaxWidth)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 20)
-                .padding(.top, 14)
                 .padding(.bottom, 24)
             }
             .accessibilityIdentifier("recipe-detail-scroll")
+            .padding(.top, 14)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             primaryAction
@@ -586,6 +938,8 @@ struct RecipeDetailView: View {
                 }
         }
         .accessibilityElement(children: .contain)
+        .accessibilityAction(.escape) { requestCancel() }
+        .sheet(isPresented: $showingSourceSettings) { RecipeSourceSheet(recipe: draft) }
     }
 
     private var primaryAction: some View {
@@ -597,12 +951,16 @@ struct RecipeDetailView: View {
             HStack(spacing: 10) {
                 Image(systemName: primaryActionIcon)
                 Text(primaryActionTitle)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.8)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 1 : 2)
+                    .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 0.7 : 0.8)
                     .multilineTextAlignment(.center)
             }
         }
         .buttonStyle(.filmyPrimary)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+        .accessibilityShowsLargeContentViewer {
+            Label(primaryActionTitle, systemImage: primaryActionIcon)
+        }
         .accessibilityLabel(primaryActionAccessibilityLabel)
         .accessibilityHint(
             hasPendingChanges
@@ -628,6 +986,14 @@ struct RecipeDetailView: View {
 
     private var hasPendingChanges: Bool {
         draft != recipe
+    }
+
+    private func requestCancel() {
+        if hasPendingChanges {
+            isConfirmingDiscard = true
+        } else {
+            onCancel()
+        }
     }
 
     private var primaryActionTitle: String {
@@ -667,7 +1033,7 @@ struct RecipeDetailView: View {
         VStack(alignment: .leading, spacing: 14) {
             RecipeSwatch(recipe: draft, compact: false, showsLabel: false)
                 .frame(maxWidth: .infinity)
-                .frame(height: 180)
+                .frame(height: dynamicTypeSize.isAccessibilitySize ? 64 : 180)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
@@ -690,6 +1056,15 @@ struct RecipeDetailView: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(recipe.name). \(recipe.descriptor). Reference \(recipe.filmBase.officialName)")
+        .accessibilityValue(heroStateDescription)
+        .accessibilityIdentifier("recipe-detail-hero")
+    }
+
+    private var heroStateDescription: String {
+        var states: [String] = []
+        if isSelected { states.append("Active") }
+        if draft != originalRecipe { states.append("Edited") }
+        return states.joined(separator: ", ")
     }
 
     private var identity: some View {
@@ -808,14 +1183,25 @@ struct RecipeDetailView: View {
         if dynamicTypeSize.isAccessibilitySize {
             return [GridItem(.flexible())]
         }
+        // summaryWidth is the grid width inside the panel's 14 pt padding and the
+        // 20 pt screen margins (screen - 68): 375 pt gives 307, 390 pt gives 322.
+        if summaryWidth > 0 && summaryWidth < 320 {
+            return Array(repeating: GridItem(.flexible(), spacing: 8), count: 2)
+        }
         return Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
+    }
+
+    private var lookCharacterLine: String {
+        LookCharacter.line(for: draft)
     }
 
     private var controlSummary: some View {
         LazyVGrid(columns: summaryColumns, spacing: 8) {
-            ForEach(draft.controlSummary, id: \.0) { control in
+            ForEach(LookCharacter.pairs(for: draft), id: \.0) { control in
                 VStack(alignment: .leading, spacing: 5) {
                     Eyebrow(text: control.0.uppercased())
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                        .minimumScaleFactor(0.6)
 
                     Text(control.1)
                         .font(.system(.subheadline, design: .rounded).weight(.bold))
@@ -832,6 +1218,15 @@ struct RecipeDetailView: View {
                         .strokeBorder(FilmyTheme.line, lineWidth: 1)
                 }
                 .accessibilityElement(children: .combine)
+            }
+        }
+        .background {
+            GeometryReader { (proxy: GeometryProxy) in
+                Color.clear
+                    .onAppear { summaryWidth = proxy.size.width }
+                    .onChange(of: proxy.size.width) { _, newWidth in
+                        summaryWidth = newWidth
+                    }
             }
         }
     }
@@ -939,7 +1334,7 @@ struct RecipeDetailView: View {
                 : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
             headerLayout {
                 VStack(alignment: .leading, spacing: 4) {
-                    Eyebrow(text: "ADJUST", color: FilmyTheme.accent)
+                    Eyebrow(text: "TUNE", color: FilmyTheme.accent)
 
                     Text("Recipe controls")
                         .font(.system(.title3, design: .rounded).weight(.bold))
@@ -1042,7 +1437,7 @@ struct RecipeDetailView: View {
             }
         case .color:
             VStack(spacing: 14) {
-                if draft.filmBase.monochromeFilter == nil {
+                if draft.filmBase.monochromeFilter == nil && draft.filmBase != .sepia {
                     RecipeSliderRow(title: "Color", value: binding(\.saturation), range: 0...2, format: "%.2f")
                     RecipeChoiceRow(title: "Color Chrome", selection: colorChromeLevelBinding) {
                         ForEach(FilmRecipe.ColorChromeLevel.allCases, id: \.self) { level in
@@ -1121,6 +1516,7 @@ struct RecipeDetailView: View {
                         Text(level.displayName).tag(level)
                     }
                 }
+                .disabled(draft.grainEffectLevel == .off)
                 RecipeSliderRow(title: "Vignette", value: binding(\.vignette), range: 0...1, format: "%.2f")
                 RecipeSliderRow(title: "Halation", value: binding(\.halation), range: 0...1, format: "%.2f")
             }
@@ -1300,7 +1696,7 @@ private struct RecipeSliderRow: View {
                 })
                     .tint(FilmyTheme.accent)
                     .accessibilityLabel(title)
-                    .accessibilityValue(String(format: format, value))
+                    .accessibilityValue(Self.displayText(format: format, value: value))
             } else {
                 Slider(value: $value, in: range, onEditingChanged: { isEditing in
                     if !isEditing {
@@ -1309,10 +1705,21 @@ private struct RecipeSliderRow: View {
                 })
                     .tint(FilmyTheme.accent)
                     .accessibilityLabel(title)
-                    .accessibilityValue(String(format: format, value))
+                    .accessibilityValue(Self.displayText(format: format, value: value))
             }
         }
         .frame(minHeight: 52, alignment: .center)
+    }
+
+    /// A small negative value rounds to "-0.0"; show it as the true zero it reads as.
+    static func displayText(format: String, value: Double) -> String {
+        let text = String(format: format, value)
+        guard text.hasPrefix("-") else { return text }
+        let hasNonZeroDigit = text.contains(where: { "123456789".contains($0) })
+        if hasNonZeroDigit { return text }
+        let rest = String(text.dropFirst())
+        if format.contains("%+") { return "+" + rest }
+        return rest
     }
 
     @ViewBuilder
@@ -1339,7 +1746,7 @@ private struct RecipeSliderRow: View {
     }
 
     private var valueLabel: some View {
-        Text(String(format: format, value))
+        Text(Self.displayText(format: format, value: value))
             .font(FilmyTheme.metadataFont)
             .foregroundStyle(FilmyTheme.secondary)
             .monospacedDigit()
@@ -1374,14 +1781,31 @@ enum LookLibraryFilter: String, CaseIterable, Identifiable {
 
 enum LookLibraryIndex {
     static func favorites(from data: Data) -> Set<String> {
-        guard data.count <= 262_144,
+        guard data.count <= 2_097_152,
               let ids = try? JSONDecoder().decode([String].self, from: data) else { return [] }
-        return Set(ids.prefix(512).filter { !$0.isEmpty && $0.utf8.count <= 256 })
+        return Set(ids.prefix(4096).filter { !$0.isEmpty && $0.utf8.count <= 256 })
     }
 
     static func encodeFavorites(_ ids: Set<String>) -> Data {
-        let normalized = ids.filter { !$0.isEmpty && $0.utf8.count <= 256 }.sorted().prefix(512)
+        let normalized = ids.filter { !$0.isEmpty && $0.utf8.count <= 256 }.sorted().prefix(4096)
         return (try? JSONEncoder().encode(Array(normalized))) ?? Data()
+    }
+
+    /// Stable partition: names that start with the query first, then the rest.
+    static func nameMatchesFirst(_ recipes: [FilmRecipe], query: String) -> [FilmRecipe] {
+        let trimmed: String = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return recipes }
+        let options: String.CompareOptions = [.anchored, .caseInsensitive, .diacriticInsensitive]
+        var prefixed: [FilmRecipe] = []
+        var others: [FilmRecipe] = []
+        for recipe in recipes {
+            if recipe.name.range(of: trimmed, options: options) != nil {
+                prefixed.append(recipe)
+            } else {
+                others.append(recipe)
+            }
+        }
+        return prefixed + others
     }
 
     static func results(
@@ -1402,15 +1826,40 @@ enum LookLibraryIndex {
             case .compact: included = recipe.isDigitalCameraStyle
             case .film: included = !recipe.isDigitalCameraStyle && !monochrome
             case .monochrome: included = monochrome
-            case .negative: included = recipe.creativeCollection == .negative
-            case .slide: included = recipe.creativeCollection == .slide
-            case .cinema: included = recipe.creativeCollection == .cinema
+            case .negative: included = recipe.creativeCollection == .negative || (recipe.provenance.cameraSource != nil && RecipeCatalog.family(for: recipe.filmBase) == "negative")
+            case .slide: included = recipe.creativeCollection == .slide || (recipe.provenance.cameraSource != nil && RecipeCatalog.family(for: recipe.filmBase) == "slide")
+            case .cinema: included = recipe.creativeCollection == .cinema || (recipe.provenance.cameraSource != nil && RecipeCatalog.family(for: recipe.filmBase) == "cinema")
             case .instant: included = recipe.creativeCollection == .instant
             case .experimental: included = recipe.creativeCollection == .experimental
             }
-            let searchable = "\(recipe.name) \(recipe.descriptor) \(recipe.creativeCollection?.title ?? "")"
-            return included && words.allSatisfy { searchable.localizedStandardContains($0) }
+            guard included else { return false }
+            guard !words.isEmpty else { return true }
+            let searchable = RecipeCatalog.searchText(for: recipe)
+            return words.allSatisfy { searchable.localizedStandardContains($0) }
         }
+    }
+}
+
+/// Looks the user switched to, newest first. UI state only: never a photo, recipe or settings value.
+enum RecentLooks {
+    static let storageKey = "recentRecipeIDs.v1"
+    static let limit = 12
+
+    static func sanitized(_ ids: [String]) -> [String] {
+        var seen = Set<String>()
+        var kept: [String] = []
+        for id in ids where !id.isEmpty && id.utf8.count <= 256 && !seen.contains(id) {
+            seen.insert(id)
+            kept.append(id)
+            if kept.count == limit { break }
+        }
+        return kept
+    }
+
+    static func recording(_ id: String, previous: String?, into list: [String]) -> [String] {
+        var base = list
+        if base.isEmpty, let previous, previous != id { base = [previous] }
+        return sanitized([id] + base)
     }
 }
 
@@ -1422,13 +1871,23 @@ struct LookLibraryView: View {
     let selectedRecipeID: String
     var selectionIdentifierPrefix = "library-recipe"
     var subtitle = "Find a feeling. Make it your own."
+    var libraryPreferences: Binding<RecipeLibraryPreferences>? = nil
+    /// True when the caller keeps the library open after a pick (camera). The
+    /// default keeps today's contract: the caller closes the library itself.
+    var staysOpenOnSelect = false
+    /// The host sheet's current detent, when the caller offers medium and large.
+    var presentationDetent: Binding<PresentationDetent>? = nil
     let onSelect: (FilmRecipe) -> Void
     let onClose: () -> Void
 
     @AppStorage("favoriteRecipeIDs.v1") private var favoriteData = Data()
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ScaledMetric(relativeTo: .footnote) private var overlayDisc: CGFloat = 28
     @State private var query = ""
     @State private var filter: LookLibraryFilter = .all
+    @State private var showingManager = false
+    @State private var sourceRecipe: FilmRecipe?
     @FocusState private var searchIsFocused: Bool
 
     // The hosted iPad review runs with a 0.75 compatibility scale, so a
@@ -1439,17 +1898,25 @@ struct LookLibraryView: View {
         UIDevice.current.userInterfaceIdiom == .pad ? 64 : 48
     }
 
+    private var isPad: Bool { UIDevice.current.userInterfaceIdiom == .pad }
+
+    /// Hit frame of the heart and quick-menu overlays on a gridded photo.
+    private var overlayTarget: CGFloat { isPad ? 64 : 44 }
+
+    private var atMedium: Bool {
+        guard let detent = presentationDetent else { return false }
+        return detent.wrappedValue == .medium
+    }
+
     private var librarySearchHeight: CGFloat {
         UIDevice.current.userInterfaceIdiom == .pad ? 64 : 52
     }
 
     private var favoriteIDs: Set<String> { LookLibraryIndex.favorites(from: favoriteData) }
 
-    private var results: [FilmRecipe] {
-        LookLibraryIndex.results(in: recipes, query: query, filter: filter, favorites: favoriteIDs)
-    }
-
     var body: some View {
+        let favorites = favoriteIDs
+        let results = LookLibraryIndex.results(in: recipes, query: query, filter: filter, favorites: favorites)
         GeometryReader { geometry in
             let singleColumn = geometry.size.width < 350 || dynamicTypeSize.isAccessibilitySize
             let compactHeader = geometry.size.height < 480 || dynamicTypeSize.isAccessibilitySize
@@ -1457,46 +1924,35 @@ struct LookLibraryView: View {
                 libraryHeader(compact: compactHeader)
                 searchField
                     .padding(.top, compactHeader ? 8 : 18)
-                filterStrip
-                    .padding(.top, 12)
-                    .padding(.bottom, 10)
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("\(results.count) \(results.count == 1 ? "look" : "looks")")
-                        .font(.caption.weight(.semibold))
-                        .monospacedDigit()
-                    Spacer(minLength: 4)
-                    Text("Sample previews")
-                        .font(.caption)
+                if !atMedium {
+                    filterStrip
+                        .padding(.top, 12)
+                        .padding(.bottom, 10)
+                    resultCountRow(count: results.count, singleColumn: singleColumn)
                 }
-                .foregroundStyle(FilmyTheme.secondary)
-                .padding(.horizontal, 22)
-                .padding(.bottom, 12)
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("look-library-result-count")
+                currentLookLine
 
-                ScrollView(showsIndicators: false) {
-                    if results.isEmpty {
-                        emptyResults
-                    } else {
-                        LazyVGrid(
-                            columns: singleColumn
-                                ? [GridItem(.flexible())]
-                                : [GridItem(.adaptive(minimum: 150, maximum: 270), spacing: 14)],
-                            alignment: .leading,
-                            spacing: 16
-                        ) {
-                            ForEach(results) { recipe in
-                                lookCard(recipe)
+                ScrollViewReader { proxy in
+                    ScrollView(showsIndicators: false) {
+                        VStack(spacing: 0) {
+                            Color.clear.frame(height: 0).id("look-library-top")
+                            if results.isEmpty {
+                                emptyResults
+                            } else {
+                                resultsGrid(results, favorites: favorites, gridded: !singleColumn)
                             }
                         }
-                        .padding(.horizontal, 22)
-                        .padding(.top, 4)
-                        .padding(.bottom, 28)
+                    }
+                    .scrollDismissesKeyboard(.interactively)
+                    .accessibilityIdentifier("look-library-results")
+                    .onChange(of: query) { _, _ in
+                        // Scroll after the new result set has laid out, or the offset lands mid-list.
+                        DispatchQueue.main.async { proxy.scrollTo("look-library-top", anchor: .top) }
+                    }
+                    .onChange(of: filter) { _, _ in
+                        DispatchQueue.main.async { proxy.scrollTo("look-library-top", anchor: .top) }
                     }
                 }
-                .scrollDismissesKeyboard(.interactively)
-                .id("\(filter.rawValue):\(query)")
-                .accessibilityIdentifier("look-library-results")
             }
             .frame(maxWidth: 960)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -1506,37 +1962,154 @@ struct LookLibraryView: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("look-library")
         .accessibilityAction(.escape, onClose)
+        .sheet(isPresented: $showingManager) {
+            if let libraryPreferences {
+                RecipeLibraryManagerView(preferences: libraryPreferences, recipes: recipes,
+                                         selectedRecipeID: selectedRecipeID,
+                                         onSelect: { (recipe: FilmRecipe) in
+                                             onSelect(recipe)
+                                             showingManager = false
+                                         })
+            }
+        }
+        .sheet(item: $sourceRecipe) { recipe in RecipeSourceSheet(recipe: recipe) }
+    }
+
+    private func resultCountRow(count: Int, singleColumn: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("\(count) \(count == 1 ? "look" : "looks")")
+                .font(.caption.weight(.semibold))
+                .monospacedDigit()
+            Spacer(minLength: 4)
+            Text("Sample previews")
+                .font(.caption)
+        }
+        .foregroundStyle(FilmyTheme.secondary)
+        .padding(.horizontal, 22)
+        .padding(.bottom, 12)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("look-library-result-count")
+        .accessibilityHint(libraryPreferences != nil && !singleColumn ? "The grid button on a card adds it to the quick menu" : "")
+    }
+
+    private var currentLookTitle: String? {
+        guard let name: String = recipes.first(where: { $0.id == selectedRecipeID })?.name else { return nil }
+        let hiddenFilter: Bool = atMedium && filter != .all
+        return hiddenFilter ? "Using \(name) \u{00B7} \(filter.title)" : "Using \(name)"
+    }
+
+    @ViewBuilder
+    private var currentLookLine: some View {
+        if staysOpenOnSelect, let title = currentLookTitle {
+            Label(title, systemImage: "camera.filters")
+                .font(.caption)
+                .foregroundStyle(FilmyTheme.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 22)
+                .padding(.top, atMedium ? 10 : 0)
+                .padding(.bottom, 12)
+                .accessibilityIdentifier("look-library-current")
+        }
+    }
+
+    private func gridColumns(gridded: Bool) -> [GridItem] {
+        guard gridded else { return [GridItem(.flexible())] }
+        let minimum: CGFloat = isPad ? 150 : 100
+        return [GridItem(.adaptive(minimum: minimum, maximum: 200), spacing: 10)]
+    }
+
+    private func resultsGrid(_ results: [FilmRecipe], favorites: Set<String>, gridded: Bool) -> some View {
+        LazyVGrid(
+            columns: gridColumns(gridded: gridded),
+            alignment: .leading,
+            spacing: gridded ? 12 : 16
+        ) {
+            ForEach(results) { recipe in
+                lookCard(recipe, favorites: favorites, gridded: gridded)
+            }
+        }
+        .padding(.horizontal, 22)
+        .padding(.top, 4)
+        .padding(.bottom, 28)
     }
 
     private func libraryHeader(compact: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .top, spacing: 16) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Looks")
-                        .font(.system(compact ? .title2 : .largeTitle).weight(.bold))
-                        .foregroundStyle(FilmyTheme.primary)
-                        .accessibilityAddTraits(.isHeader)
+        let accessibilityHeader = dynamicTypeSize.isAccessibilitySize
+        return VStack(alignment: .leading, spacing: accessibilityHeader ? 10 : 6) {
+            if accessibilityHeader {
+                libraryTitle(compact: compact)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) {
+                        if libraryPreferences != nil {
+                            libraryManageButton(expanded: false)
+                        }
+                        libraryCloseButton(expanded: false)
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        if libraryPreferences != nil {
+                            libraryManageButton(expanded: true)
+                        }
+                        libraryCloseButton(expanded: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                Spacer(minLength: 0)
-                Button(action: onClose) {
-                    Text("Done")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(FilmyTheme.primary)
-                        .padding(.horizontal, 16)
-                        .frame(
-                            minWidth: UIDevice.current.userInterfaceIdiom == .pad ? 64 : 52,
-                            minHeight: libraryButtonTarget
-                        )
-                        .background(FilmyTheme.panel, in: Capsule())
-                        .contentShape(Capsule())
+            } else {
+                HStack(alignment: .top, spacing: 16) {
+                    libraryTitle(compact: compact)
+                    Spacer(minLength: 0)
+                    if libraryPreferences != nil {
+                        libraryManageButton(expanded: false)
+                    }
+                    libraryCloseButton(expanded: false)
                 }
-                .buttonStyle(.pressable)
-                .accessibilityIdentifier("look-library-close")
-                .accessibilityHint("Closes the library without changing your look")
             }
         }
         .padding(.horizontal, 22)
         .padding(.top, compact ? 12 : 26)
+    }
+
+    private func libraryTitle(compact: Bool) -> some View {
+        Text("Looks")
+            .font(.system(compact ? .title2 : .largeTitle).weight(.bold))
+            .foregroundStyle(FilmyTheme.primary)
+            .lineLimit(1)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    private func libraryManageButton(expanded: Bool) -> some View {
+        Button { showingManager = true } label: {
+            Label("Packs", systemImage: "square.stack.3d.up")
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+                .fixedSize(horizontal: !expanded, vertical: false)
+                .frame(
+                    minWidth: 44,
+                    maxWidth: expanded ? .infinity : nil,
+                    minHeight: libraryButtonTarget
+                )
+        }
+        .accessibilityIdentifier("look-library-manage")
+    }
+
+    private func libraryCloseButton(expanded: Bool) -> some View {
+        Button(action: onClose) {
+            Text("Done")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(FilmyTheme.primary)
+                .lineLimit(1)
+                .fixedSize(horizontal: !expanded, vertical: false)
+                .padding(.horizontal, 16)
+                .frame(
+                    minWidth: UIDevice.current.userInterfaceIdiom == .pad ? 64 : 52,
+                    maxWidth: expanded ? .infinity : nil,
+                    minHeight: libraryButtonTarget
+                )
+                .background(FilmyTheme.panel, in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.pressable)
+        .accessibilityIdentifier("look-library-close")
+        .accessibilityHint("Closes the library without changing your look")
     }
 
     private var searchField: some View {
@@ -1573,114 +2146,371 @@ struct LookLibraryView: View {
         .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 16))
         .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(FilmyTheme.lineStrong, lineWidth: 1) }
         .padding(.horizontal, 22)
+        .onChange(of: searchIsFocused) { _, focused in promoteDetentForSearch(focused: focused) }
     }
+
+    /// Search never types into a half sheet under the keyboard.
+    private func promoteDetentForSearch(focused: Bool) {
+        guard focused, let detent = presentationDetent, detent.wrappedValue != .large else { return }
+        detent.wrappedValue = .large
+    }
+
+    private static let filterFadeWidth: CGFloat = 24
+    private static let filterStripStartID: String = "look-library-filter-strip-start"
 
     private var filterStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(LookLibraryFilter.allCases) { option in
-                    Button {
-                        HapticFeedback.play(.selection)
-                        filter = option
-                        searchIsFocused = false
-                    } label: {
-                        HStack(spacing: 6) {
-                            if option == .favorites {
-                                Image(systemName: "heart")
-                            }
-                            Text(option.title)
-                        }
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(filter == option ? FilmyTheme.background : FilmyTheme.secondary)
-                        .padding(.horizontal, 16)
-                        .frame(minHeight: libraryButtonTarget)
-                        .background(filter == option ? FilmyTheme.accent : FilmyTheme.panel, in: Capsule())
-                        .contentShape(Capsule())
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    // 14 pt spacer + 8 pt HStack spacing = the 22 pt leading inset; the
+                    // reset scrolls to this spacer so All keeps its inset.
+                    Color.clear
+                        .frame(width: 14, height: 1)
+                        .id(Self.filterStripStartID)
+                    ForEach(LookLibraryFilter.allCases) { option in
+                        filterChip(option)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("look-filter-\(option.id)")
-                    .accessibilityValue(filter == option ? "Selected" : "Not selected")
-                    .accessibilityAddTraits(filter == option ? .isSelected : [])
                 }
+                // The trailing fade covers the last 24 pt of the viewport; the extra
+                // padding keeps that band empty at the scroll end.
+                .padding(.trailing, 22 + Self.filterFadeWidth)
             }
-            .padding(.horizontal, 22)
+            .mask(filterFadeMask)
+            .onChange(of: filter) { _, new in resetFilterScroll(to: new, proxy: proxy) }
         }
         .accessibilityElement(children: .contain)
     }
 
-    private func lookCard(_ recipe: FilmRecipe) -> some View {
-        let selected = recipe.id == selectedRecipeID
-        let favorite = favoriteIDs.contains(recipe.id)
-        return VStack(alignment: .leading, spacing: 4) {
-            Button {
-                searchIsFocused = false
-                HapticFeedback.play(.selection)
-                onSelect(recipe)
-            } label: {
-                VStack(alignment: .leading, spacing: 8) {
-                    Color.clear
-                        .aspectRatio(dynamicTypeSize.isAccessibilitySize ? 1.5 : 0.75, contentMode: .fit)
-                        // Keep the first card's action row in the initial viewport at
-                        // accessibility sizes, especially on the single-column iPad layout.
-                        // A max-height proposal can be ignored by the aspect-ratio child
-                        // when the grid supplies a wider width. Use an explicit height so
-                        // the title, descriptor, and favorite action remain in the first
-                        // viewport at accessibility sizes.
-                        .frame(height: dynamicTypeSize.isAccessibilitySize ? 220 : nil)
-                        .overlay {
-                            RecipeSwatch(recipe: recipe, showsLabel: false)
-                        }
-                        .clipped()
-                    HStack(alignment: .top, spacing: 5) {
-                        if selected {
-                            Image(systemName: "checkmark")
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(FilmyTheme.accent)
-                        }
-                        Text(recipe.name)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(FilmyTheme.primary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("\(selectionIdentifierPrefix)-\(recipe.id)")
-            .accessibilityLabel("\(recipe.name), \(recipe.descriptor)")
-            .accessibilityValue(selected ? "Selected" : "Not selected")
-            .accessibilityAddTraits(selected ? .isSelected : [])
-            .accessibilityHint("Applies this look and closes the library")
+    private var filterFadeMask: some View {
+        HStack(spacing: 0) {
+            Color.black
+            LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
+                .frame(width: Self.filterFadeWidth)
+        }
+    }
 
-            HStack(alignment: .center, spacing: 4) {
-                Text(recipe.descriptor)
-                    .font(.caption)
-                    .foregroundStyle(FilmyTheme.secondary)
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Button {
-                    var updated = favoriteIDs
-                    if favorite { updated.remove(recipe.id) } else { updated.insert(recipe.id) }
-                    favoriteData = LookLibraryIndex.encodeFavorites(updated)
-                    HapticFeedback.play(.selection)
-                } label: {
-                    Image(systemName: favorite ? "heart.fill" : "heart")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(favorite ? FilmyTheme.accent : FilmyTheme.primary)
-                        .frame(width: libraryButtonTarget, height: libraryButtonTarget)
-                        .contentShape(Rectangle())
+    private func resetFilterScroll(to new: LookLibraryFilter, proxy: ScrollViewProxy) {
+        guard new == .all else { return }
+        if reduceMotion {
+            proxy.scrollTo(Self.filterStripStartID, anchor: .leading)
+        } else {
+            withAnimation { proxy.scrollTo(Self.filterStripStartID, anchor: .leading) }
+        }
+    }
+
+    private func filterChip(_ option: LookLibraryFilter) -> some View {
+        Button {
+            HapticFeedback.play(.selection)
+            filter = option
+            searchIsFocused = false
+        } label: {
+            HStack(spacing: 6) {
+                if option == .favorites {
+                    Image(systemName: "heart")
                 }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("look-favorite-\(recipe.id)")
-                .accessibilityLabel(favorite ? "Remove \(recipe.name) from favorites" : "Favorite \(recipe.name)")
-                .accessibilityValue(favorite ? "Favorite" : "Not favorite")
+                Text(option.title)
             }
-            .overlay(alignment: .bottomLeading) {
-                if selected { FilmRegistration() }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(filter == option ? FilmyTheme.background : FilmyTheme.secondary)
+            .padding(.horizontal, 16)
+            .frame(minHeight: libraryButtonTarget)
+            .background(filter == option ? FilmyTheme.accent : FilmyTheme.panel, in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .id(option)
+        .accessibilityIdentifier("look-filter-\(option.id)")
+        .accessibilityValue(filter == option ? "Selected" : "Not selected")
+        .accessibilityAddTraits(filter == option ? .isSelected : [])
+    }
+
+    @ViewBuilder
+    private func lookCard(_ recipe: FilmRecipe, favorites: Set<String>, gridded: Bool) -> some View {
+        let selected: Bool = recipe.id == selectedRecipeID
+        let favorite: Bool = favorites.contains(recipe.id)
+        if gridded {
+            griddedCard(recipe, favorites: favorites, selected: selected, favorite: favorite)
+        } else {
+            singleColumnCard(recipe, favorites: favorites, selected: selected, favorite: favorite)
+        }
+    }
+
+    private func toggleFavorite(_ recipe: FilmRecipe, favorites: Set<String>, favorite: Bool) {
+        var updated = favorites
+        if favorite { updated.remove(recipe.id) } else { updated.insert(recipe.id) }
+        favoriteData = LookLibraryIndex.encodeFavorites(updated)
+        HapticFeedback.play(.selection)
+    }
+
+    private func toggleQuickMenu(_ recipe: FilmRecipe) {
+        guard let libraryPreferences else { return }
+        var updated = libraryPreferences.wrappedValue
+        updated.setRecipe(recipe.id, enabled: !updated.isEnabled(recipe.id))
+        libraryPreferences.wrappedValue = updated
+    }
+
+    private func quickMenuEnabled(_ recipe: FilmRecipe) -> Bool {
+        libraryPreferences?.wrappedValue.isEnabled(recipe.id) ?? false
+    }
+
+    private func quickMenuActionTitle(_ recipe: FilmRecipe) -> String {
+        quickMenuEnabled(recipe) ? "Remove from quick menu" : "Add to quick menu"
+    }
+
+    /// The card's apply button. The heart and quick toggle are never inside its
+    /// label (no nested buttons); the gridded card overlays them instead.
+    private func cardSelectButton<CardLabel: View>(
+        _ recipe: FilmRecipe,
+        selected: Bool,
+        gridded: Bool,
+        label: CardLabel
+    ) -> some View {
+        let quickActions: Bool = gridded && libraryPreferences != nil
+        let hint: String = staysOpenOnSelect
+            ? "Applies this look"
+            : "Applies this look and closes the library"
+        return Button {
+            searchIsFocused = false
+            HapticFeedback.play(.selection)
+            onSelect(recipe)
+        } label: {
+            label
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("\(selectionIdentifierPrefix)-\(recipe.id)")
+        .accessibilityLabel("\(recipe.name), \(recipe.descriptor)")
+        .accessibilityValue(selected ? "Selected" : "Not selected")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityHint(hint)
+        .contextMenu {
+            Button("Details and source", systemImage: "info.circle") { sourceRecipe = recipe }
+            if quickActions {
+                Button {
+                    toggleQuickMenu(recipe)
+                } label: {
+                    Label(quickMenuActionTitle(recipe), systemImage: "square.grid.2x2")
+                }
             }
         }
+        .accessibilityAction(named: Text("Details and source")) { sourceRecipe = recipe }
+        .accessibilityActions {
+            if quickActions {
+                Button(quickMenuActionTitle(recipe)) { toggleQuickMenu(recipe) }
+            }
+        }
+    }
+
+    // MARK: Gridded card (3-up)
+
+    private func griddedCard(
+        _ recipe: FilmRecipe,
+        favorites: Set<String>,
+        selected: Bool,
+        favorite: Bool
+    ) -> some View {
+        cardSelectButton(
+            recipe,
+            selected: selected,
+            gridded: true,
+            label: griddedLabel(recipe, selected: selected)
+        )
+        .overlay(alignment: .top) {
+            griddedOverlays(recipe, favorites: favorites, favorite: favorite)
+        }
         .accessibilityElement(children: .contain)
+    }
+
+    private func griddedLabel(_ recipe: FilmRecipe, selected: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Color.clear
+                .aspectRatio(0.75, contentMode: .fit)
+                .overlay {
+                    RecipeSwatch(recipe: recipe, showsLabel: false)
+                }
+                .clipped()
+            griddedNameRow(recipe, selected: selected)
+        }
+        .contentShape(Rectangle())
+    }
+
+    private func griddedNameRow(_ recipe: FilmRecipe, selected: Bool) -> some View {
+        HStack(alignment: .top, spacing: 5) {
+            if selected {
+                Image(systemName: "checkmark")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(FilmyTheme.accent)
+            }
+            Text(recipe.name)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(FilmyTheme.primary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.bottom, 6)
+        .overlay(alignment: .bottomLeading) {
+            if selected { FilmRegistration() }
+        }
+    }
+
+    /// A clear frame the size of the photo: heart at its top-trailing corner,
+    /// quick toggle at its bottom-leading corner (diagonal, never adjacent).
+    private func griddedOverlays(_ recipe: FilmRecipe, favorites: Set<String>, favorite: Bool) -> some View {
+        Color.clear
+            .aspectRatio(0.75, contentMode: .fit)
+            .overlay(alignment: .topTrailing) {
+                heartOverlay(recipe, favorites: favorites, favorite: favorite)
+            }
+            .overlay(alignment: .bottomLeading) {
+                quickToggleOverlay(recipe)
+            }
+    }
+
+    private func cardOverlayButton(symbol: String, tint: Color, action: @escaping () -> Void) -> some View {
+        let disc: CGFloat = min(overlayDisc, 36)
+        return Button(action: action) {
+            ZStack {
+                Circle().fill(.ultraThinMaterial)
+                    .frame(width: disc, height: disc)
+                Image(systemName: symbol)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(tint)
+            }
+            .frame(width: overlayTarget, height: overlayTarget)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func heartOverlay(_ recipe: FilmRecipe, favorites: Set<String>, favorite: Bool) -> some View {
+        let symbol: String = favorite ? "heart.fill" : "heart"
+        let tint: Color = favorite ? FilmyTheme.accent : FilmyTheme.primary
+        let label: String = favorite ? "Remove \(recipe.name) from favorites" : "Favorite \(recipe.name)"
+        let value: String = favorite ? "Favorite" : "Not favorite"
+        return cardOverlayButton(symbol: symbol, tint: tint) {
+            toggleFavorite(recipe, favorites: favorites, favorite: favorite)
+        }
+        .accessibilityIdentifier("look-favorite-\(recipe.id)")
+        .accessibilityLabel(label)
+        .accessibilityValue(value)
+    }
+
+    @ViewBuilder
+    private func quickToggleOverlay(_ recipe: FilmRecipe) -> some View {
+        if libraryPreferences != nil {
+            let enabled: Bool = quickMenuEnabled(recipe)
+            let symbol: String = enabled ? "square.grid.2x2.fill" : "square.grid.2x2"
+            let tint: Color = enabled ? FilmyTheme.accent : FilmyTheme.secondary
+            let value: String = enabled ? "Enabled" : "Hidden"
+            cardOverlayButton(symbol: symbol, tint: tint) {
+                toggleQuickMenu(recipe)
+            }
+            .accessibilityIdentifier("library-quick-toggle-\(recipe.id)")
+            .accessibilityLabel("\(recipe.name) in quick menu")
+            .accessibilityValue(value)
+        }
+    }
+
+    // MARK: Single-column card (accessibility sizes and narrow widths)
+
+    private func singleColumnCard(
+        _ recipe: FilmRecipe,
+        favorites: Set<String>,
+        selected: Bool,
+        favorite: Bool
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            cardSelectButton(
+                recipe,
+                selected: selected,
+                gridded: false,
+                label: singleColumnLabel(recipe, selected: selected)
+            )
+            singleColumnActionRow(recipe, favorites: favorites, selected: selected, favorite: favorite)
+            singleColumnQuickRow(recipe)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func singleColumnLabel(_ recipe: FilmRecipe, selected: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Color.clear
+                .aspectRatio(dynamicTypeSize.isAccessibilitySize ? 1.5 : 0.75, contentMode: .fit)
+                // Keep the first card's action row in the initial viewport at
+                // accessibility sizes, especially on the single-column iPad layout.
+                // A max-height proposal can be ignored by the aspect-ratio child
+                // when the grid supplies a wider width. Use an explicit height so
+                // the title, descriptor, and favorite action remain in the first
+                // viewport at accessibility sizes.
+                .frame(height: dynamicTypeSize.isAccessibilitySize ? 220 : nil)
+                .overlay {
+                    RecipeSwatch(recipe: recipe, showsLabel: false)
+                }
+                .clipped()
+            HStack(alignment: .top, spacing: 5) {
+                if selected {
+                    Image(systemName: "checkmark")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(FilmyTheme.accent)
+                }
+                Text(recipe.name)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(FilmyTheme.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .contentShape(Rectangle())
+    }
+
+    private func singleColumnActionRow(
+        _ recipe: FilmRecipe,
+        favorites: Set<String>,
+        selected: Bool,
+        favorite: Bool
+    ) -> some View {
+        HStack(alignment: .center, spacing: 4) {
+            Text(recipe.descriptor)
+                .font(.caption)
+                .foregroundStyle(FilmyTheme.secondary)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button {
+                toggleFavorite(recipe, favorites: favorites, favorite: favorite)
+            } label: {
+                Image(systemName: favorite ? "heart.fill" : "heart")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(favorite ? FilmyTheme.accent : FilmyTheme.primary)
+                    .frame(width: libraryButtonTarget, height: libraryButtonTarget)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("look-favorite-\(recipe.id)")
+            .accessibilityLabel(favorite ? "Remove \(recipe.name) from favorites" : "Favorite \(recipe.name)")
+            .accessibilityValue(favorite ? "Favorite" : "Not favorite")
+        }
+        .overlay(alignment: .bottomLeading) {
+            if selected { FilmRegistration() }
+        }
+    }
+
+    @ViewBuilder
+    private func singleColumnQuickRow(_ recipe: FilmRecipe) -> some View {
+        if libraryPreferences != nil {
+            let enabled: Bool = quickMenuEnabled(recipe)
+            Button {
+                toggleQuickMenu(recipe)
+            } label: {
+                Label("Quick menu", systemImage: enabled ? "checkmark.circle.fill" : "circle")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(enabled ? FilmyTheme.accent : FilmyTheme.secondary)
+                    .frame(maxWidth: .infinity, minHeight: libraryButtonTarget, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("library-quick-toggle-\(recipe.id)")
+            .accessibilityLabel("\(recipe.name) in quick menu")
+            .accessibilityValue(enabled ? "Enabled" : "Hidden")
+        }
     }
 
     private var emptyResults: some View {

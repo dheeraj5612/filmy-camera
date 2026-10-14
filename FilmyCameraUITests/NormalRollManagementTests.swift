@@ -33,11 +33,73 @@ final class NormalRollManagementTests: XCTestCase {
         returnToCamera()
         try saveCafeFixture(newerSavedFrameCount: countBefore)
         XCTAssertEqual(try openAuthorizedRoll(), countBefore + 1)
+
+        // The header folds Select and the layout toggle into one row, so the
+        // first thumbnail row starts high and entering select mode moves nothing.
+        let select = app.buttons["roll-select-toggle"]
+        let layout = app.buttons["roll-grid-layout"]
+        let originals = app.descendants(matching: .any)["roll-filmy-originals"]
+        let first = savedFrameButton()
+        XCTAssertTrue(select.exists && select.isHittable && layout.exists && originals.exists)
+        XCTAssertGreaterThanOrEqual(select.frame.height, 44)
+        // The same-row check only holds for the short "Photos" source label; a longer
+        // label may legitimately stack Select under the layout toggle. Assumes lookFilter == nil.
+        if app.staticTexts["Photos"].exists {
+            XCTAssertLessThan(abs(select.frame.midY - layout.frame.midY), 8, "Select and the layout toggle must share one header row")
+        }
+        XCTAssertFalse(app.staticTexts["LIBRARY"].exists)
+        XCTAssertLessThan(first.frame.minY, 440, "The first thumbnail row must start within 440 pt of the top")
+        XCTAssertLessThanOrEqual(first.frame.maxY, app.frame.maxY, "The first thumbnail row must be fully on screen")
+        let rollImport = app.buttons["roll-import-photo"]
+        XCTAssertTrue(rollImport.exists && rollImport.isHittable)
+        XCTAssertEqual(rollImport.label, "Import photo")
+        XCTAssertLessThan(abs(rollImport.frame.midY - app.buttons["roll-back-to-camera"].frame.midY), 8)
+        screenshot("roll-header-one-row")
+        let selectFrame = select.frame
+        let firstTop = first.frame.minY
+        select.tap()
+        XCTAssertTrue(app.buttons["roll-select-all"].waitForExistence(timeout: 5))
+        XCTAssertEqual(select.label, "Done")
+        XCTAssertTrue(waitUntil { select.frame.contains(CGPoint(x: selectFrame.midX, y: selectFrame.midY)) }, "Done must sit under the finger that tapped Select")
+        XCTAssertTrue(waitUntil { abs(first.frame.minY - firstTop) < 8 }, "Entering select mode must not move the grid")
+        XCTAssertEqual(app.staticTexts["roll-count-summary"].label, "0 selected")
+        screenshot("roll-select-mode")
+        select.tap()
+        XCTAssertTrue(waitUntil { !self.app.buttons["roll-select-all"].exists && originals.exists })
+
         try openNewestSavedFrame(expectedCount: countBefore + 1)
+
+        // One tap hides the viewer controls, a second brings them back, and a
+        // double tap zooms in without toggling them. Each check waits because
+        // the single tap waits out the double-tap window.
+        let photo = app.images["Photo"]
+        let close = app.buttons["Close frame"]
+        let photoFrame = photo.frame
+        photo.tap()
+        XCTAssertTrue(waitUntil { !close.exists }, "One tap must hide the viewer controls")
+        XCTAssertTrue(waitUntil { !app.descendants(matching: .any)["gallery-frame-metadata"].exists }, "Hidden controls must hide the frame metadata")
+        XCTAssertEqual(photo.frame, photoFrame, "Hiding the controls must not move or resize the photo")
+        screenshot("frame-chrome-hidden")
+        photo.tap()
+        XCTAssertTrue(waitUntil { close.exists && close.isHittable }, "A second tap must bring the controls back")
+        XCTAssertTrue(waitUntil { app.descendants(matching: .any)["gallery-frame-metadata"].exists }, "A second tap must bring the frame metadata back")
+        photo.doubleTap()
+        XCTAssertTrue(waitUntil { (photo.value as? String) == "Zoomed 200 percent" }, "Double tap from fit must zoom in")
+        XCTAssertTrue(close.exists, "Double tap must not toggle the controls")
+        screenshot("frame-double-tap-zoom")
+        photo.doubleTap()
+        XCTAssertTrue(waitUntil { (photo.value as? String) == "Fit to screen" })
+        XCTAssertFalse(app.buttons["gallery-edit-look"].exists, "A frame without a kept original must not offer Edit look")
+
         let metadataBefore = app.descendants(matching: .any)["gallery-frame-metadata"].label
+        XCTAssertFalse(metadataBefore.contains("Local copy"), "A Photos frame must not carry the cached-frame note")
 
         app.buttons["Delete frame"].tap()
         XCTAssertTrue(app.buttons["Delete Frame"].waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Photos may ask you to confirm once more")).firstMatch.waitForExistence(timeout: 5),
+            "The delete prompt must say Photos will ask again"
+        )
         screenshot("owned-frame-delete-confirmation")
         app.buttons["Cancel"].tap()
         XCTAssertTrue(waitUntil { !self.app.buttons["Delete Frame"].exists })
@@ -45,14 +107,69 @@ final class NormalRollManagementTests: XCTestCase {
         XCTAssertTrue(app.images["Photo"].exists, "Cancel must retain the loaded frame")
         app.buttons["Close frame"].tap()
         XCTAssertEqual(try loadedRollCount(), countBefore + 1)
+
+        // Large text: the detail toolbar must keep every control reachable and apart.
+        // The accessibility size forces two rows; the plain extra-large size
+        // exercises the one-row fit check and its two-row fallback.
+        let categories = [
+            "UICTContentSizeCategoryAccessibilityXXXL",
+            "UICTContentSizeCategoryXXXL"
+        ]
+        for category in categories {
+            app.terminate()
+            launchNormalApp(contentSizeCategory: category)
+            XCTAssertEqual(try openAuthorizedRoll(), countBefore + 1)
+            let rollImport = app.buttons["roll-import-photo"]
+            XCTAssertTrue(rollImport.exists && rollImport.isHittable)
+            XCTAssertEqual(rollImport.label, "Import photo")
+            if category.contains("Accessibility") {
+                XCTAssertGreaterThan(rollImport.frame.minY, app.buttons["roll-back-to-camera"].frame.maxY)
+            } else {
+                XCTAssertLessThan(abs(rollImport.frame.midY - app.buttons["roll-back-to-camera"].frame.midY), 8)
+            }
+            try openNewestSavedFrame(expectedCount: countBefore + 1, scrollingToTile: true)
+            let toolbarButtons = [
+                app.buttons["Close frame"],
+                app.buttons["frame-back-to-camera"],
+                app.buttons["gallery-info-frame"],
+                app.buttons["gallery-share-frame"],
+                app.buttons["Delete frame"]
+            ]
+            for button in toolbarButtons {
+                XCTAssertTrue(button.exists && button.isHittable,
+                              "Large text must keep \(button.identifier.isEmpty ? button.label : button.identifier) hittable")
+            }
+            for first in 0..<toolbarButtons.count {
+                for second in (first + 1)..<toolbarButtons.count {
+                    XCTAssertFalse(toolbarButtons[first].frame.intersects(toolbarButtons[second].frame),
+                                   "Large text must not overlap detail controls \(first) and \(second)")
+                }
+            }
+            screenshot("frame-detail-large-text-\(category)")
+            app.buttons["Close frame"].tap()
+            XCTAssertTrue(waitUntil(timeout: 30) { !self.app.buttons["Close frame"].exists })
+            screenshot("roll-large-text-\(category)")
+        }
+        app.terminate()
+        launchNormalApp()
+        XCTAssertEqual(try openAuthorizedRoll(), countBefore + 1)
+        returnToCamera()
+
+        // A second fixture gives the delete a neighbour, so the pager must
+        // land on it instead of closing. A lone fixture would only ever
+        // exercise the last-frame exit.
+        try saveCafeFixture(newerSavedFrameCount: countBefore + 1)
+        XCTAssertEqual(try openAuthorizedRoll(), countBefore + 2)
         returnToCamera()
 
         try clearCacheThroughSettings()
-        XCTAssertEqual(try openAuthorizedRoll(), countBefore + 1,
+        XCTAssertEqual(try openAuthorizedRoll(), countBefore + 2,
                        "Clearing cache must retain the actual Photos asset and ownership")
         XCTAssertFalse(app.staticTexts["Local cache"].exists)
-        try openNewestSavedFrame(expectedCount: countBefore + 1)
+        try openNewestSavedFrame(expectedCount: countBefore + 2)
         screenshot("cleared-cache-frame-loaded-from-photos")
+        try confirmDeletionOfOpenFixture(expectedCountAfter: countBefore + 1)
+        try openNewestSavedFrame(expectedCount: countBefore + 1)
         try confirmDeletionOfOpenFixture(expectedCountAfter: countBefore)
 
         app.terminate()
@@ -89,16 +206,29 @@ final class NormalRollManagementTests: XCTestCase {
 
         openRoll()
         XCTAssertTrue(app.staticTexts["Local cache"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["gallery-photos-permission-settings"].waitForExistence(timeout: 10),
+                      "Denied Roll keeps its warning notice with the settings action")
+        screenshot("photos-denied-roll-notice")
         let saved = savedFrameButton()
         XCTAssertTrue(saved.waitForExistence(timeout: 15) && saved.isHittable)
         saved.tap()
         XCTAssertTrue(app.images["Photo"].waitForExistence(timeout: 20),
                       "Read denial must still allow the owned cached frame to load")
         XCTAssertTrue(app.descendants(matching: .any)["gallery-frame-metadata"].label.contains(recipeName))
+        XCTAssertTrue(app.descendants(matching: .any)["gallery-frame-metadata"].label.contains("Local copy kept in Filmy"),
+                      "A cached frame must say it is Filmy's local copy")
         XCTAssertFalse(app.buttons["Delete frame"].exists,
                        "A cache-only frame must not offer a Photos deletion operation")
         XCTAssertTrue(app.buttons["Share frame"].isEnabled)
         screenshot("photos-denied-cached-frame-without-delete")
+        app.buttons["gallery-info-frame"].tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Storage")).firstMatch.waitForExistence(timeout: 5),
+            "Frame info must carry the local-copy note"
+        )
+        screenshot("photos-denied-cached-frame-info")
+        app.buttons["gallery-info-done"].tap()
+        XCTAssertTrue(waitUntil { !self.app.buttons["gallery-info-done"].exists })
         app.buttons["frame-back-to-camera"].tap()
 
         try clearCacheThroughSettings()
@@ -108,6 +238,12 @@ final class NormalRollManagementTests: XCTestCase {
                        "A denied library with the local cache cleared must not retain a stale tile")
         let settingsAction = app.buttons["Open Settings"]
         XCTAssertTrue(settingsAction.exists && settingsAction.isHittable)
+        let start = app.buttons["roll-start-shooting"]
+        let originals = app.descendants(matching: .any)["roll-filmy-originals"]
+        XCTAssertTrue(start.exists && originals.exists)
+        XCTAssertLessThanOrEqual(settingsAction.frame.maxY, start.frame.minY, "The access fix must sit above the camera route")
+        XCTAssertLessThanOrEqual(start.frame.maxY, originals.frame.minY, "Originals must sit below both actions while access is off")
+        screenshot("photos-denied-empty-roll-one-primary")
         settingsAction.tap()
         let settings = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
         XCTAssertTrue(settings.wait(for: .runningForeground, timeout: 10),
@@ -129,11 +265,16 @@ final class NormalRollManagementTests: XCTestCase {
         try verifyPhotosLibraryCountAfterDeletion()
     }
 
-    private func launchNormalApp() {
+    private func launchNormalApp(contentSizeCategory: String? = nil) {
         app?.terminate()
         XCUIDevice.shared.orientation = .portrait
         app = XCUIApplication()
-        // No -ui-testing: exercise actual PhotosPicker, PhotoKit and cache.
+        // Avoid the exact -ui-testing flag so PhotosPicker, PhotoKit and cache
+        // remain real while premium entitlement is deterministic for this lane.
+        app.launchArguments = ["-ui-testing-photos-e2e"]
+        if let contentSizeCategory {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", contentSizeCategory]
+        }
         app.launch()
         let skip = app.buttons["Skip"]
         if skip.waitForExistence(timeout: 2) { skip.tap() }
@@ -159,8 +300,21 @@ final class NormalRollManagementTests: XCTestCase {
     }
 
     private func returnToCamera() {
-        app.buttons["roll-back-to-camera"].tap()
-        XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 10))
+        let back = app.buttons["roll-back-to-camera"]
+        let menu = app.buttons["recipe-menu"]
+        for attempt in 1...3 {
+            var tapped = false
+            if back.waitForExistence(timeout: 5), back.isHittable {
+                back.tap()
+                tapped = true
+            }
+            if menu.waitForExistence(timeout: 10) { return }
+            // CI run 38345928864: the button dimmed (press recognized) but the
+            // Roll stayed up. Keep evidence so a recurring ignored press shows.
+            let name = tapped ? "roll-back-to-camera-ignored-attempt-\(attempt)" : "roll-back-to-camera-not-hittable-attempt-\(attempt)"
+            screenshot(name)
+        }
+        XCTFail("Back to camera must reach the viewfinder")
     }
 
     private func saveCafeFixture(newerSavedFrameCount: Int) throws {
@@ -172,8 +326,15 @@ final class NormalRollManagementTests: XCTestCase {
             tile.tap()
             XCTAssertTrue(waitUntil { current.label.contains(self.recipeName) })
             app.buttons["recipe-drawer-close"].tap()
+            XCTAssertTrue(waitUntil(timeout: 5) {
+                !app.descendants(matching: .any)["recipe-drawer"].exists
+            }, "Closing the look picker must leave the camera controls available")
         }
-        app.buttons["import-photo"].tap()
+        // Import lives in Roll; picking a photo returns to the camera for review.
+        if !app.buttons["roll-import-photo"].exists { app.buttons["roll-tab"].tap() }
+        let rollImport = app.buttons["roll-import-photo"]
+        XCTAssertTrue(rollImport.waitForExistence(timeout: 10))
+        rollImport.tap()
         let photos = app.images.matching(NSPredicate(format: "identifier == 'PXGGridLayout-Info'"))
         XCTAssertTrue(waitUntil(timeout: 30) {
             if photos.count > newerSavedFrameCount { return true }
@@ -181,7 +342,8 @@ final class NormalRollManagementTests: XCTestCase {
             if notice.exists && notice.isHittable { notice.tap() }
             return false
         }, "The seeded source must be visible after the newer app-created fixtures")
-        sourceLibraryCount = photos.count
+        // Keep the count from before the first fixture of the case.
+        if sourceLibraryCount == nil { sourceLibraryCount = photos.count }
         // The harness seeds cafe newest; earlier app saves sort ahead of it.
         let source = photos.element(boundBy: newerSavedFrameCount)
         XCTAssertTrue(app.frame.contains(source.frame), "Never tap an offscreen or unknown Photos tile")
@@ -204,9 +366,22 @@ final class NormalRollManagementTests: XCTestCase {
         app.buttons.matching(NSPredicate(format: "label == %@", "Photo in your gallery, \(recipeName)")).firstMatch
     }
 
-    private func openNewestSavedFrame(expectedCount: Int) throws {
+    private func openNewestSavedFrame(expectedCount: Int, scrollingToTile: Bool = false) throws {
         let saved = savedFrameButton()
-        XCTAssertTrue(saved.waitForExistence(timeout: 20) && saved.isHittable)
+        if scrollingToTile {
+            // Large text pushes the first tile below the fold, and the lazy grid
+            // creates it only near the screen. Short drags that end with a hold:
+            // a flick could carry the tile past the visible band.
+            _ = saved.waitForExistence(timeout: 3)
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35))
+            for _ in 0..<10 where !(saved.exists && saved.isHittable) {
+                start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
+            }
+        } else {
+            XCTAssertTrue(saved.waitForExistence(timeout: 20))
+        }
+        XCTAssertTrue(saved.exists && saved.isHittable)
         saved.tap()
         XCTAssertTrue(app.images["Photo"].waitForExistence(timeout: 30))
         XCTAssertTrue(app.descendants(matching: .any)["gallery-frame-metadata"].label.contains(recipeName))
@@ -232,16 +407,39 @@ final class NormalRollManagementTests: XCTestCase {
                     return false
                 }
             }
+            let position = self.app.descendants(matching: .any)["gallery-frame-position"]
+            if expectedCountAfter > 1, self.app.buttons["Close frame"].exists,
+               position.value as? String == "1 of \(expectedCountAfter)" {
+                // The pager stays open on the neighbouring frame.
+                return true
+            }
+            if expectedCountAfter == 1, self.app.buttons["Close frame"].exists, !position.exists,
+               self.app.images["Photo"].exists,
+               self.app.descendants(matching: .any)["gallery-frame-metadata"].label.contains(self.recipeName) {
+                // A single survivor has no position label but still shows its photo.
+                return true
+            }
+            // A closed pager is only a valid landing once nothing is left to show.
+            guard expectedCountAfter == 0 else { return false }
             return !self.app.buttons["Close frame"].exists && self.rollCount() == expectedCountAfter
         }, "Confirmed deletion must remove the selected fixture and publish the reduced Roll count")
+        if app.buttons["Close frame"].exists {
+            screenshot("frame-after-delete-landing")
+            app.buttons["Close frame"].tap()
+            XCTAssertTrue(waitUntil(timeout: 30) {
+                !self.app.buttons["Close frame"].exists && self.rollCount() == expectedCountAfter
+            }, "Closing the pager must show the reduced Roll count")
+        }
         XCTAssertFalse(app.alerts["Couldn’t update frame"].exists)
     }
 
     private func verifyPhotosLibraryCountAfterDeletion() throws {
         let expected = try XCTUnwrap(sourceLibraryCount)
         XCTAssertGreaterThan(expected, 0, "The public source must remain in Photos")
-        returnToCamera()
-        app.buttons["import-photo"].tap()
+        if !app.buttons["roll-import-photo"].exists { app.buttons["roll-tab"].tap() }
+        let rollImport = app.buttons["roll-import-photo"]
+        XCTAssertTrue(rollImport.waitForExistence(timeout: 10))
+        rollImport.tap()
         let photos = app.images.matching(NSPredicate(format: "identifier == 'PXGGridLayout-Info'"))
         XCTAssertTrue(waitUntil(timeout: 30) { photos.count == expected },
                       "The system PhotosPicker must return to its pre-save item count; hiding a Roll tile is insufficient")
@@ -254,7 +452,7 @@ final class NormalRollManagementTests: XCTestCase {
         let cancel = app.buttons["Cancel"].firstMatch
         XCTAssertTrue(cancel.waitForExistence(timeout: 5) && cancel.isHittable)
         cancel.tap()
-        XCTAssertTrue(app.buttons["import-photo"].waitForExistence(timeout: 10))
+        XCTAssertTrue(rollImport.waitForExistence(timeout: 10), "Cancelling the picker stays in Roll")
     }
 
     private func openSettings() {
@@ -269,6 +467,37 @@ final class NormalRollManagementTests: XCTestCase {
         XCTAssertEqual(clear.value as? String, "Available", "A just-saved fixture must have a persistent local fallback")
         XCTAssertTrue(clear.isEnabled && clear.isHittable)
         clear.tap()
+        let confirm = app.buttons.matching(identifier: "confirm-clear-local-cache").firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        screenshot("clear-cache-confirmation-keeps-photos")
+        let keepCache = app.buttons["Keep cache"]
+        let dismissRegion = app.otherElements["PopoverDismissRegion"].firstMatch
+        XCTAssertTrue(waitUntil { keepCache.exists || dismissRegion.exists })
+        if keepCache.exists {
+            keepCache.tap()
+        } else {
+            // Native popover presentations omit the cancel button. Dismiss
+            // outside the popover, then verify the same cache-preserving result.
+            let popover = app.popovers.firstMatch
+            XCTAssertTrue(popover.waitForExistence(timeout: 5))
+            let bounds = dismissRegion.frame
+            let excluded = popover.frame.insetBy(dx: -8, dy: -8)
+            let candidates = [
+                CGPoint(x: bounds.minX + 8, y: bounds.midY),
+                CGPoint(x: bounds.maxX - 8, y: bounds.midY),
+                CGPoint(x: bounds.midX, y: bounds.minY + 48)
+            ]
+            let point = try XCTUnwrap(candidates.first { bounds.contains($0) && !excluded.contains($0) },
+                                      "The native popover must expose a safe outside dismissal region")
+            dismissRegion.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: point.x - bounds.minX, dy: point.y - bounds.minY)).tap()
+        }
+        XCTAssertTrue(waitUntil { !confirm.exists })
+        XCTAssertEqual(clear.value as? String, "Available", "Cancel must retain the local fallback")
+        XCTAssertTrue(clear.isEnabled)
+        clear.tap()
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.tap()
         XCTAssertTrue(waitUntil { clear.value as? String == "Empty" && !clear.isEnabled },
                       "Clear must remove the cached files and disable the empty action")
         screenshot("clear-local-cache-empty-readback")
@@ -289,8 +518,12 @@ final class NormalRollManagementTests: XCTestCase {
     }
 
     private func rollCount() -> Int? {
-        for label in app.staticTexts.allElementsBoundByIndex.map(\.label) where label.hasSuffix(" frames") {
-            if let count = Int(label.dropLast(" frames".count)) { return count }
+        let countLabel = app.staticTexts.matching(
+            NSPredicate(format: "label ENDSWITH %@", " frames")
+        ).firstMatch
+        if countLabel.exists,
+           let count = Int(countLabel.label.dropLast(" frames".count)) {
+            return count
         }
         if app.staticTexts["Your frames will live here"].exists || app.staticTexts["Your selected roll is empty"].exists {
             return 0

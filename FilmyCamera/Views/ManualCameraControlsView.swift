@@ -1,13 +1,41 @@
 import SwiftUI
 
+/// Where the Pro sheet opens. `.top` (default) keeps today's sheet.
+enum ProControlsSection: String, CaseIterable, Sendable {
+    case top, exposure, whiteBalance, focus, format
+
+    static let lensAnchor = "pro-anchor-lens"
+    static let manualAnchor = "pro-anchor-manual"
+    static let formatAnchor = "pro-anchor-format"
+
+    /// Raw value of the manual tab to select; nil keeps Exposure.
+    var manualTabID: String? {
+        switch self {
+        case .exposure, .whiteBalance, .focus: return rawValue
+        case .top, .format: return nil
+        }
+    }
+
+    /// Scroll id to bring to the top edge. The lens pick stays first when required.
+    func openingScrollAnchor(lensFirst: Bool) -> String? {
+        switch self {
+        case .top: return nil
+        case .format: return Self.formatAnchor
+        case .exposure, .whiteBalance, .focus: return lensFirst ? Self.lensAnchor : Self.manualAnchor
+        }
+    }
+}
+
 /// A compact, camera-first surface for sensor controls. Slider drags stay local
 /// until the gesture ends so AVFoundation receives one bounded request instead
 /// of a request for every touch sample.
 struct ManualCameraControlsView: View {
     @ObservedObject var camera: CameraService
+    let initialSection: ProControlsSection
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var isoDraft: Double = 0
@@ -20,8 +48,46 @@ struct ManualCameraControlsView: View {
     @State private var editingKelvin = false
     @State private var editingTint = false
     @State private var editingFocus = false
+    @State private var selectedSection: ControlSection = .exposure
+    @State private var didApplyOpeningSection = false
+
+    init(camera: CameraService, initialSection: ProControlsSection = .top) {
+        _camera = ObservedObject(wrappedValue: camera)
+        self.initialSection = initialSection
+        let tab = initialSection.manualTabID.flatMap(ControlSection.init(rawValue:)) ?? .exposure
+        _selectedSection = State(initialValue: tab)
+    }
+
+    private enum ControlSection: String, CaseIterable, Identifiable {
+        case exposure
+        case focus
+        case whiteBalance
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .exposure: return "Exposure"
+            case .focus: return "Focus"
+            case .whiteBalance: return "White balance"
+            }
+        }
+
+        var symbolName: String {
+            switch self {
+            case .exposure: return "sun.max"
+            case .focus: return "scope"
+            case .whiteBalance: return "thermometer.sun"
+            }
+        }
+    }
 
     private var controls: CameraManualControls { camera.manualControls }
+    // Keep a generous touch target on iPad in every orientation.
+    private var doneButtonTarget: CGFloat {
+        UIDevice.current.userInterfaceIdiom == .pad ? 64 : 48
+    }
+
     private var hasManualCapability: Bool {
         controls.manualExposureSupported
             || controls.manualWhiteBalanceSupported
@@ -33,31 +99,14 @@ struct ManualCameraControlsView: View {
     var body: some View {
         VStack(spacing: 0) {
             sheetHeader
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    if hasManualCapability { statusHeader }
-
-                    if !controls.physicalLensOptions.isEmpty {
-                        physicalLensSection
-                    }
-
-                    if hasManualCapability {
-                        exposureSection
-                        whiteBalanceSection
-                        focusSection
-                    } else {
-                        unavailableCard
-                    }
-
-                    resetButton
+            ScrollViewReader { proxy in
+                ScrollView {
+                    scrollContent
                 }
-                .frame(maxWidth: 720, alignment: .leading)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.horizontal, horizontalSizeClass == .regular ? 28 : 20)
-                .padding(.vertical, 20)
+                .background(FilmyTheme.background.ignoresSafeArea())
+                .accessibilityIdentifier("manual-controls-scroll")
+                .onAppear { scrollToOpeningSection(proxy) }
             }
-            .background(FilmyTheme.background.ignoresSafeArea())
-            .accessibilityIdentifier("manual-controls-scroll")
         }
         .background(FilmyTheme.background.ignoresSafeArea())
         .accessibilityElement(children: .contain)
@@ -67,23 +116,73 @@ struct ManualCameraControlsView: View {
             syncDrafts()
         }
         .onChange(of: controls) { _, _ in syncDraftsIfIdle() }
+        .onChange(of: controls.activeDeviceID) { _, _ in syncDrafts() }
+    }
+
+    private var scrollContent: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            if dynamicTypeSize.isAccessibilitySize { cameraMessage }
+            if camera.sceneAuto.isEnabled {
+                Text("Changing a control here turns Scene Auto off.")
+                    .font(.footnote)
+                    .foregroundStyle(FilmyTheme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if controls.requiresPhysicalLensSelection {
+                // One container, so the scroll anchor names a single view.
+                VStack(alignment: .leading, spacing: 20) { cameraAndLens }
+                    .id(ProControlsSection.lensAnchor)
+            }
+
+            if hasManualCapability {
+                sectionPicker
+                selectedSectionView.id(ProControlsSection.manualAnchor)
+            } else {
+                unavailableCard
+            }
+
+            resetButton
+            if !controls.requiresPhysicalLensSelection { cameraAndLens }
+            ProCaptureControlsView(camera: camera)
+        }
+        .frame(maxWidth: 720, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.horizontal, horizontalSizeClass == .regular ? 28 : 20)
+        .padding(.vertical, 20)
+    }
+
+    private func scrollToOpeningSection(_ proxy: ScrollViewProxy) {
+        guard !didApplyOpeningSection, initialSection != .top else { return }
+        didApplyOpeningSection = true
+        Task { @MainActor in
+            scrollToOpeningAnchor(proxy)          // after first layout
+            try? await Task.sleep(for: .milliseconds(350))
+            scrollToOpeningAnchor(proxy)          // after the detent settles and refreshManualControls publishes
+        }
+    }
+
+    private func scrollToOpeningAnchor(_ proxy: ScrollViewProxy) {
+        guard let anchor = initialSection.openingScrollAnchor(lensFirst: controls.requiresPhysicalLensSelection) else { return }
+        proxy.scrollTo(anchor, anchor: .top)
     }
 
     private var sheetHeader: some View {
         HStack(spacing: 16) {
-            Text("Pro controls")
-                .font(.system(.headline, design: .rounded).weight(.bold))
-                .foregroundStyle(FilmyTheme.primary)
-                .accessibilityAddTraits(.isHeader)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Pro controls")
+                    .font(.system(.headline, design: .rounded).weight(.bold))
+                    .foregroundStyle(FilmyTheme.primary)
+                    .accessibilityAddTraits(.isHeader)
+                // Pinned copy stays short so a long message cannot push the first control off the sheet.
+                if !dynamicTypeSize.isAccessibilitySize { cameraMessage.lineLimit(3) }
+            }
             Spacer(minLength: 8)
             Button { dismiss() } label: {
                 Text("Done")
                     .font(.system(.body, design: .rounded).weight(.semibold))
                     .foregroundStyle(FilmyTheme.accent)
                     .padding(.horizontal, 16)
-                    // Inset medium sheets scale their content slightly;
-                    // preserve a displayed target of at least 44 points.
-                    .frame(minWidth: 64, minHeight: 48)
+                    .frame(minWidth: 64, minHeight: doneButtonTarget)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -95,43 +194,181 @@ struct ManualCameraControlsView: View {
         .padding(.bottom, 4)
     }
 
+    @ViewBuilder private var cameraAndLens: some View {
+        if hasManualCapability { statusHeader }
+        if !controls.physicalLensOptions.isEmpty { physicalLensSection }
+    }
+
+    private var cameraMessage: some View {
+        Text(camera.statusMessage)
+            .font(.system(.caption, design: .rounded).weight(.medium))
+            .foregroundStyle(FilmyTheme.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityLabel("Camera message")
+            .accessibilityValue(camera.statusMessage)
+            .accessibilityIdentifier("pro-camera-status")
+    }
+
     private var statusHeader: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Eyebrow(text: "CAMERA", color: FilmyTheme.filmAccent)
-            Text(controls.activeDeviceName)
-                .font(.system(.title3, design: .rounded).weight(.bold))
-                .foregroundStyle(FilmyTheme.primary)
-                .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Eyebrow(text: "CAMERA", color: FilmyTheme.accent)
+                    Text(controls.activeDeviceName)
+                        .font(.system(.title3, design: .rounded).weight(.bold))
+                        .foregroundStyle(FilmyTheme.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                modeBadge
+            }
             Text(statusDescription)
                 .font(.system(.subheadline, design: .rounded).weight(.medium))
                 .foregroundStyle(FilmyTheme.secondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("manual-controls-status")
         }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(FilmyTheme.backgroundRaised, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(FilmyTheme.line, lineWidth: 1)
+        }
+    }
+
+    private var modeBadge: some View {
+        let manual = controls.isAnyManualModeEnabled
+        return Text(manual ? "MANUAL" : "AUTO")
+            .font(.system(.caption2, design: .rounded).weight(.heavy))
+            .tracking(0.8)
+            .foregroundStyle(manual ? FilmyTheme.background : FilmyTheme.primary)
+            .padding(.horizontal, 10)
+            .frame(minHeight: 28)
+            .background(manual ? FilmyTheme.filmAccent : FilmyTheme.panel, in: Capsule())
+            .overlay { Capsule().strokeBorder(manual ? FilmyTheme.filmAccent : FilmyTheme.lineStrong, lineWidth: 1) }
+            .accessibilityLabel("Control mode")
+            .accessibilityValue(manual ? "Manual" : "Auto")
+    }
+
+    private var compactSectionTitles: Bool {
+        horizontalSizeClass == .compact && !dynamicTypeSize.isAccessibilitySize
+    }
+
+    private var sectionTitleLayout: AnyLayout {
+        compactSectionTitles
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 7))
+    }
+
+    private var sectionPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Camera")
+                .font(.system(.caption, design: .rounded).weight(.heavy))
+                .foregroundStyle(FilmyTheme.secondary)
+                .textCase(.uppercase)
+                .tracking(0.8)
+                .accessibilityAddTraits(.isHeader)
+
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: dynamicTypeSize.isAccessibilitySize ? 1 : 3),
+                spacing: 8
+            ) {
+                ForEach(ControlSection.allCases) { section in
+                    Button {
+                        HapticFeedback.play(.selection)
+                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { selectedSection = section }
+                    } label: {
+                        ZStack(alignment: .topTrailing) {
+                            VStack(alignment: .leading, spacing: 5) {
+                                sectionTitleLayout {
+                                    Image(systemName: section.symbolName)
+                                        .font(.system(.caption, weight: .bold))
+                                    Text(section.title)
+                                        .font(.system(compactSectionTitles ? .caption : .subheadline, design: .rounded).weight(.bold))
+                                        .lineLimit(2)
+                                        .minimumScaleFactor(0.85)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .layoutPriority(1)
+                                }
+                                .padding(.trailing, compactSectionTitles ? 0 : 24)
+                                Text(sectionSummary(section))
+                                    .font(.system(.caption2, design: .rounded).weight(.medium))
+                                    .foregroundStyle(selectedSection == section ? FilmyTheme.primary : FilmyTheme.secondary)
+                                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                                    .minimumScaleFactor(0.85)
+                            }
+                            if selectedSection == section {
+                                Image(systemName: "checkmark")
+                                    .font(.caption.weight(.heavy))
+                                    .padding(.top, 1)
+                            }
+                        }
+                        .foregroundStyle(selectedSection == section ? FilmyTheme.accent : FilmyTheme.primary)
+                        .padding(.horizontal, 12)
+                        .frame(maxWidth: .infinity, minHeight: dynamicTypeSize.isAccessibilitySize ? 72 : 60, alignment: .leading)
+                        .background(selectedSection == section ? FilmyTheme.accent.opacity(0.18) : FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .strokeBorder(selectedSection == section ? FilmyTheme.accent : FilmyTheme.line, lineWidth: 1)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("manual-section-\(section.id)")
+                    .accessibilityLabel(section.title)
+                    .accessibilityValue(selectedSection == section ? "Selected. \(sectionSummary(section))" : sectionSummary(section))
+                    .accessibilityHint("Shows \(section.title.lowercased()) controls")
+                }
+            }
+        }
+        .accessibilityIdentifier("manual-controls-sections")
+    }
+
+    @ViewBuilder
+    private var selectedSectionView: some View {
+        switch selectedSection {
+        case .exposure: exposureSection
+        case .focus: focusSection
+        case .whiteBalance: whiteBalanceSection
+        }
+    }
+
+    private func sectionSummary(_ section: ControlSection) -> String {
+        switch section {
+        case .exposure:
+            guard controls.exposureMode == .manual else { return "Auto metering" }
+            return "ISO \(Int(isoDraft.rounded())) · \(shutterLabel(duration(for: shutterPosition)))"
+        case .focus:
+            guard controls.focusMode == .manual else { return "Auto focus" }
+            return String(format: "Manual · %.2f", focusDraft)
+        case .whiteBalance:
+            guard controls.whiteBalanceMode == .manual else { return "Auto color" }
+            return "\(Int(kelvinDraft.rounded()))K · \(String(format: "%+.0f", tintDraft))"
+        }
     }
 
     private var statusDescription: String {
         if camera.availability == .simulator {
-            return "Manual sensor controls appear on a physical camera. This preview cannot change ISO, shutter, white balance, or focus."
+            return "Manual controls need a real camera."
         }
         if camera.availability == .permissionDenied {
-            return "Allow Camera access in Settings to use manual controls."
+            return "Allow Camera access in Settings."
         }
         if controls.activeDeviceID == nil {
-            return "Camera controls will appear when the camera is ready."
+            return "Waiting for the camera."
         }
         if isApplying { return "Applying your settings…" }
         if controls.requiresPhysicalLensSelection {
-            return "Automatic lens switching is active. Choose a lens below to access more manual controls."
+            return "Choose a lens below for more manual controls."
         }
         if controls.isAnyManualModeEnabled {
-            return "Manual settings are applied to the next capture."
+            return "Manual settings apply to the next shot."
         }
         return "Auto settings meter each frame."
     }
 
     private var physicalLensSection: some View {
-        controlSection(title: "Lens", subtitle: "Choose a lens for manual control. Availability varies by camera.") {
+        controlSection(title: "Lens", subtitle: "Manual controls apply to the lens you pick.") {
             VStack(spacing: 8) {
                 ForEach(controls.physicalLensOptions) { lens in
                     Button {
@@ -139,7 +376,7 @@ struct ManualCameraControlsView: View {
                     } label: {
                         HStack(spacing: 12) {
                             Image(systemName: lens.isActive ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(lens.isActive ? FilmyTheme.filmAccent : FilmyTheme.secondary)
+                                .foregroundStyle(lens.isActive ? FilmyTheme.accent : FilmyTheme.secondary)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(lens.title)
                                     .font(.system(.subheadline, design: .rounded).weight(.bold))
@@ -156,7 +393,7 @@ struct ManualCameraControlsView: View {
                         .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .overlay {
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(lens.isActive ? FilmyTheme.filmAccent : FilmyTheme.line, lineWidth: 1)
+                                .stroke(lens.isActive ? FilmyTheme.accent : FilmyTheme.line, lineWidth: 1)
                         }
                     }
                     .buttonStyle(.plain)
@@ -170,7 +407,7 @@ struct ManualCameraControlsView: View {
     }
 
     private var exposureSection: some View {
-        controlSection(title: "Exposure", subtitle: "Set sensitivity and shutter speed, or let the camera meter automatically.") {
+        controlSection(title: "Exposure", subtitle: "Set ISO and shutter, or leave it on Auto.") {
             modePicker(
                 title: "Exposure mode",
                 mode: controls.exposureMode,
@@ -203,16 +440,13 @@ struct ManualCameraControlsView: View {
                     onEnded: { camera.setManualExposure(iso: Float(isoDraft), durationSeconds: duration(for: shutterPosition)) }
                 )
                 if controls.exposureDurationSeconds > (1.0 / 30.0) {
-                    Text("Slower shutter speeds reduce live preview smoothness. Hold steady.")
+                    Text("Slow shutter: hold steady, preview may stutter.")
                         .font(.system(.caption, design: .rounded).weight(.medium))
                         .foregroundStyle(FilmyTheme.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if controls.flashRequiresAutoExposure {
-                    Text("Flash is off while Manual exposure is active. Return to Auto to restore it.")
-                        .font(.system(.caption, design: .rounded).weight(.semibold))
-                        .foregroundStyle(FilmyTheme.accent)
-                        .fixedSize(horizontal: false, vertical: true)
+                    ProReasonLine(text: "Flash is off in Manual. Auto restores it.")
                 }
             } else if !controls.manualExposureSupported {
                 unsupportedText("Manual ISO and shutter are unavailable on this camera.")
@@ -222,7 +456,7 @@ struct ManualCameraControlsView: View {
     }
 
     private var whiteBalanceSection: some View {
-        controlSection(title: "White balance", subtitle: "Sensor color temperature is separate from the selected film recipe.") {
+        controlSection(title: "White balance", subtitle: "Camera color, set separately from your look.") {
             modePicker(
                 title: "White balance mode",
                 mode: controls.whiteBalanceMode,
@@ -262,7 +496,7 @@ struct ManualCameraControlsView: View {
     }
 
     private var focusSection: some View {
-        controlSection(title: "Focus", subtitle: "Adjust focus manually. Return to Auto for moving subjects.") {
+        controlSection(title: "Focus", subtitle: "Focus by hand, or use Auto for moving subjects.") {
             modePicker(
                 title: "Focus mode",
                 mode: controls.focusMode,
@@ -343,6 +577,13 @@ struct ManualCameraControlsView: View {
             }
             content()
         }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(FilmyTheme.backgroundRaised, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(FilmyTheme.line, lineWidth: 1)
+        }
         .accessibilityElement(children: .contain)
     }
 
@@ -359,6 +600,8 @@ struct ManualCameraControlsView: View {
             modeButton(title: "Auto", selected: mode == .auto, enabled: true, id: autoID, action: autoAction)
             modeButton(title: "Manual", selected: mode == .manual, enabled: supported, id: manualID, action: manualAction)
         }
+        .padding(4)
+        .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
     }
@@ -376,12 +619,12 @@ struct ManualCameraControlsView: View {
         } label: {
             Text(title)
                 .font(.system(.subheadline, design: .rounded).weight(.bold))
-                .frame(maxWidth: .infinity, minHeight: FilmyTheme.minimumHitTarget)
+                .frame(maxWidth: .infinity, minHeight: max(FilmyTheme.minimumHitTarget, 44))
                 .foregroundStyle(selected ? FilmyTheme.background : FilmyTheme.primary)
-                .background(selected ? FilmyTheme.filmAccent : FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(selected ? FilmyTheme.accent : FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(selected ? FilmyTheme.filmAccent : FilmyTheme.line, lineWidth: 1)
+                        .strokeBorder(selected ? FilmyTheme.accent : FilmyTheme.line, lineWidth: 1)
                 }
         }
         .buttonStyle(.plain)
@@ -415,7 +658,7 @@ struct ManualCameraControlsView: View {
                 if !active { onEnded() }
             })
             .disabled(isApplying)
-            .tint(FilmyTheme.filmAccent)
+            .tint(FilmyTheme.accent)
             .accessibilityIdentifier(id)
             .accessibilityLabel(title)
             .accessibilityValue(displayValue)
@@ -430,14 +673,12 @@ struct ManualCameraControlsView: View {
                 onEnded()
             }
         }
+        .padding(.horizontal, 2)
         .frame(minHeight: 58)
     }
 
     private func unsupportedText(_ text: String) -> some View {
-        Text(text)
-            .font(.system(.caption, design: .rounded).weight(.medium))
-            .foregroundStyle(FilmyTheme.secondary)
-            .fixedSize(horizontal: false, vertical: true)
+        ProReasonLine(text: text)
     }
 
     private func syncDraftsIfIdle() {

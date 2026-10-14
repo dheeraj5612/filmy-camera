@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreLocation
 import CoreImage
 import ImageIO
 import UIKit
@@ -169,6 +170,50 @@ final class CameraViewModelRenderingTests: XCTestCase {
         }
     }
 
+    func testReviewPreviewDownscaleKeepsEdgesOpaque() {
+        let extent = CGRect(x: 0, y: 0, width: 2400, height: 1800)
+        let source = CIImage(color: CIColor(red: 0.6, green: 0.5, blue: 0.4, alpha: 1)).cropped(to: extent)
+        let bounded = CameraViewModel.boundedReviewPreviewInput(source)
+        XCTAssertEqual(bounded.extent.width, 1800)
+        XCTAssertEqual(bounded.extent.height, 1350)
+        let context = CIContext(options: FilmRenderer.testContextOptions)
+        let midX = (bounded.extent.width / 2).rounded(.down)
+        let midY = (bounded.extent.height / 2).rounded(.down)
+        let centre = probePixels(bounded, CGRect(x: midX, y: midY, width: 1, height: 1), context: context)
+        let probes = [
+            CGRect(x: 0, y: midY, width: 3, height: 1),
+            CGRect(x: bounded.extent.width - 3, y: midY, width: 3, height: 1),
+            CGRect(x: midX, y: 0, width: 1, height: 3),
+            CGRect(x: midX, y: bounded.extent.height - 3, width: 1, height: 3)
+        ]
+        for probe in probes {
+            let pixels = probePixels(bounded, probe, context: context)
+            for offset in stride(from: 0, to: pixels.count, by: 4) {
+                XCTAssertEqual(pixels[offset + 3], 1, accuracy: 0.002, "Alpha must stay opaque at \(probe)")
+                for channel in 0..<3 {
+                    XCTAssertEqual(pixels[offset + channel], centre[channel], accuracy: 0.002, "Edge colour must match centre at \(probe)")
+                }
+            }
+        }
+    }
+
+    private func probePixels(_ image: CIImage, _ rect: CGRect, context: CIContext) -> [Float] {
+        let width = Int(rect.width)
+        let height = Int(rect.height)
+        var pixels = [Float](repeating: 0, count: width * height * 4)
+        pixels.withUnsafeMutableBytes { buffer in
+            context.render(
+                image,
+                toBitmap: buffer.baseAddress!,
+                rowBytes: width * 4 * MemoryLayout<Float>.stride,
+                bounds: rect,
+                format: .RGBAf,
+                colorSpace: CGColorSpace(name: CGColorSpace.sRGB)
+            )
+        }
+        return pixels
+    }
+
     func testScaledGrainPhasePreservesValuesBeyondSeedBitRange() {
         let seed = UInt32(0x1FF) | (UInt32(0x1FF) << 9)
         let phase = CameraViewModel.scaledGrainPhase(
@@ -315,6 +360,34 @@ final class CameraViewModelRenderingTests: XCTestCase {
         )
     }
 #endif
+
+    func testCaptureRenderWritesShutterLocationAsGPS() throws {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 30)).image { context in
+            UIColor.orange.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 40, height: 30))
+        }
+        let source = try XCTUnwrap(image.jpegData(compressionQuality: 0.9))
+        let recipe = FilmRecipe.builtIns[0]
+        let location = CLLocation(latitude: 37.5, longitude: -122.25)
+
+        func gps(_ location: CLLocation?) throws -> [String: Any]? {
+            let rendered = try XCTUnwrap(CameraViewModel.render(
+                sourceData: source, recipe: recipe, viewportSize: CGSize(width: 40, height: 30),
+                previewDrawableSize: CGSize(width: 40, height: 30), capturedAt: Date(timeIntervalSince1970: 1_800_000_000),
+                flashFired: false, location: location, grainSeed: 1
+            ))
+            let imageSource = try XCTUnwrap(CGImageSourceCreateWithData(rendered.data as CFData, nil))
+            let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [String: Any])
+            return properties[kCGImagePropertyGPSDictionary as String] as? [String: Any]
+        }
+
+        let tagged = try XCTUnwrap(gps(location))
+        XCTAssertEqual(tagged[kCGImagePropertyGPSLatitude as String] as? Double ?? 0, 37.5, accuracy: 0.0001)
+        XCTAssertEqual(tagged[kCGImagePropertyGPSLatitudeRef as String] as? String, "N")
+        XCTAssertEqual(tagged[kCGImagePropertyGPSLongitude as String] as? Double ?? 0, 122.25, accuracy: 0.0001)
+        XCTAssertEqual(tagged[kCGImagePropertyGPSLongitudeRef as String] as? String, "W")
+        XCTAssertNil(try gps(nil))
+    }
 
     @MainActor
     private func makeViewModel() throws -> CameraViewModel {

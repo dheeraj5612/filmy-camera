@@ -154,15 +154,16 @@ struct ContentView: View {
     @ObservedObject var camera: CameraService
     @ObservedObject var cameraViewModel: CameraViewModel
     @ObservedObject var photoLibrary: PhotoLibraryService
+    @Binding var selectedTab: Tab
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
-    @State private var selectedTab: Tab = .camera
     @State private var isShowingImporter = false
     @State private var importedPhotoItem: PhotosPickerItem?
     @State private var importTask: Task<Void, Never>?
     @State private var importSession = PhotoImportSession()
     @State private var importErrorMessage: String?
+    @AccessibilityFocusState private var isImportStatusFocused: Bool
 
     private var isImportInProgress: Bool {
         importSession.isBusy || cameraViewModel.isImporting
@@ -177,11 +178,23 @@ struct ContentView: View {
 
     var body: some View {
         selectedTabContent
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(spacing: 0) {
+                    MembershipStatusBar()
+                    if selectedTab != .camera { MonetizationBanner() }
+                }
+            }
             .allowsHitTesting(!isImportInProgress)
             .accessibilityHidden(isImportInProgress)
             // Release hardware even when the camera screen is not mounted.
             .onChange(of: scenePhase) { _, phase in
                 if phase != .active { camera.stop() }
+                cameraViewModel.sceneDidChange(phase)
+            }
+            // Cold launch: list captures that still owe a Photos export.
+            .task { await cameraViewModel.reconcilePendingPhotosExports() }
+            .onChange(of: selectedTab) { _, tab in
+                if tab == .camera { reconcileOwedExports() }
             }
             .overlay {
                 if isImportInProgress { importProgressOverlay }
@@ -220,15 +233,28 @@ struct ContentView: View {
             .onDisappear { cancelImport() }
     }
 
+    /// A save or delete in Filmy originals is reflected when the camera tab returns.
+    private func reconcileOwedExports() {
+        Task { await cameraViewModel.reconcilePendingPhotosExports() }
+    }
+
     private func startImport(_ item: PhotosPickerItem) {
+        guard MembershipStore.shared.require(.photoImport) else { return }
         guard !cameraViewModel.isCapturing, !cameraViewModel.isSaving,
               !cameraViewModel.isImporting, cameraViewModel.reviewImage == nil,
               let id = importSession.begin() else { return }
         selectedTab = .camera
         importErrorMessage = nil
+        // Counts the loading phase (for example an iCloud download) as busy so
+        // the Capture modes button and Siri launches cannot unmount this view
+        // and silently cancel the import.
+        cameraViewModel.beginImportLoading()
         importTask = Task {
             defer {
-                if importSession.finish(id) { importTask = nil }
+                if importSession.finish(id) {
+                    importTask = nil
+                    cameraViewModel.endImportLoading()
+                }
             }
             do {
                 guard let photo = try await item.loadTransferable(type: ImportedPhoto.self) else {
@@ -247,48 +273,70 @@ struct ContentView: View {
     private func cancelImport() {
         importTask?.cancel()
         importSession.cancel()
+        cameraViewModel.endImportLoading()
         if !importSession.isBusy { importTask = nil }
     }
 
     private var importProgressOverlay: some View {
-        ZStack {
-            Color.black.opacity(0.55).ignoresSafeArea()
-            VStack(spacing: 14) {
-                ProgressView().tint(FilmyTheme.accent)
-                Text(importTitle)
-                    .font(.headline)
-                    .foregroundStyle(FilmyTheme.primary)
-                    .accessibilityIdentifier("photo-import-status")
-                Text(importDetail)
-                    .font(.subheadline)
-                    .foregroundStyle(FilmyTheme.secondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button(action: cancelImport) {
-                    Text("Cancel import")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
-                        .contentShape(Rectangle())
+        GeometryReader { geometry in
+            ZStack {
+                Color.black.opacity(0.65).ignoresSafeArea()
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 18) {
+                        ProgressView()
+                            .tint(FilmyTheme.accent)
+                            .accessibilityHidden(true)
+                        Text(importTitle)
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(FilmyTheme.primary)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityAddTraits(.isHeader)
+                            .accessibilityFocused($isImportStatusFocused)
+                            .accessibilityIdentifier("photo-import-status")
+                        Text(importDetail)
+                            .font(.subheadline)
+                            .foregroundStyle(FilmyTheme.secondary)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button(action: cancelImport) {
+                            Text(importSession.phase == .cancelling ? "Canceling import" : "Cancel import")
+                        }
+                        .buttonStyle(.filmySecondary)
+                        .disabled(importSession.phase == .cancelling)
+                        .keyboardShortcut(.cancelAction)
+                        .accessibilityHint("Stops this import without saving a photo")
+                        .accessibilityIdentifier("photo-import-cancel")
+                    }
+                    .padding(24)
+                    .frame(maxWidth: 400)
+                    .viewfinderChrome(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .padding(20)
+                    .frame(maxWidth: .infinity, minHeight: geometry.size.height)
                 }
-                .buttonStyle(.plain)
-                .disabled(importSession.phase == .cancelling)
-                .accessibilityIdentifier("photo-import-cancel")
+                // Cancel remains reachable when the text is taller than the
+                // viewport. The camera underneath remains noninteractive.
+                .scrollBounceBehavior(.basedOnSize)
             }
-            .padding(24)
-            .frame(maxWidth: 360)
-            .viewfinderChrome(RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .padding(24)
-            .accessibilityElement(children: .contain)
-            .accessibilityAddTraits(.isModal)
         }
         .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.isModal)
         .accessibilityIdentifier("photo-import-progress")
+        .accessibilityAction(.escape, cancelImport)
+        .task {
+            await Task.yield()
+            guard !Task.isCancelled, isImportInProgress else { return }
+            // Focus once on presentation, not on every phase change; users
+            // navigating to Cancel must not have their focus pulled away.
+            isImportStatusFocused = true
+        }
+        .onDisappear { isImportStatusFocused = false }
     }
 
     private var importTitle: String {
         switch importSession.phase {
         case .loading: return "Opening your photo"
-        case .cancelling: return "Cancelling import"
+        case .cancelling: return "Canceling import"
         case .idle, .applying: return "Applying \(cameraViewModel.selectedRecipe.name)"
         }
     }
@@ -312,17 +360,23 @@ struct ContentView: View {
                 isCameraTabActive: selectedTab == .camera,
                 onOpenGallery: { open(.gallery) },
                 onOpenSettings: { open(.settings) },
-                onImportPhoto: {
-                    guard !isCameraBusy else { return }
-                    isShowingImporter = true
-                },
+                onImportPhoto: requestImport,
                 isImportInProgress: isImportInProgress || isShowingImporter
             )
         case .gallery:
-            GalleryScreen(photoLibrary: photoLibrary, onBackToCamera: returnToCamera)
+            GalleryScreen(photoLibrary: photoLibrary, onBackToCamera: returnToCamera, onImportPhoto: requestImport)
         case .settings:
             SettingsView(camera: camera, photoLibrary: photoLibrary, onBackToCamera: returnToCamera)
         }
+    }
+
+    private func requestImport() {
+        guard !isCameraBusy else {
+            cameraViewModel.noteBusyNavigation()
+            return
+        }
+        guard MembershipStore.shared.require(.photoImport) else { return }
+        isShowingImporter = true
     }
 
     private func returnToCamera() {
@@ -331,7 +385,11 @@ struct ContentView: View {
     }
 
     private func open(_ destination: Tab) {
-        guard !isCameraBusy, selectedTab != destination else { return }
+        guard !isCameraBusy else {
+            cameraViewModel.noteBusyNavigation()
+            return
+        }
+        guard selectedTab != destination else { return }
         withAnimation(reduceMotion ? nil : .snappy(duration: 0.24)) { selectedTab = destination }
     }
 }

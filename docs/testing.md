@@ -13,7 +13,9 @@ python3 scripts/testing/run.py ci \
   --destination 'platform=iOS Simulator,id=YOUR_SIMULATOR_UUID'
 ```
 
-`ci` builds once, then executes every deterministic test without rebuilding between phases. `core` runs unit and integration tests; `unit`, `integration`, and `e2e` select narrower groups. The `e2e` lane includes UI cases compiled only for the simulator. The physical `device` lane excludes those cases while retaining every platform-independent UI acceptance, so selected and reported counts remain exact on both platforms. Reuse products built by this runner with `--skip-build --derived-data PATH`. A source/resource/project digest and Xcode/coverage stamp reject stale or unverified products. After changing Swift source or project membership, rebuild first.
+`scripts/testing/test_sf_symbols.py` (portable, needs macOS SF Symbols data, else skips) fails on symbols newer than the deployment target; tag availability-guarded uses with a `sf-symbol: guarded` comment on the same line.
+
+`ci` builds once, then executes every deterministic test without rebuilding between phases. `core` runs unit and integration tests; `unit`, `integration`, and `e2e` select narrower groups. The `e2e` lane includes UI cases compiled only for the simulator. The physical `device` lane excludes those cases while retaining every platform-independent UI acceptance, so selected and reported counts remain exact on both platforms. Lanes default to the Debug configuration, except `store-media`, which defaults to Release so screenshots exercise the free shipping configuration. Store media uses the dedicated `FilmyCameraStoreMedia` Release scheme, containing the app and UI test target without the unit test target. Release test products enable testability; distribution archives retain their separate release settings. Pass `--configuration Debug` or `--configuration Release` to override that default. Reuse products built by this runner with `--skip-build --derived-data PATH` and the same configuration; the build stamp records the scheme and rejects products from another scheme or configuration. A source/resource/project digest (which also covers `Config/`, `StoreKit/`, and the workspace shared data including `Package.resolved`) and Xcode/coverage stamp reject stale or unverified products. After changing Swift source or project membership, rebuild first. An xcodebuild SIGTRAP exit (133, or -5 from Popen) is accepted only when the result bundle says Passed with zero failed and zero skipped and the selected-count check holds; the summary then carries `exitCodeOverridden` and `xcodebuildExitCode`. SIGTERM makes run.py exit 143 after its cleanup. The `ci`, `photos-e2e`, `fixtures`, and `store-media` lanes need a destination with `id=<simulator udid>`.
 
 ```sh
 python3 scripts/testing/run.py core \
@@ -55,6 +57,12 @@ Counts describe declared test methods, not line coverage or proof of hardware be
 
 Each deterministic UI case receives a unique preferences suite that persists across its own relaunches. Normal app launches ignore that testing environment variable. The Photos E2E uses its disposable simulator's real preferences and library.
 
+Debug-only fixture flags, each honored only together with `-ui-testing`: `-ui-testing-review-fixture` imports a generated 900 x 1200 JPEG at launch so review opens without Photos access; adding `-ui-testing-review-save-error` also shows the Photos write-failure message in review; `-ui-testing-cache-confirm` lets Settings show the Clear local cache confirmation when no cache exists. Release builds compile none of them.
+
+### Primary portrait iPhone acceptance
+
+Portrait iPhone is the primary product layout (user preference, 2026-09-14). For every camera or controls UI change, test the current revision on an iPhone simulator or physical iPhone before merge/release. iPhone compatibility mode on iPad is an acceptable fallback; a native iPad run alone does not satisfy this gate. Check the viewfinder, shutter, look picker, Pro controls, dismissal, and large text, and retain portrait screenshots with the test result and source revision. Continue native iPad coverage for its adaptive layouts.
+
 ## Hardware and optional lanes
 
 Compile device-only branches before a release, even when hardware is unavailable:
@@ -77,11 +85,11 @@ python3 scripts/testing/run.py device \
 | Lane | Prerequisite / output |
 | --- | --- |
 | `performance` | Physical-device renderer/import/detector and launch benchmarks. Compare the same device, build configuration, scene, and thermal state. |
-| `lens` | Physical iPhone 16 Pro lens/telephoto acceptance. Unsupported hardware is reported as skipped. |
+| `lens` | Physical iPhone 16 Pro lens/telephoto acceptance. Unsupported hardware is reported as skipped; an all-skipped `lens` or `performance` run exits 1 and prints the reason. |
 | `add-only` | Configure **Add Photos Only** in Settings first; requires `--allow-photos-writes`. Checks readable local Roll/cache after save and relaunch. |
 | `capture-sheet` | Physical device with a stable scene; saves recipe captures to Photos and therefore requires `--allow-photos-writes`. |
 | `fixtures` | Local render fixtures under `FilmyCameraTests/Fixtures`; regenerate the project after adding them. Private fixture files and results stay untracked. Empty fixture sets skip explicitly. |
-| `store-media` | Pass any reference simulator UUID. The runner creates a fresh simulator with the same device type/runtime, seeds only `docs/app-store/screenshots/demo-source/cafe-original.png`, forces zero prior saves, and destroys its owned simulator afterward. The reference simulator is untouched. Screenshots are attached to the result bundle. |
+| `store-media` | Pass any reference simulator UUID. The runner creates a fresh simulator with the same device type/runtime, builds and runs the `FilmyCameraStoreMedia` Release scheme by default, seeds only `docs/app-store/screenshots/demo-source/cafe-original.png`, forces zero prior saves, and destroys its owned simulator afterward. Use `--configuration Debug` only when intentionally reviewing the paid/local debug configuration. The reference simulator is untouched. Screenshots are attached to the result bundle. |
 
 Optional lanes report prerequisites and skips explicitly. A passing supported subset with skips does not validate the skipped hardware behavior. Physical screenshot attachments may contain personal surroundings or photos; keep them local.
 
@@ -107,3 +115,17 @@ CI runs portable routing checks on Linux before starting macOS. It retains the e
 ## Remaining validation limits
 
 The deterministic suite does not inject every PhotoKit service-level interleaving (for example, cache maintenance racing a save), or pause a renderer mid-import to force every cancellation schedule. Real permission revocation, add-only/limited access, storage pressure, thermal interruption, and long camera sessions still need device acceptance. Pixel-level assertions and public fixture E2Es do not replace visual comparison of skin tones, flash scenes, G7 X character, and Fuji looks on current hardware. See `docs/ipad-ui-acceptance-20260904.md` for the separate physical-device evidence.
+
+## Source-linked recipe library
+
+`RecipeLibraryTests` and `RecipeLibraryPersistenceTests` belong to the unit lane;
+`RecipeLibraryUITests` belongs to e2e and the iPhone/iPad screenshot workflow.
+`RecipeControlEffectTests` includes source-camera MG-axis polarity across all
+render qualities. The catalog acceptance workflow requires 190 passed cases,
+including two cases that enumerate all 595 sourced looks and 20 camera foundations
+in addition to the 142 per-look cases (36 legacy plus 106 original ids). Counted tests and counted recipes
+are deliberately different. See `docs/recipe-library-and-fidelity.md`.
+
+```sh
+python3 -m unittest discover -s scripts/recipes -p 'test_*.py' -v
+```

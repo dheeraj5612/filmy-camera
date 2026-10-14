@@ -1,8 +1,25 @@
 # Filmy Camera release checklist
 
-The current build 15 candidate carries the consolidated camera and gallery corrections while preserving the refreshed opaque app icon. Its source changes and generated icon provenance are documented in [the icon record](app-store/icon/README.md). Build 12 has already uploaded and finished processing; its distribution binary retains the earlier icon.
+## Standing UI acceptance gate
 
-## Build 15 release gates
+- [ ] For camera/control changes, verify the current revision in portrait on an iPhone simulator or physical iPhone (iPhone compatibility mode on iPad is an acceptable fallback), including large text. Retain screenshots and test results before merge/release. Native iPad coverage is additional. See [primary portrait iPhone acceptance](testing.md#primary-portrait-iphone-acceptance).
+
+## Monetized candidate
+
+Do not reuse the historical free-release approvals below for this branch. Complete [monetization setup](monetization.md), [new store/privacy disclosures](app-store/monetized-release.md), real-provider tests and a new version/build review before release. Production billing and ads are disabled until owner configuration and legal approval.
+
+## Version 1.0.2 update
+
+This update uses the explicit free-release configuration (`FILMY_MONETIZATION_ENABLED = NO`). It preserves unrestricted features without starting purchases, accounts or ads. The monetized candidate requirements above remain mandatory before enabling those services in a later release.
+
+- [ ] Integrate current PR deltas and pass relevant automated checks on the final source.
+- [ ] Confirm the signed archive is version 1.0.2, build 28, with monetization and ads disabled.
+- [ ] Complete iPhone portrait/large-text and iPad acceptance, plus available physical-camera checks; record any remaining hardware coverage.
+- [ ] Validate and upload the exact archive, confirm Apple processing, and submit matching listing/media for review.
+
+The earlier build 15 candidate (superseded by the 1.0.2 build 28 update above) carries the consolidated camera and gallery corrections while preserving the refreshed opaque app icon. Its source changes and generated icon provenance are documented in [the icon record](app-store/icon/README.md). Build 12 has already uploaded and finished processing; its distribution binary retains the earlier icon.
+
+## Build 15 release gates (superseded; historical)
 
 - [x] Integrate the refreshed opaque 1024-pixel icon and consistently increment both project representations to build 15. Preserve the old design and new generated master/prompts outside application resources.
 - [ ] Complete the consolidated camera/gallery corrections and physical acceptance on the connected iPad. Existing simulator evidence and generic signed-device compilation remain historical diagnostics; they do not replace the required latest-OS iPad run.
@@ -140,6 +157,8 @@ Do not describe the rendering as camera-exact or claim G7 X superiority without 
 
 Run from a clean checkout of the source being archived. Use the recorded source revision when validating any existing archive; do not restamp an older build from a later documentation or test commit.
 
+Prerequisites: Xcode 26 or later (iOS 26+ SDK) selected; the pinned XcodeGen 2.45.4 at `.ci/xcodegen/bin/xcodegen` or an absolute `FILMY_XCODEGEN_PATH` (SHA-256 verified by the script); set `FILMY_CODE_SIGN_STYLE`, `FILMY_CODE_SIGN_IDENTITY` and `FILMY_PROVISIONING_PROFILE_SPECIFIER` together for an Apple Distribution identity and App Store profile (the default Release signing is Apple Development, which `validate-archive.sh` rejects); `--allow-provisioning-updates` (optionally with `FILMY_ASC_KEY_ID`, `FILMY_ASC_ISSUER_ID` and `FILMY_ASC_KEY_PATH`) only lets Xcode contact Apple while archiving.
+
 ```sh
 scripts/release/archive-device.sh
 scripts/release/validate-archive.sh build/FilmyCamera.xcarchive
@@ -151,6 +170,6 @@ scripts/release/validate-ipa.sh \
 scripts/release/prepare-upload.sh --upload --export-path build/upload-export
 ```
 
-The check mode is read-only. Export and upload require explicit modes plus valid external signing/App Store credentials. Never commit certificates, profiles, API keys, or upload credentials.
+The check mode is read-only (nothing is exported or uploaded) but exits non-zero unless the project preflight passes, the archive exists and passes `validate-archive.sh`, an Apple Distribution certificate and an App Store profile are installed, final store metadata and store media validate, and `FILMY_ASC_KEY_ID`, `FILMY_ASC_ISSUER_ID` and `FILMY_ASC_KEY_PATH` are set and valid (key file outside the repository, owner-only permissions). Export and upload require explicit modes plus valid external signing/App Store credentials. Never commit certificates, profiles, API keys, or upload credentials.
 
 Archive and export destinations must be fresh. Upload performs a new export, so it needs a separate empty directory after a local export. For subsequent releases, set `FILMY_ARCHIVE_PATH`, pass that path as the positional argument to `validate-archive.sh`, and pass it through `--archive` to `prepare-upload.sh` and `validate-ipa.sh`. Replace each export directory with a fresh destination.

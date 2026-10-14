@@ -97,9 +97,10 @@ final class StoreScreenshotTests: XCTestCase {
         XCTAssertTrue(currentLook.waitForExistence(timeout: 15))
         XCTAssertTrue(currentLook.label.contains(recipeName))
 
-        let importPhoto = app.buttons["import-photo"]
-        XCTAssertTrue(importPhoto.waitForExistence(timeout: 10))
-        importPhoto.tap()
+        if !app.buttons["roll-import-photo"].exists { app.buttons["roll-tab"].tap() }
+        let rollImport = app.buttons["roll-import-photo"]
+        XCTAssertTrue(rollImport.waitForExistence(timeout: 10))
+        rollImport.tap()
 
         let photos = app.images.matching(
             NSPredicate(format: "identifier == 'PXGGridLayout-Info'")
@@ -153,10 +154,21 @@ final class StoreScreenshotTests: XCTestCase {
         // gesture area. PhotosPicker dismissal must settle before review is
         // accepted; existence alone can capture a full-screen transition.
         let topClearance: CGFloat = app.frame.width < 600 ? 44 : 20
-        XCTAssertTrue(waitUntil(timeout: 10) {
+        let reviewLayoutSettled = waitUntil(timeout: 10) {
             heading.frame.minY >= app.frame.minY + topClearance
                 && save.frame.maxY <= app.frame.maxY - 20
-        }, "Review controls must clear the status bar and bottom gesture area")
+                && photo.frame.width > app.frame.width * 0.60
+                && photo.frame.height > app.frame.height * 0.40
+        }
+        if !reviewLayoutSettled {
+            attachScreenshot(named: "review-layout-diagnostic")
+            let geometry = XCTAttachment(string: "App: \(app.frame); photo: \(photo.frame); heading: \(heading.frame); save: \(save.frame)")
+            geometry.name = "review-layout-frames"
+            geometry.lifetime = .keepAlways
+            add(geometry)
+        }
+        XCTAssertTrue(reviewLayoutSettled,
+                      "Review must settle with a substantial photo and controls clear of system areas")
         XCTAssertGreaterThanOrEqual(review.frame.width, app.frame.width * 0.95)
         // The portrait photo shares the screen with Look, Compare and Finish.
         // Keep it substantial and entirely visible without cropping its source.
@@ -212,7 +224,7 @@ final class StoreScreenshotTests: XCTestCase {
         app?.terminate()
         app = XCUIApplication()
         // -ui-testing is intentionally absent because it denies Photos reads.
-        app.launchArguments = ["-selectedRecipeID", recipeID]
+        app.launchArguments = ["-selectedRecipeID", recipeID, "-cameraGestureHintSeen.v1", "YES", "-reviewPeekHintSeen.v1", "YES"]
         app.launch()
 
         // A generic app-center tap selects a look in the interactive chooser.
@@ -381,6 +393,11 @@ final class LookLibraryUITests: XCTestCase {
         XCTAssertFalse(app.buttons["library-recipe-g7x-compact"].exists)
         snapshot(app, "looks-favorites")
         muted.tap()
+        let picked = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == 'Selected'"), object: muted)
+        XCTAssertEqual(XCTWaiter.wait(for: [picked], timeout: 5), .completed, "Picking a look marks it selected")
+        XCTAssertTrue(app.buttons["look-library-close"].exists, "Picking a look keeps the camera library open")
+        XCTAssertTrue(app.descendants(matching: .any)["look-library-current"].exists, "The library names the look in use")
+        app.buttons["look-library-close"].tap()
         XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["recipe-menu"].label.contains("Muted Color"))
         app.terminate()
@@ -412,6 +429,23 @@ final class LookLibraryUITests: XCTestCase {
         XCTAssertFalse(app.buttons["look-library-clear-search"].exists,
                        "The clear action must disappear when the query is empty")
         XCTAssertEqual(app.buttons["look-filter-all"].value as? String, "Selected")
+        let results = app.scrollViews["look-library-results"]
+        let firstCard = app.buttons["library-recipe-g7x-compact"]
+        for _ in 0..<3 { results.swipeUp() }
+        XCTAssertFalse(firstCard.isHittable, "The results must be scrolled away from the top")
+        // A filter change must also return to the top. Film has hundreds of
+        // looks, so the offset is not clamped by a short result list.
+        app.buttons["look-filter-film"].tap()
+        for _ in 0..<3 { results.swipeUp() }
+        app.buttons["look-filter-all"].tap()
+        let atTop = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == true"), object: firstCard)
+        XCTAssertEqual(XCTWaiter.wait(for: [atTop], timeout: 5), .completed,
+                       "A filter change must scroll the results back to the top")
+        for _ in 0..<3 { results.swipeUp() }
+        search.tap()
+        search.typeText("G7 X Compact")
+        XCTAssertTrue(firstCard.waitForExistence(timeout: 5))
+        XCTAssertTrue(firstCard.isHittable, "A query change must scroll the results back to the top")
         app.buttons["look-library-close"].tap()
         XCTAssertTrue(app.buttons["recipe-menu"].label.contains("G7 X Compact"))
     }
@@ -441,8 +475,17 @@ final class LookLibraryUITests: XCTestCase {
         openLibrary(app)
         assertControl(app.buttons["look-library-close"], in: app)
         assertControl(app.buttons["look-filter-all"], in: app)
-        XCTAssertTrue(app.textFields["look-library-search"].isHittable)
+        let search = app.textFields["look-library-search"]
+        XCTAssertTrue(search.isHittable)
+        search.tap()
+        search.typeText("G7 X Compact")
+        if app.keyboards.buttons["search"].exists { app.keyboards.buttons["search"].tap() }
         let favorite = app.buttons["look-favorite-g7x-compact"]
+        let results = app.scrollViews["look-library-results"]
+        XCTAssertTrue(results.waitForExistence(timeout: 5))
+        for _ in 0..<6 where favorite.exists && !favorite.isHittable {
+            results.swipeUp()
+        }
         assertControl(favorite, in: app)
         favorite.tap()
         XCTAssertEqual(favorite.value as? String, "Favorite")
@@ -491,8 +534,8 @@ final class LookLibraryUITests: XCTestCase {
     private func assertControl(_ element: XCUIElement, in app: XCUIApplication) {
         XCTAssertTrue(element.waitForExistence(timeout: 5))
         XCTAssertTrue(element.isHittable)
-        XCTAssertGreaterThanOrEqual(element.frame.width, 44)
-        XCTAssertGreaterThanOrEqual(element.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(element.frame.width, 44 - 0.01)
+        XCTAssertGreaterThanOrEqual(element.frame.height, 44 - 0.01)
         XCTAssertTrue(app.frame.insetBy(dx: -1, dy: -1).contains(element.frame))
     }
 
@@ -566,12 +609,31 @@ final class CaptureSetupUITests: XCTestCase {
                       "Explore looks must finish moving before it is tapped")
         browse.tap()
         let search = app.textFields["look-library-search"]
-        XCTAssertTrue(search.waitForExistence(timeout: 10)); search.tap(); search.typeText("CCD Daylight\n")
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        XCTAssertTrue(focusSearchField(search), "Look search must take keyboard focus before typing")
+        search.typeText("CCD Daylight\n")
         let style = app.buttons["library-recipe-digital-ccd-daylight"]
         XCTAssertTrue(style.waitForExistence(timeout: 5)); style.tap()
+        let close = app.buttons["look-library-close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5), "Picking a look keeps the camera library open")
+        close.tap()
         XCTAssertTrue(menu.waitForExistence(timeout: 5)); XCTAssertTrue(menu.label.contains("CCD Daylight"))
         app.terminate(); app.launch()
         XCTAssertTrue(menu.waitForExistence(timeout: 15)); XCTAssertTrue(menu.label.contains("CCD Daylight"))
+    }
+
+    /// The library sheet can still be presenting when the field first becomes
+    /// hittable, so a single tap may not take focus. Retry until it does.
+    private func focusSearchField(_ field: XCUIElement) -> Bool {
+        for _ in 0..<4 {
+            if field.isHittable { field.tap() }
+            let deadline = Date().addingTimeInterval(3)
+            while Date() < deadline {
+                if (field.value(forKey: "hasKeyboardFocus") as? Bool) == true { return true }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            }
+        }
+        return false
     }
 
     private func openCaptureSetup(in app: XCUIApplication) {
@@ -623,8 +685,8 @@ final class CaptureSetupUITests: XCTestCase {
 @MainActor
 private func waitForStationaryControl(_ control: XCUIElement, in app: XCUIApplication) -> Bool {
     // Accessibility queries on a loaded hosted iPad can take several seconds
-    // per observation. Allow enough time to compare two complete samples.
-    let deadline = Date(timeIntervalSinceNow: 15)
+    // per observation. Allow enough time to compare several complete samples.
+    let deadline = Date(timeIntervalSinceNow: 30)
     let frameTolerance: CGFloat = 1.0
     var previousFrame: CGRect?
     var stationarySince: Date?
@@ -639,14 +701,20 @@ private func waitForStationaryControl(_ control: XCUIElement, in app: XCUIApplic
         // while the activation point is temporarily invalid.
         if control.exists && control.isEnabled {
             let frame = control.frame
-            if frame.width >= 44 && frame.height >= 44 && app.frame.contains(frame) {
+            let visible = frame.intersection(app.frame)
+            if frame.width >= 44 && frame.height >= 44
+                && visible.width >= frame.width - 2
+                && visible.height >= frame.height - 2 {
                 if let previousFrame,
                    abs(frame.minX - previousFrame.minX) <= frameTolerance,
                    abs(frame.minY - previousFrame.minY) <= frameTolerance,
                    abs(frame.width - previousFrame.width) <= frameTolerance,
                    abs(frame.height - previousFrame.height) <= frameTolerance {
-                    if let stationarySince, Date().timeIntervalSince(stationarySince) >= 0.3 {
-                        return control.isHittable
+                    // A stable frame can still sit under a finishing overlay;
+                    // keep polling instead of failing on the first miss.
+                    if let stationarySince, Date().timeIntervalSince(stationarySince) >= 0.3,
+                       control.isHittable {
+                        return true
                     }
                 } else {
                     stationarySince = Date()

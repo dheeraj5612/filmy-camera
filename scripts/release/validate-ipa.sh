@@ -8,6 +8,8 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root_dir="$(cd "${script_dir}/../.." && pwd)"
+# shellcheck source=scripts/release/app-config.sh
+source "${root_dir}/scripts/release/app-config.sh"
 ipa_path=""
 archive_path="${FILMY_ARCHIVE_PATH:-}"
 temp_paths=()
@@ -18,7 +20,7 @@ Usage:
   scripts/release/validate-ipa.sh --ipa PATH --archive PATH
 
 Options:
-  --ipa PATH       Exported FilmyCamera.ipa to validate.
+  --ipa PATH       Exported ${release_app_bundle_name}.ipa to validate.
   --archive PATH   Validated source archive used to create the IPA.
   -h, --help       Show this help.
 
@@ -71,7 +73,10 @@ cleanup() {
     [[ -n "${path}" ]] && rm -rf "${path}"
   done
 }
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+trap "exit 129" HUP
+trap "exit 130" INT
+trap "exit 143" TERM
 
 plist_value() {
   local key="$1"
@@ -143,7 +148,7 @@ print_uuid_records() {
 
 "${script_dir}/validate-archive.sh" "${archive_path}" >/dev/null
 
-archive_app_path="${archive_path}/Products/Applications/FilmyCamera.app"
+archive_app_path="${archive_path}/Products/Applications/${release_app_bundle_name}.app"
 archive_info_plist="${archive_app_path}/Info.plist"
 archive_bundle_id="$(plist_value CFBundleIdentifier "${archive_info_plist}")"
 archive_version="$(plist_value CFBundleShortVersionString "${archive_info_plist}")"
@@ -158,15 +163,17 @@ work_dir="$(mktemp -d -t filmycamera-ipa-validation)"
 temp_paths+=("${work_dir}")
 unzip -qq "${ipa_path}" -d "${work_dir}" || die "IPA is not a valid ZIP archive"
 
-app_path="${work_dir}/Payload/FilmyCamera.app"
+app_path="${work_dir}/Payload/${release_app_bundle_name}.app"
 info_plist="${app_path}/Info.plist"
-[[ -d "${app_path}" && -f "${info_plist}" ]] || die "IPA does not contain FilmyCamera.app"
+[[ -d "${app_path}" && -f "${info_plist}" ]] || die "IPA does not contain ${release_app_bundle_name}.app"
 
 bundle_id="$(plist_value CFBundleIdentifier "${info_plist}")"
+display_name="$(plist_value CFBundleDisplayName "${info_plist}" || true)"
 version="$(plist_value CFBundleShortVersionString "${info_plist}")"
 build="$(plist_value CFBundleVersion "${info_plist}")"
 executable_name="$(plist_value CFBundleExecutable "${info_plist}" || true)"
 [[ "${bundle_id}" == "${archive_bundle_id}" \
+  && "${display_name}" == "${release_app_display_name}" \
   && "${version}" == "${archive_version}" \
   && "${build}" == "${archive_build}" ]] || {
   die "IPA metadata does not match the validated archive"
@@ -197,6 +204,12 @@ ipa_uuid_records="$(macho_uuid_records "${ipa_executable_path}" "IPA app executa
 [[ -f "${app_path}/PrivacyInfo.xcprivacy" ]] || {
   die "IPA is missing PrivacyInfo.xcprivacy"
 }
+if [[ "${release_app_variant}" == "filmy" ]]; then
+  # The g7 variant is intentionally not scanned by the free-SDK gate: this block runs only for the filmy variant (the g7 app is a separate product with its own checks).
+  python3 "${root_dir}/scripts/monetization/sdk_gate.py" app --expect free "${app_path}" || {
+    die "IPA app carries Firebase, Google Sign-In, Google Mobile Ads or UMP residue"
+  }
+fi
 [[ -f "${app_path}/embedded.mobileprovision" ]] || {
   die "IPA has no embedded provisioning profile"
 }

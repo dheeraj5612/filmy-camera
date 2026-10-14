@@ -1,0 +1,26 @@
+// Public identifiers only. Provider private keys belong in provider consoles.
+FILMY_MONTHLY_PRODUCT_ID = com.dheeraj.filmycamera.pro.monthly
+FILMY_TERMS_URL = https:/$()/www.apple.com/legal/internet-services/itunes/dev/stdeula/
+FILMY_PRIVACY_POLICY_URL = https:/$()/dheeraj5612.github.io/filmycam-legal/privacy-policy.html
+
+// Which Swift branch compiles: SDK-backed (monetized) or SDK-free (Release).
+FILMY_MONETIZATION_SWIFT_CONDITION_YES = FILMY_MONETIZATION_SDKS
+FILMY_MONETIZATION_SWIFT_CONDITION_NO = FILMY_MONETIZATION_FREE
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) $(FILMY_MONETIZATION_SWIFT_CONDITION_$(FILMY_MONETIZATION_ENABLED))
+
+// Link cut: the free build (FILMY_MONETIZATION_ENABLED = NO) drops the SDK package products and -ObjC.
+// Exclusion globs name the SDK products as each Xcode spells them (FirebaseCore, FirebaseCore-product, ...).
+// The free build drops EVERY package product and framework from the app target: the globs *-product *.o
+// *.xcframework *.framework are not SDK-specific. A future non-SDK package dependency needs this list narrowed.
+FILMY_MONETIZATION_SDK_PRODUCTS = FirebaseCore FirebaseAuth GoogleSignIn GoogleSignInSwift GoogleMobileAds GoogleUserMessagingPlatform
+FILMY_MONETIZATION_EXCLUDED_YES =
+FILMY_MONETIZATION_EXCLUDED_NO = $(FILMY_MONETIZATION_SDK_PRODUCTS) *-product *.o *.xcframework *.framework GoogleService-Info.plist
+FILMY_MONETIZATION_LDFLAGS_YES = -ObjC
+FILMY_MONETIZATION_LDFLAGS_NO =
+FILMY_MONETIZATION_LDFLAGS = $(FILMY_MONETIZATION_LDFLAGS_$(FILMY_MONETIZATION_ENABLED))
+EXCLUDED_SOURCE_FILE_NAMES = $(inherited) $(FILMY_MONETIZATION_EXCLUDED_$(FILMY_MONETIZATION_ENABLED))
+
+// Info.plist per mode: the free plist is generated from project.yml; the monetized plist adds the SDK keys.
+FILMY_INFOPLIST_FILE_YES = Config/Info.Monetized.plist
+FILMY_INFOPLIST_FILE_NO = FilmyCamera/Info.plist
+FILMY_INFOPLIST_FILE = $(FILMY_INFOPLIST_FILE_$(FILMY_MONETIZATION_ENABLED))

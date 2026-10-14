@@ -1,5 +1,6 @@
 import XCTest
 import Combine
+import SwiftUI
 @preconcurrency import AVFoundation
 import CoreVideo
 @testable import FilmyCamera
@@ -37,15 +38,17 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         XCTAssertTrue(GalleryPagingPolicy.retainedIndices(around: 0, count: 0).isEmpty)
     }
 
-    func testAppAndItsInfoPlistAllowOnlyPortrait() throws {
+    func testAppAndInfoPlistUseDeviceSpecificOrientations() throws {
         let delegate = FilmyAppDelegate()
-        XCTAssertEqual(delegate.application(.shared, supportedInterfaceOrientationsFor: nil), .portrait)
+        XCTAssertEqual(delegate.application(.shared, supportedInterfaceOrientationsFor: nil),
+                       UIDevice.current.userInterfaceIdiom == .pad ? .all : .portrait)
         // Bundle resolves device-qualified keys. Read the built file to verify both device families.
         let data = try Data(contentsOf: Bundle.main.bundleURL.appendingPathComponent("Info.plist"))
         let info = try XCTUnwrap(PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any])
-        for key in ["UISupportedInterfaceOrientations", "UISupportedInterfaceOrientations~ipad"] {
-            XCTAssertEqual(info[key] as? [String], ["UIInterfaceOrientationPortrait"])
-        }
+        XCTAssertEqual(info["UISupportedInterfaceOrientations"] as? [String], ["UIInterfaceOrientationPortrait"])
+        XCTAssertEqual(Set(info["UISupportedInterfaceOrientations~ipad"] as? [String] ?? []),
+                       Set(["UIInterfaceOrientationPortrait", "UIInterfaceOrientationPortraitUpsideDown",
+                            "UIInterfaceOrientationLandscapeLeft", "UIInterfaceOrientationLandscapeRight"]))
         XCTAssertEqual(info["UIRequiresFullScreen"] as? Bool, true)
     }
 
@@ -88,8 +91,8 @@ final class CameraServiceAvailabilityTests: XCTestCase {
 
         XCTAssertEqual(CameraService.videoRotationAngle(for: .portrait, fallbackViewSize: portraitSize), 90)
         XCTAssertEqual(CameraService.videoRotationAngle(for: .portraitUpsideDown, fallbackViewSize: portraitSize), 270)
-        XCTAssertEqual(CameraService.videoRotationAngle(for: .landscapeLeft, fallbackViewSize: portraitSize), 0)
-        XCTAssertEqual(CameraService.videoRotationAngle(for: .landscapeRight, fallbackViewSize: portraitSize), 180)
+        XCTAssertEqual(CameraService.videoRotationAngle(for: .landscapeLeft, fallbackViewSize: portraitSize), 180)
+        XCTAssertEqual(CameraService.videoRotationAngle(for: .landscapeRight, fallbackViewSize: portraitSize), 0)
         XCTAssertEqual(CameraService.videoRotationAngle(for: nil, fallbackViewSize: portraitSize), 90)
         XCTAssertEqual(
             CameraService.videoRotationAngle(
@@ -378,6 +381,52 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         )
     }
 
+    func testRefreshedFlashAvailabilityFollowsThermalChangeOnly() {
+        XCTAssertEqual(
+            CameraService.refreshedFlashAvailability(
+                current: .temporarilyUnavailable,
+                hasFlash: true,
+                supportedModeRawValues: [0, 1, 2],
+                flashAvailable: true
+            ),
+            .available
+        )
+        XCTAssertEqual(
+            CameraService.refreshedFlashAvailability(
+                current: .available,
+                hasFlash: true,
+                supportedModeRawValues: [0, 1, 2],
+                flashAvailable: false
+            ),
+            .temporarilyUnavailable
+        )
+        XCTAssertNil(
+            CameraService.refreshedFlashAvailability(
+                current: .available,
+                hasFlash: true,
+                supportedModeRawValues: [0, 1, 2],
+                flashAvailable: true
+            )
+        )
+        // A transiently empty supported set must not downgrade to unsupported.
+        XCTAssertNil(
+            CameraService.refreshedFlashAvailability(
+                current: .temporarilyUnavailable,
+                hasFlash: true,
+                supportedModeRawValues: [],
+                flashAvailable: true
+            )
+        )
+        XCTAssertNil(
+            CameraService.refreshedFlashAvailability(
+                current: .unsupported,
+                hasFlash: true,
+                supportedModeRawValues: [0, 1, 2],
+                flashAvailable: true
+            )
+        )
+    }
+
     func testFlashAvailabilitySeparatesUnsupportedAndTemporaryHardwareStates() {
         XCTAssertEqual(
             CameraService.resolveFlashAvailability(
@@ -653,6 +702,55 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         XCTAssertEqual(CameraActivityPolicy.inactiveGracePeriod, 8)
     }
 
+    func testCompactWidthMappingTreatsNilAndRegularAsNotCompact() {
+        XCTAssertTrue(CameraActivityPolicy.isCompactWidth(.compact))
+        XCTAssertFalse(CameraActivityPolicy.isCompactWidth(.regular))
+        XCTAssertFalse(CameraActivityPolicy.isCompactWidth(nil), "A nil size class must not pause")
+    }
+
+    func testFrameDeliveryPausePolicyCoversSheetImportReviewAndSizeClass() {
+        func pauses(sheet: Bool, importing: Bool, review: Bool, compact: Bool) -> Bool {
+            CameraActivityPolicy.pausesFrameDelivery(
+                isImporting: importing,
+                hasImportReview: review,
+                coveredBySheet: CameraActivityPolicy.sheetCoversViewfinder(
+                    fullHeightSheetOpen: sheet,
+                    isCompactWidth: compact
+                )
+            )
+        }
+        let flags = [false, true]
+        for sheet in flags {
+            for importing in flags {
+                for review in flags {
+                    for compact in flags {
+                        XCTAssertEqual(
+                            pauses(sheet: sheet, importing: importing, review: review, compact: compact),
+                            importing || review || (sheet && compact),
+                            "sheet=\(sheet) import=\(importing) review=\(review) compact=\(compact)"
+                        )
+                    }
+                }
+            }
+        }
+        XCTAssertTrue(
+            pauses(sheet: false, importing: false, review: true, compact: true),
+            "Review active with the sheet closed stays paused"
+        )
+        XCTAssertFalse(
+            pauses(sheet: true, importing: false, review: false, compact: false),
+            "Regular width never pauses for a sheet alone"
+        )
+        XCTAssertTrue(
+            pauses(sheet: true, importing: false, review: false, compact: true),
+            "Compact width with a sheet pauses"
+        )
+        XCTAssertFalse(
+            pauses(sheet: false, importing: false, review: false, compact: true),
+            "Nothing open never pauses"
+        )
+    }
+
     func testFlashSelectionSurvivesAPreCaptureRefreshWithoutPersistence() {
         let supported: Set<Int> = [
             CameraService.FlashMode.off.rawValue,
@@ -730,7 +828,7 @@ final class CameraServiceAvailabilityTests: XCTestCase {
                 availability: .available,
                 supportedModeRawValues: supported
             ),
-            [.off, .auto, .on]
+            [.off, .on, .auto]
         )
         XCTAssertEqual(
             CameraService.flashModesForCycle(
@@ -754,6 +852,34 @@ final class CameraServiceAvailabilityTests: XCTestCase {
                 availability: .available,
                 supportedModeRawValues: supported,
                 manualExposureActive: true
+            ),
+            .off
+        )
+
+        XCTAssertEqual(
+            CameraService.nextFlashMode(
+                current: .off,
+                availability: .available,
+                supportedModeRawValues: supported,
+                manualExposureActive: false
+            ),
+            .on
+        )
+        XCTAssertEqual(
+            CameraService.nextFlashMode(
+                current: .on,
+                availability: .available,
+                supportedModeRawValues: supported,
+                manualExposureActive: false
+            ),
+            .auto
+        )
+        XCTAssertEqual(
+            CameraService.nextFlashMode(
+                current: .auto,
+                availability: .available,
+                supportedModeRawValues: supported,
+                manualExposureActive: false
             ),
             .off
         )
@@ -992,4 +1118,120 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         )
     }
 
+    func testBayerRAWRequiresSpeedPrioritizationAndUnitZoom() {
+        XCTAssertEqual(CameraService.photoQualityPrioritization(manualExposureEnabled: false, bayerRAW: true), .speed)
+        XCTAssertEqual(CameraService.photoQualityPrioritization(manualExposureEnabled: false, bayerRAW: false), .quality)
+        XCTAssertNotNil(CameraService.bayerRAWZoomRefusal(format: .bayerRAW, hardwareZoom: 2))
+        XCTAssertNil(CameraService.bayerRAWZoomRefusal(format: .bayerRAW, hardwareZoom: 1))
+        XCTAssertNotNil(CameraService.bayerRAWZoomRefusal(format: .bayerRAW, hardwareZoom: 1.0005))
+        XCTAssertNil(CameraService.bayerRAWZoomRefusal(format: .proRAW, hardwareZoom: 2))
+        XCTAssertNil(CameraService.bayerRAWZoomRefusal(format: .heif, hardwareZoom: 3))
+    }
+
+    func testFujiRAWFormatRefusesBayerAwayFromUnitZoom() {
+        let bayer = OSType(kCVPixelFormatType_14Bayer_RGGB)
+        XCTAssertEqual(CameraService.fujiRAWFormat(from: [bayer], hardwareZoom: 1), bayer)
+        XCTAssertNil(CameraService.fujiRAWFormat(from: [bayer], hardwareZoom: 2))
+        XCTAssertNil(CameraService.fujiRAWFormat(from: [bayer], hardwareZoom: 1.0005))
+        XCTAssertNil(CameraService.fujiRAWFormat(from: [], hardwareZoom: 1))
+    }
+
+    func testFujiRAWFormatPrefersBayerAtUnitZoomAndProRAWAway() {
+        let bayer: OSType = 1
+        let pro: OSType = 2
+        let isPro: (OSType) -> Bool = { $0 == pro }
+        XCTAssertEqual(CameraService.fujiRAWFormat(from: [bayer, pro], hardwareZoom: 2, isProRAW: isPro), pro)
+        XCTAssertEqual(CameraService.fujiRAWFormat(from: [pro, bayer], hardwareZoom: 1, isProRAW: isPro), bayer)
+        XCTAssertEqual(CameraService.fujiRAWFormat(from: [pro], hardwareZoom: 1, isProRAW: isPro), pro)
+        XCTAssertNil(CameraService.fujiRAWFormat(from: [bayer], hardwareZoom: 2, isProRAW: isPro))
+        XCTAssertEqual(CameraService.fujiRAWFormat(from: [bayer, pro], hardwareZoom: 1.0005, isProRAW: isPro), pro)
+    }
+
+    func testCustomExposureResolutionRefusalExemptsSceneAuto() {
+        XCTAssertNil(CameraService.customExposureResolutionRefusal(customExposure: true, sceneAutoOwnsExposure: true, resolution: .mp48))
+        XCTAssertNil(CameraService.customExposureResolutionRefusal(customExposure: false, sceneAutoOwnsExposure: false, resolution: .mp48))
+        XCTAssertNil(CameraService.customExposureResolutionRefusal(customExposure: true, sceneAutoOwnsExposure: false, resolution: .mp12))
+        XCTAssertNotNil(CameraService.customExposureResolutionRefusal(customExposure: true, sceneAutoOwnsExposure: false, resolution: .mp24))
+        XCTAssertNotNil(CameraService.customExposureResolutionRefusal(customExposure: true, sceneAutoOwnsExposure: false, resolution: .mp48))
+    }
+
+    func testStopDefersOnlyForRunningUninterruptedCapture() {
+        XCTAssertTrue(CameraService.shouldDeferStop(photoIssued: true, running: true, interrupted: false))
+        XCTAssertFalse(CameraService.shouldDeferStop(photoIssued: false, running: true, interrupted: false))
+        XCTAssertFalse(CameraService.shouldDeferStop(photoIssued: true, running: false, interrupted: false))
+        XCTAssertFalse(CameraService.shouldDeferStop(photoIssued: true, running: true, interrupted: true))
+    }
+
+    func testStillSalvageRequiresCompleteProcessedStill() {
+        var assembly = PhotoCaptureAssembly(uniqueID: 1, settings: ProCaptureSettings())
+        XCTAssertNil(CameraService.salvageableStill(assembly))
+        assembly.processed = Data([1, 2, 3])
+        XCTAssertEqual(CameraService.salvageableStill(assembly), Data([1, 2, 3]))
+        assembly.failed = true
+        XCTAssertNil(CameraService.salvageableStill(assembly))
+        var rawSettings = ProCaptureSettings()
+        rawSettings.format = .bayerRAW
+        var rawAssembly = PhotoCaptureAssembly(uniqueID: 2, settings: rawSettings)
+        rawAssembly.processed = Data([1])
+        XCTAssertNil(CameraService.salvageableStill(rawAssembly))
+        rawAssembly.raw = Data([9])
+        XCTAssertNotNil(CameraService.salvageableStill(rawAssembly))
+    }
+
+    func testFailedStartWhileInterruptedIsNotARecoveryCandidate() {
+        XCTAssertEqual(CameraService.startOutcomeAvailability(running: true, interrupted: true), .running)
+        XCTAssertEqual(CameraService.startOutcomeAvailability(running: false, interrupted: true), .interrupted)
+        XCTAssertEqual(CameraService.startOutcomeAvailability(running: false, interrupted: false), .needsRecovery)
+    }
+
+    func testDefaultsWriteOffMainDoesNotWaitForLocationProviderOnMainThread() {
+        let key = "locationTaggingEnabled.v1"
+        let saved = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let saved {
+                UserDefaults.standard.set(saved, forKey: key)
+            } else {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
+        let provider = CameraCaptureLocationProvider()
+        // A changed value, so the write posts didChangeNotification.
+        let flipped = !((saved as? Bool) ?? true)
+        let returned = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            UserDefaults.standard.set(flipped, forKey: key)
+            returned.signal()
+        }
+        // The main thread is blocked here: the write must return without it.
+        XCTAssertEqual(returned.wait(timeout: .now() + 10), .success)
+        withExtendedLifetime(provider) {}
+    }
+
+    func testStaleLiveTemporaryFilesSelectsOnlyOlderUnheldFiles() {
+        let start = Date(timeIntervalSince1970: 1_000_000)
+        let dir = URL(fileURLWithPath: "/tmp/FilmyLiveCapture", isDirectory: true)
+        let old = dir.appendingPathComponent("old.mov")
+        let held = dir.appendingPathComponent("held.mov")
+        let fresh = dir.appendingPathComponent("fresh.mov")
+        let unknown = dir.appendingPathComponent("unknown.mov")
+        let files: [(url: URL, modified: Date?)] = [
+            (url: old, modified: start.addingTimeInterval(-60)),
+            (url: held, modified: start.addingTimeInterval(-60)),
+            (url: fresh, modified: start.addingTimeInterval(60)),
+            (url: unknown, modified: nil)
+        ]
+        let stale = CameraService.staleLiveTemporaryFiles(files, processStart: start, inFlight: [held])
+        XCTAssertEqual(stale, [old])
+        XCTAssertEqual(
+            CameraService.staleLiveTemporaryFiles([(url: fresh, modified: start)], processStart: start, inFlight: []),
+            []
+        )
+    }
+
+    func testLookLibraryCoversFinderOnlyAtLargeDetent() {
+        XCTAssertFalse(CameraActivityPolicy.lookLibraryCoversViewfinder(isPresented: true, atLargeDetent: false))
+        XCTAssertTrue(CameraActivityPolicy.lookLibraryCoversViewfinder(isPresented: true, atLargeDetent: true))
+        XCTAssertFalse(CameraActivityPolicy.lookLibraryCoversViewfinder(isPresented: false, atLargeDetent: true))
+        XCTAssertFalse(CameraActivityPolicy.lookLibraryCoversViewfinder(isPresented: false, atLargeDetent: false))
+    }
 }

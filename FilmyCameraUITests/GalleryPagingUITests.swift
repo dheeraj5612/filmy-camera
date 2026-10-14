@@ -102,7 +102,8 @@ final class GalleryPagingUITests: XCTestCase {
         app.buttons["gallery-previous-frame"].tap()
         assertFrame(2, recipe: "Fine Monochrome")
 
-        // The product locks this flow to portrait; verify geometry remains stable.
+        // This test starts in portrait on both idioms; verify the selected
+        // frame remains inside the settled portrait app geometry.
         XCTAssertTrue(waitUntil(timeout: 10) { self.app.frame.height >= self.app.frame.width })
         XCTAssertTrue(app.frame.insetBy(dx: -1, dy: -1).contains(position.frame))
 
@@ -122,6 +123,53 @@ final class GalleryPagingUITests: XCTestCase {
             sheet.swipeDown()
         }
         XCTAssertTrue(waitUntil(timeout: 10) { !copy.exists })
+        assertFrame(2, recipe: "Fine Monochrome")
+
+        // Edit look opens the kept original in the editor. Nothing is saved
+        // or deleted here: the test only checks the mode and closes it.
+        let edit = app.buttons["gallery-edit-look"]
+        XCTAssertTrue(edit.waitForExistence(timeout: 10) && edit.isHittable)
+        XCTAssertGreaterThanOrEqual(edit.frame.height, 44)
+        edit.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["filmy-edit-recipe"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["filmy-save-new-frame"].exists)
+        XCTAssertFalse(app.buttons["filmy-save-version"].exists)
+        XCTAssertFalse(app.buttons["filmy-delete-original"].exists)
+        XCTAssertFalse(app.buttons["filmy-export-photos"].exists)
+        XCTAssertTrue(app.navigationBars["Edit look"].exists)
+        attach("roll-paging-edit-look")
+        let done = app.buttons["gallery-edit-look-done"]
+        XCTAssertEqual(done.label, "Done")
+        let editPhoto = app.descendants(matching: .any)["filmy-edit-photo"]
+        XCTAssertTrue(editPhoto.exists)
+        let save = app.buttons["filmy-save-new-frame"]
+        XCTAssertTrue(save.isHittable && save.frame.maxY <= app.frame.maxY, "Save stays pinned on screen")
+        XCTAssertTrue(app.descendants(matching: .any)["filmy-edit-recipe"].isHittable, "Look row is above the fold")
+        XCTAssertTrue(app.buttons["filmy-compare-original"].isHittable, "Compare is above the fold")
+        // The look row is disabled until the saved version shows; the loaded photo is the signal.
+        let loadedPhoto = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Photo with")).firstMatch
+        XCTAssertTrue(loadedPhoto.waitForExistence(timeout: 10), "The saved version loads before a look is picked")
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            // Photo-first, measured on the photo itself (the container is always full width):
+            // as wide as the content allows (width less the 20 pt margin), or at least half the screen tall.
+            XCTAssertTrue(loadedPhoto.frame.width >= app.frame.width - 21
+                          || loadedPhoto.frame.height >= app.frame.height * 0.5, "The photo leads the editor")
+        }
+        XCTAssertTrue(waitUntil(timeout: 10) { app.descendants(matching: .any)["filmy-edit-recipe"].isEnabled }, "Look row unlocks once the saved version loads")
+        app.descendants(matching: .any)["filmy-edit-recipe"].tap()
+        let search = app.textFields["look-library-search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap(); search.typeText("Vivid Slide\n")
+        let vivid = app.buttons["filmy-look-velvia-vivid"]
+        XCTAssertTrue(vivid.waitForExistence(timeout: 5))
+        attach("roll-paging-edit-look-library")
+        vivid.tap()
+        XCTAssertTrue(waitUntil(timeout: 20) { done.label == "Cancel" && done.isEnabled }, "An unsaved look turns Done into Cancel")
+        XCTAssertEqual(app.descendants(matching: .any)["filmy-edit-recipe"].value as? String, "Vivid Slide")
+        XCTAssertTrue(app.descendants(matching: .any)["filmy-document-message"].waitForExistence(timeout: 20), "Result message appears")
+        XCTAssertTrue(app.descendants(matching: .any)["filmy-document-message"].isHittable, "Result message sits by Save")
+        attach("roll-paging-edit-look-changed")
+        app.buttons["gallery-edit-look-done"].tap()
         assertFrame(2, recipe: "Fine Monochrome")
         app.buttons["frame-back-to-camera"].tap()
         XCTAssertTrue(waitForFreshCameraFrames())
@@ -161,6 +209,78 @@ final class GalleryPagingUITests: XCTestCase {
         return condition()
     }
 
+    private func waitForStableButton(_ identifier: String, timeout: TimeInterval) -> XCUIElement? {
+        var previousFrame: CGRect?
+        var stableSamples = 0
+        var stableElement: XCUIElement?
+        let windowFrame = app.frame
+        let found = waitUntil(timeout: timeout) {
+            // SwiftUI can replace a button while a sheet or recipe is applied;
+            // resolve the current node on each sample instead of retaining a stale AX node.
+            let element = app.buttons[identifier]
+            guard element.exists, element.isHittable else {
+                previousFrame = nil
+                stableSamples = 0
+                return false
+            }
+            let frame = element.frame
+            guard frame.width > 0, frame.height > 0,
+                  frame.intersects(windowFrame),
+                  windowFrame.contains(CGPoint(x: frame.midX, y: frame.midY)) else {
+                previousFrame = nil
+                stableSamples = 0
+                return false
+            }
+            if let previousFrame,
+               abs(previousFrame.minX - frame.minX) < 0.5,
+               abs(previousFrame.minY - frame.minY) < 0.5,
+               abs(previousFrame.width - frame.width) < 0.5,
+               abs(previousFrame.height - frame.height) < 0.5 {
+                stableSamples += 1
+            } else {
+                stableSamples = 0
+            }
+            previousFrame = frame
+            guard stableSamples >= 2 else { return false }
+            stableElement = element
+            return true
+        }
+        return found ? stableElement : nil
+    }
+
+    private func dismissLookLibraryIfPresented() -> Bool {
+        let library = app.descendants(matching: .any)["look-library"]
+        guard library.exists else { return true }
+
+        guard app.buttons["look-library-close"].waitForExistence(timeout: 5),
+              let done = waitForStableButton("look-library-close", timeout: 5) else {
+            attachRecipeCloseFailure("look-library-close-unhittable")
+            XCTFail("Looks library must expose a stable Done control before the drawer can be closed")
+            return false
+        }
+        done.tap()
+        let dismissed = waitUntil(timeout: 5) { !library.exists }
+        XCTAssertTrue(dismissed, "Looks library must dismiss before interacting with the underlying look drawer")
+        return dismissed
+    }
+
+    private func recipeTileIsSafelyTappable(_ tile: XCUIElement, picker: XCUIElement) -> Bool {
+        guard tile.exists else { return false }
+        let frame = tile.frame
+        // The 52 pt group marker plus a 4 pt gap sit left of the rail; taps there page groups.
+        var pickerFrame = picker.frame
+        pickerFrame.origin.x += 56
+        pickerFrame.size.width -= 56
+        guard frame.width > 0, frame.height > 0,
+              pickerFrame.width > 0, pickerFrame.height > 0,
+              frame.intersection(pickerFrame).intersection(app.frame).width >= 44,
+              frame.intersection(pickerFrame).intersection(app.frame).height >= 44 else {
+            return false
+        }
+        let libraryButton = app.buttons["look-library-open"]
+        return !libraryButton.exists || !frame.intersects(libraryButton.frame)
+    }
+
     private func attach(_ name: String) {
         // UIKit reports the new frame before the orientation animation ends.
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.7))
@@ -171,6 +291,7 @@ final class GalleryPagingUITests: XCTestCase {
     }
 
     private func ensureRecipe(id: String, name: String) throws {
+        guard dismissLookLibraryIfPresented() else { return }
         let menu = app.buttons["recipe-menu"]
         XCTAssertTrue(menu.waitForExistence(timeout: 10))
         guard !menu.label.contains(name) else { return }
@@ -179,9 +300,46 @@ final class GalleryPagingUITests: XCTestCase {
         XCTAssertTrue(tile.waitForExistence(timeout: 10))
         let picker = app.scrollViews["recipe-picker"]
         let deadline = Date(timeIntervalSinceNow: 8)
-        while !tile.isHittable && Date() < deadline { picker.swipeUp() }
-        XCTAssertTrue(tile.isHittable, "Recipe \(name) must be selectable")
-        tile.tap()
+        while !recipeTileIsSafelyTappable(tile, picker: picker) && Date() < deadline {
+            // A lazy rail may release the off-screen tile; do not read its frame then.
+            guard tile.exists else { picker.swipeRight(); continue }
+            let t = tile.frame, p = picker.frame
+            if t.maxY <= p.minY + 1 {
+                picker.swipeDown()
+            } else if t.minY >= p.maxY - 1 {
+                picker.swipeUp()
+            } else if t.midX < p.midX {
+                picker.swipeRight()
+            } else {
+                picker.swipeLeft()
+            }
+        }
+        XCTAssertTrue(recipeTileIsSafelyTappable(tile, picker: picker),
+                      "Recipe \(name) must be selectable inside the recipe picker")
+        let visible = tile.frame.intersection(picker.frame).intersection(app.frame)
+        tile.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: visible.midX - tile.frame.minX,
+                                 dy: visible.midY - tile.frame.minY)).tap()
+        XCTAssertTrue(waitUntil(timeout: 5) { menu.label.contains(name) })
+        app.buttons["recipe-drawer-close"].tap()
+        XCTAssertTrue(waitUntil(timeout: 5) {
+            !app.descendants(matching: .any)["recipe-drawer"].exists
+                && menu.label.contains(name)
+                && app.buttons["Capture photo"].isEnabled
+                && app.buttons["Capture photo"].isHittable
+        }, "Closing the look picker after selecting \(name) must restore the shutter")
+    }
+
+    private func attachRecipeCloseFailure(_ name: String) {
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = name
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+
+        let hierarchy = XCTAttachment(string: app.debugDescription)
+        hierarchy.name = "\(name)-hierarchy"
+        hierarchy.lifetime = .keepAlways
+        add(hierarchy)
     }
 
 }

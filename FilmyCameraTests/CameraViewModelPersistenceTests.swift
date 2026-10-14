@@ -20,6 +20,26 @@ final class CameraViewModelPersistenceTests: XCTestCase {
         XCTAssertEqual(warmed.colorChrome, 0.8)
     }
 
+    func testOverrideForUnknownRecipeIDSurvivesInitAndPersist() throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let unknown = FilmRecipe(id: "zz-unknown", name: "Unknown", subtitle: "Retired")
+        let known = FilmRecipe.builtIns[1]
+        defaults.set(try JSONEncoder().encode([unknown.id: unknown]),
+                     forKey: CameraViewModel.recipeOverridesKey)
+
+        let viewModel = CameraViewModel(defaults: defaults)
+        var edited = known
+        edited.contrast = 1.3
+        viewModel.update(recipe: edited)
+
+        let stored = try JSONDecoder().decode(
+            [String: FilmRecipe].self,
+            from: try XCTUnwrap(defaults.data(forKey: CameraViewModel.recipeOverridesKey))
+        )
+        XCTAssertNotNil(stored[unknown.id])
+    }
+
     func testInvalidSelectedRecipeIDIsNormalizedAndRewritten() throws {
         let (defaults, suiteName) = try makeDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -43,6 +63,86 @@ final class CameraViewModelPersistenceTests: XCTestCase {
             defaults.string(forKey: CameraViewModel.selectedRecipeIDKey),
             fallbackID
         )
+    }
+
+    func testAcceptedPickPersistsTheSelectedID() throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = MembershipStore.shared
+        let previousAccess = store.access
+        defer { store.setAccessForTesting(previousAccess) }
+        store.setAccessForTesting(.premium(until: .distantFuture, trial: false))
+
+        let viewModel = CameraViewModel(defaults: defaults)
+        let pickedID = try XCTUnwrap(FilmRecipe.builtIns.map(\.id).first {
+            $0 != viewModel.selectedRecipeID && AppConfiguration.isRecipeAllowed($0)
+        })
+        viewModel.selectedRecipeID = pickedID
+
+        XCTAssertEqual(viewModel.selectedRecipeID, pickedID)
+        XCTAssertEqual(defaults.string(forKey: CameraViewModel.selectedRecipeIDKey), pickedID)
+    }
+
+    func testUnknownPickEndsOnTheFallbackAndPersistsIt() throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = MembershipStore.shared
+        let previousAccess = store.access
+        defer { store.setAccessForTesting(previousAccess) }
+        store.setAccessForTesting(.premium(until: .distantFuture, trial: false))
+
+        let viewModel = CameraViewModel(defaults: defaults)
+        let otherID = try XCTUnwrap(FilmRecipe.builtIns.map(\.id).first {
+            $0 != CameraViewModel.defaultRecipeID && AppConfiguration.isRecipeAllowed($0)
+        })
+        viewModel.selectedRecipeID = otherID
+        viewModel.selectedRecipeID = "zz-not-a-look"
+
+        XCTAssertEqual(viewModel.selectedRecipeID, CameraViewModel.defaultRecipeID)
+        XCTAssertEqual(
+            defaults.string(forKey: CameraViewModel.selectedRecipeIDKey),
+            CameraViewModel.defaultRecipeID
+        )
+
+        // The guard must be released: the next valid pick lands and persists.
+        viewModel.selectedRecipeID = otherID
+        XCTAssertEqual(viewModel.selectedRecipeID, otherID)
+        XCTAssertEqual(defaults.string(forKey: CameraViewModel.selectedRecipeIDKey), otherID)
+    }
+
+    func testRefusedPickWithARefusedCurrentLookKeepsTheCurrentLook() throws {
+        let store = MembershipStore.shared
+        try XCTSkipUnless(store.monetizationEnabled, "Looks are only refused when monetization is on.")
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let previousAccess = store.access
+        defer { store.setAccessForTesting(previousAccess) }
+
+        let paidIDs = FilmRecipe.builtIns.map(\.id).filter {
+            AppConfiguration.isRecipeAllowed($0) && !MembershipPolicy.freeRecipeIDs.contains($0)
+        }
+        let currentID = try XCTUnwrap(paidIDs.first)
+        let requestedID = try XCTUnwrap(paidIDs.dropFirst().first)
+        defaults.set(currentID, forKey: CameraViewModel.selectedRecipeIDKey)
+        store.setAccessForTesting(.premium(until: .distantFuture, trial: false))
+        let viewModel = CameraViewModel(defaults: defaults)
+        XCTAssertEqual(viewModel.selectedRecipeID, currentID)
+
+        // Access lapses while a paid look is still selected, then another paid look is picked.
+        store.setAccessForTesting(.free)
+        XCTAssertFalse(store.allowsRecipe(currentID))
+        XCTAssertFalse(store.allowsRecipe(requestedID))
+        viewModel.selectedRecipeID = requestedID
+
+        XCTAssertEqual(viewModel.selectedRecipeID, currentID)
+        XCTAssertEqual(defaults.string(forKey: CameraViewModel.selectedRecipeIDKey), currentID)
+        XCTAssertEqual(viewModel.effectiveSelectedRecipeID, CameraViewModel.defaultRecipeID)
+
+        // The guard must be released: once access returns, the same pick lands and persists.
+        store.setAccessForTesting(.premium(until: .distantFuture, trial: false))
+        viewModel.selectedRecipeID = requestedID
+        XCTAssertEqual(viewModel.selectedRecipeID, requestedID)
+        XCTAssertEqual(defaults.string(forKey: CameraViewModel.selectedRecipeIDKey), requestedID)
     }
 
     func testValidSelectedRecipeIDIsPreserved() throws {

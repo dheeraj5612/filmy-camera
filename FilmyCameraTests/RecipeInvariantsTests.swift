@@ -34,7 +34,7 @@ final class RecipeInvariantsTests: XCTestCase {
     private var previousRecipeOverrides: Data?
 
     func testRendererVersionTracksCurrentParametricPipeline() {
-        XCTAssertEqual(FilmRecipe.rendererVersion, "core-image-parametric-v19")
+        XCTAssertEqual(FilmRecipe.rendererVersion, "core-image-parametric-v20")
     }
 
     override func setUp() {
@@ -85,7 +85,8 @@ final class RecipeInvariantsTests: XCTestCase {
         XCTAssertEqual(FilmRecipe.expandedInternetRecipeIDs.count, 18)
         XCTAssertEqual(Set(FilmRecipe.expandedInternetRecipeIDs).count, 18)
         XCTAssertEqual(FilmRecipe.legacyBuiltIns.count, 36)
-        XCTAssertEqual(FilmRecipe.builtIns.count, 128)
+        XCTAssertEqual(FilmRecipe.builtIns.count, 163 + RecipeCatalog.records.count)
+        XCTAssertGreaterThanOrEqual(RecipeCatalog.records.count, 500)
 
         let builtInIDs = Set(FilmRecipe.builtIns.map(\.id))
         XCTAssertTrue(Set(FilmRecipe.expandedInternetRecipeIDs).isSubset(of: builtInIDs))
@@ -155,8 +156,10 @@ final class RecipeInvariantsTests: XCTestCase {
     }
 
     func testBuiltInGrainDefaultsMatchTheReferenceCatalog() throws {
+        var compared = 0
         for entry in FilmRecipeReferenceCatalog.entries {
             guard let controls = entry.publicControls else { continue }
+            compared += 1
             let recipe = try XCTUnwrap(entry.currentRecipe, entry.currentRecipeID)
 
             XCTAssertEqual(
@@ -170,6 +173,7 @@ final class RecipeInvariantsTests: XCTestCase {
                 "\(recipe.id) grain size drifted from its documented reference"
             )
         }
+        XCTAssertEqual(compared, 15)
     }
 
     func testBuiltInRecipeControlsAreFinite() {
@@ -276,6 +280,10 @@ final class RecipeInvariantsTests: XCTestCase {
                 XCTAssertEqual(recipe.provenance.source, .publicCanonDocumentation, recipe.id)
                 XCTAssertEqual(recipe.provenance.calibration, .notCalibratedToCanonHardware, recipe.id)
                 XCTAssertEqual(recipe.provenance.references, FilmRecipe.g7XPublicReferences, recipe.id)
+            case .publicAppleDocumentation:
+                XCTAssertEqual(recipe.provenance.source, .publicAppleDocumentation, recipe.id)
+                XCTAssertEqual(recipe.provenance.calibration, .notCalibratedToAppleHardware, recipe.id)
+                XCTAssertEqual(recipe.provenance.references, FilmRecipe.ogIPhonePublicReferences, recipe.id)
             case .publicOfficialDocumentation:
                 XCTAssertEqual(recipe.provenance.source, .publicOfficialDocumentation, recipe.id)
                 XCTAssertEqual(recipe.provenance.calibration, .notCalibratedToFujifilmHardware, recipe.id)
@@ -285,7 +293,12 @@ final class RecipeInvariantsTests: XCTestCase {
                 XCTAssertEqual(recipe.provenance.references, FilmRecipe.fujifilmCreatorRecipeReferences, recipe.id)
             case .publicCommunityRecipe:
                 XCTAssertEqual(recipe.provenance.calibration, .notCalibratedToFujifilmHardware, recipe.id)
-                XCTAssertEqual(recipe.provenance.references, FilmRecipe.communityRecipeReferences, recipe.id)
+                if recipe.provenance.cameraSource?.publisher == .filmRecipes {
+                    XCTAssertEqual(recipe.provenance.references,
+                                   FilmRecipe.fujifilmPublicReferences + [.filmRecipesLibrary], recipe.id)
+                } else {
+                    XCTAssertEqual(recipe.provenance.references, FilmRecipe.communityRecipeReferences, recipe.id)
+                }
             case .originalCreativeDesign:
                 XCTAssertEqual(recipe.provenance, FilmRecipe.creativeProvenance, recipe.id)
                 XCTAssertTrue(FilmRecipe.originalCreativeRecipeIDs.contains(recipe.id))
@@ -718,13 +731,173 @@ final class RecipeInvariantsTests: XCTestCase {
         XCTAssertTrue(decoded.validationIssues.contains { $0.code == .provenanceUnavailable })
         XCTAssertFalse(decoded.isValid)
     }
+
+    func testUnknownProvenanceEnumFromNewerBuildFallsBackToLegacyAndKeepsControls() throws {
+        let original = FilmRecipe.builtIns[0]
+        let encoded = try JSONEncoder().encode(original)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        var provenance = try XCTUnwrap(object["provenance"] as? [String: Any])
+        provenance["references"] = ["futureReference"]
+        provenance["rendererVersion"] = "core-image-parametric-v1"
+        provenance["parentRecipeID"] = "parent-look"
+        object["provenance"] = provenance
+        let decoded = try JSONDecoder().decode(
+            FilmRecipe.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+        XCTAssertEqual(decoded.provenance.rendererVersion, "core-image-parametric-v1")
+        XCTAssertEqual(decoded.provenance.parentRecipeID, "parent-look")
+        XCTAssertEqual(decoded.provenance.source, .legacyRecordWithoutProvenance)
+        XCTAssertEqual(decoded.provenance.implementation, .unknownLegacyRecord)
+        XCTAssertEqual(decoded.provenance.calibration, original.provenance.calibration)
+        XCTAssertEqual(decoded.provenance.references, [])
+        XCTAssertEqual(decoded.id, original.id)
+        XCTAssertEqual(decoded.filmBase, original.filmBase)
+        XCTAssertEqual(decoded.exposure, original.exposure)
+        XCTAssertEqual(decoded.tone, original.tone)
+        XCTAssertEqual(decoded.saturation, original.saturation)
+        XCTAssertEqual(decoded.contrast, original.contrast)
+        XCTAssertEqual(decoded.whiteBalance, original.whiteBalance)
+        XCTAssertEqual(decoded.palette, original.palette)
+    }
+
+    func testUnknownProvenanceReferenceKeepsCreativeCollection() throws {
+        let id = try XCTUnwrap(FilmRecipe.originalCreativeRecipeIDs.first)
+        let original = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == id })
+        XCTAssertNotNil(original.creativeCollection)
+        let encoded = try JSONEncoder().encode(original)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        var provenance = try XCTUnwrap(object["provenance"] as? [String: Any])
+        provenance["references"] = ["futureReference"]
+        object["provenance"] = provenance
+        let decoded = try JSONDecoder().decode(
+            FilmRecipe.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+        XCTAssertEqual(decoded.creativeCollection, original.creativeCollection)
+        XCTAssertEqual(decoded.provenance.calibration, original.provenance.calibration)
+    }
+
+    func testUnknownProvenanceCalibrationFailsToDecode() throws {
+        let encoded = try JSONEncoder().encode(FilmRecipe.builtIns[0])
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        var provenance = try XCTUnwrap(object["provenance"] as? [String: Any])
+        provenance["calibration"] = "futureCalibration"
+        object["provenance"] = provenance
+        let data = try JSONSerialization.data(withJSONObject: object)
+        XCTAssertThrowsError(try JSONDecoder().decode(FilmRecipe.self, from: data))
+    }
+
+    func testUnknownFilmBaseStillFailsToDecode() throws {
+        let encoded = try JSONEncoder().encode(FilmRecipe.builtIns[0])
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object["filmBase"] = "futureBase"
+        let data = try JSONSerialization.data(withJSONObject: object)
+        XCTAssertThrowsError(try JSONDecoder().decode(FilmRecipe.self, from: data))
+    }
+
+    /// A literal build-3 override record (schemaVersion 5, renderer core-image-parametric-v1),
+    /// frozen on purpose: it must keep decoding even if HEAD's encoder and decoder change together.
+    func testBuild3OverrideFixtureDecodesAndMigrates() throws {
+        let json = """
+        {"schemaVersion":5,
+         "provenance":{"source":"userModified","implementation":"originalParametricApproximation",
+           "calibration":"notCalibratedToFujifilmHardware",
+           "references":["xt5ImageQualitySetting","filmSimulationOverview"],
+           "parentRecipeID":"provia-standard","rendererVersion":"core-image-parametric-v1"},
+         "id":"provia-standard","name":"Natural Standard","subtitle":"Natural color / clean daylight",
+         "filmBase":"provia","exposure":0.3,"tone":{"highlight":0.2,"shadow":-0.1},
+         "saturation":1.1,"contrast":1.05,"dynamicRange":200,"dRangePriority":"weak",
+         "whiteBalance":{"mode":"colorTemperature","kelvin":6500,"temperature":0.1,"tint":-0.05},
+         "monochromaticColor":{"warmCool":0.2,"greenMagenta":-0.3},
+         "colorChrome":0.5,"blueResponse":0.1,"fxBlue":0.5,"sharpness":0.2,"noiseReduction":0.1,
+         "clarity":0.15,"grain":0.5,"grainSize":1.5,"vignette":0.2,"halation":0.1,
+         "palette":{"redBias":0.05,"greenBias":-0.05,"blueBias":0.1,"redGreenMix":0.02,
+           "greenBlueMix":-0.02,"blueRedMix":0.03,"saturation":1.2}}
+        """
+        let stored = try JSONDecoder().decode(FilmRecipe.self, from: Data(json.utf8))
+        XCTAssertEqual(stored.schemaVersion, 5)
+        XCTAssertEqual(stored.filmBase, .provia)
+        XCTAssertEqual(stored.provenance.source, .userModified)
+        XCTAssertEqual(stored.provenance.implementation, .originalParametricApproximation)
+        XCTAssertEqual(stored.provenance.calibration, .notCalibratedToFujifilmHardware)
+        XCTAssertEqual(stored.provenance.references, [.xt5ImageQualitySetting, .filmSimulationOverview])
+        XCTAssertEqual(stored.provenance.parentRecipeID, "provia-standard")
+        XCTAssertEqual(stored.provenance.rendererVersion, "core-image-parametric-v1")
+
+        let parent = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == "provia-standard" })
+        var migrated = parent
+        migrated.applyControlValues(from: stored)
+        XCTAssertEqual(migrated.id, parent.id)
+        XCTAssertEqual(migrated.filmBase, .provia)
+        XCTAssertEqual(migrated.exposure, 0.3, accuracy: 1e-9)
+        XCTAssertEqual(migrated.tone, FilmRecipe.Tone(highlight: 0.2, shadow: -0.1))
+        XCTAssertEqual(migrated.saturation, 1.1, accuracy: 1e-9)
+        XCTAssertEqual(migrated.contrast, 1.05, accuracy: 1e-9)
+        XCTAssertEqual(migrated.dynamicRange, .dr200)
+        XCTAssertEqual(migrated.dRangePriority, .weak)
+        XCTAssertEqual(migrated.whiteBalance.mode, .colorTemperature)
+        XCTAssertEqual(migrated.whiteBalance.temperature, 0.1, accuracy: 1e-9)
+        XCTAssertEqual(migrated.whiteBalance.tint, -0.05, accuracy: 1e-9)
+        XCTAssertEqual(migrated.monochromaticColor.warmCool, 0.2, accuracy: 1e-9)
+        XCTAssertEqual(migrated.monochromaticColor.greenMagenta, -0.3, accuracy: 1e-9)
+        XCTAssertEqual(migrated.colorChrome, 0.5, accuracy: 1e-9)
+        XCTAssertEqual(migrated.blueResponse, 0.1, accuracy: 1e-9)
+        XCTAssertEqual(migrated.fxBlue, 0.5, accuracy: 1e-9)
+        XCTAssertEqual(migrated.sharpness, 0.2, accuracy: 1e-9)
+        XCTAssertEqual(migrated.noiseReduction, 0.1, accuracy: 1e-9)
+        XCTAssertEqual(migrated.clarity, 0.15, accuracy: 1e-9)
+        XCTAssertEqual(migrated.grain, 0.5, accuracy: 1e-9)
+        XCTAssertEqual(migrated.grainSize, 1.5, accuracy: 1e-9)
+        XCTAssertEqual(migrated.vignette, 0.2, accuracy: 1e-9)
+        XCTAssertEqual(migrated.halation, 0.1, accuracy: 1e-9)
+        XCTAssertEqual(migrated.palette.redBias, 0.05, accuracy: 1e-9)
+        XCTAssertEqual(migrated.palette.greenBias, -0.05, accuracy: 1e-9)
+        XCTAssertEqual(migrated.palette.blueBias, 0.1, accuracy: 1e-9)
+        XCTAssertEqual(migrated.palette.redGreenMix, 0.02, accuracy: 1e-9)
+        XCTAssertEqual(migrated.palette.greenBlueMix, -0.02, accuracy: 1e-9)
+        XCTAssertEqual(migrated.palette.blueRedMix, 0.03, accuracy: 1e-9)
+        XCTAssertEqual(migrated.palette.saturation, 1.2, accuracy: 1e-9)
+    }
+
+    func testCachedSearchTextMatchesTheUncachedJoinForEveryBuiltIn() throws {
+        for recipe in FilmRecipe.builtIns {
+            let source = recipe.provenance.cameraSource
+            let expected = [recipe.name, recipe.subtitle, recipe.filmBase.officialName, recipe.filmBase.displayName,
+                            recipe.creativeCollection?.title ?? "", source?.originalName ?? "",
+                            source?.publisher.title ?? "", source?.cameraScope ?? "",
+                            RecipeCatalog.packByRecipeID[recipe.id]?.title ?? ""].joined(separator: " ")
+            XCTAssertEqual(RecipeCatalog.searchText(for: recipe), expected, recipe.id)
+        }
+        let encoded = try JSONEncoder().encode(FilmRecipe.builtIns[0])
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object["name"] = "Renamed Look"
+        let renamed = try JSONDecoder().decode(FilmRecipe.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertTrue(RecipeCatalog.searchText(for: renamed).contains("Renamed Look"))
+        let otherBase = try XCTUnwrap(FilmRecipe.FilmBase.allCases.first {
+            $0.displayName != FilmRecipe.builtIns[0].filmBase.displayName
+        })
+        object["name"] = FilmRecipe.builtIns[0].name
+        object["filmBase"] = otherBase.rawValue
+        let rebased = try JSONDecoder().decode(FilmRecipe.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertEqual(rebased.id, FilmRecipe.builtIns[0].id)
+        XCTAssertEqual(rebased.name, FilmRecipe.builtIns[0].name)
+        let rebasedSource = rebased.provenance.cameraSource
+        let rebasedExpected = [rebased.name, rebased.subtitle, otherBase.officialName, otherBase.displayName,
+                               rebased.creativeCollection?.title ?? "", rebasedSource?.originalName ?? "",
+                               rebasedSource?.publisher.title ?? "", rebasedSource?.cameraScope ?? "",
+                               RecipeCatalog.packByRecipeID[rebased.id]?.title ?? ""].joined(separator: " ")
+        // A stale cache hit would return the built-in's text, which names the original film base.
+        XCTAssertEqual(RecipeCatalog.searchText(for: rebased), rebasedExpected)
+        XCTAssertNotEqual(RecipeCatalog.searchText(for: rebased), RecipeCatalog.searchText(for: FilmRecipe.builtIns[0]))
+    }
 }
 
 
 final class ExpandedCreativeCatalogTests: XCTestCase {
     func testOriginalCollectionsContainEveryAuthoredRecipe() {
-        let expected: [FilmRecipe.Collection: Int] = [.negative:16, .slide:10, .cinema:12, .instant:8, .digital:16, .experimental:6, .monochrome:24]
-        XCTAssertEqual(FilmRecipe.originalCreativeLooks.count, 92)
+        let expected: [FilmRecipe.Collection: Int] = [.negative:23, .slide:14, .cinema:12, .instant:8, .digital:16, .experimental:6, .monochrome:27]
+        XCTAssertEqual(FilmRecipe.originalCreativeLooks.count, 106)
         XCTAssertEqual(Array(FilmRecipe.builtIns.prefix(36)), FilmRecipe.legacyBuiltIns)
         for (collection,count) in expected {
             XCTAssertEqual(FilmRecipe.originalCreativeLooks.filter { $0.creativeCollection == collection }.count, count)
@@ -759,7 +932,7 @@ final class ExpandedCreativeCatalogTests: XCTestCase {
     }
     func testFamilySearchAndFiltersResolveTheExpandedCatalog() {
         XCTAssertEqual(LookLibraryIndex.results(in: FilmRecipe.builtIns, query: "", filter: .compact, favorites: []).count, 17)
-        XCTAssertEqual(LookLibraryIndex.results(in: FilmRecipe.builtIns, query: "cinema", filter: .cinema, favorites: []).count, 12)
+        XCTAssertEqual(LookLibraryIndex.results(in: FilmRecipe.originalCreativeLooks, query: "cinema", filter: .cinema, favorites: []).count, 12)
         XCTAssertEqual(LookLibraryIndex.results(in: FilmRecipe.builtIns, query: "CCD Daylight", filter: .all, favorites: []).map(\.id), ["digital-ccd-daylight"])
         XCTAssertEqual(LookLibraryIndex.results(in: FilmRecipe.builtIns, query: "", filter: .instant, favorites: []).count, 8)
     }

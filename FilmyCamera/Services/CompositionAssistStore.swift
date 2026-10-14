@@ -62,6 +62,8 @@ final class CompositionAssistStore: ObservableObject {
         var zebras = false
         var peaking = false
         var level = false
+        var digitalCrop: Double = 1
+        var tuning: PreviewAnalysisMath.Tuning = .standard
         var usesFrames: Bool { histogram || zebras || peaking }
     }
     private struct Output: @unchecked Sendable {
@@ -91,7 +93,8 @@ final class CompositionAssistStore: ObservableObject {
                 let x = motion?.gravity.x, y = motion?.gravity.y
                 MainActor.assumeIsolated {
                     guard let self, self.rendering.generation == current else { return }
-                    self.horizon = x.flatMap { x in y.flatMap { PreviewAnalysisMath.horizonDegrees(x: x, y: $0) } }
+                    let wasShowing = self.horizon != nil
+                    self.horizon = x.flatMap { x in y.flatMap { PreviewAnalysisMath.horizonDegrees(x: x, y: $0, wasShowing: wasShowing) } }
                 }
             }
         }
@@ -138,14 +141,16 @@ final class CompositionAssistStore: ObservableObject {
         let width = max(1, Int((viewport.width * scale).rounded(.down)))
         let height = max(1, Int((viewport.height * scale).rounded(.down)))
         let bounds = CGRect(x: 0, y: 0, width: width, height: height)
-        let framed = CameraFrameLayout.aspectFill(image, in: bounds)
+        let cropped = FujiImageProcessor.crop(image, factor: options.digitalCrop)
+        let framed = CameraFrameLayout.aspectFill(cropped, in: bounds)
         var rgba = [UInt8](repeating: 0, count: width * height * 4)
         let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
         FilmRenderer.sharedContext.render(framed, toBitmap: &rgba, rowBytes: width * 4,
                                           bounds: bounds, format: .RGBA8, colorSpace: colorSpace)
         guard !Task.isCancelled,
               let result = PreviewAnalysisMath.analyze(rgba: rgba, width: width, height: height,
-                                                       zebras: options.zebras, peaking: options.peaking) else { return nil }
+                                                       zebras: options.zebras, peaking: options.peaking,
+                                                       tuning: options.tuning) else { return nil }
         var overlay: CGImage?
         if options.zebras || options.peaking {
             let mask = CIImage(bitmapData: Data(result.overlayRGBA), bytesPerRow: width * 4,

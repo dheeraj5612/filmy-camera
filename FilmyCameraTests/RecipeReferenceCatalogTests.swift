@@ -18,7 +18,8 @@ final class RecipeReferenceCatalogTests: XCTestCase {
         )
         XCTAssertEqual(
             FilmRecipeReferenceCatalog.document.intentionallyUnlistedBuiltInRecipeIDs,
-            ["sepia-archive", "g7x-compact"] + FilmRecipe.expandedInternetRecipeIDs + FilmRecipe.originalCreativeRecipeIDs
+            ["sepia-archive", "g7x-compact", "og-iphone"] + FilmRecipe.expandedInternetRecipeIDs + FilmRecipe.originalCreativeRecipeIDs
+            + RecipeCatalog.cameraBaselines.map(\.id) + RecipeCatalog.sourcedRecipes.map(\.id)
         )
     }
 
@@ -131,12 +132,15 @@ final class RecipeReferenceCatalogTests: XCTestCase {
         ]
 
         XCTAssertEqual(expected.count, 15)
+        var compared = 0
         for entry in FilmRecipeReferenceCatalog.entries where entry.settingsSource == .priorPrivateRepositoryPresetSnapshot {
+            compared += 1
             XCTAssertEqual(entry.publicControls, expected[entry.currentRecipeID], entry.currentRecipeID)
             XCTAssertNotNil(entry.priorPresetID, entry.currentRecipeID)
             XCTAssertNotNil(entry.priorPresetName, entry.currentRecipeID)
             XCTAssertNotNil(entry.priorPresetOrdinal, entry.currentRecipeID)
         }
+        XCTAssertEqual(compared, expected.count)
     }
 
     func testCurrentOnlyBaselineAndApproximationDisclosureAreExplicit() {

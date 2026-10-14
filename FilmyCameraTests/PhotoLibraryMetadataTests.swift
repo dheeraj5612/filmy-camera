@@ -1,3 +1,4 @@
+import Combine
 import CoreGraphics
 import Foundation
 import ImageIO
@@ -33,7 +34,64 @@ private actor PhotoLibraryTestFlag {
     func read() -> Bool { value }
 }
 
+private final class LockedValue<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Value
+
+    init(_ value: Value) { stored = value }
+    var value: Value {
+        get { lock.lock(); defer { lock.unlock() }; return stored }
+        set { lock.lock(); stored = newValue; lock.unlock() }
+    }
+}
+
 final class PhotoLibraryMetadataTests: XCTestCase {
+    @MainActor
+    func testPhotosLocationMatchesEncodedSouthernWesternCoordinates() throws {
+        let data = try jpegWithGPS([
+            kCGImagePropertyGPSLatitude as String: 33.86,
+            kCGImagePropertyGPSLatitudeRef as String: "S",
+            kCGImagePropertyGPSLongitude as String: 151.21,
+            kCGImagePropertyGPSLongitudeRef as String: "W",
+            kCGImagePropertyGPSAltitude as String: 12.5,
+            kCGImagePropertyGPSAltitudeRef as String: 1
+        ])
+        let location = try XCTUnwrap(PhotoLibraryService.location(from: data))
+        XCTAssertEqual(location.coordinate.latitude, -33.86, accuracy: 0.00001)
+        XCTAssertEqual(location.coordinate.longitude, -151.21, accuracy: 0.00001)
+        XCTAssertEqual(location.altitude, -12.5, accuracy: 0.01)
+    }
+
+    @MainActor
+    func testPhotosLocationDoesNotInventCoordinatesForMissingOrMalformedGPS() throws {
+        XCTAssertNil(PhotoLibraryService.location(from: nil))
+        XCTAssertNil(PhotoLibraryService.location(from: Data("invalid".utf8)))
+        XCTAssertNil(PhotoLibraryService.location(from: try jpegWithGPS([:])))
+        XCTAssertNil(PhotoLibraryService.location(fromGPS: [
+            kCGImagePropertyGPSLatitude as String: 40,
+            kCGImagePropertyGPSLongitude as String: 70
+        ]))
+        XCTAssertNil(PhotoLibraryService.location(from: try jpegWithGPS([
+            kCGImagePropertyGPSLatitude as String: 91,
+            kCGImagePropertyGPSLatitudeRef as String: "N",
+            kCGImagePropertyGPSLongitude as String: 70,
+            kCGImagePropertyGPSLongitudeRef as String: "E"
+        ])))
+    }
+
+    @MainActor
+    private func jpegWithGPS(_ gps: [String: Any]) throws -> Data {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).image { context in
+            UIColor.gray.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        }
+        let data = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(data, UTType.jpeg.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, try XCTUnwrap(image.cgImage), [kCGImagePropertyGPSDictionary: gps] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return data as Data
+    }
+
     func testPhotoLibraryCompletionBridgeHopsToMainActor() async {
         let completionExpectation = expectation(description: "Main actor completion")
         let callback = PhotoLibraryCompletionBridge.mainActor { success in
@@ -94,12 +152,63 @@ final class PhotoLibraryMetadataTests: XCTestCase {
         XCTAssertTrue(PhotoLibraryServiceError.changeFailed.localizedDescription.contains("Try again"))
     }
 
+    func testDeleteErrorMappingTreatsUserCancelledAsCancelled() {
+        let declined = NSError(domain: PHPhotosErrorDomain, code: PHPhotosError.Code.userCancelled.rawValue)
+        let other = NSError(domain: PHPhotosErrorDomain, code: PHPhotosError.Code.internalError.rawValue)
+        XCTAssertEqual(PhotoLibraryServiceError.failure(for: declined), .cancelled)
+        XCTAssertEqual(PhotoLibraryServiceError.failure(for: other), .changeFailed)
+        XCTAssertEqual(PhotoLibraryServiceError.failure(for: nil), .changeFailed)
+    }
+
     func testSaveFailuresDistinguishAuthorizationFromPhotoKitWriteFailure() {
         XCTAssertEqual(PhotoLibrarySaveError.failure(for: .denied), .accessDenied)
         XCTAssertEqual(PhotoLibrarySaveError.failure(for: .restricted), .accessDenied)
         XCTAssertEqual(PhotoLibrarySaveError.failure(for: .authorized), .writeFailed)
         XCTAssertTrue(PhotoLibrarySaveError.accessDenied.localizedDescription.contains("Settings"))
         XCTAssertTrue(PhotoLibrarySaveError.writeFailed.localizedDescription.localizedCaseInsensitiveContains("retry"))
+    }
+
+    @MainActor
+    func testDocumentSaveErrorMappingKeepsExporterAndStorageCauses() {
+        let exporterError = FilmyPhotosExporter.ExportError.unsupportedOutput
+        XCTAssertEqual(PhotoLibraryService.saveError(for: exporterError),
+                       .exportFailed(exporterError.errorDescription ?? ""))
+        XCTAssertEqual(PhotoLibraryService.saveError(for: exporterError).localizedDescription,
+                       exporterError.errorDescription)
+        XCTAssertEqual(PhotoLibraryService.saveError(for: FilmyPhotosExporter.ExportError.accessDenied), .accessDenied)
+        let diskFull = NSError(domain: PHPhotosErrorDomain, code: 3305)
+        XCTAssertEqual(PhotoLibraryService.saveError(for: diskFull), .insufficientStorage)
+        XCTAssertTrue(PhotoLibrarySaveError.insufficientStorage.localizedDescription.localizedCaseInsensitiveContains("space"))
+        XCTAssertEqual(PhotoLibraryService.saveError(for: NSError(domain: "other", code: 1)), .writeFailed)
+        let cocoaFull = NSError(domain: NSCocoaErrorDomain, code: NSFileWriteOutOfSpaceError)
+        XCTAssertEqual(PhotoLibraryService.saveError(for: cocoaFull), .insufficientStorage)
+        let posixFull = NSError(domain: NSPOSIXErrorDomain, code: Int(ENOSPC))
+        XCTAssertEqual(PhotoLibraryService.saveError(for: posixFull), .insufficientStorage)
+        let wrappedFull = NSError(domain: NSCocoaErrorDomain, code: NSFileWriteUnknownError,
+                                  userInfo: [NSUnderlyingErrorKey: posixFull])
+        XCTAssertEqual(PhotoLibraryService.saveError(for: wrappedFull), .insufficientStorage)
+        XCTAssertEqual(PhotoLibraryService.saveError(for: FilmyPhotosExporter.ExportError.writeFailed, assetLinked: false), .writeFailed)
+        XCTAssertEqual(PhotoLibraryService.saveError(for: FilmyPhotosExporter.ExportError.writeFailed, assetLinked: true),
+                       .exportFailed(FilmyPhotosExporter.ExportError.writeFailed.errorDescription ?? ""))
+    }
+
+    func testFailedDocumentSaveOwnsLinkedAssetOnlyWhenWarranted() {
+        typealias Export = FilmyPhotosExporter.ExportError
+        let decide = PhotoLibraryService.assetToOwnAfterFailure
+        let photosError = NSError(domain: PHPhotosErrorDomain, code: 3300)
+        XCTAssertEqual(decide(Export.writeFailed, "A", "A", []), "A")
+        XCTAssertEqual(decide(Export.writeFailed, nil, "A", []), "A")
+        XCTAssertEqual(decide(photosError, nil, "A", []), "A")
+        XCTAssertEqual(decide(Export.iCloudDownloadRequired, nil, "A", []), "A")
+        XCTAssertNil(decide(photosError, "A", "A", []))
+        XCTAssertNil(decide(Export.busy, "A", "A", []))
+        XCTAssertNil(decide(Export.missingAsset, "A", "A", []))
+        XCTAssertNil(decide(Export.missingAsset, nil, "A", []))
+        XCTAssertNil(decide(Export.externalEdit, "A", "A", []))
+        XCTAssertNil(decide(Export.writeFailed, nil, nil, []))
+        XCTAssertNil(decide(photosError, nil, nil, []))
+        XCTAssertNil(decide(Export.writeFailed, nil, "A", ["A"]))
+        XCTAssertNil(decide(photosError, nil, "A", ["A"]))
     }
 
     func testCachedFrameDimensionsComeFromFullResolutionJPEG() throws {
@@ -244,12 +353,100 @@ final class PhotoLibraryMetadataTests: XCTestCase {
         #endif
     }
 
+    @MainActor
+    func testBatchForgetRemovesOnlyRequestedIdentifiersFromOwnershipAndMetadata() throws {
+        let keys = [PhotoLibraryAssetOwnership.defaultsKey,
+                    "filmyCamera.savedFrameMetadata",
+                    "filmyCamera.savedFrameResources"]
+        var saved: [String: Any] = [:]
+        for key in keys {
+            if let value = UserDefaults.standard.object(forKey: key) {
+                saved[key] = value
+            }
+        }
+        defer {
+            for key in keys {
+                if let value = saved[key] {
+                    UserDefaults.standard.set(value, forKey: key)
+                } else {
+                    UserDefaults.standard.removeObject(forKey: key)
+                }
+            }
+        }
+        let all = (0..<2000).map { "batch-forget-\($0)" }
+        let doomed = Array(all.prefix(1500)) + ["batch-forget-unknown", ""]
+        let kept = Array(all.suffix(500))
+        let entry = SavedFrameMetadata(recipe: FilmRecipe.builtIns[0],
+                                       capturedAt: Date(timeIntervalSince1970: 1_754_000_000))
+        var seeded: [String: SavedFrameMetadata] = [:]
+        for identifier in all.prefix(3) + all.suffix(3) {
+            seeded[identifier] = entry
+        }
+        PhotoLibraryAssetOwnership.persist(all)
+        UserDefaults.standard.set(try JSONEncoder().encode(seeded), forKey: "filmyCamera.savedFrameMetadata")
+        UserDefaults.standard.removeObject(forKey: "filmyCamera.savedFrameResources")
+        let service = PhotoLibraryService()
+        XCTAssertEqual(service.metadataByAssetIdentifier.count, 6)
+
+        service.forgetSavedAssets(doomed)
+        XCTAssertEqual(PhotoLibraryAssetOwnership.load(), kept)
+        XCTAssertEqual(Set(service.metadataByAssetIdentifier.keys), Set(all.suffix(3)))
+
+        service.forgetSavedAssets([])
+        XCTAssertEqual(PhotoLibraryAssetOwnership.load(), kept)
+        XCTAssertEqual(Set(service.metadataByAssetIdentifier.keys), Set(all.suffix(3)))
+        // Drain the queued persistence write before the defer restores the keys.
+        service.flushPersistence()
+    }
+
+    @MainActor
+    func testUndecodableMetadataEntryDoesNotDiscardTheIndex() throws {
+        let key = "filmyCamera.savedFrameMetadata"
+        let saved = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let saved { UserDefaults.standard.set(saved, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) }
+        }
+        let entry = SavedFrameMetadata(recipe: FilmRecipe.builtIns[0],
+                                       capturedAt: Date(timeIntervalSince1970: 1_754_000_000))
+        let encoded = try JSONEncoder().encode(entry)
+        var broken = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        var recipe = try XCTUnwrap(broken["recipe"] as? [String: Any])
+        recipe["filmBase"] = "futureBase"
+        broken["recipe"] = recipe
+        let good = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded))
+        let blob = try JSONSerialization.data(withJSONObject: ["good-entry": good, "future-entry": broken])
+        UserDefaults.standard.set(blob, forKey: key)
+        let service = PhotoLibraryService()
+        XCTAssertEqual(Set(service.metadataByAssetIdentifier.keys), ["good-entry"])
+        service.flushPersistence()
+    }
+
+    @MainActor
+    func testUnchangedAuthorizationRefreshDoesNotPublish() {
+        let service = PhotoLibraryService()
+        service.refreshAuthorizationStatuses()
+        var emissions = 0
+        let cancellable = service.objectWillChange.sink { emissions += 1 }
+        service.refreshAuthorizationStatuses()
+        service.refreshAuthorizationStatuses()
+        cancellable.cancel()
+        XCTAssertEqual(emissions, 0)
+    }
+
     func testReadWriteAuthorizationAllowsFullAndLimitedAccess() {
         XCTAssertTrue(PhotoLibraryAuthorizationPolicy.canRead(.authorized))
         XCTAssertTrue(PhotoLibraryAuthorizationPolicy.canRead(.limited))
         XCTAssertFalse(PhotoLibraryAuthorizationPolicy.canRead(.notDetermined))
         XCTAssertFalse(PhotoLibraryAuthorizationPolicy.canRead(.denied))
         XCTAssertFalse(PhotoLibraryAuthorizationPolicy.canRead(.restricted))
+    }
+
+    func testPhotosAccessRefusedOnlyForDeniedOrRestricted() {
+        XCTAssertTrue(PhotoLibraryAuthorizationPolicy.isRefused(.denied))
+        XCTAssertTrue(PhotoLibraryAuthorizationPolicy.isRefused(.restricted))
+        XCTAssertFalse(PhotoLibraryAuthorizationPolicy.isRefused(.notDetermined))
+        XCTAssertFalse(PhotoLibraryAuthorizationPolicy.isRefused(.authorized))
+        XCTAssertFalse(PhotoLibraryAuthorizationPolicy.isRefused(.limited))
     }
 
     func testAddOnlyAuthorizationIsDistinctFromLimitedReadAccess() {
@@ -582,5 +779,281 @@ final class PhotoLibraryMetadataTests: XCTestCase {
         state.finish(with: lateImage, cacheable: true)
 
         XCTAssertFalse(state.canCacheResult())
+    }
+
+    @MainActor
+    func testDefaultsWriteGateDropsOlderGenerationAfterNewer() {
+        let stored = LockedValue<[Int]>([])
+        let gate = PhotoLibraryService.DefaultsWriteGate { data, _ in stored.value.append(data.count) }
+        gate.write(Data(count: 2), key: "gate.key", generation: 2)
+        gate.write(Data(count: 1), key: "gate.key", generation: 1)
+        XCTAssertEqual(stored.value, [2])
+        gate.write(Data(count: 3), key: "gate.key", generation: 3)
+        gate.write(Data(count: 4), key: "gate.other", generation: 1)
+        XCTAssertEqual(stored.value, [2, 3, 4])
+    }
+
+    @MainActor
+    func testDefaultsWriteGateRunsStoreWithLockReleased() {
+        let probeResult = LockedValue<Bool>(false)
+        let probeFinished = LockedValue<Bool>(false)
+        let gateBox = LockedValue<PhotoLibraryService.DefaultsWriteGate?>(nil)
+        let gate = PhotoLibraryService.DefaultsWriteGate { _, key in
+            // Another thread must be able to take the gate lock while the store runs.
+            let finished = DispatchSemaphore(value: 0)
+            DispatchQueue.global().async {
+                gateBox.value?.request(key: key, generation: 9)
+                probeResult.value = gateBox.value?.isSuperseded(key: key, generation: 1) == true
+                finished.signal()
+            }
+            probeFinished.value = finished.wait(timeout: .now() + 5) == .success
+        }
+        gateBox.value = gate
+        gate.write(Data(count: 1), key: "gate.lock", generation: 1)
+        XCTAssertTrue(probeFinished.value, "request and isSuperseded must not wait on the store")
+        XCTAssertTrue(probeResult.value)
+    }
+
+    @MainActor
+    func testFlushPersistenceWritesLatestStateWhileBackgroundSnapshotIsInFlight() async throws {
+        let keys = [PhotoLibraryAssetOwnership.defaultsKey,
+                    "filmyCamera.savedFrameMetadata",
+                    "filmyCamera.savedFrameResources"]
+        var saved: [String: Any] = [:]
+        for key in keys {
+            if let value = UserDefaults.standard.object(forKey: key) { saved[key] = value }
+        }
+        defer {
+            for key in keys {
+                if let value = saved[key] {
+                    UserDefaults.standard.set(value, forKey: key)
+                } else {
+                    UserDefaults.standard.removeObject(forKey: key)
+                }
+            }
+        }
+        let ids = (0..<4).map { "inflight-\($0)" }
+        let entry = SavedFrameMetadata(recipe: FilmRecipe.builtIns[0],
+                                       capturedAt: Date(timeIntervalSince1970: 1_754_000_000))
+        var seeded: [String: SavedFrameMetadata] = [:]
+        for identifier in ids { seeded[identifier] = entry }
+        PhotoLibraryAssetOwnership.persist(ids)
+        UserDefaults.standard.set(try JSONEncoder().encode(seeded), forKey: "filmyCamera.savedFrameMetadata")
+        UserDefaults.standard.removeObject(forKey: "filmyCamera.savedFrameResources")
+        // The shape that deadlocked: an observer that needs the main thread
+        // while a background thread is writing defaults.
+        let observer = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification, object: nil, queue: .main
+        ) { _ in }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        func persisted() throws -> Set<String> {
+            let data = try XCTUnwrap(UserDefaults.standard.data(forKey: "filmyCamera.savedFrameMetadata"))
+            return Set(try JSONDecoder().decode([String: SavedFrameMetadata].self, from: data).keys)
+        }
+        // The injected store records every commit and still writes the real
+        // defaults, so the observer above sees each write.
+        let metadataKey = "filmyCamera.savedFrameMetadata"
+        let metadataWrites = LockedValue<Int>(0)
+        let offMainWrites = LockedValue<Int>(0)
+        let gate = PhotoLibraryService.DefaultsWriteGate { data, key in
+            if key == metadataKey { metadataWrites.value += 1 }
+            if !Thread.isMainThread { offMainWrites.value += 1 }
+            UserDefaults.standard.set(data, forKey: key)
+        }
+        let service = PhotoLibraryService(defaultsGate: gate)
+        // Init queued a cache-maintenance pass that flushes. Let it run while
+        // nothing is dirty so it cannot write the state mutated below.
+        await Task.yield()
+        XCTAssertFalse(gate.isSuperseded(key: metadataKey, generation: 0))
+
+        // Snapshot taken and handed to the background task, then flushed
+        // before it commits: the flush must write that state itself. The
+        // commit needs the main actor, which this test holds until it suspends.
+        service.forgetSavedAssets([ids[0]])
+        await Task.yield()
+        XCTAssertTrue(gate.isSuperseded(key: metadataKey, generation: 0), "background snapshot was not taken")
+        XCTAssertEqual(metadataWrites.value, 0, "background snapshot must still be uncommitted")
+        service.flushPersistence()
+        XCTAssertEqual(metadataWrites.value, 1, "flush must write a key whose background commit is pending")
+        XCTAssertEqual(try persisted(), Set(ids.suffix(3)))
+
+        // In flight and dirty again: the flush writes the newest state.
+        service.forgetSavedAssets([ids[1]])
+        await Task.yield()
+        XCTAssertEqual(metadataWrites.value, 1, "second background snapshot must still be uncommitted")
+        service.forgetSavedAssets([ids[2]])
+        service.flushPersistence()
+        XCTAssertEqual(metadataWrites.value, 2)
+        XCTAssertEqual(try persisted(), Set([ids[3]]))
+
+        // Late background commits are dropped as stale: no further write.
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertEqual(metadataWrites.value, 2, "a stale background commit reached the store")
+        XCTAssertEqual(offMainWrites.value, 0, "saved-frame keys are written on the main thread only")
+        XCTAssertEqual(try persisted(), Set([ids[3]]))
+        XCTAssertEqual(Set(service.metadataByAssetIdentifier.keys), Set([ids[3]]))
+    }
+
+    // MARK: saved-frame index decoded off the launch path
+
+    /// Saves the three saved-frame defaults keys; the returned closure restores them.
+    private func savedFrameKeysRestorer() -> () -> Void {
+        let keys = [PhotoLibraryAssetOwnership.defaultsKey,
+                    "filmyCamera.savedFrameMetadata",
+                    "filmyCamera.savedFrameResources"]
+        var saved: [String: Any] = [:]
+        for key in keys {
+            if let value = UserDefaults.standard.object(forKey: key) { saved[key] = value }
+        }
+        return {
+            for key in keys {
+                if let value = saved[key] {
+                    UserDefaults.standard.set(value, forKey: key)
+                } else {
+                    UserDefaults.standard.removeObject(forKey: key)
+                }
+            }
+        }
+    }
+
+    /// Owns `ids`, stores one metadata entry per id and clears the resources key.
+    /// Returns the stored metadata bytes.
+    @MainActor
+    @discardableResult
+    private func seedSavedFrameIndex(_ ids: [String]) throws -> Data {
+        let entry = SavedFrameMetadata(recipe: FilmRecipe.builtIns[0],
+                                       capturedAt: Date(timeIntervalSince1970: 1_754_000_000))
+        var seeded: [String: SavedFrameMetadata] = [:]
+        for identifier in ids { seeded[identifier] = entry }
+        let data = try JSONEncoder().encode(seeded)
+        PhotoLibraryAssetOwnership.persist(ids)
+        UserDefaults.standard.set(data, forKey: "filmyCamera.savedFrameMetadata")
+        UserDefaults.standard.removeObject(forKey: "filmyCamera.savedFrameResources")
+        return data
+    }
+
+    private func persistedIndexKeys() throws -> Set<String> {
+        let data = try XCTUnwrap(UserDefaults.standard.data(forKey: "filmyCamera.savedFrameMetadata"))
+        return Set(try JSONDecoder().decode([String: SavedFrameMetadata].self, from: data).keys)
+    }
+
+    @MainActor
+    func testWithheldIndexDecodeFallsBackSynchronouslyAndLateResultIsDropped() throws {
+        let restore = savedFrameKeysRestorer()
+        defer { restore() }
+        let ids = (0..<4).map { "withheld-\($0)" }
+        try seedSavedFrameIndex(ids)
+        let jobs = LockedValue<[@Sendable () -> Void]>([])
+        let service = PhotoLibraryService(metadataDecodeLauncher: { job in
+            jobs.value = jobs.value + [job]
+        })
+        XCTAssertEqual(service.metadataLoadPath, .pending)
+        XCTAssertEqual(jobs.value.count, 1)
+
+        // First use is a mutation: it must run on the whole index.
+        service.forgetSavedAssets([ids[0]])
+        XCTAssertEqual(service.metadataLoadPath, .decodedSynchronously)
+        XCTAssertEqual(Set(service.metadataByAssetIdentifier.keys), Set(ids.dropFirst()))
+
+        // The withheld job runs late: it must not bring the removed entry back.
+        for job in jobs.value { job() }
+        XCTAssertEqual(service.metadataLoadPath, .decodedSynchronously)
+        XCTAssertEqual(Set(service.metadataByAssetIdentifier.keys), Set(ids.dropFirst()))
+        service.flushPersistence()
+        XCTAssertEqual(try persistedIndexKeys(), Set(ids.dropFirst()))
+    }
+
+    @MainActor
+    func testFinishedIndexDecodeIsAdoptedWithoutPublishing() throws {
+        let restore = savedFrameKeysRestorer()
+        defer { restore() }
+        let ids = (0..<4).map { "adopted-\($0)" }
+        try seedSavedFrameIndex(ids)
+        let service = PhotoLibraryService(metadataDecodeLauncher: { job in job() })
+        var emissions = 0
+        let cancellable = service.objectWillChange.sink { emissions += 1 }
+        XCTAssertEqual(service.metadataLoadPath, .pending)
+        XCTAssertEqual(Set(service.metadataByAssetIdentifier.keys), Set(ids))
+        XCTAssertEqual(service.metadataLoadPath, .adopted)
+        cancellable.cancel()
+        XCTAssertEqual(emissions, 0, "loading the index must not publish")
+        service.flushPersistence()
+    }
+
+    @MainActor
+    func testFirstUseMutationAfterFinishedDecodeAdoptsThenPersistsTheRest() throws {
+        let restore = savedFrameKeysRestorer()
+        defer { restore() }
+        let ids = (0..<4).map { "adopt-mutate-\($0)" }
+        try seedSavedFrameIndex(ids)
+        let service = PhotoLibraryService(metadataDecodeLauncher: { job in job() })
+        service.forgetSavedAssets([ids[0]])
+        XCTAssertEqual(service.metadataLoadPath, .adopted)
+        service.flushPersistence()
+        XCTAssertEqual(try persistedIndexKeys(), Set(ids.dropFirst()))
+    }
+
+    @MainActor
+    func testFlushAndMaintenanceNeverWriteOrDecodeAnUnclaimedIndex() async throws {
+        let restore = savedFrameKeysRestorer()
+        defer { restore() }
+        let ids = (0..<4).map { "unclaimed-\($0)" }
+        let seeded = try seedSavedFrameIndex(ids)
+        let metadataKey = "filmyCamera.savedFrameMetadata"
+        let metadataWrites = LockedValue<Int>(0)
+        let gate = PhotoLibraryService.DefaultsWriteGate { data, key in
+            if key == metadataKey { metadataWrites.value += 1 }
+            UserDefaults.standard.set(data, forKey: key)
+        }
+        let service = PhotoLibraryService(defaultsGate: gate, metadataDecodeLauncher: { _ in })
+        // The maintenance tail ends in refreshCachedFrames, which sets the
+        // published cache state. Wait (bounded) for that publish so the
+        // assertions below also cover the maintenance pass, not just flush.
+        var maintenancePublished = false
+        let cancellable = service.objectWillChange.sink { maintenancePublished = true }
+        service.flushPersistence()
+        for _ in 0..<150 where !maintenancePublished {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        service.flushPersistence()
+        cancellable.cancel()
+        XCTAssertEqual(metadataWrites.value, 0, "nothing is dirty: no metadata write")
+        XCTAssertEqual(UserDefaults.standard.data(forKey: metadataKey), seeded)
+        XCTAssertEqual(service.metadataLoadPath, .pending, "flush and maintenance must not decode")
+    }
+
+    @MainActor
+    func testRegistrationBeforeFirstUseKeepsEveryStoredEntry() async throws {
+        // registerDocumentExport ends in refresh(): a readable library would
+        // prune the synthetic identifiers below.
+        try XCTSkipIf(PhotoLibraryAuthorizationPolicy.canRead(PHPhotoLibrary.authorizationStatus(for: .readWrite)))
+        let restore = savedFrameKeysRestorer()
+        defer { restore() }
+        let ids = (0..<4).map { "register-\($0)" }
+        try seedSavedFrameIndex(ids)
+        let service = PhotoLibraryService(metadataDecodeLauncher: { _ in })
+        await service.registerDocumentExport("spec-new",
+                                             recipe: FilmRecipe.builtIns[0],
+                                             capturedAt: Date(timeIntervalSince1970: 1_754_100_000),
+                                             thumbnailData: nil,
+                                             thumbnail: nil)
+        XCTAssertEqual(service.metadataLoadPath, .decodedSynchronously)
+        let expected = Set(ids + ["spec-new"])
+        XCTAssertEqual(Set(service.metadataByAssetIdentifier.keys), expected)
+        service.flushPersistence()
+        XCTAssertEqual(try persistedIndexKeys(), expected)
+    }
+
+    @MainActor
+    func testDefaultLauncherAlwaysYieldsTheWholeIndex() throws {
+        let restore = savedFrameKeysRestorer()
+        defer { restore() }
+        let ids = (0..<50).map { "default-launcher-\($0)" }
+        try seedSavedFrameIndex(ids)
+        for _ in 0..<20 {
+            let service = PhotoLibraryService()
+            XCTAssertEqual(Set(service.metadataByAssetIdentifier.keys), Set(ids))
+            XCTAssertTrue([.adopted, .decodedSynchronously].contains(service.metadataLoadPath))
+        }
     }
 }
