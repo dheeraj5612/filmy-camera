@@ -1850,11 +1850,18 @@ struct LookLibraryView: View {
     var selectionIdentifierPrefix = "library-recipe"
     var subtitle = "Find a feeling. Make it your own."
     var libraryPreferences: Binding<RecipeLibraryPreferences>? = nil
+    /// True when the caller keeps the library open after a pick (camera). The
+    /// default keeps today's contract: the caller closes the library itself.
+    var staysOpenOnSelect = false
+    /// The host sheet's current detent, when the caller offers medium and large.
+    var presentationDetent: Binding<PresentationDetent>? = nil
     let onSelect: (FilmRecipe) -> Void
     let onClose: () -> Void
 
     @AppStorage("favoriteRecipeIDs.v1") private var favoriteData = Data()
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ScaledMetric(relativeTo: .footnote) private var overlayDisc: CGFloat = 28
     @State private var query = ""
     @State private var filter: LookLibraryFilter = .all
     @State private var showingManager = false
@@ -1867,6 +1874,16 @@ struct LookLibraryView: View {
     // touch target.
     private var libraryButtonTarget: CGFloat {
         UIDevice.current.userInterfaceIdiom == .pad ? 64 : 48
+    }
+
+    private var isPad: Bool { UIDevice.current.userInterfaceIdiom == .pad }
+
+    /// Hit frame of the heart and quick-menu overlays on a gridded photo.
+    private var overlayTarget: CGFloat { isPad ? 64 : 44 }
+
+    private var atMedium: Bool {
+        guard let detent = presentationDetent else { return false }
+        return detent.wrappedValue == .medium
     }
 
     private var librarySearchHeight: CGFloat {
@@ -1885,22 +1902,13 @@ struct LookLibraryView: View {
                 libraryHeader(compact: compactHeader)
                 searchField
                     .padding(.top, compactHeader ? 8 : 18)
-                filterStrip
-                    .padding(.top, 12)
-                    .padding(.bottom, 10)
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("\(results.count) \(results.count == 1 ? "look" : "looks")")
-                        .font(.caption.weight(.semibold))
-                        .monospacedDigit()
-                    Spacer(minLength: 4)
-                    Text("Sample previews")
-                        .font(.caption)
+                if !atMedium {
+                    filterStrip
+                        .padding(.top, 12)
+                        .padding(.bottom, 10)
+                    resultCountRow(count: results.count, singleColumn: singleColumn)
                 }
-                .foregroundStyle(FilmyTheme.secondary)
-                .padding(.horizontal, 22)
-                .padding(.bottom, 12)
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("look-library-result-count")
+                currentLookLine
 
                 ScrollViewReader { proxy in
                     ScrollView(showsIndicators: false) {
@@ -1909,20 +1917,7 @@ struct LookLibraryView: View {
                             if results.isEmpty {
                                 emptyResults
                             } else {
-                                LazyVGrid(
-                                    columns: singleColumn
-                                        ? [GridItem(.flexible())]
-                                        : [GridItem(.adaptive(minimum: 150, maximum: 270), spacing: 14)],
-                                    alignment: .leading,
-                                    spacing: 16
-                                ) {
-                                    ForEach(results) { recipe in
-                                        lookCard(recipe, favorites: favorites)
-                                    }
-                                }
-                                .padding(.horizontal, 22)
-                                .padding(.top, 4)
-                                .padding(.bottom, 28)
+                                resultsGrid(results, favorites: favorites, gridded: !singleColumn)
                             }
                         }
                     }
@@ -1948,10 +1943,72 @@ struct LookLibraryView: View {
         .sheet(isPresented: $showingManager) {
             if let libraryPreferences {
                 RecipeLibraryManagerView(preferences: libraryPreferences, recipes: recipes,
-                                         selectedRecipeID: selectedRecipeID, onSelect: onSelect)
+                                         selectedRecipeID: selectedRecipeID,
+                                         onSelect: { (recipe: FilmRecipe) in
+                                             onSelect(recipe)
+                                             showingManager = false
+                                         })
             }
         }
         .sheet(item: $sourceRecipe) { recipe in RecipeSourceSheet(recipe: recipe) }
+    }
+
+    private func resultCountRow(count: Int, singleColumn: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("\(count) \(count == 1 ? "look" : "looks")")
+                .font(.caption.weight(.semibold))
+                .monospacedDigit()
+            Spacer(minLength: 4)
+            Text("Sample previews")
+                .font(.caption)
+        }
+        .foregroundStyle(FilmyTheme.secondary)
+        .padding(.horizontal, 22)
+        .padding(.bottom, 12)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("look-library-result-count")
+        .accessibilityHint(libraryPreferences != nil && !singleColumn ? "The grid button on a card adds it to the quick menu" : "")
+    }
+
+    private var currentLookTitle: String? {
+        guard let name: String = recipes.first(where: { $0.id == selectedRecipeID })?.name else { return nil }
+        let hiddenFilter: Bool = atMedium && filter != .all
+        return hiddenFilter ? "Using \(name) \u{00B7} \(filter.title)" : "Using \(name)"
+    }
+
+    @ViewBuilder
+    private var currentLookLine: some View {
+        if staysOpenOnSelect, let title = currentLookTitle {
+            Label(title, systemImage: "camera.filters")
+                .font(.caption)
+                .foregroundStyle(FilmyTheme.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 22)
+                .padding(.top, atMedium ? 10 : 0)
+                .padding(.bottom, 12)
+                .accessibilityIdentifier("look-library-current")
+        }
+    }
+
+    private func gridColumns(gridded: Bool) -> [GridItem] {
+        guard gridded else { return [GridItem(.flexible())] }
+        let minimum: CGFloat = isPad ? 150 : 100
+        return [GridItem(.adaptive(minimum: minimum, maximum: 200), spacing: 10)]
+    }
+
+    private func resultsGrid(_ results: [FilmRecipe], favorites: Set<String>, gridded: Bool) -> some View {
+        LazyVGrid(
+            columns: gridColumns(gridded: gridded),
+            alignment: .leading,
+            spacing: gridded ? 12 : 16
+        ) {
+            ForEach(results) { recipe in
+                lookCard(recipe, favorites: favorites, gridded: gridded)
+            }
+        }
+        .padding(.horizontal, 22)
+        .padding(.top, 4)
+        .padding(.bottom, 28)
     }
 
     private func libraryHeader(compact: Bool) -> some View {
@@ -2067,135 +2124,371 @@ struct LookLibraryView: View {
         .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 16))
         .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(FilmyTheme.lineStrong, lineWidth: 1) }
         .padding(.horizontal, 22)
+        .onChange(of: searchIsFocused) { _, focused in promoteDetentForSearch(focused: focused) }
     }
+
+    /// Search never types into a half sheet under the keyboard.
+    private func promoteDetentForSearch(focused: Bool) {
+        guard focused, let detent = presentationDetent, detent.wrappedValue != .large else { return }
+        detent.wrappedValue = .large
+    }
+
+    private static let filterFadeWidth: CGFloat = 24
+    private static let filterStripStartID: String = "look-library-filter-strip-start"
 
     private var filterStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(LookLibraryFilter.allCases) { option in
-                    Button {
-                        HapticFeedback.play(.selection)
-                        filter = option
-                        searchIsFocused = false
-                    } label: {
-                        HStack(spacing: 6) {
-                            if option == .favorites {
-                                Image(systemName: "heart")
-                            }
-                            Text(option.title)
-                        }
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(filter == option ? FilmyTheme.background : FilmyTheme.secondary)
-                        .padding(.horizontal, 16)
-                        .frame(minHeight: libraryButtonTarget)
-                        .background(filter == option ? FilmyTheme.accent : FilmyTheme.panel, in: Capsule())
-                        .contentShape(Capsule())
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    // 14 pt spacer + 8 pt HStack spacing = the 22 pt leading inset; the
+                    // reset scrolls to this spacer so All keeps its inset.
+                    Color.clear
+                        .frame(width: 14, height: 1)
+                        .id(Self.filterStripStartID)
+                    ForEach(LookLibraryFilter.allCases) { option in
+                        filterChip(option)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("look-filter-\(option.id)")
-                    .accessibilityValue(filter == option ? "Selected" : "Not selected")
-                    .accessibilityAddTraits(filter == option ? .isSelected : [])
                 }
+                // The trailing fade covers the last 24 pt of the viewport; the extra
+                // padding keeps that band empty at the scroll end.
+                .padding(.trailing, 22 + Self.filterFadeWidth)
             }
-            .padding(.horizontal, 22)
+            .mask(filterFadeMask)
+            .onChange(of: filter) { _, new in resetFilterScroll(to: new, proxy: proxy) }
         }
         .accessibilityElement(children: .contain)
     }
 
-    private func lookCard(_ recipe: FilmRecipe, favorites: Set<String>) -> some View {
-        let selected = recipe.id == selectedRecipeID
-        let favorite = favorites.contains(recipe.id)
-        return VStack(alignment: .leading, spacing: 4) {
-            Button {
-                searchIsFocused = false
-                HapticFeedback.play(.selection)
-                onSelect(recipe)
-            } label: {
-                VStack(alignment: .leading, spacing: 8) {
-                    Color.clear
-                        .aspectRatio(dynamicTypeSize.isAccessibilitySize ? 1.5 : 0.75, contentMode: .fit)
-                        // Keep the first card's action row in the initial viewport at
-                        // accessibility sizes, especially on the single-column iPad layout.
-                        // A max-height proposal can be ignored by the aspect-ratio child
-                        // when the grid supplies a wider width. Use an explicit height so
-                        // the title, descriptor, and favorite action remain in the first
-                        // viewport at accessibility sizes.
-                        .frame(height: dynamicTypeSize.isAccessibilitySize ? 220 : nil)
-                        .overlay {
-                            RecipeSwatch(recipe: recipe, showsLabel: false)
-                        }
-                        .clipped()
-                    HStack(alignment: .top, spacing: 5) {
-                        if selected {
-                            Image(systemName: "checkmark")
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(FilmyTheme.accent)
-                        }
-                        Text(recipe.name)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(FilmyTheme.primary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("\(selectionIdentifierPrefix)-\(recipe.id)")
-            .accessibilityLabel("\(recipe.name), \(recipe.descriptor)")
-            .accessibilityValue(selected ? "Selected" : "Not selected")
-            .accessibilityAddTraits(selected ? .isSelected : [])
-            .accessibilityHint("Applies this look and closes the library")
-            .contextMenu {
-                Button("Details and source", systemImage: "info.circle") { sourceRecipe = recipe }
-            }
-            .accessibilityAction(named: Text("Details and source")) { sourceRecipe = recipe }
+    private var filterFadeMask: some View {
+        HStack(spacing: 0) {
+            Color.black
+            LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
+                .frame(width: Self.filterFadeWidth)
+        }
+    }
 
-            HStack(alignment: .center, spacing: 4) {
-                Text(recipe.descriptor)
-                    .font(.caption)
-                    .foregroundStyle(FilmyTheme.secondary)
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Button {
-                    var updated = favorites
-                    if favorite { updated.remove(recipe.id) } else { updated.insert(recipe.id) }
-                    favoriteData = LookLibraryIndex.encodeFavorites(updated)
-                    HapticFeedback.play(.selection)
-                } label: {
-                    Image(systemName: favorite ? "heart.fill" : "heart")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(favorite ? FilmyTheme.accent : FilmyTheme.primary)
-                        .frame(width: libraryButtonTarget, height: libraryButtonTarget)
-                        .contentShape(Rectangle())
+    private func resetFilterScroll(to new: LookLibraryFilter, proxy: ScrollViewProxy) {
+        guard new == .all else { return }
+        if reduceMotion {
+            proxy.scrollTo(Self.filterStripStartID, anchor: .leading)
+        } else {
+            withAnimation { proxy.scrollTo(Self.filterStripStartID, anchor: .leading) }
+        }
+    }
+
+    private func filterChip(_ option: LookLibraryFilter) -> some View {
+        Button {
+            HapticFeedback.play(.selection)
+            filter = option
+            searchIsFocused = false
+        } label: {
+            HStack(spacing: 6) {
+                if option == .favorites {
+                    Image(systemName: "heart")
                 }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("look-favorite-\(recipe.id)")
-                .accessibilityLabel(favorite ? "Remove \(recipe.name) from favorites" : "Favorite \(recipe.name)")
-                .accessibilityValue(favorite ? "Favorite" : "Not favorite")
+                Text(option.title)
             }
-            .overlay(alignment: .bottomLeading) {
-                if selected { FilmRegistration() }
-            }
-            if let libraryPreferences {
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(filter == option ? FilmyTheme.background : FilmyTheme.secondary)
+            .padding(.horizontal, 16)
+            .frame(minHeight: libraryButtonTarget)
+            .background(filter == option ? FilmyTheme.accent : FilmyTheme.panel, in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .id(option)
+        .accessibilityIdentifier("look-filter-\(option.id)")
+        .accessibilityValue(filter == option ? "Selected" : "Not selected")
+        .accessibilityAddTraits(filter == option ? .isSelected : [])
+    }
+
+    @ViewBuilder
+    private func lookCard(_ recipe: FilmRecipe, favorites: Set<String>, gridded: Bool) -> some View {
+        let selected: Bool = recipe.id == selectedRecipeID
+        let favorite: Bool = favorites.contains(recipe.id)
+        if gridded {
+            griddedCard(recipe, favorites: favorites, selected: selected, favorite: favorite)
+        } else {
+            singleColumnCard(recipe, favorites: favorites, selected: selected, favorite: favorite)
+        }
+    }
+
+    private func toggleFavorite(_ recipe: FilmRecipe, favorites: Set<String>, favorite: Bool) {
+        var updated = favorites
+        if favorite { updated.remove(recipe.id) } else { updated.insert(recipe.id) }
+        favoriteData = LookLibraryIndex.encodeFavorites(updated)
+        HapticFeedback.play(.selection)
+    }
+
+    private func toggleQuickMenu(_ recipe: FilmRecipe) {
+        guard let libraryPreferences else { return }
+        var updated = libraryPreferences.wrappedValue
+        updated.setRecipe(recipe.id, enabled: !updated.isEnabled(recipe.id))
+        libraryPreferences.wrappedValue = updated
+    }
+
+    private func quickMenuEnabled(_ recipe: FilmRecipe) -> Bool {
+        libraryPreferences?.wrappedValue.isEnabled(recipe.id) ?? false
+    }
+
+    private func quickMenuActionTitle(_ recipe: FilmRecipe) -> String {
+        quickMenuEnabled(recipe) ? "Remove from quick menu" : "Add to quick menu"
+    }
+
+    /// The card's apply button. The heart and quick toggle are never inside its
+    /// label (no nested buttons); the gridded card overlays them instead.
+    private func cardSelectButton<CardLabel: View>(
+        _ recipe: FilmRecipe,
+        selected: Bool,
+        gridded: Bool,
+        label: CardLabel
+    ) -> some View {
+        let quickActions: Bool = gridded && libraryPreferences != nil
+        let hint: String = staysOpenOnSelect
+            ? "Applies this look"
+            : "Applies this look and closes the library"
+        return Button {
+            searchIsFocused = false
+            HapticFeedback.play(.selection)
+            onSelect(recipe)
+        } label: {
+            label
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("\(selectionIdentifierPrefix)-\(recipe.id)")
+        .accessibilityLabel("\(recipe.name), \(recipe.descriptor)")
+        .accessibilityValue(selected ? "Selected" : "Not selected")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityHint(hint)
+        .contextMenu {
+            Button("Details and source", systemImage: "info.circle") { sourceRecipe = recipe }
+            if quickActions {
                 Button {
-                    var updated = libraryPreferences.wrappedValue
-                    updated.setRecipe(recipe.id, enabled: !updated.isEnabled(recipe.id))
-                    libraryPreferences.wrappedValue = updated
+                    toggleQuickMenu(recipe)
                 } label: {
-                    Label("Quick menu", systemImage: libraryPreferences.wrappedValue.isEnabled(recipe.id)
-                          ? "checkmark.circle.fill" : "circle")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(libraryPreferences.wrappedValue.isEnabled(recipe.id) ? FilmyTheme.accent : FilmyTheme.secondary)
-                        .frame(maxWidth: .infinity, minHeight: libraryButtonTarget, alignment: .leading)
+                    Label(quickMenuActionTitle(recipe), systemImage: "square.grid.2x2")
                 }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("library-quick-toggle-\(recipe.id)")
-                .accessibilityLabel("\(recipe.name) in quick menu")
-                .accessibilityValue(libraryPreferences.wrappedValue.isEnabled(recipe.id) ? "Enabled" : "Hidden")
             }
         }
+        .accessibilityAction(named: Text("Details and source")) { sourceRecipe = recipe }
+        .accessibilityActions {
+            if quickActions {
+                Button(quickMenuActionTitle(recipe)) { toggleQuickMenu(recipe) }
+            }
+        }
+    }
+
+    // MARK: Gridded card (3-up)
+
+    private func griddedCard(
+        _ recipe: FilmRecipe,
+        favorites: Set<String>,
+        selected: Bool,
+        favorite: Bool
+    ) -> some View {
+        cardSelectButton(
+            recipe,
+            selected: selected,
+            gridded: true,
+            label: griddedLabel(recipe, selected: selected)
+        )
+        .overlay(alignment: .top) {
+            griddedOverlays(recipe, favorites: favorites, favorite: favorite)
+        }
         .accessibilityElement(children: .contain)
+    }
+
+    private func griddedLabel(_ recipe: FilmRecipe, selected: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Color.clear
+                .aspectRatio(0.75, contentMode: .fit)
+                .overlay {
+                    RecipeSwatch(recipe: recipe, showsLabel: false)
+                }
+                .clipped()
+            griddedNameRow(recipe, selected: selected)
+        }
+        .contentShape(Rectangle())
+    }
+
+    private func griddedNameRow(_ recipe: FilmRecipe, selected: Bool) -> some View {
+        HStack(alignment: .top, spacing: 5) {
+            if selected {
+                Image(systemName: "checkmark")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(FilmyTheme.accent)
+            }
+            Text(recipe.name)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(FilmyTheme.primary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.bottom, 6)
+        .overlay(alignment: .bottomLeading) {
+            if selected { FilmRegistration() }
+        }
+    }
+
+    /// A clear frame the size of the photo: heart at its top-trailing corner,
+    /// quick toggle at its bottom-leading corner (diagonal, never adjacent).
+    private func griddedOverlays(_ recipe: FilmRecipe, favorites: Set<String>, favorite: Bool) -> some View {
+        Color.clear
+            .aspectRatio(0.75, contentMode: .fit)
+            .overlay(alignment: .topTrailing) {
+                heartOverlay(recipe, favorites: favorites, favorite: favorite)
+            }
+            .overlay(alignment: .bottomLeading) {
+                quickToggleOverlay(recipe)
+            }
+    }
+
+    private func cardOverlayButton(symbol: String, tint: Color, action: @escaping () -> Void) -> some View {
+        let disc: CGFloat = min(overlayDisc, 36)
+        return Button(action: action) {
+            ZStack {
+                Circle().fill(.ultraThinMaterial)
+                    .frame(width: disc, height: disc)
+                Image(systemName: symbol)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(tint)
+            }
+            .frame(width: overlayTarget, height: overlayTarget)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func heartOverlay(_ recipe: FilmRecipe, favorites: Set<String>, favorite: Bool) -> some View {
+        let symbol: String = favorite ? "heart.fill" : "heart"
+        let tint: Color = favorite ? FilmyTheme.accent : FilmyTheme.primary
+        let label: String = favorite ? "Remove \(recipe.name) from favorites" : "Favorite \(recipe.name)"
+        let value: String = favorite ? "Favorite" : "Not favorite"
+        return cardOverlayButton(symbol: symbol, tint: tint) {
+            toggleFavorite(recipe, favorites: favorites, favorite: favorite)
+        }
+        .accessibilityIdentifier("look-favorite-\(recipe.id)")
+        .accessibilityLabel(label)
+        .accessibilityValue(value)
+    }
+
+    @ViewBuilder
+    private func quickToggleOverlay(_ recipe: FilmRecipe) -> some View {
+        if libraryPreferences != nil {
+            let enabled: Bool = quickMenuEnabled(recipe)
+            let symbol: String = enabled ? "square.grid.2x2.fill" : "square.grid.2x2"
+            let tint: Color = enabled ? FilmyTheme.accent : FilmyTheme.secondary
+            let value: String = enabled ? "Enabled" : "Hidden"
+            cardOverlayButton(symbol: symbol, tint: tint) {
+                toggleQuickMenu(recipe)
+            }
+            .accessibilityIdentifier("library-quick-toggle-\(recipe.id)")
+            .accessibilityLabel("\(recipe.name) in quick menu")
+            .accessibilityValue(value)
+        }
+    }
+
+    // MARK: Single-column card (accessibility sizes and narrow widths)
+
+    private func singleColumnCard(
+        _ recipe: FilmRecipe,
+        favorites: Set<String>,
+        selected: Bool,
+        favorite: Bool
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            cardSelectButton(
+                recipe,
+                selected: selected,
+                gridded: false,
+                label: singleColumnLabel(recipe, selected: selected)
+            )
+            singleColumnActionRow(recipe, favorites: favorites, selected: selected, favorite: favorite)
+            singleColumnQuickRow(recipe)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func singleColumnLabel(_ recipe: FilmRecipe, selected: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Color.clear
+                .aspectRatio(dynamicTypeSize.isAccessibilitySize ? 1.5 : 0.75, contentMode: .fit)
+                // Keep the first card's action row in the initial viewport at
+                // accessibility sizes, especially on the single-column iPad layout.
+                // A max-height proposal can be ignored by the aspect-ratio child
+                // when the grid supplies a wider width. Use an explicit height so
+                // the title, descriptor, and favorite action remain in the first
+                // viewport at accessibility sizes.
+                .frame(height: dynamicTypeSize.isAccessibilitySize ? 220 : nil)
+                .overlay {
+                    RecipeSwatch(recipe: recipe, showsLabel: false)
+                }
+                .clipped()
+            HStack(alignment: .top, spacing: 5) {
+                if selected {
+                    Image(systemName: "checkmark")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(FilmyTheme.accent)
+                }
+                Text(recipe.name)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(FilmyTheme.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .contentShape(Rectangle())
+    }
+
+    private func singleColumnActionRow(
+        _ recipe: FilmRecipe,
+        favorites: Set<String>,
+        selected: Bool,
+        favorite: Bool
+    ) -> some View {
+        HStack(alignment: .center, spacing: 4) {
+            Text(recipe.descriptor)
+                .font(.caption)
+                .foregroundStyle(FilmyTheme.secondary)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button {
+                toggleFavorite(recipe, favorites: favorites, favorite: favorite)
+            } label: {
+                Image(systemName: favorite ? "heart.fill" : "heart")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(favorite ? FilmyTheme.accent : FilmyTheme.primary)
+                    .frame(width: libraryButtonTarget, height: libraryButtonTarget)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("look-favorite-\(recipe.id)")
+            .accessibilityLabel(favorite ? "Remove \(recipe.name) from favorites" : "Favorite \(recipe.name)")
+            .accessibilityValue(favorite ? "Favorite" : "Not favorite")
+        }
+        .overlay(alignment: .bottomLeading) {
+            if selected { FilmRegistration() }
+        }
+    }
+
+    @ViewBuilder
+    private func singleColumnQuickRow(_ recipe: FilmRecipe) -> some View {
+        if libraryPreferences != nil {
+            let enabled: Bool = quickMenuEnabled(recipe)
+            Button {
+                toggleQuickMenu(recipe)
+            } label: {
+                Label("Quick menu", systemImage: enabled ? "checkmark.circle.fill" : "circle")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(enabled ? FilmyTheme.accent : FilmyTheme.secondary)
+                    .frame(maxWidth: .infinity, minHeight: libraryButtonTarget, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("library-quick-toggle-\(recipe.id)")
+            .accessibilityLabel("\(recipe.name) in quick menu")
+            .accessibilityValue(enabled ? "Enabled" : "Hidden")
+        }
     }
 
     private var emptyResults: some View {

@@ -5,9 +5,13 @@ extension LookLibraryView {
     /// existing selection/close initializer contract used by capture review.
     init(recipes: [FilmRecipe], selectedRecipeID: String,
          onSelect: @escaping (FilmRecipe) -> Void, onClose: @escaping () -> Void,
-         libraryPreferences: Binding<RecipeLibraryPreferences>) {
+         libraryPreferences: Binding<RecipeLibraryPreferences>,
+         staysOpenOnSelect: Bool = false,
+         presentationDetent: Binding<PresentationDetent>? = nil) {
         self.init(recipes: recipes, selectedRecipeID: selectedRecipeID,
-                  libraryPreferences: libraryPreferences, onSelect: onSelect, onClose: onClose)
+                  libraryPreferences: libraryPreferences,
+                  staysOpenOnSelect: staysOpenOnSelect, presentationDetent: presentationDetent,
+                  onSelect: onSelect, onClose: onClose)
     }
 }
 
