@@ -492,9 +492,11 @@ final class NormalPhotoFlowTests: XCTestCase {
             waitUntil(timeout: 10) { currentLook.label.contains(name) },
             "Selecting \(name) must update the current look"
         )
+        XCTAssertTrue(app.descendants(matching: .any)["recipe-drawer"].exists)
+        app.buttons["recipe-drawer-close"].tap()
         XCTAssertTrue(
             waitForDisappearance(app.buttons["recipe-drawer-close"], timeout: 5),
-            "Selecting a look must dismiss the picker and leave the camera controls available"
+            "Closing the look picker must leave the camera controls available"
         )
     }
 
@@ -578,7 +580,8 @@ final class NormalPhotoFlowTests: XCTestCase {
             // vertical scroll view. Resolve vertical clipping first so a
             // coordinate derived from the tile can never land on the camera
             // controls below the drawer.
-            let pickerViewport = picker.frame.intersection(app.frame).insetBy(dx: 1, dy: 1)
+            // The 76 pt row has no vertical slack, so allow 1 pt for fractional frames.
+            let pickerViewport = picker.frame.intersection(app.frame).insetBy(dx: 1, dy: -1)
             let frame = element.frame
             guard pickerViewport.width > 20, pickerViewport.height > 20 else {
                 return false
@@ -597,7 +600,7 @@ final class NormalPhotoFlowTests: XCTestCase {
                     return false
                 }
             } else {
-                let railViewport = rail.frame.intersection(pickerViewport).insetBy(dx: 1, dy: 1)
+                let railViewport = rail.frame.intersection(pickerViewport).insetBy(dx: 1, dy: -1)
                 guard railViewport.width > 20, railViewport.height > 20 else {
                     return false
                 }

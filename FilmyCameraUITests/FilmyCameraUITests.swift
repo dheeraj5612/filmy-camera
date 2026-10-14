@@ -300,7 +300,8 @@ final class FilmyCameraUITests: XCTestCase {
         defer { compactApp.terminate() }
 
         openRecipeDrawer(in: compactApp)
-        XCTAssertTrue(compactApp.staticTexts["CAMERA PROFILE"].waitForExistence(timeout: 8))
+        XCTAssertTrue(compactApp.descendants(matching: .any)["recipe-drawer"].waitForExistence(timeout: 8))
+        XCTAssertFalse(compactApp.staticTexts["CAMERA PROFILE"].exists, "The look picker has no eyebrow row")
 
         let selectedRecipe = compactApp.buttons["recipe-g7x-compact"]
         assertMinimumAccessibilityFrame(selectedRecipe, named: "G7 X recipe")
@@ -308,17 +309,19 @@ final class FilmyCameraUITests: XCTestCase {
         // Stay within the compact-profile rail. Reaching into another nested
         // horizontal rail makes XCTest try to scroll the outer drawer instead.
         let alternate = compactApp.buttons["recipe-digital-ccd-daylight"]
-        scrollToHittable(alternate, in: compactApp)
+        let rail = compactApp.scrollViews["recipe-group-compact"]
+        for _ in 0..<6 where !alternate.isHittable { rail.swipeLeft() }
         assertMinimumHitTarget(alternate, named: "CCD Daylight recipe")
         alternate.tap()
         XCTAssertTrue(compactApp.buttons["recipe-menu"].waitForExistence(timeout: 5))
         XCTAssertTrue(compactApp.buttons["recipe-menu"].label.contains("CCD Daylight"))
-        XCTAssertTrue(waitUntil(timeout: 5) {
-            !compactApp.descendants(matching: .any)["recipe-drawer"].exists
-        }, "Selecting a look must dismiss the picker")
+        XCTAssertTrue(compactApp.descendants(matching: .any)["recipe-drawer"].exists,
+                      "Choosing a look keeps the look picker open")
+        XCTAssertEqual(alternate.value as? String, "Selected")
 
         openRecipeDrawer(in: compactApp)
         XCTAssertTrue(compactApp.buttons["Tune CCD Daylight"].waitForExistence(timeout: 5))
+        for _ in 0..<6 where !selectedRecipe.isHittable { rail.swipeRight() }
         #if targetEnvironment(simulator)
         // iPadOS 26 Simulator can report the first tile of a nested row as
         // non-hittable despite correct visible bounds and working taps.
@@ -334,9 +337,7 @@ final class FilmyCameraUITests: XCTestCase {
         selectedRecipe.tap()
         #endif
         XCTAssertTrue(compactApp.buttons["recipe-menu"].label.contains("G7 X Compact"))
-        XCTAssertTrue(waitUntil(timeout: 5) {
-            !compactApp.descendants(matching: .any)["recipe-drawer"].exists
-        }, "Selecting a look must dismiss the picker")
+        XCTAssertEqual(selectedRecipe.value as? String, "Selected")
 
         openRecipeDrawer(in: compactApp)
         let tune = compactApp.buttons["Tune G7 X Compact"]
@@ -569,7 +570,8 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertTrue(onboardingApp.buttons["roll-tab"].waitForExistence(timeout: 8))
         assertMinimumHitTarget(onboardingApp.buttons["recipe-menu"], named: "Current look after onboarding")
         openRecipeDrawer(in: onboardingApp)
-        XCTAssertTrue(onboardingApp.staticTexts["CAMERA PROFILE"].waitForExistence(timeout: 5))
+        XCTAssertTrue(onboardingApp.descendants(matching: .any)["recipe-drawer"].waitForExistence(timeout: 5))
+        XCTAssertFalse(onboardingApp.staticTexts["CAMERA PROFILE"].exists)
         XCTAssertTrue(onboardingApp.descendants(matching: .any)["recipe-group-compact"].exists)
         let g7x = onboardingApp.buttons["recipe-g7x-compact"]
         assertMinimumAccessibilityFrame(g7x, named: "G7 X recipe after onboarding")
@@ -1878,11 +1880,12 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertTrue(target.staticTexts["Recipe controls"].waitForExistence(timeout: 5))
     }
 
-    /// Choosing a look dismisses the picker; reopen it to reach the tuning control.
+    /// Choosing a look keeps the picker open; make sure it is open to reach the tuning control.
     private func reopenRecipeDrawerAfterSelection(in target: XCUIApplication) {
-        XCTAssertTrue(waitUntil(timeout: 5) {
-            !target.descendants(matching: .any)["recipe-drawer"].exists
-        }, "Selecting a look must dismiss the picker")
+        XCTAssertTrue(
+            target.descendants(matching: .any)["recipe-drawer"].waitForExistence(timeout: 2),
+            "Choosing a look keeps the look picker open"
+        )
         openRecipeDrawer(in: target)
     }
 
@@ -2406,11 +2409,13 @@ final class FilmyCameraUITests: XCTestCase {
                                          dy: visible.midY - swatch.frame.minY))
                     .tap()
                 XCTAssertTrue(waitUntil(timeout: 5) {
-                    !app.descendants(matching: .any)["recipe-drawer"].exists
+                    app.descendants(matching: .any)["recipe-drawer"].exists
                         && app.buttons["recipe-menu"].label != previousLook
-                }, "Tapping \(identifier) must update the current look and dismiss the picker")
+                }, "Tapping \(identifier) must update the current look and keep the look picker open")
                 selectedRecipes.insert(identifier)
                 taps += 1
+                app.buttons["recipe-drawer-close"].tap()
+                XCTAssertTrue(waitForDisappearance(app.descendants(matching: .any)["recipe-picker"], timeout: 5))
             }
         }
         XCTAssertGreaterThanOrEqual(taps, 6, "The look drawer should expose several recipes to switch between")

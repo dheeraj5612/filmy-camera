@@ -12,7 +12,6 @@ struct RecipePickerView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     init(
         recipes: [FilmRecipe],
@@ -26,26 +25,20 @@ struct RecipePickerView: View {
         self.compact = compact
     }
 
+    /// AX grid tiles stretch to the column width; the width here is the floor.
     private var swatchSize: CGSize {
-        if compact {
-            return dynamicTypeSize.isAccessibilitySize
-                ? CGSize(width: 146, height: 90)
-                : CGSize(width: 126, height: 88)
+        if dynamicTypeSize.isAccessibilitySize {
+            return CGSize(width: 140, height: 56)
         }
         // Regular widths (iPad) have room for a slightly larger swatch.
         return horizontalSizeClass == .regular
-            ? CGSize(width: 96, height: 70)
-            : CGSize(width: 78, height: 58)
+            ? CGSize(width: 88, height: 56)
+            : CGSize(width: 64, height: 40)
     }
 
-    private var tileSpacing: CGFloat {
-        compact ? 10 : 10
-    }
-
-    /// Captions stay outside the photograph at every text size.
-    @ScaledMetric(relativeTo: .caption) private var captionSpace: CGFloat = 36
-    private var railHeight: CGFloat {
-        swatchSize.height + captionSpace + 12
+    /// Swatch, 3 pt gap, a 2-line name (32 pt) and 1 pt of top rail padding.
+    private var rowHeight: CGFloat {
+        swatchSize.height + 3 + 32 + 1
     }
 
     /// Put the compact digital profile in the first glance of the rail. Its
@@ -81,6 +74,14 @@ struct RecipePickerView: View {
             case .monochrome: return "circle.lefthalf.filled"
             }
         }
+
+        var shortTitle: String {
+            switch self {
+            case .compact: return "Digital"
+            case .film: return "Film"
+            case .monochrome: return "Mono"
+            }
+        }
     }
 
     private struct RecipeGroupSection: Identifiable {
@@ -109,115 +110,270 @@ struct RecipePickerView: View {
     }
 
     var body: some View {
-        if compact {
-            expandedPicker
+        if dynamicTypeSize.isAccessibilitySize {
+            accessibleGrid
+        } else if compact {
+            groupPager
         } else {
             standardRail
         }
     }
 
+    // MARK: Scrolling helpers
+
+    private func scroll(_ proxy: ScrollViewProxy, to id: String, anchor: UnitPoint) {
+        if reduceMotion {
+            proxy.scrollTo(id, anchor: anchor)
+        } else {
+            withAnimation(.snappy(duration: 0.24)) {
+                proxy.scrollTo(id, anchor: anchor)
+            }
+        }
+    }
+
+    private func section(holding id: String) -> RecipeGroupSection? {
+        groupedRecipes.first { (candidate: RecipeGroupSection) -> Bool in
+            candidate.recipes.contains { (recipe: FilmRecipe) -> Bool in recipe.id == id }
+        }
+    }
+
+    private func nextSection(after section: RecipeGroupSection) -> RecipeGroupSection {
+        let all = groupedRecipes
+        guard let index = all.firstIndex(where: { (candidate: RecipeGroupSection) -> Bool in
+            candidate.id == section.id
+        }) else {
+            return section
+        }
+        return all[(index + 1) % all.count]
+    }
+
+    private func centerSelectedSection(_ proxy: ScrollViewProxy, animated: Bool) {
+        guard let target = section(holding: selectedRecipeID) else { return }
+        if animated {
+            scroll(proxy, to: target.id, anchor: .top)
+        } else {
+            proxy.scrollTo(target.id, anchor: .top)
+        }
+    }
+
+    private func centerSelectedTile(
+        _ proxy: ScrollViewProxy,
+        in section: RecipeGroupSection,
+        animated: Bool
+    ) {
+        let holdsSelection = section.recipes.contains { (recipe: FilmRecipe) -> Bool in
+            recipe.id == selectedRecipeID
+        }
+        guard holdsSelection else { return }
+        if animated {
+            scroll(proxy, to: selectedRecipeID, anchor: .center)
+        } else {
+            proxy.scrollTo(selectedRecipeID, anchor: .center)
+        }
+    }
+
+    // MARK: Favorites and search results
+
     private var standardRail: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: tileSpacing) {
+                LazyHStack(alignment: .top, spacing: 10) {
                     ForEach(presentationRecipes) { recipe in
-                        recipeButton(for: recipe)
+                        recipeButton(for: recipe, inGrid: false)
                             .id(recipe.id)
                     }
                 }
                 .scrollTargetLayout()
                 .padding(.horizontal, 4)
-                .padding(.vertical, 6)
+                .padding(.top, 1)
             }
-            .scrollClipDisabled()
             .scrollTargetBehavior(.viewAligned)
             .contentMargins(.horizontal, 4, for: .scrollContent)
-            .frame(height: railHeight)
+            .frame(height: rowHeight)
             .onAppear {
                 proxy.scrollTo(selectedRecipeID, anchor: .center)
             }
             .onChange(of: selectedRecipeID) { _, newValue in
-                if reduceMotion {
-                    proxy.scrollTo(newValue, anchor: .center)
-                } else {
-                    withAnimation(.snappy(duration: 0.24)) {
-                        proxy.scrollTo(newValue, anchor: .center)
-                    }
-                }
+                scroll(proxy, to: newValue, anchor: .center)
             }
             .accessibilityIdentifier("recipe-rail")
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("recipe-picker")
-        .accessibilityLabel("Film recipe picker. Swipe left or right to browse looks.")
+        .accessibilityLabel("Look picker. Swipe left or right to browse looks.")
     }
 
-    /// The drawer is intentionally grouped by the kind of camera decision it
-    /// represents. A compact profile and a monochrome look should not be
-    /// hidden in one undifferentiated strip of thumbnails.
-    private var expandedPicker: some View {
-        ScrollViewReader { outerProxy in
-            ScrollView(.vertical, showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: 14) {
-                    ForEach(groupedRecipes) { section in
-                        let group = section.group
-                        let recipes = section.recipes
-                        VStack(alignment: .leading, spacing: 7) {
-                        HStack(spacing: 7) {
-                            Image(systemName: group.symbol)
-                                .font(.system(.caption, weight: .bold))
-                                .foregroundStyle(groupAccent(group))
-                                .accessibilityHidden(true)
-                            Text(group.title.uppercased())
-                                .font(.system(.caption, design: .rounded).weight(.bold))
-                                .tracking(0.8)
-                                .foregroundStyle(groupAccent(group))
-                            Text("\(recipes.count)")
-                                .font(.system(.caption2, design: .monospaced).weight(.bold))
-                                .foregroundStyle(FilmyTheme.tertiary)
-                            Spacer(minLength: 0)
-                        }
+    // MARK: Default sizes: vertical pager of per-group rails
 
-                            ScrollViewReader { rowProxy in
-                                ScrollView(.horizontal, showsIndicators: false) {
-                                    LazyHStack(alignment: .top, spacing: 10) {
-                                        ForEach(recipes) { recipe in
-                                            recipeButton(for: recipe)
-                                                .id(recipe.id)
-                                        }
-                                    }
-                                    .padding(.horizontal, 2)
-                                    .padding(.vertical, 2)
-                                }
-                                .scrollClipDisabled()
-                                .accessibilityIdentifier("recipe-group-\(group.id)")
-                                .onAppear {
-                                    if recipes.contains(where: { $0.id == selectedRecipeID }) {
-                                        rowProxy.scrollTo(selectedRecipeID, anchor: .center)
-                                    }
-                                }
-                            }
-                        }
-                        .id(section.id)
+    /// One 76 pt row per group. The rows page vertically; each row is a
+    /// group marker followed by a horizontal rail of that group's looks.
+    private var groupPager: some View {
+        ScrollViewReader { outer in
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 0) {
+                    ForEach(groupedRecipes) { section in
+                        groupRow(section, outer: outer)
+                            .containerRelativeFrame(.vertical)
+                            .id(section.id)
                     }
                 }
-                .padding(.horizontal, 8)
+                .scrollTargetLayout()
+            }
+            .scrollTargetBehavior(.paging)
+            .frame(height: rowHeight)
+            .accessibilityIdentifier("recipe-picker")
+            .accessibilityLabel("Look picker grouped by digital, film, and monochrome looks")
+            .onAppear {
+                centerSelectedSection(outer, animated: false)
+            }
+            .onChange(of: selectedRecipeID) { _, _ in
+                centerSelectedSection(outer, animated: true)
+            }
+        }
+    }
+
+    private func groupRow(_ section: RecipeGroupSection, outer: ScrollViewProxy) -> some View {
+        HStack(spacing: 4) {
+            groupMarker(section, outer: outer, isHeader: false)
+            groupRail(section)
+        }
+    }
+
+    private func groupRail(_ section: RecipeGroupSection) -> some View {
+        ScrollViewReader { row in
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: 6) {
+                    ForEach(section.recipes) { recipe in
+                        recipeButton(for: recipe, inGrid: false)
+                            .id(recipe.id)
+                    }
+                }
+                .padding(.horizontal, 2)
+                .padding(.top, 1)
+            }
+            .accessibilityIdentifier("recipe-group-\(section.group.id)")
+            .onAppear {
+                centerSelectedTile(row, in: section, animated: false)
+            }
+            .onChange(of: selectedRecipeID) { _, _ in
+                centerSelectedTile(row, in: section, animated: true)
+            }
+        }
+    }
+
+    // MARK: Accessibility sizes: grouped two-column grid
+
+    private var gridColumns: [GridItem] {
+        [GridItem(.adaptive(minimum: 140), spacing: 10, alignment: .top)]
+    }
+
+    private var accessibleGrid: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(groupedRecipes) { section in
+                        gridSection(section, proxy: proxy)
+                            .id(section.id)
+                    }
+                }
+                .padding(.horizontal, 4)
                 .padding(.vertical, 4)
             }
+            .scrollIndicatorsFlash(onAppear: true)
+            .accessibilityIdentifier("recipe-picker")
             .onAppear {
-                if let section = groupedRecipes.first(where: { $0.recipes.contains(where: { $0.id == selectedRecipeID }) }) {
-                    outerProxy.scrollTo(section.id, anchor: .center)
+                proxy.scrollTo(selectedRecipeID, anchor: .center)
+            }
+            .onChange(of: selectedRecipeID) { _, newValue in
+                scroll(proxy, to: newValue, anchor: .center)
+            }
+        }
+    }
+
+    private func gridSection(_ section: RecipeGroupSection, proxy: ScrollViewProxy) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            groupMarker(section, outer: proxy, isHeader: true)
+            LazyVGrid(columns: gridColumns, spacing: 12) {
+                ForEach(section.recipes) { recipe in
+                    recipeButton(for: recipe, inGrid: true)
+                        .id(recipe.id)
                 }
             }
         }
-        // Landscape phones have very little vertical room once the drawer
-        // header and capture controls are accounted for. Keep the drawer
-        // bounded and let its grouped rows scroll inside that space.
-        .frame(maxHeight: verticalSizeClass == .compact
-            ? (dynamicTypeSize.isAccessibilitySize ? 220 : 190)
-            : (dynamicTypeSize.isAccessibilitySize ? 390 : 330))
-        .accessibilityIdentifier("recipe-picker")
-        .accessibilityLabel("Film recipe picker grouped by compact, film, and monochrome looks")
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("recipe-group-\(section.group.id)")
+    }
+
+    // MARK: Group marker
+
+    private func groupMarker(
+        _ section: RecipeGroupSection,
+        outer: ScrollViewProxy,
+        isHeader: Bool
+    ) -> some View {
+        let next = nextSection(after: section)
+        let count = section.recipes.count
+        let canAdvance = groupedRecipes.count > 1
+        return Button {
+            scroll(outer, to: next.id, anchor: .top)
+        } label: {
+            if isHeader {
+                headerMarkerLabel(section, showsChevron: canAdvance)
+            } else {
+                railMarkerLabel(section, showsChevron: canAdvance)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("recipe-group-marker-\(section.group.id)")
+        .accessibilityLabel("\(section.group.title), \(count) looks")
+        .accessibilityHint(canAdvance ? "Shows \(next.group.title) looks" : "")
+        .disabled(!canAdvance)
+    }
+
+    private func railMarkerLabel(_ section: RecipeGroupSection, showsChevron: Bool) -> some View {
+        let group = section.group
+        return VStack(spacing: 2) {
+            Image(systemName: group.symbol)
+                .font(.system(.caption, weight: .bold))
+                .foregroundStyle(groupAccent(group))
+            Text(group.shortTitle)
+                .font(.system(.caption2, design: .rounded).weight(.bold))
+                .foregroundStyle(groupAccent(group))
+                .lineLimit(1)
+            Text("\(section.recipes.count)")
+                .font(.system(.caption2, design: .monospaced).weight(.bold))
+                .foregroundStyle(FilmyTheme.tertiary)
+            Image(systemName: "chevron.down")
+                .font(.system(.caption2, weight: .bold))
+                .foregroundStyle(groupAccent(group))
+                .opacity(showsChevron ? 1 : 0)
+        }
+        .dynamicTypeSize(...DynamicTypeSize.xLarge)
+        .frame(width: 52, height: rowHeight)
+        .contentShape(Rectangle())
+    }
+
+    private func headerMarkerLabel(_ section: RecipeGroupSection, showsChevron: Bool) -> some View {
+        let group = section.group
+        return HStack(spacing: 7) {
+            Image(systemName: group.symbol)
+                .font(.system(.caption, weight: .bold))
+                .foregroundStyle(groupAccent(group))
+            Text(group.title.uppercased())
+                .font(.system(.caption, design: .rounded).weight(.bold))
+                .tracking(0.8)
+                .foregroundStyle(groupAccent(group))
+            Text("\(section.recipes.count)")
+                .font(.system(.caption2, design: .monospaced).weight(.bold))
+                .foregroundStyle(FilmyTheme.tertiary)
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.down")
+                .font(.system(.caption2, weight: .bold))
+                .foregroundStyle(groupAccent(group))
+                .opacity(showsChevron ? 1 : 0)
+        }
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
     private func groupAccent(_ group: RecipeGroup) -> Color {
@@ -228,7 +384,9 @@ struct RecipePickerView: View {
         }
     }
 
-    private func recipeButton(for recipe: FilmRecipe) -> some View {
+    // MARK: Tiles
+
+    private func recipeButton(for recipe: FilmRecipe, inGrid: Bool) -> some View {
         let isSelected = selectedRecipeID == recipe.id
 
         return Button {
@@ -236,13 +394,13 @@ struct RecipePickerView: View {
                 selectedRecipeID = recipe.id
             }
         } label: {
-            recipeTile(recipe)
+            recipeTile(recipe, inGrid: inGrid)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("recipe-\(recipe.id)")
         .accessibilityLabel("\(recipe.name), \(recipe.descriptor)")
         .accessibilityValue(isSelected ? "Selected" : "Not selected")
-        .accessibilityHint("Select this look and return to the camera preview. Use the View recipe details action for more information.")
+        .accessibilityHint("Selects this look. The picker stays open.")
         .accessibilityAction(named: "View recipe details") {
             onOpenDetail(recipe)
         }
@@ -256,30 +414,77 @@ struct RecipePickerView: View {
         }
     }
 
-    private func recipeTile(_ recipe: FilmRecipe) -> some View {
+    private func nameFont(isSelected: Bool) -> Font {
+        .system(.caption, design: .rounded).weight(isSelected ? .bold : .semibold)
+    }
+
+    private func nameColor(isSelected: Bool) -> Color {
+        isSelected ? FilmyTheme.accent : Color.white.opacity(0.72)
+    }
+
+    private func selectedBadge(isSelected: Bool) -> some View {
+        Group {
+            if isSelected {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.caption2)
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(Color.black, FilmyTheme.accent)
+                    .padding(2)
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func tileSwatch(_ recipe: FilmRecipe, isSelected: Bool, inGrid: Bool) -> some View {
+        let swatch = RecipeSwatch(
+            recipe: recipe,
+            isSelected: isSelected,
+            compact: true,
+            showsLabel: false
+        )
+        if inGrid {
+            swatch
+                .frame(maxWidth: .infinity)
+                .frame(height: swatchSize.height)
+                .clipShape(Rectangle())
+                .overlay(alignment: .topTrailing) { selectedBadge(isSelected: isSelected) }
+        } else {
+            swatch
+                .frame(width: swatchSize.width, height: swatchSize.height)
+                .clipShape(Rectangle())
+                .overlay(alignment: .topTrailing) { selectedBadge(isSelected: isSelected) }
+        }
+    }
+
+    @ViewBuilder
+    private func tileName(_ recipe: FilmRecipe, isSelected: Bool, inGrid: Bool) -> some View {
+        if inGrid {
+            Text(recipe.name)
+                .font(nameFont(isSelected: isSelected))
+                .foregroundStyle(nameColor(isSelected: isSelected))
+                .lineLimit(3)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            Text(recipe.name)
+                .font(nameFont(isSelected: isSelected))
+                .foregroundStyle(nameColor(isSelected: isSelected))
+                .dynamicTypeSize(DynamicTypeSize.large ... DynamicTypeSize.xLarge)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .minimumScaleFactor(0.85)
+                .allowsTightening(true)
+                .frame(width: swatchSize.width + 8, height: 32, alignment: .top)
+        }
+    }
+
+    private func recipeTile(_ recipe: FilmRecipe, inGrid: Bool) -> some View {
         let isSelected = selectedRecipeID == recipe.id
 
-        return VStack(spacing: 6) {
-            RecipeSwatch(
-                recipe: recipe,
-                isSelected: isSelected,
-                compact: compact,
-                showsLabel: false
-            )
-            .frame(width: swatchSize.width, height: swatchSize.height)
-            .clipShape(Rectangle())
-
-            Text(recipe.name)
-                    .font(.system(
-                        dynamicTypeSize.isAccessibilitySize ? .caption : .caption2,
-                        design: .rounded
-                    ).weight(isSelected ? .bold : .semibold))
-                    .foregroundStyle(isSelected ? FilmyTheme.accent : Color.white.opacity(0.72))
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                    .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 0.82 : 0.78)
-                    .multilineTextAlignment(.center)
-                    .frame(width: swatchSize.width + 8)
-                    .fixedSize(horizontal: false, vertical: dynamicTypeSize.isAccessibilitySize)
+        return VStack(spacing: 3) {
+            tileSwatch(recipe, isSelected: isSelected, inGrid: inGrid)
+            tileName(recipe, isSelected: isSelected, inGrid: inGrid)
         }
         // Do not dim unselected photographs: their colors are the decision.
         .contentShape(Rectangle())

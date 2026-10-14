@@ -575,6 +575,8 @@ final class CameraViewModel: ObservableObject {
 
     /// A hidden current look remains an ordering anchor for an explicit swipe.
     /// It is not reinserted into the popup or made active by this navigation aid.
+    /// The camera's look strip pins the current look itself (CameraScreen
+    /// `lookStripShown`) so its ring stays visible.
     var quickNavigationRecipes: [FilmRecipe] {
         FilmRecipe.builtIns.filter { Self.validRecipeIDs.contains($0.id) && ($0.id == selectedRecipeID || libraryPreferences.isEnabled($0.id)) }
             .map { recipe(for: $0.id) }

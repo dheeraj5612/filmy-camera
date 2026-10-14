@@ -296,10 +296,25 @@ final class AdditionalInteractionTests: XCTestCase {
                     let picker = app.scrollViews["recipe-picker"]
                     XCTAssertTrue(picker.waitForExistence(timeout: 5))
                     let deadline = Date(timeIntervalSinceNow: 10)
-                    while !tile.isHittable && Date() < deadline { picker.swipeUp() }
+                    while !tile.isHittable && Date() < deadline {
+                        // A lazy rail may release the off-screen tile; do not read its frame then.
+                        guard tile.exists else { picker.swipeRight(); continue }
+                        let t = tile.frame, p = picker.frame
+                        if t.maxY <= p.minY + 1 {
+                            picker.swipeDown()
+                        } else if t.minY >= p.maxY - 1 {
+                            picker.swipeUp()
+                        } else if t.midX < p.midX {
+                            picker.swipeRight()
+                        } else {
+                            picker.swipeLeft()
+                        }
+                    }
                 }
                 XCTAssertTrue(tile.isHittable)
                 tile.tap()
+                // Choosing a look keeps the picker open; close it before the shutter.
+                app.buttons["recipe-drawer-close"].tap()
             }
             XCTAssertTrue(waitForFreshCameraFrames())
             app.buttons["Capture photo"].tap()

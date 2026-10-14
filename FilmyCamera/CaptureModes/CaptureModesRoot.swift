@@ -55,6 +55,8 @@ struct CaptureModesRoot: View {
                             .accessibilityIdentifier("open-capture-modes")
                         }
                     }
+                    // The camera page has no field that needs the bar above the keyboard; other tabs keep keyboard avoidance.
+                    .ignoresSafeArea(selectedTab == .camera ? .keyboard : [], edges: .bottom)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: CaptureModesLaunch.notification)) { _ in consumeLaunch() }

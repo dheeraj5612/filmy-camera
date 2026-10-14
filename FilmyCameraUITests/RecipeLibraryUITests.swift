@@ -29,14 +29,52 @@ final class RecipeLibraryUITests: XCTestCase {
         XCTAssertEqual(compare.value as? String, initialPreview)
 
         menu.tap()
+        let drawer = app.descendants(matching: .any)["recipe-drawer"]
+        XCTAssertTrue(drawer.waitForExistence(timeout: 5))
+        let preview = app.descendants(matching: .any)["camera-preview"]
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(
+            drawer.frame.minY - preview.frame.minY,
+            preview.frame.height * 0.6 - 1,
+            "The look picker leaves at least 60% of the viewfinder visible"
+        )
+        attach("camera-look-strip-open")
+
         let alternate = app.buttons["recipe-g7x-compact"]
+        let picker = app.scrollViews["recipe-picker"]
+        for _ in 0..<3 where !alternate.isHittable { picker.swipeDown() }
         XCTAssertTrue(alternate.waitForExistence(timeout: 5))
         alternate.tap()
+        let lookChanged = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label CONTAINS 'G7 X Compact'"),
+            object: menu
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [lookChanged], timeout: 5), .completed)
+        XCTAssertTrue(drawer.exists, "Choosing a look keeps the look picker open")
+        XCTAssertEqual(alternate.value as? String, "Selected")
+        attach("camera-look-strip-after-pick")
+
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).tap()
+        XCTAssertTrue(drawer.exists, "A viewfinder tap focuses and leaves the look picker open")
+        XCTAssertTrue(menu.label.contains("G7 X Compact"))
+
+        let top = drawer.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0)).withOffset(CGVector(dx: 0, dy: 24))
+        top.press(forDuration: 0.05, thenDragTo: top.withOffset(CGVector(dx: 0, dy: 90)))
         let drawerClosed = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "exists == false"),
             object: app.buttons["recipe-drawer-close"]
         )
         XCTAssertEqual(XCTWaiter.wait(for: [drawerClosed], timeout: 5), .completed)
+
+        menu.tap()
+        let close = app.buttons["recipe-drawer-close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5))
+        close.tap()
+        let closedAgain = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: close
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [closedAgain], timeout: 5), .completed)
         XCTAssertTrue(menu.label.contains("G7 X Compact"))
         XCTAssertEqual(compare.value as? String, initialPreview)
     }

@@ -202,9 +202,10 @@ final class PhysicalReviewFlowTests: XCTestCase {
             tapCenter(of: g7x)
         }
         XCTAssertTrue(waitUntil(timeout: 15) { currentLook.label.contains("G7 X Compact") })
+        app.buttons["recipe-drawer-close"].tap()
         XCTAssertTrue(waitUntil(timeout: 5) {
             !app.descendants(matching: .any)["recipe-drawer"].exists
-        }, "Selecting a look must dismiss the picker")
+        }, "Closing the look picker must leave the camera controls available")
     }
 
     private func waitForLiveShutter(timeout: TimeInterval) -> Bool {

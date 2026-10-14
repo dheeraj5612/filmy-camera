@@ -321,9 +321,10 @@ final class NormalRollManagementTests: XCTestCase {
             XCTAssertTrue(tile.waitForExistence(timeout: 10) && tile.isHittable)
             tile.tap()
             XCTAssertTrue(waitUntil { current.label.contains(self.recipeName) })
+            app.buttons["recipe-drawer-close"].tap()
             XCTAssertTrue(waitUntil(timeout: 5) {
                 !app.descendants(matching: .any)["recipe-drawer"].exists
-            }, "Selecting a look must dismiss the picker")
+            }, "Closing the look picker must leave the camera controls available")
         }
         app.buttons["import-photo"].tap()
         let photos = app.images.matching(NSPredicate(format: "identifier == 'PXGGridLayout-Info'"))

@@ -220,7 +220,10 @@ final class GalleryPagingUITests: XCTestCase {
     private func recipeTileIsSafelyTappable(_ tile: XCUIElement, picker: XCUIElement) -> Bool {
         guard tile.exists else { return false }
         let frame = tile.frame
-        let pickerFrame = picker.frame
+        // The 52 pt group marker plus a 4 pt gap sit left of the rail; taps there page groups.
+        var pickerFrame = picker.frame
+        pickerFrame.origin.x += 56
+        pickerFrame.size.width -= 56
         guard frame.width > 0, frame.height > 0,
               pickerFrame.width > 0, pickerFrame.height > 0,
               frame.intersection(pickerFrame).intersection(app.frame).width >= 44,
@@ -251,7 +254,18 @@ final class GalleryPagingUITests: XCTestCase {
         let picker = app.scrollViews["recipe-picker"]
         let deadline = Date(timeIntervalSinceNow: 8)
         while !recipeTileIsSafelyTappable(tile, picker: picker) && Date() < deadline {
-            picker.swipeUp()
+            // A lazy rail may release the off-screen tile; do not read its frame then.
+            guard tile.exists else { picker.swipeRight(); continue }
+            let t = tile.frame, p = picker.frame
+            if t.maxY <= p.minY + 1 {
+                picker.swipeDown()
+            } else if t.minY >= p.maxY - 1 {
+                picker.swipeUp()
+            } else if t.midX < p.midX {
+                picker.swipeRight()
+            } else {
+                picker.swipeLeft()
+            }
         }
         XCTAssertTrue(recipeTileIsSafelyTappable(tile, picker: picker),
                       "Recipe \(name) must be selectable inside the recipe picker")
@@ -259,12 +273,14 @@ final class GalleryPagingUITests: XCTestCase {
         tile.coordinate(withNormalizedOffset: .zero)
             .withOffset(CGVector(dx: visible.midX - tile.frame.minX,
                                  dy: visible.midY - tile.frame.minY)).tap()
+        XCTAssertTrue(waitUntil(timeout: 5) { menu.label.contains(name) })
+        app.buttons["recipe-drawer-close"].tap()
         XCTAssertTrue(waitUntil(timeout: 5) {
             !app.descendants(matching: .any)["recipe-drawer"].exists
                 && menu.label.contains(name)
                 && app.buttons["Capture photo"].isEnabled
                 && app.buttons["Capture photo"].isHittable
-        }, "Selecting \(name) must dismiss the picker and restore the shutter")
+        }, "Closing the look picker after selecting \(name) must restore the shutter")
     }
 
     private func attachRecipeCloseFailure(_ name: String) {

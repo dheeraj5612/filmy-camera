@@ -284,6 +284,10 @@ struct CameraScreen: View {
     @State private var isShowingLookLibrary = false
     @State private var isShowingRecipeManager = false
     @State private var quickRecipeQuery = ""
+    @State private var isSearchingLooks = false
+    @FocusState private var isLookSearchFocused: Bool
+    @State private var lookStripHeight: CGFloat = 0
+    @State private var lookStripActive: [FilmRecipe] = []
     @State private var focusPoint: CGPoint?
     @State private var focusNormalizedPoint: CGPoint?
     @State private var pinchStartZoom: CGFloat = 1
@@ -364,6 +368,7 @@ struct CameraScreen: View {
                 // remains reachable.
                 .dynamicTypeSize(.xSmall ... .accessibility1)
             }
+            .ignoresSafeArea(.keyboard, edges: .bottom)
             .background(FilmyTheme.viewfinderBand.ignoresSafeArea())
             .overlay(alignment: .top) {
                 VStack(spacing: 8) {
@@ -560,6 +565,12 @@ struct CameraScreen: View {
                 isShowingExposureReadout = false
                 lookFlash = nil
             }
+        }
+        .onChange(of: isShowingLookLibrary) { _, showing in
+            if !showing { lookStripActive = viewModel.quickRecipes }
+        }
+        .onChange(of: isShowingRecipeManager) { _, showing in
+            if !showing { lookStripActive = viewModel.quickRecipes }
         }
         .onChange(of: isHoldingOriginalPreview) { _, holding in noteOriginalHold(holding) }
         .onChange(of: isPreviewDragActive) { _, active in
@@ -791,22 +802,6 @@ struct CameraScreen: View {
                 .padding(.bottom, 2)
                 .disabled(isNavigationChromeDisabled)
         }
-        .overlay(alignment: .bottom) {
-            #if !G7_APP
-            if isShowingLookDrawer {
-                lookDrawer(
-                    maxHeight: max(
-                        160,
-                        min(410, availableHeight - portraitControlClearance - 60)
-                    )
-                )
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, portraitControlClearance)
-                    .disabled(isChromeDisabled)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-            #endif
-        }
     }
 
     private func edgeControlShell(
@@ -817,7 +812,6 @@ struct CameraScreen: View {
         let isPad = UIDevice.current.userInterfaceIdiom == .pad
         let railOnLeading = useLeftHandedGrip
         let railWidth: CGFloat = isPad ? 152 : 136
-        let drawerOnLeading = !railOnLeading
 
         return HStack(spacing: isPad ? 16 : 12) {
             if railOnLeading {
@@ -836,26 +830,6 @@ struct CameraScreen: View {
         }
         .padding(.horizontal, isPad ? 20 : 12)
         .padding(.vertical, isPad ? 12 : 6)
-        .overlay(alignment: drawerOnLeading ? .bottomLeading : .bottomTrailing) {
-            #if !G7_APP
-            if isShowingLookDrawer {
-                lookDrawer(
-                    maxHeight: isLandscape
-                        ? max(160, min(UIDevice.current.userInterfaceIdiom == .pad ? 460 : 240, availableHeight - 130))
-                        : max(180, min(UIDevice.current.userInterfaceIdiom == .pad ? 460 : 360, availableHeight - 190))
-                )
-                    .frame(
-                        maxWidth: min(560, max(280, availableWidth - railWidth - 52)),
-                        alignment: drawerOnLeading ? .leading : .trailing
-                    )
-                    .padding(.leading, drawerOnLeading ? 12 : 160)
-                    .padding(.trailing, drawerOnLeading ? 160 : 12)
-                    .padding(.bottom, isPad ? 86 : 78)
-                    .disabled(isChromeDisabled)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-            #endif
-        }
     }
 
     private var isChromeDisabled: Bool {
@@ -889,10 +863,6 @@ struct CameraScreen: View {
         originalPreviewOverride = !isShowingOriginalPreview
     }
 
-    private var portraitControlClearance: CGFloat {
-        dynamicTypeSize.isAccessibilitySize ? 176 : 150
-    }
-
     // MARK: - Viewfinder
 
     private func viewfinderStage(isLandscape: Bool, overlaysTopBar: Bool) -> some View {
@@ -902,7 +872,34 @@ struct CameraScreen: View {
             viewfinder(size: size, overlaysTopBar: overlaysTopBar)
                 .frame(width: size.width, height: size.height)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay { lookStripSlot(stage: proxy.size, viewfinder: size) }
         }
+    }
+
+    /// The slim look picker docks over the bottom of the viewfinder, outside its
+    /// clip shape so it may span the side bands. Adjust, review and the tool strip
+    /// each take the slot when the picker is not shown.
+    @ViewBuilder
+    private func lookStripSlot(stage: CGSize, viewfinder: CGSize) -> some View {
+        #if !G7_APP
+        if isShowingLookDrawer && !isShowingLiveAdjustments && !isReviewing {
+            let inset: CGFloat = max(0, (stage.height - viewfinder.height) / 2 + 8)
+            let cap: CGFloat = dynamicTypeSize.isAccessibilitySize ? viewfinder.height * 0.6 - 8 : viewfinder.height - 16
+            lookDrawer(maxHeight: max(126, cap))
+                .frame(maxWidth: max(0, min(640, stage.width - 16)))
+                .frame(maxHeight: .infinity, alignment: isLookSearchFocused ? .top : .bottom)
+                .padding(.vertical, inset)
+                .disabled(isChromeDisabled)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+        #endif
+    }
+
+    /// Histogram and level assists rise above the footer chrome, or above the look picker while it is open.
+    private var histogramBottomClearance: CGFloat {
+        let chrome: CGFloat = viewfinderChromeHeights[.bottom] ?? 52
+        let strip: CGFloat = isShowingLookDrawer ? lookStripHeight + 8 : 0
+        return max(chrome, strip) + 8
     }
 
     private func viewfinder(size: CGSize, overlaysTopBar: Bool) -> some View {
@@ -944,7 +941,7 @@ struct CameraScreen: View {
                     showHistogram: showHistogram,
                     showLevel: showHorizonLevel,
                     topClearance: overlaysTopBar ? (viewfinderChromeHeights[.top] ?? 54) + 8 : 8,
-                    bottomClearance: (viewfinderChromeHeights[.bottom] ?? 52) + 8
+                    bottomClearance: histogramBottomClearance
                 )
                 .allowsHitTesting(canTriggerShutter)
             }
@@ -1162,14 +1159,15 @@ struct CameraScreen: View {
         flashLook(id: recipe.id, among: ordered)
     }
 
-    /// Drawer tile pick: the position counts over the list the user was looking at.
+    /// Picker tile pick: selects and keeps the look picker open. The position
+    /// counts over the list the user was looking at.
     private func selectDrawerLook(id: String, among visible: [FilmRecipe]) {
         let changed: Bool = id != viewModel.effectiveSelectedRecipeID
         viewModel.select(recipe: viewModel.recipe(for: id))
         originalPreviewOverride = nil
-        if changed { flashLook(id: id, among: visible) }
-        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) {
-            isShowingLookDrawer = false
+        if changed {
+            HapticFeedback.play(.selection)
+            flashLook(id: id, among: visible)
         }
     }
 
@@ -1477,7 +1475,7 @@ struct CameraScreen: View {
                     onClose: { isShowingLiveAdjustments = false }
                 )
             }
-            if isShowingTools && !isShowingLiveAdjustments && !hidesToolsForRecoveryPlaceholder {
+            if isShowingTools && !isShowingLiveAdjustments && !isShowingLookDrawer && !hidesToolsForRecoveryPlaceholder {
                 toolStrip(minWidth: width - 24)
             }
 
@@ -1520,10 +1518,6 @@ struct CameraScreen: View {
     /// drawer names it as a camera profile.
     private var isCompactDigitalMode: Bool {
         viewModel.selectedRecipe.filmBase == .compactDigital
-    }
-
-    private var recipeEyebrow: String {
-        isCompactDigitalMode ? "CAMERA PROFILE" : "RECIPE"
     }
 
     private var isLive: Bool {
@@ -1895,7 +1889,7 @@ struct CameraScreen: View {
 
     /// What the toggle reports: the rail is suppressed over a recovery placeholder.
     private var isToolRailVisible: Bool {
-        isShowingTools && !hidesToolsForRecoveryPlaceholder
+        isShowingTools && !isShowingLookDrawer && !hidesToolsForRecoveryPlaceholder
     }
 
     private func toolsToggle(showsCaption: Bool = false) -> some View {
@@ -1903,10 +1897,12 @@ struct CameraScreen: View {
         return Button {
             HapticFeedback.play(.selection)
             withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.82)) {
-                if !isShowingTools {
+                if isShowingLookDrawer {
                     isShowingLookDrawer = false
+                    isShowingTools = true
+                } else {
+                    isShowingTools.toggle()
                 }
-                isShowingTools.toggle()
             }
         } label: {
             VStack(spacing: 1) {
@@ -2136,182 +2132,366 @@ struct CameraScreen: View {
     }
 
     private func lookDrawer(maxHeight: CGFloat) -> some View {
-        // Header, filters, footer, three gaps, and outer padding must all
-        // fit before assigning the remaining height to scrolling recipes.
-        let showsSearch = maxHeight >= 340
-        let chromeHeight = 64 + cameraHitTarget + max(48, cameraHitTarget) + 38 + (showsSearch ? 50 : 0)
-        let active = viewModel.quickRecipes
-        let visible = active.filter { recipe in
-            (!favoritesOnly || favoriteIDs.contains(recipe.id))
-                && (!showsSearch || quickRecipeQuery.isEmpty
-                    || RecipeCatalog.searchText(for: recipe).localizedStandardContains(quickRecipeQuery))
+        let isFiltering: Bool = isSearchingLooks && !quickRecipeQuery.isEmpty
+        let visible: [FilmRecipe] = lookStripVisible(isFiltering: isFiltering)
+        let shown: [FilmRecipe] = lookStripShown(visible: visible)
+
+        return VStack(spacing: 0) {
+            lookStripHeader(activeCount: lookStripActive.count)
+                .contentShape(Rectangle())
+                .simultaneousGesture(lookStripDismissDrag)
+            lookStripContent(visible: visible, shown: shown, isFiltering: isFiltering)
         }
-
-        return VStack(spacing: 6) {
-            HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Eyebrow(
-                        text: recipeEyebrow,
-                        color: isCompactDigitalMode ? FilmyTheme.accent : FilmyTheme.filmAccent
-                    )
-                    Text("Looks")
-                        .font(.system(.title3).weight(.bold))
-                        .foregroundStyle(FilmyTheme.primary)
-                }
-
-                Spacer(minLength: 8)
-
-                Button {
-                    openRecipeDetail(viewModel.selectedRecipe)
-                } label: {
-                    Label("Tune", systemImage: "slider.vertical.3")
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
-                        .foregroundStyle(FilmyTheme.primary)
-                        .padding(.horizontal, 12)
-                        .frame(minHeight: 64)
-                        .background(FilmyTheme.panel, in: Capsule())
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.pressable)
-                .accessibilityLabel("Tune \(viewModel.selectedRecipe.name)")
-                .accessibilityHint("Opens every setting for this look")
-
-                Button(action: toggleLookDrawer) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(FilmyTheme.secondary)
-                        .frame(width: cameraHitTarget, height: cameraHitTarget)
-                        .background(FilmyTheme.panel, in: Circle())
-                        .frame(width: 64, height: 64)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.pressable)
-                .accessibilityIdentifier("recipe-drawer-close")
-                .accessibilityLabel("Close look picker")
-            }
-            .padding(.horizontal, 8)
-            .layoutPriority(1)
-
-            HStack(spacing: 8) {
-                Button {
-                    favoritesOnly = false
-                    HapticFeedback.play(.selection)
-                } label: {
-                    Text("Active \(active.count)")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(!favoritesOnly ? FilmyTheme.primary : FilmyTheme.secondary)
-                        .padding(.horizontal, 12)
-                        .frame(minWidth: cameraHitTarget, minHeight: cameraHitTarget)
-                        .overlay(alignment: .bottom) {
-                            if !favoritesOnly { FilmRegistration() }
-                        }
-                        .contentShape(Rectangle())
-                }
-                .accessibilityIdentifier("camera-looks-all")
-                .accessibilityAddTraits(!favoritesOnly ? .isSelected : [])
-                Button {
-                    favoritesOnly = true
-                    HapticFeedback.play(.selection)
-                } label: {
-                    Label("Favorites", systemImage: "heart")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(favoritesOnly ? FilmyTheme.primary : FilmyTheme.secondary)
-                        .padding(.horizontal, 12)
-                        .frame(minWidth: cameraHitTarget, minHeight: cameraHitTarget)
-                        .overlay(alignment: .bottom) {
-                            if favoritesOnly { FilmRegistration() }
-                        }
-                        .contentShape(Rectangle())
-                }
-                .accessibilityIdentifier("camera-looks-favorites")
-                .accessibilityAddTraits(favoritesOnly ? .isSelected : [])
-                Spacer(minLength: 0)
-            }
-            .buttonStyle(.plain)
-
-            if showsSearch {
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(FilmyTheme.secondary)
-                    TextField("Search active looks", text: $quickRecipeQuery)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .submitLabel(.done)
-                        .accessibilityIdentifier("camera-looks-search")
-                    if !quickRecipeQuery.isEmpty {
-                        Button {
-                            quickRecipeQuery = ""
-                        } label: {
-                            Label("Clear", systemImage: "xmark.circle.fill")
-                                .labelStyle(.iconOnly)
-                                .frame(minWidth: 44, minHeight: 44)
-                                .contentShape(Rectangle())
-                        }
-                    }
-                }
-                .font(.subheadline)
-                .padding(.horizontal, 12)
-                .frame(height: 44)
-                .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 10))
-            }
-
-            if visible.isEmpty {
-                Text(active.isEmpty ? "Your quick menu is empty. Open Packs to add looks."
-                     : favoritesOnly ? "No active favorites match. Manage them in Packs."
-                     : "No active looks match your search.")
-                    .font(.subheadline)
-                    .foregroundStyle(FilmyTheme.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 70)
-                    .accessibilityIdentifier(favoritesOnly ? "camera-favorites-empty" : "camera-looks-empty")
-            } else {
-                RecipePickerView(
-                    recipes: visible,
-                    selectedRecipeID: Binding(get: { viewModel.effectiveSelectedRecipeID }, set: { id in
-                        selectDrawerLook(id: id, among: visible)
-                    }),
-                    onOpenDetail: openRecipeDetail,
-                    compact: !favoritesOnly
-                )
-                .frame(maxHeight: max(maxHeight - chromeHeight, 70))
-                .id(favoritesOnly)
-            }
-
-            HStack(spacing: 8) {
-                Button {
-                    HapticFeedback.play(.selection)
-                    isShowingLookLibrary = true
-                } label: {
-                    Label("Browse all", systemImage: "square.grid.2x2")
-                        .frame(maxWidth: .infinity, minHeight: max(48, cameraHitTarget))
-                        .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 12))
-                }
-                .accessibilityIdentifier("look-library-open")
-                .accessibilityHint("Browse and search all \(viewModel.recipes.count) looks, including hidden recipes")
-                Button {
-                    HapticFeedback.play(.selection)
-                    isShowingRecipeManager = true
-                } label: {
-                    Label("Packs", systemImage: "square.stack.3d.up")
-                        .frame(maxWidth: .infinity, minHeight: max(48, cameraHitTarget))
-                        .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 12))
-                }
-                .accessibilityIdentifier("camera-recipe-packs")
-                .accessibilityHint("Choose the packs and individual looks in your quick menu")
-            }
-            .font(.system(.subheadline).weight(.semibold))
-            .foregroundStyle(FilmyTheme.accent)
-            .buttonStyle(.pressable)
-        }
-        .padding(10)
-        .frame(maxWidth: 640)
-        .frame(maxHeight: maxHeight)
-        .background(FilmyTheme.backgroundRaised, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .padding(.horizontal, 4)
+        .padding(.vertical, 3)
+        .background(FilmyTheme.backgroundRaised, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                .allowsHitTesting(false)
+        }
+        .overlay(alignment: .top) {
+            Capsule()
+                .fill(FilmyTheme.tertiary)
+                .frame(width: 36, height: 4)
+                .padding(.top, 3)
+                .accessibilityHidden(true)
+                .allowsHitTesting(false)
         }
         .shadow(color: .black.opacity(0.38), radius: 18, y: 8)
+        .frame(maxHeight: maxHeight)
+        .background { lookStripHeightReader }
+        .onAppear { lookStripActive = viewModel.quickRecipes }
+        .onDisappear {
+            isSearchingLooks = false
+            isLookSearchFocused = false
+            quickRecipeQuery = ""
+        }
         .accessibilityElement(children: .contain)
+        .accessibilityLabel("Look picker")
         .accessibilityIdentifier("recipe-drawer")
+        .accessibilityAction(.escape) { closeLookDrawer() }
+    }
+
+    /// Measures the docked panel so the histogram and level assists can clear it.
+    private var lookStripHeightReader: some View {
+        GeometryReader { proxy in
+            Color.clear
+                .onAppear { lookStripHeight = proxy.size.height }
+                .onChange(of: proxy.size.height) { _, height in lookStripHeight = height }
+        }
+    }
+
+    /// Active looks narrowed by Favorites and by the search text. Reads the
+    /// cached active list, never the whole catalog.
+    private func lookStripVisible(isFiltering: Bool) -> [FilmRecipe] {
+        var list: [FilmRecipe] = lookStripActive
+        if favoritesOnly {
+            let favorites: Set<String> = favoriteIDs
+            list = list.filter { (recipe: FilmRecipe) -> Bool in favorites.contains(recipe.id) }
+        }
+        if isFiltering {
+            let query: String = quickRecipeQuery
+            list = list.filter { (recipe: FilmRecipe) -> Bool in
+                RecipeCatalog.searchText(for: recipe).localizedStandardContains(query)
+            }
+        }
+        return list
+    }
+
+    /// The current look stays ringed at the start when the filters hide it.
+    private func lookStripShown(visible: [FilmRecipe]) -> [FilmRecipe] {
+        let currentID: String = viewModel.effectiveSelectedRecipeID
+        let holdsCurrent: Bool = visible.contains { (recipe: FilmRecipe) -> Bool in recipe.id == currentID }
+        if visible.isEmpty || holdsCurrent { return visible }
+        return [viewModel.selectedRecipe] + visible
+    }
+
+    @ViewBuilder
+    private func lookStripContent(visible: [FilmRecipe], shown: [FilmRecipe], isFiltering: Bool) -> some View {
+        if visible.isEmpty {
+            Text(lookStripEmptyText)
+                .font(.caption)
+                .foregroundStyle(FilmyTheme.secondary)
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+                .frame(maxWidth: .infinity, minHeight: 76)
+                .accessibilityIdentifier(favoritesOnly ? "camera-favorites-empty" : "camera-looks-empty")
+        } else {
+            RecipePickerView(
+                recipes: shown,
+                selectedRecipeID: Binding(get: { viewModel.effectiveSelectedRecipeID }, set: { id in
+                    selectDrawerLook(id: id, among: visible)
+                }),
+                onOpenDetail: openRecipeDetail,
+                compact: !favoritesOnly && !isFiltering
+            )
+            .id(favoritesOnly)
+        }
+    }
+
+    private var lookStripEmptyText: String {
+        if lookStripActive.isEmpty { return "Your quick menu is empty. Open Packs to add looks." }
+        if favoritesOnly { return "No active favorites match. Manage them in Packs." }
+        return "No active looks match your search."
+    }
+
+    /// Swipe down on the header closes the picker. The look row scrolls
+    /// vertically between groups, so the gesture is attached to the header only.
+    private var lookStripDismissDrag: some Gesture {
+        DragGesture(minimumDistance: 16)
+            .onEnded { (value: DragGesture.Value) in
+                guard value.translation.height > 32,
+                      value.translation.height > abs(value.translation.width) * 1.5 else { return }
+                closeLookDrawer()
+            }
+    }
+
+    @ViewBuilder
+    private func lookStripHeader(activeCount: Int) -> some View {
+        if isSearchingLooks {
+            lookSearchRow
+        } else {
+            ViewThatFits(in: .horizontal) {
+                lookHeaderRow(activeCount: activeCount, iconOnly: false, tuneShowsText: true)
+                lookHeaderRow(activeCount: activeCount, iconOnly: false, tuneShowsText: false)
+                lookHeaderRow(activeCount: activeCount, iconOnly: true, tuneShowsText: false)
+                lookHeaderTwoRows(activeCount: activeCount)
+            }
+        }
+    }
+
+    private func lookHeaderRow(activeCount: Int, iconOnly: Bool, tuneShowsText: Bool) -> some View {
+        HStack(spacing: 4) {
+            lookSegments(iconOnly: iconOnly, activeCount: activeCount)
+            Spacer(minLength: 0)
+            lookSearchToggleButton
+            lookBrowseButton
+            lookPacksButton
+            lookTuneButton(showsText: tuneShowsText)
+            lookCloseButton
+                .padding(.leading, 4)
+        }
+        .frame(minHeight: cameraHitTarget)
+    }
+
+    /// Split-view iPad only: the four actions drop to a second row.
+    private func lookHeaderTwoRows(activeCount: Int) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 4) {
+                lookSegments(iconOnly: false, activeCount: activeCount)
+                Spacer(minLength: 0)
+                lookCloseButton
+            }
+            HStack(spacing: 4) {
+                Spacer(minLength: 0)
+                lookSearchToggleButton
+                lookBrowseButton
+                lookPacksButton
+                lookTuneButton(showsText: true)
+            }
+        }
+        .frame(minHeight: cameraHitTarget)
+    }
+
+    private func lookSegments(iconOnly: Bool, activeCount: Int) -> some View {
+        HStack(spacing: 4) {
+            Button {
+                favoritesOnly = false
+                HapticFeedback.play(.selection)
+            } label: {
+                lookActiveSegmentLabel(iconOnly: iconOnly)
+                    .font(.subheadline.weight(.semibold))
+                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                    .foregroundStyle(!favoritesOnly ? FilmyTheme.primary : FilmyTheme.secondary)
+                    .padding(.horizontal, 12)
+                    .frame(minWidth: cameraHitTarget, minHeight: cameraHitTarget)
+                    .overlay(alignment: .bottom) {
+                        if !favoritesOnly { FilmRegistration() }
+                    }
+                    .contentShape(Rectangle())
+            }
+            .accessibilityIdentifier("camera-looks-all")
+            .accessibilityLabel("Active looks, \(activeCount)")
+            .accessibilityAddTraits(!favoritesOnly ? .isSelected : [])
+            Button {
+                favoritesOnly = true
+                HapticFeedback.play(.selection)
+            } label: {
+                Image(systemName: favoritesOnly ? "heart.fill" : "heart")
+                    .font(.subheadline.weight(.semibold))
+                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                    .foregroundStyle(favoritesOnly ? FilmyTheme.primary : FilmyTheme.secondary)
+                    .frame(minWidth: cameraHitTarget, minHeight: cameraHitTarget)
+                    .overlay(alignment: .bottom) {
+                        if favoritesOnly { FilmRegistration() }
+                    }
+                    .contentShape(Rectangle())
+            }
+            .accessibilityIdentifier("camera-looks-favorites")
+            .accessibilityLabel("Favorites")
+            .accessibilityAddTraits(favoritesOnly ? .isSelected : [])
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func lookActiveSegmentLabel(iconOnly: Bool) -> some View {
+        if iconOnly {
+            Image(systemName: "rectangle.stack")
+        } else {
+            Text("Active").lineLimit(1).fixedSize()
+        }
+    }
+
+    private var lookSearchToggleButton: some View {
+        lookHeaderIconButton(
+            systemImage: "magnifyingglass",
+            identifier: "camera-looks-search-toggle",
+            label: "Search looks",
+            hint: "Filters the active looks by name"
+        ) {
+            isSearchingLooks = true
+        }
+    }
+
+    private var lookBrowseButton: some View {
+        lookHeaderIconButton(
+            systemImage: "books.vertical",
+            identifier: "look-library-open",
+            label: "Browse all looks",
+            hint: "Browse and search all \(viewModel.recipes.count) looks, including hidden recipes"
+        ) {
+            HapticFeedback.play(.selection)
+            isShowingLookLibrary = true
+        }
+    }
+
+    private var lookPacksButton: some View {
+        lookHeaderIconButton(
+            systemImage: "square.stack.3d.up",
+            identifier: "camera-recipe-packs",
+            label: "Packs",
+            hint: "Choose the packs and individual looks in your quick menu"
+        ) {
+            HapticFeedback.play(.selection)
+            isShowingRecipeManager = true
+        }
+    }
+
+    private var lookCloseButton: some View {
+        lookHeaderIconButton(
+            systemImage: "xmark",
+            identifier: "recipe-drawer-close",
+            label: "Close look picker",
+            hint: ""
+        ) {
+            closeLookDrawer()
+        }
+    }
+
+    private func lookHeaderIconButton(
+        systemImage: String,
+        identifier: String,
+        label: String,
+        hint: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(.subheadline).weight(.bold))
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                .foregroundStyle(FilmyTheme.primary)
+                .frame(width: cameraHitTarget, height: cameraHitTarget)
+                .background(FilmyTheme.panel, in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(.pressable)
+        .accessibilityIdentifier(identifier)
+        .accessibilityLabel(label)
+        .accessibilityHint(hint)
+        .accessibilityShowsLargeContentViewer()
+    }
+
+    private func lookTuneButton(showsText: Bool) -> some View {
+        Button {
+            openRecipeDetail(viewModel.selectedRecipe)
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "slider.vertical.3")
+                if showsText {
+                    Text("Tune").lineLimit(1).fixedSize()
+                }
+            }
+            .font(.system(.subheadline).weight(.bold))
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+            .foregroundStyle(FilmyTheme.primary)
+            .padding(.horizontal, showsText ? 12 : 0)
+            .frame(minWidth: cameraHitTarget, minHeight: cameraHitTarget)
+            .background(FilmyTheme.panel, in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.pressable)
+        .accessibilityLabel("Tune \(viewModel.selectedRecipe.name)")
+        .accessibilityHint("Opens every setting for this look")
+        .accessibilityShowsLargeContentViewer()
+    }
+
+    private func endLookSearch() {
+        isLookSearchFocused = false
+        isSearchingLooks = false
+        quickRecipeQuery = ""
+    }
+
+    private var lookSearchRow: some View {
+        HStack(spacing: 4) {
+            lookSearchField
+            Button {
+                endLookSearch()
+            } label: {
+                Text("Done")
+                    .font(.subheadline.weight(.semibold))
+                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                    .foregroundStyle(FilmyTheme.accent)
+                    .padding(.horizontal, 8)
+                    .frame(minWidth: cameraHitTarget, minHeight: cameraHitTarget)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.pressable)
+            .accessibilityIdentifier("camera-looks-search-done")
+            .accessibilityLabel("Done searching")
+            lookCloseButton
+        }
+        .frame(minHeight: cameraHitTarget)
+    }
+
+    private var lookSearchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(FilmyTheme.secondary)
+            TextField("Search active looks", text: $quickRecipeQuery)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+                .focused($isLookSearchFocused)
+                .onAppear { isLookSearchFocused = true }
+                .onSubmit { isLookSearchFocused = false }
+                .accessibilityIdentifier("camera-looks-search")
+            if !quickRecipeQuery.isEmpty {
+                Button {
+                    quickRecipeQuery = ""
+                } label: {
+                    Label("Clear", systemImage: "xmark.circle.fill")
+                        .labelStyle(.iconOnly)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+            }
+        }
+        .font(.subheadline)
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+        .padding(.horizontal, 12)
+        .frame(height: cameraHitTarget)
+        .background(FilmyTheme.panel, in: Capsule())
     }
 
     @ViewBuilder
@@ -2335,10 +2515,11 @@ struct CameraScreen: View {
 
     private var captureNotice: some View {
         Label(captureNoticeTitle, systemImage: captureNoticeIcon)
-            .font(.system(size: 11, weight: .semibold, design: .rounded))
+            .font(.system(.caption, design: .rounded).weight(.semibold))
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             .foregroundStyle(.white.opacity(0.8))
             .multilineTextAlignment(.center)
-            .lineLimit(2)
+            .lineLimit(3)
             .minimumScaleFactor(0.78)
             .fixedSize(horizontal: false, vertical: true)
             .frame(width: 104, height: 80)
@@ -2841,7 +3022,7 @@ struct CameraScreen: View {
 #endif
         guard canTriggerShutter else { return }
         HapticFeedback.play(.capture)
-        closeLookAndAdjustDrawers()
+        closeAdjustForCapture()
         if captureDelay == .off {
             performShutterCapture()
         } else {
@@ -2981,11 +3162,16 @@ struct CameraScreen: View {
         }
     }
 
-    /// The shutter leaves the control strip where the user set it.
-    private func closeLookAndAdjustDrawers() {
+    /// The shutter closes Adjust only. The control strip and the look picker stay as the user set them.
+    private func closeAdjustForCapture() {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) {
+            isShowingLiveAdjustments = false
+        }
+    }
+
+    private func closeLookDrawer() {
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) {
             isShowingLookDrawer = false
-            isShowingLiveAdjustments = false
         }
     }
 
@@ -3000,7 +3186,7 @@ struct CameraScreen: View {
         withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.84)) {
             if !isShowingLookDrawer {
                 isShowingLiveAdjustments = false
-                isShowingTools = false
+                lookStripActive = viewModel.quickRecipes
             }
             isShowingLookDrawer.toggle()
         }

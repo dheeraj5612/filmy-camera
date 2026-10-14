@@ -62,9 +62,33 @@ final class SignalFrameUITests: XCTestCase {
         #endif
         snapshot("signal-frame-camera-largest-text")
         app.buttons["recipe-menu"].tap()
-        for id in ["recipe-drawer-close", "camera-looks-favorites", "camera-looks-all"] {
+        let pickerIDs = [
+            "recipe-drawer-close", "camera-looks-favorites", "camera-looks-all",
+            "look-library-open", "camera-recipe-packs", "camera-looks-search-toggle"
+        ]
+        for id in pickerIDs {
             assertReachable(app.buttons[id], in: app)
         }
+        let drawer = app.descendants(matching: .any)["recipe-drawer"]
+        XCTAssertFalse(drawer.frame.intersects(app.buttons["recipe-menu"].frame), "The look picker never covers the look name")
+        let flip = app.buttons["Switch camera"]
+        if flip.exists { XCTAssertFalse(drawer.frame.intersects(flip.frame)) }
+        let selected = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'recipe-' AND value == 'Selected'")).firstMatch
+        XCTAssertTrue(selected.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            drawer.frame.minX - 1 <= selected.frame.minX && selected.frame.maxX <= drawer.frame.maxX + 1,
+            "Tiles are never cut at the panel edges"
+        )
+        let filmMarker = app.buttons["recipe-group-marker-film"]
+        let otherMarkers: [XCUIElement] = ["recipe-group-marker-compact", "recipe-group-marker-monochrome"].map { app.buttons[$0] }
+        for _ in 0..<3 where !filmMarker.isHittable {
+            if let marker = otherMarkers.first(where: { $0.isHittable }) {
+                marker.tap()
+            } else {
+                app.scrollViews["recipe-picker"].swipeUp()
+            }
+        }
+        XCTAssertTrue(filmMarker.isHittable, "Film looks are reachable at the largest text")
         snapshot("signal-frame-drawer-largest-text")
         app.buttons["recipe-drawer-close"].tap()
 
@@ -186,8 +210,13 @@ final class SignalFrameUITests: XCTestCase {
         tapWhenStable(app.buttons["recipe-menu"], in: app)
         tapWhenStable(app.buttons["camera-looks-favorites"], in: app)
         XCTAssertTrue(app.buttons["recipe-provia-standard"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["recipe-g7x-compact"].exists)
+        // The un-favorited current look stays ringed at the start; it is not listed as a favorite.
+        let current = app.buttons["recipe-g7x-compact"]
+        XCTAssertTrue(current.waitForExistence(timeout: 5))
+        XCTAssertEqual(current.value as? String, "Selected")
         tapWhenStable(app.buttons["recipe-provia-standard"], in: app)
+        waitForValue("Selected", of: app.buttons["recipe-provia-standard"], app: app)
+        tapWhenStable(app.buttons["recipe-drawer-close"], in: app)
         waitForCamera(app)
         XCTAssertTrue(app.buttons["recipe-menu"].label.contains("Natural Standard"))
         waitForValue("Favorite", of: app.buttons["camera-favorite-look"], app: app)
@@ -294,6 +323,8 @@ final class SignalFrameUITests: XCTestCase {
         tapWhenStable(app.buttons["camera-looks-favorites"], in: app)
         assertReachable(app.buttons["recipe-g7x-compact"], in: app)
         tapWhenStable(app.buttons["recipe-g7x-compact"], in: app)
+        XCTAssertTrue(app.descendants(matching: .any)["recipe-drawer"].exists)
+        tapWhenStable(app.buttons["recipe-drawer-close"], in: app)
         waitForCamera(app)
         XCTAssertTrue(app.buttons["recipe-menu"].label.contains("G7 X Compact"))
         XCTAssertEqual(app.buttons["recipe-menu"].label, selected)
@@ -634,11 +665,29 @@ final class SignalFrameUITests: XCTestCase {
         // All looks is vertically grouped. Reach the Film row from Digital,
         // or return to Digital from Film, without scrolling the camera shell.
         for _ in 0..<6 {
-            if recipe.exists && recipe.isHittable && picker.frame.contains(recipe.frame) { break }
-            if id == "g7x-compact" { picker.swipeDown() } else { picker.swipeUp() }
+            // The 76 pt row has no vertical slack; allow 1 pt for fractional frames.
+            if recipe.exists && recipe.isHittable && picker.frame.insetBy(dx: 0, dy: -1).contains(recipe.frame) { break }
+            if recipe.exists {
+                let t = recipe.frame, p = picker.frame
+                if t.maxY <= p.minY + 1 {
+                    picker.swipeDown()
+                } else if t.minY >= p.maxY - 1 {
+                    picker.swipeUp()
+                } else if t.midX < p.midX {
+                    picker.swipeRight()
+                } else {
+                    picker.swipeLeft()
+                }
+            } else if id == "g7x-compact" {
+                picker.swipeDown()
+            } else {
+                picker.swipeUp()
+            }
         }
         let expectedName = recipe.label.components(separatedBy: ",").first ?? id
         tapWhenStable(recipe, in: app, file: file, line: line)
+        waitForValue("Selected", of: recipe, app: app, file: file, line: line)
+        tapWhenStable(app.buttons["recipe-drawer-close"], in: app, file: file, line: line)
         waitForCamera(app, file: file, line: line)
         XCTAssertTrue(
             app.buttons["recipe-menu"].label.localizedCaseInsensitiveContains(expectedName),
