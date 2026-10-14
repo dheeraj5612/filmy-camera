@@ -1148,17 +1148,14 @@ struct CameraScreen: View {
 
             }
         } indicators: {
-            HStack(spacing: 8) {
+            HStack(spacing: captureFormatToken == nil ? 8 : 4) {
                 SceneAutoControl(camera: camera, isBusy: viewModel.isCapturing || viewModel.isSaving || countdown.state.isActive)
                 Spacer(minLength: 0)
-                SmartRecipeEntryPoint(
-                    store: smartRecipes, selectedID: viewModel.selectedRecipeID,
-                    canApply: canApplySmartRecipe, onOpen: openSmartRecipes,
-                    onApply: applySmartRecipe, onUndo: undoSmartRecipe
-                )
+                smartRecipeEntry.layoutPriority(1)
                 Spacer(minLength: 0)
                 g7ProfileBadge
-                activeCaptureIndicators
+                activeCaptureIndicators.layoutPriority(1)
+                captureFormatChip.layoutPriority(1)
 
                 if !isLive {
                     CameraStatusPill(
@@ -1166,9 +1163,45 @@ struct CameraScreen: View {
                         availability: camera.availability,
                         message: camera.statusMessage
                     )
+                    .layoutPriority(2)
                 }
             }
         }
+    }
+
+    /// Smart looks form depends only on stable layout inputs, never on the changing suggestion name:
+    /// the sparkle alone beside a format chip, the adjustments chip or an accessibility text size,
+    /// otherwise the named entry when a fixed reference width fits, else the sparkle.
+    @ViewBuilder
+    private var smartRecipeEntry: some View {
+        if captureFormatToken != nil || isActiveAdjustmentsChipVisible || dynamicTypeSize.isAccessibilitySize {
+            compactSmartRecipeEntry
+        } else {
+            ViewThatFits(in: .horizontal) {
+                fullSmartRecipeEntry
+                    .frame(idealWidth: Self.smartEntryReferenceWidth, maxWidth: 180, alignment: .leading)
+                compactSmartRecipeEntry
+            }
+        }
+    }
+
+    /// Sparkle, the text "Smart looks" at the default size and the entry padding.
+    private static let smartEntryReferenceWidth: CGFloat = 100
+
+    private var fullSmartRecipeEntry: some View {
+        SmartRecipeEntryPoint(
+            store: smartRecipes, selectedID: viewModel.selectedRecipeID,
+            canApply: canApplySmartRecipe, onOpen: openSmartRecipes,
+            onApply: applySmartRecipe, onUndo: undoSmartRecipe
+        )
+    }
+
+    private var compactSmartRecipeEntry: some View {
+        CompactSmartRecipeEntry(
+            store: smartRecipes, selectedID: viewModel.selectedRecipeID,
+            canApply: canApplySmartRecipe, onOpen: openSmartRecipes,
+            onApply: applySmartRecipe, onUndo: undoSmartRecipe
+        )
     }
 
     @ViewBuilder
@@ -1196,10 +1229,15 @@ struct CameraScreen: View {
         #endif
     }
 
+    private var isActiveAdjustmentsChipVisible: Bool {
+        let hasBias = abs(camera.exposureBias) >= 0.05 && camera.manualControls.exposureMode == .auto
+        let hasHold = camera.isFocusExposureLocked || camera.manualControls.isAnyManualModeEnabled
+        return !camera.sceneAuto.isEnabled && (hasBias || hasHold)
+    }
+
     @ViewBuilder
     private var activeCaptureIndicators: some View {
-        if !camera.sceneAuto.isEnabled && ((abs(camera.exposureBias) >= 0.05 && camera.manualControls.exposureMode == .auto)
-            || camera.isFocusExposureLocked || camera.manualControls.isAnyManualModeEnabled) {
+        if isActiveAdjustmentsChipVisible {
             Button {
                 if camera.manualControls.isAnyManualModeEnabled {
                     isShowingManualControls = true
@@ -1211,18 +1249,7 @@ struct CameraScreen: View {
                     isShowingTools = true
                 }
             } label: {
-                HStack(spacing: 5) {
-                    if abs(camera.exposureBias) >= 0.05 && camera.manualControls.exposureMode == .auto {
-                        Text(String(format: "%+.1f EV", camera.exposureBias))
-                    }
-                    if camera.isFocusExposureLocked {
-                        Label("AE/AF LOCK", systemImage: "lock.fill")
-                            .labelStyle(.titleAndIcon)
-                    }
-                    if camera.manualControls.isAnyManualModeEnabled {
-                        Text("MANUAL")
-                    }
-                }
+                activeCaptureIndicatorLines
                 .font(.system(.caption2, design: .rounded).weight(.bold))
                 .minimumScaleFactor(0.7)
                 .lineLimit(1)
@@ -1250,6 +1277,123 @@ struct CameraScreen: View {
         }
     }
 
+    private var activeCaptureIndicatorLines: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 5) {
+                if abs(camera.exposureBias) >= 0.05 && camera.manualControls.exposureMode == .auto {
+                    Text(String(format: "%+.1f EV", camera.exposureBias))
+                }
+                if camera.isFocusExposureLocked {
+                    Label("AE/AF LOCK", systemImage: "lock.fill")
+                        .labelStyle(.titleAndIcon)
+                }
+                if camera.manualControls.isAnyManualModeEnabled {
+                    Text(visibleManualReadout?.iso ?? "MANUAL")
+                }
+            }
+            if !dynamicTypeSize.isAccessibilitySize {
+                HStack(spacing: 4) {
+                    if let readout = visibleManualReadout { Text(readout.shutter) }
+                    if let token = captureFormatToken { formatTokenLabel(token) }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var captureFormatChip: some View {
+        if let token = captureFormatToken, !isActiveAdjustmentsChipVisible || dynamicTypeSize.isAccessibilitySize {
+            Button {
+                HapticFeedback.play(.selection)
+                isShowingManualControls = true
+            } label: {
+                formatTokenLabel(token)
+                    .font(.system(.caption2, design: .rounded).weight(.bold))
+                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                    .minimumScaleFactor(0.7)
+                    .lineLimit(1)
+                    .foregroundStyle(FilmyTheme.accent)
+                    .padding(.horizontal, 9)
+                    .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
+                    .background(Color.black.opacity(0.68), in: Capsule())
+                    .overlay { Capsule().stroke(FilmyTheme.accent.opacity(0.36), lineWidth: 1) }
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.pressable)
+            .accessibilityShowsLargeContentViewer { Text(captureFormatSpokenValue) }
+            .accessibilityIdentifier("camera-capture-format")
+            .accessibilityLabel("Capture format")
+            .accessibilityValue(captureFormatSpokenValue)
+            .accessibilityHint("Opens Pro controls")
+        }
+    }
+
+    private var captureFormatToken: String? {
+        let settings = camera.proCaptureSettings
+        let base: String
+        if settings.format.retainsRAW { base = "RAW" }
+        else if settings.dynamicRange == .hdr { base = "HDR" }
+        else if settings.livePhoto { base = "LIVE" }
+        else if settings.format == .jpeg { base = "JPEG" }
+        else if settings.resolution != .mp12 { base = "HEIF" }
+        else { return nil }
+        return settings.resolution == .mp12 ? base : "\(base) \(settings.resolution.rawValue)"
+    }
+
+    private var captureFormatSpokenValue: String {
+        let settings = camera.proCaptureSettings
+        var parts = [settings.format.title]
+        if settings.dynamicRange == .hdr { parts.append("HDR") }
+        if settings.livePhoto { parts.append("Live Photo") }
+        parts.append("\(settings.resolution.rawValue) megapixels")
+        if let reason = captureFormatConflictReason { parts.append(reason) }
+        return parts.joined(separator: ", ")
+    }
+
+    /// Mirrors the service's refusal so the chip never states a format the shutter will not take.
+    private var captureFormatConflictReason: String? {
+        let capabilities = camera.proCaptureCapabilities
+        guard isLive, !capabilities.resolutions.isEmpty else { return nil }
+        let settings = camera.proCaptureSettings
+        if let reason = capabilities.unavailableReason(for: settings) { return reason }
+        return CameraService.customExposureResolutionRefusal(
+            customExposure: camera.manualControls.exposureMode == .manual,
+            sceneAutoOwnsExposure: camera.sceneAuto.isEnabled,
+            resolution: settings.resolution
+        )
+    }
+
+    private var manualExposureReadout: (iso: String, shutter: String)? {
+        let controls = camera.manualControls
+        let seconds = controls.exposureDurationSeconds
+        guard controls.exposureMode == .manual, controls.iso >= 1, controls.iso.isFinite,
+              seconds.isFinite, seconds > 0 else { return nil }
+        let reciprocal = (1 / seconds).rounded()
+        guard reciprocal.isFinite else { return nil }
+        let shutter = seconds >= 0.3
+            ? String(format: "%.1fs", seconds)
+            : "1/\(max(Int(min(reciprocal, 1_000_000)), 1))"
+        return ("ISO \(Int(controls.iso.rounded()))", shutter)
+    }
+
+    /// Visible only when exposure is the sole manual mode; otherwise "MANUAL" keeps covering WB and focus.
+    private var visibleManualReadout: (iso: String, shutter: String)? {
+        let controls = camera.manualControls
+        guard controls.whiteBalanceMode != .manual, controls.focusMode != .manual,
+              !dynamicTypeSize.isAccessibilitySize else { return nil }
+        return manualExposureReadout
+    }
+
+    @ViewBuilder
+    private func formatTokenLabel(_ token: String) -> some View {
+        HStack(spacing: 3) {
+            if captureFormatConflictReason != nil {
+                Image(systemName: "exclamationmark.triangle.fill")
+            }
+            Text(token)
+        }
+    }
+
     private var hasExposureBiasToReset: Bool {
         abs(camera.exposureBias) >= 0.05 && camera.manualControls.exposureMode == .auto
     }
@@ -1264,12 +1408,19 @@ struct CameraScreen: View {
         }
         if camera.manualControls.exposureMode == .manual {
             values.append("Manual exposure")
+            if let readout = manualExposureReadout {
+                values.append(readout.iso)
+                values.append("Shutter \(readout.shutter)")
+            }
         }
         if camera.manualControls.whiteBalanceMode == .manual {
             values.append("Manual white balance")
         }
         if camera.manualControls.focusMode == .manual {
             values.append("Manual focus")
+        }
+        if captureFormatToken != nil {
+            values.append(captureFormatSpokenValue)
         }
         return values.joined(separator: ", ")
     }
@@ -1330,8 +1481,10 @@ struct CameraScreen: View {
         isShowingTools && !hidesToolsForRecoveryPlaceholder
     }
 
-    private var toolsToggle: some View {
-        Button {
+    private func toolsToggle(showsCaption: Bool = false) -> some View {
+        let captioned = showsCaption && !isToolRailVisible && !dynamicTypeSize.isAccessibilitySize
+        return Button {
+            HapticFeedback.play(.selection)
             withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.82)) {
                 if !isShowingTools {
                     isShowingLookDrawer = false
@@ -1339,21 +1492,32 @@ struct CameraScreen: View {
                 isShowingTools.toggle()
             }
         } label: {
-            Image(systemName: isToolRailVisible ? "xmark" : "slider.horizontal.3")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(isToolRailVisible ? FilmyTheme.accent : .white)
-                .frame(width: cameraHitTarget, height: cameraHitTarget)
-                .background { ChromeShapeBackground(shape: Circle()) }
-                .contentShape(Circle())
+            VStack(spacing: 1) {
+                Image(systemName: isToolRailVisible ? "xmark" : "switch.2")
+                    .font(.system(size: 16, weight: .semibold))
+                if captioned {
+                    Text("Controls")
+                        .font(.caption2.weight(.medium))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
+            }
+            .foregroundStyle(isToolRailVisible ? FilmyTheme.accent : .white)
+            .frame(width: captioned ? max(60, cameraHitTarget) : cameraHitTarget, height: cameraHitTarget)
+            .background { ChromeShapeBackground(shape: Capsule()) }
+            .contentShape(Capsule())
         }
         .buttonStyle(.pressable)
+        .accessibilityShowsLargeContentViewer {
+            Label("Controls", systemImage: isToolRailVisible ? "xmark" : "switch.2")
+        }
         .accessibilityIdentifier("camera-chrome-toggle")
         .accessibilityValue(isToolRailVisible ? "Expanded" : "Collapsed")
         .accessibilityLabel(isToolRailVisible ? "Hide camera controls" : "Show camera controls")
         .accessibilityHint(
             isToolRailVisible
-                ? "Return to the viewfinder-first camera layout"
-                : "Reveal exposure, zoom, and camera controls"
+                ? "Hides the control strip"
+                : "Shows exposure, grid, Pro controls and self-timer"
         )
     }
 
@@ -1361,12 +1525,10 @@ struct CameraScreen: View {
 
     private var primaryBottomBar: some View {
         VStack(spacing: 6) {
-            HStack(spacing: 6) {
-                currentRecipeButton()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                favoriteCurrentLookButton
-                toolsToggle
-                    .disabled(!camera.isRunning && !isViewfinderChromePreview)
+            // The Controls caption gives way before the look name does on a narrow phone.
+            ViewThatFits(in: .horizontal) {
+                primaryLookRow(showsCaption: true)
+                primaryLookRow(showsCaption: false)
             }
 
             HStack(alignment: .center, spacing: 0) {
@@ -1391,6 +1553,16 @@ struct CameraScreen: View {
         }
         .frame(maxWidth: FilmyLayout.dockMaxWidth)
         .frame(maxWidth: .infinity)
+    }
+
+    private func primaryLookRow(showsCaption: Bool) -> some View {
+        HStack(spacing: 6) {
+            currentRecipeButton()
+                .frame(maxWidth: .infinity, alignment: .leading)
+            favoriteCurrentLookButton
+            toolsToggle(showsCaption: showsCaption)
+                .disabled(!camera.isRunning && !isViewfinderChromePreview)
+        }
     }
 
     private var favoriteIDs: Set<String> { LookLibraryIndex.favorites(from: favoriteData) }
@@ -1439,7 +1611,7 @@ struct CameraScreen: View {
                 }
                 HStack(spacing: 8) {
                     favoriteCurrentLookButton
-                    toolsToggle
+                    toolsToggle()
                         .disabled(!camera.isRunning && !isViewfinderChromePreview)
                 }
             }
@@ -1866,6 +2038,18 @@ struct CameraScreen: View {
 
     // MARK: - Tool strips
 
+    private static let toolStripFadeWidth: CGFloat = 16
+
+    /// Fades the trailing edge so a clipped tool reads as "more to scroll". Taller than the strip so shadows survive.
+    private var toolStripFadeMask: some View {
+        HStack(spacing: 0) {
+            Color.black
+            LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
+                .frame(width: Self.toolStripFadeWidth)
+        }
+        .padding(.vertical, -12)
+    }
+
     private func toolStrip(minWidth: CGFloat) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
@@ -1898,12 +2082,16 @@ struct CameraScreen: View {
                 }
 
                 proControlsButton
+
+                timerControl
             }
             .padding(.horizontal, 4)
             .padding(.vertical, 4)
+            .padding(.trailing, Self.toolStripFadeWidth)
             .frame(minWidth: max(minWidth, 0))
         }
         .scrollClipDisabled()
+        .mask { toolStripFadeMask }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(
             isCompactDigitalMode ? "g7x-capture-controls" : "camera-utility-rail"
@@ -1940,6 +2128,51 @@ struct CameraScreen: View {
                 : (camera.manualControls.isAnyManualModeEnabled ? "Manual settings active" : "Auto settings")
         )
         .accessibilityHint("Adjust ISO, shutter speed, white balance, and focus")
+    }
+
+    private var timerControl: some View {
+        let delay = captureDelay
+        let isArmed = delay != .off
+        return Button {
+            guard membership.require(.captureSetup) else { return }
+            HapticFeedback.play(.selection)
+            let all = CaptureDelay.allCases
+            let index = all.firstIndex(of: delay) ?? 0
+            storedCaptureDelay = all[(index + 1) % all.count]
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "timer")
+                    .font(.system(size: 14, weight: .bold))
+                if isArmed {
+                    Text(delay.title)
+                        .font(.system(.caption2, design: .rounded).weight(.bold))
+                        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+                }
+            }
+            .foregroundStyle(isArmed ? FilmyTheme.background : .white)
+            .padding(.horizontal, isArmed ? 12 : 0)
+            .frame(minWidth: FilmyTheme.toolControlHeight, minHeight: FilmyTheme.toolControlHeight)
+            .background {
+                if isArmed {
+                    Capsule().fill(FilmyTheme.accent)
+                } else {
+                    ChromeShapeBackground(shape: Capsule())
+                }
+            }
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.pressable)
+        .accessibilityShowsLargeContentViewer { Label("Timer \(delay.title)", systemImage: "timer") }
+        .accessibilityIdentifier("timer-control")
+        .accessibilityLabel("Self-timer")
+        .accessibilityValue(isArmed ? "\(delay.rawValue) seconds" : "Off")
+        .accessibilityAddTraits(isArmed ? .isSelected : [])
+        .accessibilityHint("Cycles between off, 3, 5 and 10 seconds")
+        .accessibilityActions {
+            if isArmed {
+                Button("Turn timer off") { storedCaptureDelay = .off }
+            }
+        }
     }
 
     private func gridToggle(accessibilityIdentifier: String) -> some View {
@@ -2053,7 +2286,7 @@ struct CameraScreen: View {
 
     private var isSmartRecipeAnalysisActive: Bool {
         smartRecipes.isEnabled && canTriggerShutter && !isShowingLookDrawer
-            && !isShowingLiveAdjustments && !isShowingTools
+            && !isShowingLiveAdjustments
     }
 
     private var smartRecipeFrameKey: [String] {
@@ -2104,7 +2337,7 @@ struct CameraScreen: View {
         guard canTriggerShutter else { return }
         HapticFeedback.play(.capture)
         dismissGestureHint()
-        closeControlDrawers()
+        closeLookAndAdjustDrawers()
         if captureDelay == .off {
             performShutterCapture()
         } else {
@@ -2204,6 +2437,14 @@ struct CameraScreen: View {
             isShowingLookDrawer = false
             isShowingLiveAdjustments = false
             isShowingTools = false
+        }
+    }
+
+    /// The shutter leaves the control strip where the user set it.
+    private func closeLookAndAdjustDrawers() {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) {
+            isShowingLookDrawer = false
+            isShowingLiveAdjustments = false
         }
     }
 
@@ -2346,6 +2587,54 @@ struct CameraScreen: View {
     private func openSystemSettings() {
         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
         UIApplication.shared.open(url)
+    }
+}
+
+/// Sparkle-only Smart looks for a crowded indicator row. Same actions, labels and identifiers as `SmartRecipeEntryPoint`.
+private struct CompactSmartRecipeEntry: View {
+    @ObservedObject var store: SmartRecipeStore
+    let selectedID: String
+    let canApply: Bool
+    let onOpen: () -> Void
+    let onApply: (String) -> Void
+    let onUndo: () -> Void
+
+    var body: some View {
+        let top = store.options.first
+        HStack(spacing: 0) {
+            Button(action: onOpen) {
+                Image(systemName: "sparkles")
+                    .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Smart look suggestions")
+            .accessibilityValue(top?.recipe.name ?? store.status.title)
+            .accessibilityHint("Compare three scene-matched recipes. Suggestions never change your look automatically.")
+            .accessibilityIdentifier("smart-recipes-open")
+            if store.undo?.appliedID == selectedID {
+                Button(action: onUndo) {
+                    Text("Undo").frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
+                        .contentShape(Rectangle())
+                }
+                .disabled(!canApply)
+                .accessibilityLabel("Undo smart look")
+                .accessibilityIdentifier("smart-recipes-undo")
+            } else if let option = top, option.id != selectedID {
+                Button { onApply(option.id) } label: {
+                    Text("Apply").frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
+                        .contentShape(Rectangle())
+                }
+                .disabled(!canApply)
+                .accessibilityLabel("Apply \(option.recipe.name)")
+                .accessibilityIdentifier("smart-recipes-quick-apply")
+            }
+        }
+        .font(.caption2.weight(.bold))
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+        .foregroundStyle(FilmyTheme.accent)
+        .buttonStyle(.plain)
+        .background(Color.white.opacity(0.07), in: Capsule())
+        .accessibilityElement(children: .contain)
     }
 }
 

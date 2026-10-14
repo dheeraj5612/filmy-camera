@@ -395,6 +395,22 @@ final class FilmyCameraUITests: XCTestCase {
         grid.tap()
         XCTAssertNotEqual(grid.value as? String, initialGridValue)
 
+        let pro = compactApp.buttons["pro-controls-button"]
+        for _ in 0..<3 where !pro.exists || !pro.isHittable { captureControls.swipeLeft() }
+        assertMinimumHitTarget(pro, named: "Pro controls")
+        let timer = compactApp.buttons["timer-control"]
+        for _ in 0..<3 where !timer.exists || !timer.isHittable { captureControls.swipeLeft() }
+        assertMinimumHitTarget(timer, named: "Self-timer")
+        let setup = compactApp.buttons["capture-setup-open"]
+        XCTAssertEqual(timer.value as? String, "Off")
+        for (spoken, summary) in [("3 seconds", "Timer 3s, "), ("5 seconds", "Timer 5s, "),
+                                  ("10 seconds", "Timer 10s, "), ("Off", "Timer Off, ")] {
+            timer.tap()
+            XCTAssertEqual(timer.value as? String, spoken)
+            XCTAssertTrue((setup.value as? String)?.hasPrefix(summary) == true)
+            if spoken == "3 seconds" { attachScreenshot(named: "g7x-timer-control-armed") }
+        }
+
         XCTAssertFalse(compactApp.descendants(matching: .any)["recipe-picker"].exists)
         attachScreenshot(named: "g7x-quick-capture-controls")
     }
@@ -1141,6 +1157,20 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertFalse(roll.frame.intersects(currentLook.frame))
         XCTAssertFalse(currentLook.frame.intersects(importPhoto.frame))
         XCTAssertFalse(accessibilityApp.descendants(matching: .any)["recipe-picker"].exists)
+        let accessibilityRail = accessibilityApp.descendants(matching: .any)["camera-utility-rail"]
+        XCTAssertTrue(accessibilityRail.waitForExistence(timeout: 8))
+        let accessibilityPro = accessibilityApp.buttons["pro-controls-button"]
+        for _ in 0..<4 where !accessibilityPro.exists || !accessibilityPro.isHittable { accessibilityRail.swipeLeft() }
+        assertMinimumHitTarget(accessibilityPro, named: "Accessibility-size Pro controls")
+        let accessibilityTimer = accessibilityApp.buttons["timer-control"]
+        for _ in 0..<4 where !accessibilityTimer.exists || !accessibilityTimer.isHittable { accessibilityRail.swipeLeft() }
+        assertMinimumHitTarget(accessibilityTimer, named: "Accessibility-size Self-timer")
+        accessibilityTimer.tap()
+        XCTAssertEqual(accessibilityTimer.value as? String, "3 seconds")
+        assertMinimumHitTarget(accessibilityApp.buttons["camera-chrome-toggle"], named: "Accessibility-size controls toggle")
+        attachScreenshot(named: "accessibility-camera-controls-timer")
+        for _ in 0..<3 { accessibilityTimer.tap() }
+        XCTAssertEqual(accessibilityTimer.value as? String, "Off")
         openRecipeDrawer(in: accessibilityApp)
         let tune = accessibilityApp.buttons["Tune Muted Color"]
         assertMinimumHitTarget(tune, named: "Accessibility-size Tune")
@@ -1196,12 +1226,25 @@ final class FilmyCameraUITests: XCTestCase {
         assertMinimumHitTarget(previewApp.buttons["recipe-menu"], named: "Current look")
         XCTAssertFalse(previewApp.descendants(matching: .any)["recipe-picker"].exists)
         XCTAssertFalse(previewApp.descendants(matching: .any)["camera-tool-strip"].exists)
+        XCTAssertFalse(previewApp.buttons["camera-capture-format"].exists)
 
         let roll = previewApp.buttons["roll-tab"]
         assertMinimumHitTarget(roll, named: "Viewfinder preview Roll")
 
         let controlsToggle = previewApp.buttons["Show camera controls"]
         assertMinimumHitTarget(controlsToggle, named: "Viewfinder preview controls toggle")
+        XCTAssertEqual(controlsToggle.value as? String, "Collapsed")
+        let previewWidth = previewApp.windows.firstMatch.frame.width
+        let toggleWidth = controlsToggle.frame.width
+        // Whether the caption fits depends on the look name and phone width, so either form is valid.
+        XCTAssertTrue(toggleWidth <= 48 || toggleWidth >= 59, "The toggle must show its caption whole or drop it")
+
+        if previewWidth >= 390 {
+            let quietSmartEntry = previewApp.buttons["smart-recipes-open"]
+            XCTAssertTrue(quietSmartEntry.waitForExistence(timeout: 5))
+            XCTAssertGreaterThanOrEqual(quietSmartEntry.frame.width, 80,
+                                        "Smart looks keeps its name without a format chip")
+        }
 
         let capture = previewApp.buttons["Capture unavailable in Preview mode"]
         XCTAssertTrue(capture.waitForExistence(timeout: 5))
@@ -1213,6 +1256,50 @@ final class FilmyCameraUITests: XCTestCase {
         screenshot.name = "viewfinder-first-chrome-preview"
         screenshot.lifetime = .keepAlways
         add(screenshot)
+
+        previewApp.terminate()
+
+        // `{"dynamicRange":"hdr"}` as a data launch argument. CameraService reads it from standard
+        // defaults, so it comes from the read-only argument domain; this flow never writes it back.
+        let formatApp = MainActor.assumeIsolated {
+            let formatApp = makeApplication()
+            formatApp.launchArguments = [
+                "-ui-testing",
+                "-ui-testing-viewfinder-chrome",
+                "-selectedRecipeID",
+                "classic-chrome",
+                "-proCaptureSettings.v1",
+                "<7b2264796e616d696352616e6765223a22686472227d>"
+            ]
+            formatApp.launch()
+            return formatApp
+        }
+        defer { formatApp.terminate() }
+
+        let formatChip = formatApp.buttons["camera-capture-format"]
+        assertMinimumHitTarget(formatChip, named: "Capture format chip")
+        let window = formatApp.windows.firstMatch
+        let smartEntry = formatApp.buttons["smart-recipes-open"]
+        assertMinimumHitTarget(smartEntry, named: "Smart looks with the format chip")
+        let sceneAuto = formatApp.descendants(matching: .any)["scene-auto-control"]
+        let formatPill = formatApp.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == %@", "Camera status")).firstMatch
+        XCTAssertTrue(formatPill.waitForExistence(timeout: 5))
+        for (element, name) in [(formatChip, "Capture format chip"), (smartEntry, "Smart looks"),
+                                (sceneAuto, "Scene Auto"), (formatPill, "Status pill")] {
+            assertContained(element, in: window, named: name)
+        }
+        XCTAssertTrue(smartEntry.frame.width <= 48 || smartEntry.frame.width >= 80,
+                      "Smart looks must read whole or shrink to its sparkle, never a cut word")
+        XCTAssertEqual(formatChip.value as? String, "HEIF, HDR, 12 megapixels")
+        attachScreenshot(named: "capture-format-chip")
+
+        formatChip.tap()
+        let proDone = formatApp.buttons["manual-controls-done"]
+        XCTAssertTrue(proDone.waitForExistence(timeout: 8))
+        XCTAssertTrue(formatApp.descendants(matching: .any)["pro-format"].exists)
+        proDone.tap()
+        XCTAssertTrue(formatChip.waitForExistence(timeout: 5))
     }
     #endif
 

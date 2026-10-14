@@ -59,6 +59,9 @@ final class AdditionalInteractionTests: XCTestCase {
             (self.app.buttons["capture-setup-open"].value as? String)?
                 .components(separatedBy: ", ").contains("Timer 5s") == true
         }, "The setup summary must read back the selected five-second timer")
+        let chromeToggle = app.buttons["camera-chrome-toggle"]
+        if (chromeToggle.value as? String) == "Collapsed" { chromeToggle.tap() }
+        XCTAssertEqual(chromeToggle.value as? String, "Expanded")
         XCTAssertTrue(waitForFreshCameraFrames())
 
         let started = Date()
@@ -80,6 +83,8 @@ final class AdditionalInteractionTests: XCTestCase {
                        "No canceled timer completion may arrive after foregrounding")
         XCTAssertEqual(app.buttons["recipe-menu"].label, recipeBefore)
         attach("timer-background-cancellation-live-preview")
+        XCTAssertTrue(waitUntil { (chromeToggle.value as? String) == "Expanded" },
+                      "The shutter must leave the control strip as the user set it")
     }
 
     func testFujiQuickMenuSavesAndRecallsC1AcrossLaunch() throws {
@@ -173,11 +178,11 @@ final class AdditionalInteractionTests: XCTestCase {
         let originalRecipe = app.buttons["recipe-menu"].label
         // The sheet shows a snapshot frozen at open, so wait for a published
         // suggestion first; opening early would freeze the empty state.
-        // Analysis only runs while the tool rail is collapsed.
+        // Analysis runs with the control strip open; the shutter no longer closes it.
         let chromeToggle = app.buttons["camera-chrome-toggle"]
-        if chromeToggle.waitForExistence(timeout: 5), (chromeToggle.value as? String) == "Expanded" {
-            chromeToggle.tap()
-        }
+        XCTAssertTrue(chromeToggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(chromeToggle.value as? String, "Expanded")
+        _ = waitUntil(timeout: 10) { (entry.value as? String) != "Smart looks" }
         guard waitUntil(timeout: 30, { app.buttons["smart-recipes-quick-apply"].exists }) else {
             throw XCTSkip("No Smart Look differing from the current look was published")
         }
