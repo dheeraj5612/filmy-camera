@@ -45,14 +45,61 @@ final class NormalRollManagementTests: XCTestCase {
         XCTAssertTrue(app.images["Photo"].exists, "Cancel must retain the loaded frame")
         app.buttons["Close frame"].tap()
         XCTAssertEqual(try loadedRollCount(), countBefore + 1)
+
+        // Large text: the detail toolbar must keep every control reachable and apart.
+        // The accessibility size forces two rows; the plain extra-large size
+        // exercises the one-row fit check and its two-row fallback.
+        let categories = [
+            "UICTContentSizeCategoryAccessibilityXXXL",
+            "UICTContentSizeCategoryExtraExtraExtraLarge"
+        ]
+        for category in categories {
+            app.terminate()
+            launchNormalApp(contentSizeCategory: category)
+            XCTAssertEqual(try openAuthorizedRoll(), countBefore + 1)
+            try openNewestSavedFrame(expectedCount: countBefore + 1, scrollingToTile: true)
+            let toolbarButtons = [
+                app.buttons["Close frame"],
+                app.buttons["frame-back-to-camera"],
+                app.buttons["gallery-info-frame"],
+                app.buttons["gallery-share-frame"],
+                app.buttons["Delete frame"]
+            ]
+            for button in toolbarButtons {
+                XCTAssertTrue(button.exists && button.isHittable,
+                              "Large text must keep \(button.identifier.isEmpty ? button.label : button.identifier) hittable")
+            }
+            for first in 0..<toolbarButtons.count {
+                for second in (first + 1)..<toolbarButtons.count {
+                    XCTAssertFalse(toolbarButtons[first].frame.intersects(toolbarButtons[second].frame),
+                                   "Large text must not overlap detail controls \(first) and \(second)")
+                }
+            }
+            screenshot("frame-detail-large-text-\(category)")
+            app.buttons["Close frame"].tap()
+            XCTAssertTrue(waitUntil(timeout: 30) { !self.app.buttons["Close frame"].exists })
+            screenshot("roll-large-text-\(category)")
+        }
+        app.terminate()
+        launchNormalApp()
+        XCTAssertEqual(try openAuthorizedRoll(), countBefore + 1)
+        returnToCamera()
+
+        // A second fixture gives the delete a neighbour, so the pager must
+        // land on it instead of closing. A lone fixture would only ever
+        // exercise the last-frame exit.
+        try saveCafeFixture(newerSavedFrameCount: countBefore + 1)
+        XCTAssertEqual(try openAuthorizedRoll(), countBefore + 2)
         returnToCamera()
 
         try clearCacheThroughSettings()
-        XCTAssertEqual(try openAuthorizedRoll(), countBefore + 1,
+        XCTAssertEqual(try openAuthorizedRoll(), countBefore + 2,
                        "Clearing cache must retain the actual Photos asset and ownership")
         XCTAssertFalse(app.staticTexts["Local cache"].exists)
-        try openNewestSavedFrame(expectedCount: countBefore + 1)
+        try openNewestSavedFrame(expectedCount: countBefore + 2)
         screenshot("cleared-cache-frame-loaded-from-photos")
+        try confirmDeletionOfOpenFixture(expectedCountAfter: countBefore + 1)
+        try openNewestSavedFrame(expectedCount: countBefore + 1)
         try confirmDeletionOfOpenFixture(expectedCountAfter: countBefore)
 
         app.terminate()
@@ -129,13 +176,16 @@ final class NormalRollManagementTests: XCTestCase {
         try verifyPhotosLibraryCountAfterDeletion()
     }
 
-    private func launchNormalApp() {
+    private func launchNormalApp(contentSizeCategory: String? = nil) {
         app?.terminate()
         XCUIDevice.shared.orientation = .portrait
         app = XCUIApplication()
         // Avoid the exact -ui-testing flag so PhotosPicker, PhotoKit and cache
         // remain real while premium entitlement is deterministic for this lane.
         app.launchArguments = ["-ui-testing-photos-e2e"]
+        if let contentSizeCategory {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", contentSizeCategory]
+        }
         app.launch()
         let skip = app.buttons["Skip"]
         if skip.waitForExistence(timeout: 2) { skip.tap() }
@@ -198,7 +248,8 @@ final class NormalRollManagementTests: XCTestCase {
             if notice.exists && notice.isHittable { notice.tap() }
             return false
         }, "The seeded source must be visible after the newer app-created fixtures")
-        sourceLibraryCount = photos.count
+        // Keep the count from before the first fixture of the case.
+        if sourceLibraryCount == nil { sourceLibraryCount = photos.count }
         // The harness seeds cafe newest; earlier app saves sort ahead of it.
         let source = photos.element(boundBy: newerSavedFrameCount)
         XCTAssertTrue(app.frame.contains(source.frame), "Never tap an offscreen or unknown Photos tile")
@@ -221,9 +272,22 @@ final class NormalRollManagementTests: XCTestCase {
         app.buttons.matching(NSPredicate(format: "label == %@", "Photo in your gallery, \(recipeName)")).firstMatch
     }
 
-    private func openNewestSavedFrame(expectedCount: Int) throws {
+    private func openNewestSavedFrame(expectedCount: Int, scrollingToTile: Bool = false) throws {
         let saved = savedFrameButton()
-        XCTAssertTrue(saved.waitForExistence(timeout: 20) && saved.isHittable)
+        if scrollingToTile {
+            // Large text pushes the first tile below the fold, and the lazy grid
+            // creates it only near the screen. Short drags that end with a hold:
+            // a flick could carry the tile past the visible band.
+            _ = saved.waitForExistence(timeout: 3)
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35))
+            for _ in 0..<10 where !(saved.exists && saved.isHittable) {
+                start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
+            }
+        } else {
+            XCTAssertTrue(saved.waitForExistence(timeout: 20))
+        }
+        XCTAssertTrue(saved.exists && saved.isHittable)
         saved.tap()
         XCTAssertTrue(app.images["Photo"].waitForExistence(timeout: 30))
         XCTAssertTrue(app.descendants(matching: .any)["gallery-frame-metadata"].label.contains(recipeName))
@@ -249,14 +313,24 @@ final class NormalRollManagementTests: XCTestCase {
                     return false
                 }
             }
-            if expectedCountAfter > 0, self.app.buttons["Close frame"].exists,
-               self.app.descendants(matching: .any)["gallery-frame-position"].value as? String == "1 of \(expectedCountAfter)" {
+            let position = self.app.descendants(matching: .any)["gallery-frame-position"]
+            if expectedCountAfter > 1, self.app.buttons["Close frame"].exists,
+               position.value as? String == "1 of \(expectedCountAfter)" {
                 // The pager stays open on the neighbouring frame.
                 return true
             }
+            if expectedCountAfter == 1, self.app.buttons["Close frame"].exists, !position.exists,
+               self.app.images["Photo"].exists,
+               self.app.descendants(matching: .any)["gallery-frame-metadata"].label.contains(self.recipeName) {
+                // A single survivor has no position label but still shows its photo.
+                return true
+            }
+            // A closed pager is only a valid landing once nothing is left to show.
+            guard expectedCountAfter == 0 else { return false }
             return !self.app.buttons["Close frame"].exists && self.rollCount() == expectedCountAfter
         }, "Confirmed deletion must remove the selected fixture and publish the reduced Roll count")
         if app.buttons["Close frame"].exists {
+            screenshot("frame-after-delete-landing")
             app.buttons["Close frame"].tap()
             XCTAssertTrue(waitUntil(timeout: 30) {
                 !self.app.buttons["Close frame"].exists && self.rollCount() == expectedCountAfter

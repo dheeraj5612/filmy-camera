@@ -23,7 +23,7 @@ struct FilmyOriginalsView: View {
             if let issue { Text(issue).foregroundStyle(.orange) }
             if !hasLoaded && documents.isEmpty {
                 ProgressView("Loading originals").frame(maxWidth: .infinity)
-            } else if documents.isEmpty {
+            } else if documents.isEmpty && issue == nil {
                 ContentUnavailableView("Your next frame starts here", systemImage: "photo.stack",
                                        description: Text("New camera captures retain their originals automatically. Older Roll exports are not retroactively recoverable."))
             }
@@ -141,6 +141,8 @@ struct FilmyPhotoEditorView: View {
                         .font(.caption).foregroundStyle(.secondary)
                     revisionPicker(document)
                     exportControls(document)
+                } else if let message {
+                    Text(message).font(.callout).accessibilityIdentifier("filmy-document-message")
                 }
                 if busy { ProgressView("Processing photo").frame(maxWidth: .infinity) }
                 Button("Delete Filmy original and versions", role: .destructive) { confirmDelete = true }
