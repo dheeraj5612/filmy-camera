@@ -10,28 +10,40 @@ struct SceneAutoControl: View {
     private var held: Bool { camera.sceneAuto.phase == .held }
     private var unavailable: Bool { !camera.isRunning || camera.availability != .running }
 
+    private var toggleTitle: String { enabled ? "Turn Scene Auto Off" : "Enable Scene Auto" }
+    private var toggleDetail: String {
+        enabled ? "Restores your previous controls and flash." : "Adapts exposure, color and focus for this session. Your look stays."
+    }
+    private var holdTitle: String { held ? "Resume Scene Auto" : "Hold Current Settings" }
+    private var holdDetail: String {
+        held ? "Starts adapting to the scene again." : "Freezes the current settings until you resume or tap to focus."
+    }
+
     var body: some View {
         Menu {
-            Button(enabled ? "Turn Scene Auto Off" : "Enable Scene Auto") {
+            Button {
                 camera.setSceneAutoEnabled(!enabled)
+            } label: {
+                Text(toggleTitle)
+                Text(toggleDetail)
             }
             .disabled(unavailable || isBusy || camera.manualControls.isApplying)
             .accessibilityIdentifier("scene-auto-toggle")
 
             if enabled {
-                Button(held ? "Resume Scene Auto" : "Hold Current Settings") {
+                Button {
                     camera.setSceneAutoHeld(!held)
+                } label: {
+                    Text(holdTitle)
+                    Text(holdDetail)
                 }
                 .disabled(isBusy || camera.manualControls.isApplying)
                 .accessibilityIdentifier("scene-auto-hold")
                 Text("Scene: \(camera.sceneAuto.scene.title)")
-                Text("Exposure, ISO/shutter, color, focus, and subtle tone/noise adjustments. Your film and framing stay yours.")
                 if camera.sceneAuto.phase == .limited {
-                    Text("This lens uses native auto exposure. Custom ISO/shutter control is unavailable; no lens will be switched automatically.")
+                    Text("This lens sets its own exposure. Scene Auto never switches lenses.")
                 }
-                Text("Flash stays off in Scene Auto. Turning Auto off restores your previous controls.")
-            } else {
-                Text("Optional for this session. Settles before adapting; ignores small fluctuations. Hold freezes the current settings.")
+                Text("Flash stays off while Scene Auto is on.")
             }
         } label: {
             HStack(spacing: 5) {

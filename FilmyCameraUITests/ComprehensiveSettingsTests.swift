@@ -437,6 +437,21 @@ final class ComprehensiveSettingsTests: XCTestCase {
         attach("settings-access-plain-words")
         let cameraBadge = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Camera, Simulator'")).firstMatch
         XCTAssertTrue(cameraBadge.exists, "The Camera badge must read its subject and state")
+
+        app.terminate()
+        app.launch()
+        let sceneAuto = app.descendants(matching: .any)["scene-auto-control"]
+        XCTAssertTrue(sceneAuto.waitForExistence(timeout: 20))
+        sceneAuto.tap()
+        let toggle = app.buttons["scene-auto-toggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        let shortLine = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS 'for this session. Your look stays.'")).firstMatch
+        XCTAssertTrue(shortLine.waitForExistence(timeout: 2), toggle.label)
+        let oldProse = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS 'Settles before adapting'")).firstMatch
+        XCTAssertFalse(oldProse.exists)
+        attach("scene-auto-menu-short-lines")
         #else
         throw XCTSkip("Needs the forced Photos-denied UI-test state")
         #endif
