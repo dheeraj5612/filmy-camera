@@ -2,7 +2,7 @@
 
 ## Find the controls
 
-Open **Pro** from the camera utility rail. Capture format, requested resolution, output color, HDR, Live Photo, exposure programs, aperture and focus aids are grouped above the existing manual controls. Unsupported hardware options are disabled with explanations. A lens change does not silently rewrite a user's RAW or resolution preference.
+Open **Pro** from the camera utility rail. Manual exposure, focus and white balance come first; exposure programs, focus aids and capture format (requested resolution, file format, output color, HDR, Live Photo) follow below them. Unsupported hardware options are disabled with explanations. A lens change does not silently rewrite a user's RAW or resolution preference.
 
 Open **Roll > Filmy originals · edit again** to compare the original, preview another recipe, save an immutable version, restore settings from history, update the linked Photos asset, export a separate copy, or share the original DNG. Captures continue to save automatically; the new editor is not a mandatory post-shutter step.
 

@@ -66,18 +66,14 @@ struct ManualCameraControlsView: View {
             sheetHeader
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    if dynamicTypeSize.isAccessibilitySize { cameraMessage }
                     if camera.sceneAuto.isEnabled {
-                        Text("Scene Auto is paused. Changing a sensor control exits Auto and restores your previous settings first.")
+                        Text("Changing a control here turns Scene Auto off.")
                             .font(.footnote)
                             .foregroundStyle(FilmyTheme.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    ProCaptureControlsView(camera: camera)
-                    if hasManualCapability { statusHeader }
-
-                    if !controls.physicalLensOptions.isEmpty {
-                        physicalLensSection
-                    }
+                    if controls.requiresPhysicalLensSelection { cameraAndLens }
 
                     if hasManualCapability {
                         sectionPicker
@@ -87,6 +83,8 @@ struct ManualCameraControlsView: View {
                     }
 
                     resetButton
+                    if !controls.requiresPhysicalLensSelection { cameraAndLens }
+                    ProCaptureControlsView(camera: camera)
                 }
                 .frame(maxWidth: 720, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .center)
@@ -109,10 +107,14 @@ struct ManualCameraControlsView: View {
 
     private var sheetHeader: some View {
         HStack(spacing: 16) {
-            Text("Pro controls")
-                .font(.system(.headline, design: .rounded).weight(.bold))
-                .foregroundStyle(FilmyTheme.primary)
-                .accessibilityAddTraits(.isHeader)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Pro controls")
+                    .font(.system(.headline, design: .rounded).weight(.bold))
+                    .foregroundStyle(FilmyTheme.primary)
+                    .accessibilityAddTraits(.isHeader)
+                // Pinned copy stays short so a long message cannot push the first control off the sheet.
+                if !dynamicTypeSize.isAccessibilitySize { cameraMessage.lineLimit(3) }
+            }
             Spacer(minLength: 8)
             Button { dismiss() } label: {
                 Text("Done")
@@ -129,6 +131,21 @@ struct ManualCameraControlsView: View {
         .padding(.trailing, horizontalSizeClass == .regular ? 12 : 4)
         .padding(.top, 12)
         .padding(.bottom, 4)
+    }
+
+    @ViewBuilder private var cameraAndLens: some View {
+        if hasManualCapability { statusHeader }
+        if !controls.physicalLensOptions.isEmpty { physicalLensSection }
+    }
+
+    private var cameraMessage: some View {
+        Text(camera.statusMessage)
+            .font(.system(.caption, design: .rounded).weight(.medium))
+            .foregroundStyle(FilmyTheme.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityLabel("Camera message")
+            .accessibilityValue(camera.statusMessage)
+            .accessibilityIdentifier("pro-camera-status")
     }
 
     private var statusHeader: some View {
@@ -271,26 +288,26 @@ struct ManualCameraControlsView: View {
 
     private var statusDescription: String {
         if camera.availability == .simulator {
-            return "Manual sensor controls appear on a physical camera. This preview cannot change ISO, shutter, white balance, or focus."
+            return "Manual controls need a real camera."
         }
         if camera.availability == .permissionDenied {
-            return "Allow Camera access in Settings to use manual controls."
+            return "Allow Camera access in Settings."
         }
         if controls.activeDeviceID == nil {
-            return "Camera controls will appear when the camera is ready."
+            return "Waiting for the camera."
         }
         if isApplying { return "Applying your settings…" }
         if controls.requiresPhysicalLensSelection {
-            return "Automatic lens switching is active. Choose a lens below to access more manual controls."
+            return "Choose a lens below for more manual controls."
         }
         if controls.isAnyManualModeEnabled {
-            return "Manual settings are applied to the next capture."
+            return "Manual settings apply to the next shot."
         }
         return "Auto settings meter each frame."
     }
 
     private var physicalLensSection: some View {
-        controlSection(title: "Lens", subtitle: "Choose a lens for manual control. Availability varies by camera.") {
+        controlSection(title: "Lens", subtitle: "Manual controls apply to the lens you pick.") {
             VStack(spacing: 8) {
                 ForEach(controls.physicalLensOptions) { lens in
                     Button {
@@ -329,7 +346,7 @@ struct ManualCameraControlsView: View {
     }
 
     private var exposureSection: some View {
-        controlSection(title: "Exposure", subtitle: "Set sensitivity and shutter speed, or let the camera meter automatically.") {
+        controlSection(title: "Exposure", subtitle: "Set ISO and shutter, or leave it on Auto.") {
             modePicker(
                 title: "Exposure mode",
                 mode: controls.exposureMode,
@@ -362,13 +379,13 @@ struct ManualCameraControlsView: View {
                     onEnded: { camera.setManualExposure(iso: Float(isoDraft), durationSeconds: duration(for: shutterPosition)) }
                 )
                 if controls.exposureDurationSeconds > (1.0 / 30.0) {
-                    Text("Slower shutter speeds reduce live preview smoothness. Hold steady.")
+                    Text("Slow shutter: hold steady, preview may stutter.")
                         .font(.system(.caption, design: .rounded).weight(.medium))
                         .foregroundStyle(FilmyTheme.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if controls.flashRequiresAutoExposure {
-                    Text("Flash is off while Manual exposure is active. Return to Auto to restore it.")
+                    Text("Flash is off in Manual. Auto restores it.")
                         .font(.system(.caption, design: .rounded).weight(.semibold))
                         .foregroundStyle(FilmyTheme.accent)
                         .fixedSize(horizontal: false, vertical: true)
@@ -381,7 +398,7 @@ struct ManualCameraControlsView: View {
     }
 
     private var whiteBalanceSection: some View {
-        controlSection(title: "White balance", subtitle: "Sensor color temperature is separate from the selected film recipe.") {
+        controlSection(title: "White balance", subtitle: "Camera color, set separately from your look.") {
             modePicker(
                 title: "White balance mode",
                 mode: controls.whiteBalanceMode,
@@ -421,7 +438,7 @@ struct ManualCameraControlsView: View {
     }
 
     private var focusSection: some View {
-        controlSection(title: "Focus", subtitle: "Adjust focus manually. Return to Auto for moving subjects.") {
+        controlSection(title: "Focus", subtitle: "Focus by hand, or use Auto for moving subjects.") {
             modePicker(
                 title: "Focus mode",
                 mode: controls.focusMode,

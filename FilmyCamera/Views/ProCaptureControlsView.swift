@@ -34,133 +34,11 @@ struct ProCaptureControlsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Capture format").font(.headline)
-            Picker("Resolution", selection: binding(\.resolution)) {
-                ForEach(availableResolutions) { value in
-                    Text(value.title).tag(value)
-                }
-            }
-            .pickerStyle(.segmented)
-            .accessibilityIdentifier("pro-resolution")
-            Text("12 and 48 MP use supported sensor dimensions. 24 MP is developed from a 48 MP original, not Apple's deferred 24 MP fusion. These are requested resolutions; the camera can deliver fewer pixels. Cropping reduces the final pixel count. Manual and priority exposure use 12 MP.")
-                .font(.caption).foregroundStyle(.secondary)
-            Picker("File format", selection: binding(\.format)) {
-                ForEach(availableFormats) { value in
-                    Text(value.title).tag(value)
-                }
-            }
-            .accessibilityIdentifier("pro-format")
-            Picker("Output color", selection: binding(\.colorGamut)) {
-                Text("sRGB").tag(ProCaptureSettings.ColorGamut.sRGB)
-                Text("Display P3").tag(ProCaptureSettings.ColorGamut.displayP3)
-            }
-            .disabled(settings.dynamicRange == .hdr)
-            .accessibilityIdentifier("pro-color-space")
-            if settings.dynamicRange == .hdr {
-                Text("HDR uses a Rec.2020 / PQ output profile. The sRGB / P3 selection applies to standard-range exports.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Toggle("HDR HEIF (10-bit PQ)", isOn: Binding(
-                get: { settings.dynamicRange == .hdr },
-                set: { value in var next = settings; next.dynamicRange = value ? .hdr : .sdr; camera.setProCaptureSettings(next) }
-            ))
-            .disabled(hdrDisabled)
-            .accessibilityIdentifier("pro-hdr")
-            if hdrDisabled {
-                Text("HDR needs HEIF or RAW without Live Photo.")
-                    .font(.caption).foregroundStyle(.orange)
-            }
-            Text("HDR preserves available captured highlight headroom. SDR originals are not given artificial HDR brightness. Filmy keeps the original alongside every edit.")
-                .font(.caption).foregroundStyle(.secondary)
-            Toggle("Live Photo", isOn: binding(\.livePhoto))
-                .disabled(livePhotoDisabled)
-                .accessibilityIdentifier("pro-live-photo")
-            if livePhotoDisabled && capabilities.livePhotoSupported {
-                Text("Live Photo needs 12 MP, a non-RAW format and standard dynamic range.")
-                    .font(.caption).foregroundStyle(.orange)
-            }
-            Text("Live uses 12 MP, standard dynamic range and Photo finish. RAW and Live cannot be combined. The film look is applied to the still and movie during Photos export.")
-                .font(.caption).foregroundStyle(.secondary)
-            if settings.livePhoto {
-                Toggle("Include microphone audio", isOn: binding(\.livePhotoAudio))
-                    .accessibilityIdentifier("pro-live-audio")
-            }
-            if let reason = capabilities.unavailableReason(for: settings) {
-                Text(reason).font(.caption).foregroundStyle(.orange).accessibilityIdentifier("pro-capture-unavailable")
-            }
-
-            Text(camera.statusMessage).font(.caption).foregroundStyle(.secondary)
+            programGroup
             Divider()
-            Text("Exposure program").font(.headline)
-            Picker("Program", selection: Binding(get: { camera.exposureProgram }, set: { apply($0) })) {
-                ForEach(availablePrograms) { program in
-                    Text(program.title).tag(program)
-                }
-            }
-            .accessibilityIdentifier("pro-exposure-program")
-            if !capabilities.nativeExposureAPIAvailable {
-                Text("Priority and variable-aperture controls require an iOS 27 release-SDK build, iOS 27, and a lens that exposes them. Coupled manual exposure remains available below.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            if priority {
-                if camera.exposureProgram == .isoPriority {
-                    Text("ISO \(Int(iso)) · shutter auto").monospacedDigit()
-                    Slider(value: $iso, in: isoRange,
-                           onEditingChanged: { if !$0 { apply(camera.exposureProgram) } })
-                        .accessibilityLabel("Priority ISO").accessibilityIdentifier("pro-priority-iso")
-                        .accessibilityValue("ISO \(Int(iso))")
-                        .accessibilityAdjustableAction { direction in
-                            guard !controls.isApplying else { return }
-                            guard let sign = Self.adjustSign(direction) else { return }
-                            iso = Self.clamped(iso * pow(2, sign / 3), isoRange)
-                            apply(camera.exposureProgram)
-                        }
-                }
-                if camera.exposureProgram == .shutterPriority {
-                    Text("\(Self.shutterTitle(pow(2, shutterLog))) · ISO auto").monospacedDigit()
-                    Slider(value: $shutterLog,
-                           in: shutterLogRange,
-                           onEditingChanged: { if !$0 { apply(camera.exposureProgram) } })
-                        .accessibilityLabel("Priority shutter duration").accessibilityIdentifier("pro-priority-shutter")
-                        .accessibilityValue(Self.shutterTitle(pow(2, shutterLog)))
-                        .accessibilityAdjustableAction { direction in
-                            guard !controls.isApplying else { return }
-                            guard let sign = Self.adjustSign(direction) else { return }
-                            shutterLog = Self.clamped(shutterLog + sign / 3, shutterLogRange)
-                            apply(camera.exposureProgram)
-                        }
-                }
-                Text("Applied: ISO \(Int(controls.iso)) · \(Self.shutterTitle(controls.exposureDurationSeconds))")
-                    .font(.caption).foregroundStyle(.secondary).monospacedDigit()
-            }
-            if capabilities.variableApertureSupported {
-                Text("Aperture f/\(aperture, specifier: "%.1f")").monospacedDigit()
-                Slider(value: $aperture, in: apertureRange, onEditingChanged: {
-                    if !$0 { apply(camera.exposureProgram == .manual ? .manual : .aperturePriority, includeAperture: true) }
-                })
-                .accessibilityLabel("Lens aperture").accessibilityIdentifier("pro-aperture")
-                .accessibilityValue(String(format: "f/%.1f", aperture))
-                .accessibilityAdjustableAction { direction in
-                    guard !controls.isApplying else { return }
-                    guard let sign = Self.adjustSign(direction) else { return }
-                    let step = (apertureRange.upperBound - apertureRange.lowerBound) / 20
-                    aperture = Self.clamped(aperture + sign * step, apertureRange)
-                    apply(camera.exposureProgram == .manual ? .manual : .aperturePriority, includeAperture: true)
-                }
-                Text("Moving aperture selects Aperture Priority, or keeps full Manual when already selected.")
-                    .font(.caption).foregroundStyle(.secondary)
-            } else if capabilities.aperture > 0 {
-                Text("Lens aperture: f/\(capabilities.aperture, specifier: "%.1f") · read-only on this lens/build")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+            focusAidsGroup
             Divider()
-            Text("Focus aids").font(.headline)
-            Toggle("Focus loupe · 4× preview", isOn: Binding(get: { camera.focusLoupeEnabled }, set: camera.setFocusLoupeEnabled))
-                .accessibilityIdentifier("pro-focus-loupe")
-            Toggle("Track tapped subject", isOn: Binding(get: { camera.subjectTrackingEnabled }, set: camera.setSubjectTrackingEnabled))
-                .disabled(!camera.isRunning).accessibilityIdentifier("pro-subject-tracking")
-            Text("Tap a subject in the viewfinder. Supported iOS 27 lenses use native tracking; other lenses use on-device Vision. Lost subjects require another tap. Manual focus and AE/AF lock stop tracking.")
-                .font(.caption).foregroundStyle(.secondary)
+            formatGroup
         }
         .padding(16)
         .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 18))
@@ -169,6 +47,202 @@ struct ProCaptureControlsView: View {
         .onAppear(perform: sync)
         .onChange(of: camera.exposureProgram) { _, _ in sync() }
         .onChange(of: controls.activeDeviceID) { _, _ in sync() }
+    }
+
+    @ViewBuilder private var programGroup: some View {
+        groupHeading("Exposure program")
+        ProChoiceRow(title: "Program") {
+            Picker("Program", selection: Binding(get: { camera.exposureProgram }, set: { apply($0) })) {
+                ForEach(availablePrograms) { program in
+                    Text(program.title).tag(program)
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(minHeight: FilmyTheme.minimumHitTarget)
+            .accessibilityIdentifier("pro-exposure-program")
+        }
+        if !capabilities.nativeExposureAPIAvailable {
+            captionLine("Priority modes need iOS 27 and a supported lens.")
+        }
+        if priority {
+            priorityControls
+        }
+        apertureControls
+    }
+
+    @ViewBuilder private var priorityControls: some View {
+        if camera.exposureProgram == .isoPriority {
+            Text("ISO \(Int(iso)) · shutter auto").monospacedDigit()
+            Slider(value: $iso, in: isoRange,
+                   onEditingChanged: { if !$0 { apply(camera.exposureProgram) } })
+                .accessibilityLabel("Priority ISO").accessibilityIdentifier("pro-priority-iso")
+                .accessibilityValue("ISO \(Int(iso))")
+                .accessibilityAdjustableAction { direction in
+                    guard !controls.isApplying else { return }
+                    guard let sign = Self.adjustSign(direction) else { return }
+                    iso = Self.clamped(iso * pow(2, sign / 3), isoRange)
+                    apply(camera.exposureProgram)
+                }
+        }
+        if camera.exposureProgram == .shutterPriority {
+            Text("\(Self.shutterTitle(pow(2, shutterLog))) · ISO auto").monospacedDigit()
+            Slider(value: $shutterLog,
+                   in: shutterLogRange,
+                   onEditingChanged: { if !$0 { apply(camera.exposureProgram) } })
+                .accessibilityLabel("Priority shutter duration").accessibilityIdentifier("pro-priority-shutter")
+                .accessibilityValue(Self.shutterTitle(pow(2, shutterLog)))
+                .accessibilityAdjustableAction { direction in
+                    guard !controls.isApplying else { return }
+                    guard let sign = Self.adjustSign(direction) else { return }
+                    shutterLog = Self.clamped(shutterLog + sign / 3, shutterLogRange)
+                    apply(camera.exposureProgram)
+                }
+        }
+        Text("Applied: ISO \(Int(controls.iso)) · \(Self.shutterTitle(controls.exposureDurationSeconds))")
+            .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+    }
+
+    @ViewBuilder private var apertureControls: some View {
+        if capabilities.variableApertureSupported {
+            Text("Aperture f/\(aperture, specifier: "%.1f")").monospacedDigit()
+            Slider(value: $aperture, in: apertureRange, onEditingChanged: {
+                if !$0 { apply(camera.exposureProgram == .manual ? .manual : .aperturePriority, includeAperture: true) }
+            })
+            .accessibilityLabel("Lens aperture").accessibilityIdentifier("pro-aperture")
+            .accessibilityValue(String(format: "f/%.1f", aperture))
+            .accessibilityAdjustableAction { direction in
+                guard !controls.isApplying else { return }
+                guard let sign = Self.adjustSign(direction) else { return }
+                let step = (apertureRange.upperBound - apertureRange.lowerBound) / 20
+                aperture = Self.clamped(aperture + sign * step, apertureRange)
+                apply(camera.exposureProgram == .manual ? .manual : .aperturePriority, includeAperture: true)
+            }
+            captionLine("Sets Aperture priority, or stays in Manual.")
+        } else if capabilities.aperture > 0 {
+            captionLine(String(format: "Lens aperture: f/%.1f · not adjustable here", capabilities.aperture))
+        }
+    }
+
+    @ViewBuilder private var focusAidsGroup: some View {
+        groupHeading("Focus aids")
+        Toggle("Focus loupe · 4× preview", isOn: Binding(get: { camera.focusLoupeEnabled }, set: camera.setFocusLoupeEnabled))
+            .accessibilityIdentifier("pro-focus-loupe")
+            .frame(minHeight: FilmyTheme.minimumHitTarget)
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle("Track tapped subject", isOn: Binding(get: { camera.subjectTrackingEnabled }, set: camera.setSubjectTrackingEnabled))
+                .disabled(!camera.isRunning).accessibilityIdentifier("pro-subject-tracking")
+                .frame(minHeight: FilmyTheme.minimumHitTarget)
+            if !camera.isRunning {
+                reasonLine("Needs the camera running.")
+            } else {
+                captionLine("Tap a subject in the viewfinder to follow it.")
+            }
+        }
+    }
+
+    @ViewBuilder private var formatGroup: some View {
+        groupHeading("Capture format")
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Resolution")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(FilmyTheme.primary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityHidden(true)
+            Picker("Resolution", selection: binding(\.resolution)) {
+                ForEach(availableResolutions) { value in
+                    Text(value.title).tag(value)
+                }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("pro-resolution")
+            .frame(minHeight: FilmyTheme.minimumHitTarget)
+            resolutionLine
+        }
+        ProChoiceRow(title: "File format") {
+            Picker("File format", selection: binding(\.format)) {
+                ForEach(availableFormats) { value in
+                    Text(value.title).tag(value)
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(minHeight: FilmyTheme.minimumHitTarget)
+            .accessibilityIdentifier("pro-format")
+        }
+        VStack(alignment: .leading, spacing: 6) {
+            ProChoiceRow(title: "Output color") {
+                Picker("Output color", selection: binding(\.colorGamut)) {
+                    Text("sRGB").tag(ProCaptureSettings.ColorGamut.sRGB)
+                    Text("Display P3").tag(ProCaptureSettings.ColorGamut.displayP3)
+                }
+                .pickerStyle(.menu)
+                .frame(minHeight: FilmyTheme.minimumHitTarget)
+                .disabled(settings.dynamicRange == .hdr)
+                .accessibilityIdentifier("pro-color-space")
+            }
+            if settings.dynamicRange == .hdr {
+                reasonLine("Not used while HDR is on.")
+            }
+        }
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle("HDR HEIF (10-bit PQ)", isOn: Binding(
+                get: { settings.dynamicRange == .hdr },
+                set: { value in var next = settings; next.dynamicRange = value ? .hdr : .sdr; camera.setProCaptureSettings(next) }
+            ))
+            .disabled(hdrDisabled)
+            .accessibilityIdentifier("pro-hdr")
+            .frame(minHeight: FilmyTheme.minimumHitTarget)
+            if hdrDisabled {
+                reasonLine("HDR needs HEIF or RAW without Live Photo.")
+            } else {
+                captionLine("Keeps extra highlight detail for HDR screens.")
+            }
+        }
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle("Live Photo", isOn: binding(\.livePhoto))
+                .disabled(livePhotoDisabled)
+                .accessibilityIdentifier("pro-live-photo")
+                .frame(minHeight: FilmyTheme.minimumHitTarget)
+            if livePhotoDisabled {
+                reasonLine(livePhotoReason)
+            } else {
+                captionLine("Your look is applied to the still and the movie.")
+            }
+        }
+        if settings.livePhoto {
+            Toggle("Include microphone audio", isOn: binding(\.livePhotoAudio))
+                .accessibilityIdentifier("pro-live-audio")
+                .frame(minHeight: FilmyTheme.minimumHitTarget)
+        }
+        if let reason = capabilities.unavailableReason(for: settings) {
+            Text(reason).font(.caption).foregroundStyle(.orange).accessibilityIdentifier("pro-capture-unavailable")
+        }
+    }
+
+    private var livePhotoReason: String {
+        capabilities.livePhotoSupported ? "Needs 12 MP, no RAW, and HDR off." : "Live Photo is not available on this camera."
+    }
+
+    @ViewBuilder private var resolutionLine: some View {
+        if settings.resolution != .mp12 && camera.exposureProgram != .automatic {
+            reasonLine("Manual and priority exposure use 12 MP.")
+        } else if settings.resolution == .mp24 {
+            captionLine("24 MP is made from a 48 MP original.")
+        } else {
+            captionLine("Requested size. The camera may deliver fewer pixels.")
+        }
+    }
+
+    private func captionLine(_ text: String) -> some View {
+        Text(text).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func reasonLine(_ text: String) -> some View {
+        Label(text, systemImage: "exclamationmark.circle")
+            .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func groupHeading(_ text: String) -> some View {
+        Text(text).font(.headline).accessibilityAddTraits(.isHeader)
     }
 
     private func binding<Value>(_ keyPath: WritableKeyPath<ProCaptureSettings, Value>) -> Binding<Value> {
@@ -217,6 +291,39 @@ struct ProCaptureControlsView: View {
     private static func shutterTitle(_ seconds: Double) -> String {
         guard seconds.isFinite, seconds > 0 else { return "Auto" }
         return seconds < 1 ? "1/\(Int((1 / seconds).rounded())) s" : String(format: "%.1f s", seconds)
+    }
+}
+
+private struct ProChoiceRow<Control: View>: View {
+    let title: String
+    @ViewBuilder let control: () -> Control
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 4) {
+                    label
+                    control()
+                }
+            } else {
+                HStack(spacing: 12) {
+                    label
+                    Spacer(minLength: 8)
+                    control()
+                }
+            }
+        }
+        .frame(minHeight: FilmyTheme.minimumHitTarget)
+    }
+
+    private var label: some View {
+        Text(title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(FilmyTheme.primary)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityHidden(true)
     }
 }
 

@@ -98,6 +98,24 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["pro-resolution"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["pro-format"].exists)
 
+        func proElement(_ id: String) -> XCUIElement {
+            app.descendants(matching: .any).matching(identifier: id).firstMatch
+        }
+        let programMenu = proElement("pro-exposure-program")
+        let loupeToggle = proElement("pro-focus-loupe")
+        let formatResolution = proElement("pro-resolution")
+        let resetControl = app.buttons["manual-controls-reset"]
+        let cameraMessage = proElement("pro-camera-status")
+        XCTAssertTrue(programMenu.exists && loupeToggle.exists && resetControl.exists && cameraMessage.exists)
+        XCTAssertTrue(cameraMessage.isHittable, "The camera message must be on the first screen of the Pro sheet")
+        XCTAssertEqual(cameraMessage.label, "Camera message")
+        XCTAssertFalse((cameraMessage.value as? String ?? "").isEmpty, "The camera message must carry its text")
+        XCTAssertLessThan(resetControl.frame.minY, programMenu.frame.minY,
+                          "Manual controls and Reset must lead the Pro sheet")
+        XCTAssertLessThan(programMenu.frame.minY, loupeToggle.frame.minY)
+        XCTAssertLessThan(loupeToggle.frame.minY, formatResolution.frame.minY,
+                          "Capture format must sit below exposure program and focus aids")
+
         #if targetEnvironment(simulator)
         XCTAssertTrue(app.descendants(matching: .any)["manual-controls-unavailable"].exists)
         XCTAssertFalse(app.sliders["manual-iso-slider"].exists,
@@ -105,6 +123,9 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertFalse(app.buttons["manual-controls-reset"].isEnabled)
         #else
         let exposure = app.buttons["manual-exposure-manual"]
+        if exposure.isEnabled {
+            XCTAssertTrue(exposure.isHittable, "Exposure Auto/Manual must be on the first screen of the Pro sheet")
+        }
         if !exposure.isEnabled {
             let lenses = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'manual-lens-'"))
             for lens in lenses.allElementsBoundByIndex {
@@ -134,6 +155,8 @@ final class FilmyCameraUITests: XCTestCase {
         #endif
 
         attachScreenshot(named: "pro-controls-portrait")
+        scrollToHittable(formatResolution, in: app)
+        attachScreenshot(named: "pro-controls-format")
         XCUIDevice.shared.orientation = .landscapeLeft
         XCTAssertTrue(waitUntil(timeout: 10) {
             UIDevice.current.userInterfaceIdiom == .pad

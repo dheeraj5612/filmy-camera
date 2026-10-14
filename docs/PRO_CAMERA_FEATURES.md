@@ -33,7 +33,7 @@ remain necessary for optical control. A simulator build is not a hardware test.
 
 ## Entry points
 
-Camera tools -> manual controls -> Capture format / Exposure priority / Focus aids.
+Camera tools -> manual controls -> manual sections / Exposure program / Focus aids / Capture format.
 Roll -> **Filmy originals · edit again** -> project -> choose recipe, codec and
 finish -> **Save edit**. Revert restores the capture-time recipe, not a mutated
 original. The editor displays the saved rendition until changes are committed.
