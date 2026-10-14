@@ -55,6 +55,9 @@ class SuiteRoutingTests(unittest.TestCase):
             "FilmyCameraUITests/SmartRecipeUITests/testSmartLooksIsDiscoverableAndUnavailableSceneHasNoApplyAction",
             "FilmyCameraUITests/SmartRecipeUITests/testDisablingSuggestionsPersistsAcrossRelaunch",
             "FilmyCameraUITests/SignalFrameUITests/testCaptureModesOpensWithoutACameraAndPicksAFilm",
+            "FilmyCameraUITests/ComprehensiveSettingsTests/testAccessSectionUsesPlainPermissionWords",
+            "FilmyCameraUITests/ComprehensiveSettingsTests/testStorageExplainerAndInlineClearCacheConfirmation",
+            "FilmyCameraUITests/ComprehensiveSettingsTests/testOnboardingStartingLooksGridAndPermissionNote",
         }
         self.assertEqual({test for test, group in tests.items() if group == "simulator-e2e"}, expected)
         e2e = set(run.phases("e2e", tests)[0][1])
