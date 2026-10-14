@@ -464,6 +464,50 @@ final class PhotoLibraryService: ObservableObject {
         }
     }
 
+    /// Test seam: how the background index decode is started. Production passes nil.
+    typealias MetadataDecodeLauncher = @Sendable (@escaping @Sendable () -> Void) -> Void
+
+    /// How the saved-frame index became whole. Read by tests only.
+    enum MetadataLoadPath: Equatable, Sendable {
+        case notStored            // no blob at init: the index is whole and empty
+        case pending              // decode requested, nothing has used the index yet
+        case adopted              // first use took the background result
+        case decodedSynchronously // first use decoded the same bytes on the main actor
+    }
+
+    /// One-shot hand-off of the stored blob and its decoded index. The lock is held
+    /// across the background decode, so a main-actor claim that arrives mid-decode
+    /// waits for that result instead of decoding again.
+    private final class MetadataSpeculation: @unchecked Sendable {
+        private let lock = NSLock()
+        private var data: Data?
+        private var result: [String: SavedFrameMetadata]?
+        private var claimed = false
+        init(data: Data) { self.data = data }
+
+        /// Background side. Does nothing once the main actor has claimed.
+        func fulfill() {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !claimed, let input = data else { return }
+            result = PhotoLibraryService.decodeMetadata(input)
+            data = nil
+        }
+
+        /// Main-actor side. Always returns the whole index.
+        func claim() -> (index: [String: SavedFrameMetadata], adopted: Bool) {
+            lock.lock()
+            claimed = true
+            let ready = result
+            let input = data
+            result = nil
+            data = nil
+            lock.unlock()
+            if let ready { return (ready, true) }
+            return (PhotoLibraryService.decodeMetadata(input), false)
+        }
+    }
+
     private final class IdentifierBox: @unchecked Sendable {
         private let lock = NSLock()
         private var value: String?
@@ -655,18 +699,61 @@ final class PhotoLibraryService: ObservableObject {
         thumbnailCache.removeAllObjects()
     }
 
-    private(set) var metadataByAssetIdentifier: [String: SavedFrameMetadata] {
+    /// The whole index, or empty while `pendingMetadataLoad` is set. Touched
+    /// only by `ensureMetadataLoaded`, `setMetadata` and the accessor below.
+    private var metadataStorage: [String: SavedFrameMetadata] = [:] {
         didSet { galleryAssetsCache = nil }
+    }
+    private var pendingMetadataLoad: MetadataSpeculation?
+    private(set) var metadataLoadPath: MetadataLoadPath = .notStored
+
+    /// Every read and every write makes the index whole first, so it is never
+    /// observed, filtered, pruned or persisted partly loaded.
+    private(set) var metadataByAssetIdentifier: [String: SavedFrameMetadata] {
+        get {
+            ensureMetadataLoaded()
+            return metadataStorage
+        }
+        set {
+            ensureMetadataLoaded()
+            metadataStorage = newValue
+        }
+    }
+
+    private func ensureMetadataLoaded() {
+        guard let speculation = pendingMetadataLoad else { return }
+        pendingMetadataLoad = nil
+        let claimed = speculation.claim()
+        metadataLoadPath = claimed.adopted ? .adopted : .decodedSynchronously
+        metadataStorage = claimed.index
+    }
+
+    /// Single-entry insert (or removal with nil), in place on the whole index.
+    private func setMetadata(_ metadata: SavedFrameMetadata?, for identifier: String) {
+        ensureMetadataLoaded()
+        metadataStorage[identifier] = metadata
     }
     private var galleryAssetsCache: [PhotoLibraryGalleryAsset]?
 
     /// The gate is injectable so tests can observe the writes.
-    init(defaultsGate: DefaultsWriteGate = DefaultsWriteGate()) {
+    init(defaultsGate: DefaultsWriteGate = DefaultsWriteGate(), metadataDecodeLauncher: MetadataDecodeLauncher? = nil) {
         self.defaultsGate = defaultsGate
         isUITesting = ProcessInfo.processInfo.arguments.contains("-ui-testing")
         thumbnailCache.countLimit = 80
         thumbnailCache.totalCostLimit = 48 * 1024 * 1024
-        metadataByAssetIdentifier = Self.loadMetadata(forKey: savedFrameMetadataKey)
+        // Only the stored bytes are read here. The decode runs off the main
+        // actor and the index becomes whole on first use (ensureMetadataLoaded).
+        if let blob = UserDefaults.standard.data(forKey: savedFrameMetadataKey) {
+            let speculation = MetadataSpeculation(data: blob)
+            pendingMetadataLoad = speculation
+            metadataLoadPath = .pending
+            let work: @Sendable () -> Void = { speculation.fulfill() }
+            if let metadataDecodeLauncher {
+                metadataDecodeLauncher(work)
+            } else {
+                Task.detached(priority: .userInitiated) { work() }
+            }
+        }
         if isUITesting {
             authorizationStatus = .denied
             addOnlyAuthorizationStatus = .denied
@@ -738,6 +825,7 @@ final class PhotoLibraryService: ObservableObject {
         let metadataPending = metadataDirty || (!inBackground && metadataInFlightGeneration != nil)
         let resourcesPending = resourcesDirty || (!inBackground && resourcesInFlightGeneration != nil)
         guard metadataPending || resourcesPending else { return }
+        // The accessor makes the index whole before it is snapshotted.
         let metadataSnapshot: [String: SavedFrameMetadata]? = metadataPending ? metadataByAssetIdentifier : nil
         let resourcesSnapshot: [String: SavedFrameResource]? = resourcesPending ? savedFrameResourcesCache : nil
         metadataDirty = false
@@ -1463,7 +1551,7 @@ final class PhotoLibraryService: ObservableObject {
                                      imageData: thumbnailData, image: thumbnail)
         } else {
             savedAssetIdentifiers = PhotoLibraryAssetOwnership.adding(identifier, to: savedAssetIdentifiers)
-            metadataByAssetIdentifier[identifier] = SavedFrameMetadata(recipe: recipe, capturedAt: capturedAt)
+            setMetadata(SavedFrameMetadata(recipe: recipe, capturedAt: capturedAt), for: identifier)
             persistMetadata()
         }
         refreshAuthorizationStatuses()
@@ -1480,7 +1568,7 @@ final class PhotoLibraryService: ObservableObject {
             identifier,
             to: savedAssetIdentifiers
         )
-        metadataByAssetIdentifier[identifier] = metadata
+        setMetadata(metadata, for: identifier)
         let retainedIdentifiers = Set(savedAssetIdentifiers)
         metadataByAssetIdentifier = metadataByAssetIdentifier.filter { retainedIdentifiers.contains($0.key) }
         persistMetadata()
@@ -1497,7 +1585,7 @@ final class PhotoLibraryService: ObservableObject {
             identifier,
             from: savedAssetIdentifiers
         )
-        metadataByAssetIdentifier.removeValue(forKey: identifier)
+        setMetadata(nil, for: identifier)
         persistMetadata()
         removeCachedFrame(identifier: identifier)
     }
@@ -2014,7 +2102,11 @@ final class PhotoLibraryService: ObservableObject {
     }
 
     static func loadMetadata(forKey key: String, defaults: UserDefaults = .standard) -> [String: SavedFrameMetadata] {
-        guard let data = defaults.data(forKey: key),
+        decodeMetadata(defaults.data(forKey: key))
+    }
+
+    private nonisolated static func decodeMetadata(_ data: Data?) -> [String: SavedFrameMetadata] {
+        guard let data,
               let entries = try? JSONDecoder().decode([String: LossySavedFrameMetadata].self, from: data) else {
             return [:]
         }

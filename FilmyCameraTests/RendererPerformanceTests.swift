@@ -522,6 +522,41 @@ final class RendererPerformanceTests: XCTestCase {
         attachReport(report, name: "measure-library-2-saved-frame-index")
     }
 
+    @MainActor
+    func testMeasureSavedFrameIndexInit() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["FILMY_RUN_PERF"] == "1")
+        let defaults = UserDefaults.standard
+        let keys = ["filmyCamera.savedFrameMetadata", "filmyCamera.savedFrameResources", "filmyCamera.savedAssetIdentifiers"]
+        let saved = keys.map { defaults.object(forKey: $0) }
+        defer {
+            for (key, value) in zip(keys, saved) {
+                if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+            }
+        }
+        defaults.removeObject(forKey: "filmyCamera.savedFrameResources")
+        defaults.removeObject(forKey: "filmyCamera.savedAssetIdentifiers")
+        var report = ""
+        for count in [500, 2000, 5000] {
+            let data = try Self.syntheticMetadataIndex(count: count)
+            defaults.set(data, forKey: "filmyCamera.savedFrameMetadata")
+            var loadedCounts: [Int] = []
+            var inits: [PerfSample] = []
+            var reads: [PerfSample] = []
+            for _ in 0..<10 {
+                var service: PhotoLibraryService?
+                inits.append(Self.timed(.thread) { service = PhotoLibraryService() })
+                var loaded = 0
+                reads.append(Self.timed(.thread) { loaded = service?.metadataByAssetIdentifier.count ?? -1 })
+                loadedCounts.append(loaded)
+            }
+            XCTAssertEqual(Set(loadedCounts), [count], "every synthetic entry must be visible after init in every iteration")
+            let note = "entries=\(count) json_bytes=\(data.count) UserDefaults.standard, main actor; init is PhotoLibraryService() and first read is metadataByAssetIdentifier.count immediately after"
+            Self.record(id: "library-2", metric: "service_init_\(count)", samples: inits, clock: .thread, note: note, into: &report)
+            Self.record(id: "library-2", metric: "first_index_read_\(count)", samples: reads, clock: .thread, note: note, preferWall: true, into: &report)
+        }
+        attachReport(report, name: "measure-library-2-saved-frame-init")
+    }
+
     // MARK: swiftui-7: look library filter
 
     private struct LookQuery {
