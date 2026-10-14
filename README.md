@@ -17,23 +17,23 @@ For a code walkthrough, begin with [`FilmyCamera/ContentView.swift`](FilmyCamera
 - Native bi-planar YUV preview buffers when available, with a BGRA fallback, and a session-scoped grain phase shared by preview and capture for a more faithful WYSIWYG frame.
 - A dedicated G7 X Compact profile and curated editable film recipes based on public Fujifilm-style controls: film base, tone curve, color, white-balance shift, dynamic range, Color Chrome, FX Blue, sharpness, noise reduction, clarity, grain, grain size, halation, and vignette.
 - 758 editable looks: 595 source-linked public camera recipes, 20 neutral camera foundations, and the 143 original looks. No random combinatorial expansion.
-- A 19-pack recipe manager with whole-pack and individual quick-menu controls, mixed states, search, favorites-only setup, bulk actions, and undo. All 758 looks may be active at once. Existing users retain their original quick menu; new packs start hidden.
+- A 19-pack recipe manager with whole-pack and individual quick-menu controls, mixed states, search, favorites-only setup, bulk actions, and undo. All 758 looks may be active at once. Existing users retain their original quick menu; source-linked packs and Camera Foundations start hidden.
 - Source sheets preserve published camera settings, original recipe names, publisher links, retrieval dates, implementation differences, and before/after samples. Source-camera settings are separate from Filmy's editable approximation.
 - A cancelable 3-, 5-, or 10-second capture timer; 4:3, square, 3:2, and 16:9 framing; composition guides; and optional horizon, histogram, clipping zebras, and focus peaking. Preview aids never enter saved photos.
 - Camera captures save to Photos automatically after the shutter, and a failed save keeps a retryable copy. Imported photos open a full-resolution review with Cancel or explicit Save to Photos. Reviews can keep the full photo edge to edge or add the optional white Instant Print border with its generous bottom margin.
 - Try another look on an import and compare with Original before saving. Review previews are bounded to 1800 pixels, and changed looks export at full resolution on Save without changing the next shot's recipe.
-- System photo picker import that preserves the original framing and applies the selected recipe at full resolution up to the 40 MP processing budget; larger images are resized and labeled in review.
+- System photo picker import (Import lives in Roll) that preserves the original framing and applies the selected recipe at full resolution up to the 40 MP processing budget; larger images are resized and labeled in review.
 - First-run recipe-first onboarding with a direct handoff into the camera.
 - Recipe swatches apply each look to the same bundled café image, making comparisons consistent while the live viewfinder continues independently.
-- Camera-first SwiftUI UI in the shape of an iPhone camera: a letterboxed 4:3 viewfinder on a black body, flash and camera switch in the top bar, Apple-style zoom presets over the frame, a film-strip recipe rail with renderer-backed swatches, a Roll thumbnail and Tune beside the shutter, Liquid Glass chrome on iOS 26 (material fallback earlier), persistent tuning, a recipe detail sheet, import review, and a three-column contact-sheet Roll with zoom gestures.
+- Camera-first SwiftUI UI in the shape of an iPhone camera: a viewfinder on a black body that follows the chosen aspect (Fit screen by default), a top bar with flash, the Q menu, Capture setup, and Settings on one row (Smart looks, Scene Auto, and capture-format indicators sit on a line below it), Apple-style zoom presets over the frame, a bottom dock with the Roll thumbnail, the shutter, and Flip, and a row above the dock with the current look, Adjust, a favorite heart, and a Controls toggle. Controls opens a tool strip with exposure, grid, lens, Pro, and a one-tap timer. The current look opens a slim look picker (Active and Favorites, search, Browse all, Packs, and Tune) with renderer-backed swatches that stays open after a pick. Also Liquid Glass chrome on iOS 26 (material fallback earlier), persistent tuning, a recipe detail sheet, import review, and a three-column contact-sheet Roll (two columns at large text) with a pinch-to-zoom frame viewer and an Edit look action that saves a new frame.
 - Optional semantic haptics for shutter, recipe and camera selections, focus, editor commits, discards, saves, and failures.
-- Flash sits beside zoom in the on-screen controls and in Settings, and the last explicit choice is remembered; the G7 X profile renders flash frames with subject/ambient separation.
+- Flash sits at the left of the top bar and in Settings, and the last explicit choice is remembered; the G7 X profile applies a distinct whole-frame tone curve to flash frames.
 - Failed starts and runtime errors reconnect with backoff, and interruptions explain the cause (background, another app, multitasking, heat). The app declares full screen only (`UIRequiresFullScreen`), so on iPadOS versions that honor the key (17 and 18; deprecated from iPadOS 26, not verified there) Split View and Slide Over are not offered; the session still enables multitasking camera access where the OS supports it and explains the interruption if one occurs. It stays warm during review and quick tab switches to reduce restart work when returning to the viewfinder.
 - The film pipeline compiles off the main thread while the session configures, and photo cache maintenance runs after the first frame.
-- iPhone and iPad hardware controls for front/back switching and available-lens selection, with simulator-safe preview behavior.
+- Front/back switching (Flip, beside the shutter) and available-lens selection (in the tool strip) on iPhone and iPad, with simulator-safe preview behavior.
 - Expandable Pro controls for coupled manual ISO and shutter, sensor white balance by Kelvin and tint, and manual focus on supported hardware. The panel reports applied device values, disables still flash during manual exposure, offers one Reset Auto action, and can switch from a virtual camera to an eligible physical lens when advanced controls require it.
 - The live preview renders into a bounded drawable (about 1.3 MP) with a 30 fps target while stills and exports retain their full processing resolution. Sustained frame pacing and thermals require separate device measurement; isolated renderer timing does not establish camera frame rate.
-- sRGB output normalization plus embedded recipe provenance metadata on saved JPEGs.
+- Saved photos default to Display P3 HEIF; JPEG and sRGB are selectable in Pro controls. Embedded recipe provenance metadata travels with the file.
 - Simulator-safe empty state: the full interface runs without camera hardware and clearly asks for a physical iPhone or iPad for capture.
 - iPad support: readable-width pages, an adaptive Roll contact sheet, and the same viewfinder chrome verified on an iPad Pro and on iPhone-size layouts.
 
@@ -78,14 +78,14 @@ See [docs/research.md](docs/research.md) for the open-source architecture review
 
 ## Recipe packs and fidelity
 
-Open the camera look popup, then **Packs**. Open a pack to choose individual looks, or use **Actions > Enable all 758 looks**. Hiding a look does not change the current capture, delete edits, or remove favorites. **Browse all** and import review retain the full catalog.
+Open the camera's look picker (tap the current look above the shutter), then **Packs**. Open a pack to choose individual looks, or use **Actions > Enable all 758 looks**. Hiding a look does not change the current capture, delete edits, or remove favorites. **Browse all** and import review retain the full catalog.
 
-See [the catalog and fidelity audit](docs/recipe-library-and-fidelity.md), [all 128 original-look audit rows](docs/original-recipe-audit.csv), and [the machine-readable source audit](docs/recipe-catalog-audit.json). The rendering tests check operational consistency, not a measured match to camera JPEGs.
+See [the catalog and fidelity audit](docs/recipe-library-and-fidelity.md), [the 128-row original-look audit, covering 128 of the 143 originals](docs/original-recipe-audit.csv), and [the machine-readable source audit](docs/recipe-catalog-audit.json). The rendering tests check operational consistency, not a measured match to camera JPEGs.
 
 ## Smart looks
 
 The Smart looks control above the viewfinder offers on-device, scene-aware recipe suggestions.
-Tap **Use `<name>`** beside it for the leading recommendation, or tap **Smart looks** to compare
+Tap **Use** beside it to apply the leading recommendation, or tap **Smart looks** to compare
 three renders of the same frame, pick a Style (Natural, Vivid, Cinema, or B&W), and apply a look
 with one tap. Undo restores the previous look unless you have since chosen another manually.
 Suggestions never select a recipe or save a photo automatically. Toggle analysis off in the Smart looks sheet.

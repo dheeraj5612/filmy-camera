@@ -8,7 +8,7 @@ The representative flow is: launch from Home, allow Camera if prompted, choose a
 
 2. Purpose, audience, and value
 
-Filmy Camera is a native iPhone/iPad camera and local photo editor for people who want a chosen visual style while shooting or importing. It provides editable recipes, an Original comparison, and clear saved results. The app includes 128 editable looks, a G7 X Compact approximation, search and favorites, framing aids, import up to 40 MP, supported-camera manual controls, full-resolution processing, and Instant Print.
+Filmy Camera is a native iPhone/iPad camera and local photo editor for people who want a chosen visual style while shooting or importing. It provides editable recipes, an Original comparison, and clear saved results. The app includes 758 editable looks, a G7 X Compact approximation, search and favorites, framing aids, import up to 40 MP, supported-camera manual controls, full-resolution processing, and Instant Print.
 
 3. Setup, access, and main features
 
@@ -22,8 +22,8 @@ Core capture, editing, and rendering run on-device with Apple system frameworks.
 
 5. Regional differences
 
-There are no intentional country or region gates, regional content rules, or localized pricing/eligibility rules. Behavior is consistent where distributed, apart from localized system permission UI, system share destinations, and device-dependent Pro controls. iPad supports portrait orientation; behavior is otherwise the same across supported regions and devices subject to hardware capabilities.
+There are no intentional country or region gates, regional content rules, or localized pricing/eligibility rules. Behavior is consistent where distributed, apart from localized system permission UI, system share destinations, and device-dependent Pro controls. iPhone is portrait only, and iPad supports portrait and landscape orientations; behavior is otherwise the same across supported regions and devices subject to hardware capabilities.
 
 6. Regulated industry and third-party material
 
-Filmy Camera is a creative camera/photo utility and does not provide medical, financial, legal, gambling, or another regulated service. Its recipes are app-authored parametric implementations. No firmware, LUTs, or camera calibration data are bundled. The optional café sample is original and team-generated. The app is not affiliated with Fujifilm, Canon, or Fuji X Weekly.
+Filmy Camera is a creative camera/photo utility and does not provide medical, financial, legal, gambling, or another regulated service. Its recipes are app-authored parametric implementations. No firmware, LUTs, or camera calibration data are bundled. The optional café sample is original and team-generated. The app is not affiliated with Fujifilm, Canon, Fuji X Weekly, or Film Recipes.
