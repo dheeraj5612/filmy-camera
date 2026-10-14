@@ -91,15 +91,16 @@ final class SignalFrameUITests: XCTestCase {
         app.launchArguments += ["-ui-testing-onboarding"]
         app.launch()
         assertReachable(app.buttons["onboarding-continue"], in: app)
+        XCTAssertLessThanOrEqual(app.buttons["onboarding-continue"].frame.height, 80, "Open camera stays one line at the largest text")
         let recipe = app.buttons["onboarding-recipe-classic-chrome"]
-        revealInPage(recipe, in: app)
+        revealInPage(recipe, in: app, scroll: app.scrollViews["onboarding-content"])
         assertReachable(recipe, in: app)
         XCTAssertGreaterThan(recipe.frame.width, 180, "Accessibility choices should be readable rows, not narrow tiles")
         recipe.tap()
         XCTAssertEqual(recipe.value as? String, "Selected")
         snapshot("signal-frame-onboarding-choices-largest-text")
         let compare = app.buttons["onboarding-compare"]
-        revealInPage(compare, in: app)
+        revealInPage(compare, in: app, scroll: app.scrollViews["onboarding-content"])
         assertReachable(compare, in: app)
         compare.tap()
         XCTAssertEqual(compare.value as? String, "Original")
@@ -124,12 +125,30 @@ final class SignalFrameUITests: XCTestCase {
         for _ in 0..<24 {
             let viewport = scroll.frame.intersection(app.frame).insetBy(dx: 0, dy: 8)
             if control.exists && viewport.contains(control.frame) { return }
+            let laidOut = control.exists && !control.frame.isEmpty && control.frame.height > 0
+            if laidOut && viewport.height > 0 && control.frame.height > viewport.height - 4 {
+                snapshot("signal-frame-unreachable-page-control")
+                XCTFail("\(control.identifier) is \(Int(control.frame.height)) pt tall, taller than its \(Int(viewport.height)) pt page")
+                return
+            }
             let downward = control.exists && control.frame.midY < viewport.midY
+            // Drag by the offset still needed instead of a fixed distance, so a
+            // short page does not oscillate. Slow velocity avoids a fling.
+            var travel: CGFloat = 0.38
+            if laidOut && scroll.frame.height > 0 {
+                let needed = downward
+                    ? viewport.minY - control.frame.minY
+                    : control.frame.maxY - viewport.maxY
+                // Overshoot margin shrinks when the control nearly fills the page.
+                let pad: CGFloat = min(12, max(2, (viewport.height - control.frame.height) / 2))
+                // Cap keeps the drag end within 0.12...0.88, clear of the tab bar.
+                travel = min(0.38, max(0.03, (max(needed, 0) + pad) / scroll.frame.height))
+            }
             // Use the middle of the view rather than its bottom edge, which is
             // covered by the tab bar at the largest accessibility text size.
-            let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: downward ? 0.30 : 0.72))
-            let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: downward ? 0.72 : 0.30))
-            start.press(forDuration: 0.05, thenDragTo: end)
+            let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: downward ? 0.5 + travel : 0.5 - travel))
+            start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.05)
         }
         snapshot("signal-frame-unreachable-page-control")
         XCTFail("Could not fully reveal \(control.identifier)")

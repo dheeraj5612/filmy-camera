@@ -89,11 +89,17 @@ struct OnboardingView: View {
             Button(action: onFinish) {
                 HStack {
                     Text("Open camera")
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     Spacer(minLength: 12)
                     Image(systemName: "arrow.right")
                 }
             }
             .buttonStyle(.filmyPrimary)
+            .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+            .accessibilityShowsLargeContentViewer {
+                Label("Open camera", systemImage: "arrow.right")
+            }
             .accessibilityLabel("Open camera")
             .accessibilityValue(previewRecipe?.name ?? "Current look")
             .accessibilityIdentifier("onboarding-continue")
@@ -245,8 +251,13 @@ struct OnboardingView: View {
 
     private func recipeChoice(_ recipe: FilmRecipe, expanded: Bool) -> some View {
         let selected = selectedRecipeID == recipe.id
-        let layout = AnyLayout(HStackLayout(alignment: .center, spacing: expanded ? 12 : 8))
+        let layout = expanded
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
         let minTileHeight: CGFloat? = expanded ? nil : 48
+        let swatchWidth: CGFloat? = expanded ? nil : 48
+        let swatchMaxWidth: CGFloat = expanded ? .infinity : 48
+        let swatchHeight: CGFloat = expanded ? 64 : 48
 
         return Button {
             guard !selected else { return }
@@ -258,7 +269,8 @@ struct OnboardingView: View {
         } label: {
             layout {
                 RecipeSwatch(recipe: recipe, isSelected: selected && !expanded, showsLabel: false)
-                    .frame(width: expanded ? 80 : 48, height: expanded ? 72 : 48)
+                    .frame(width: swatchWidth, height: swatchHeight)
+                    .frame(maxWidth: swatchMaxWidth)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
 
