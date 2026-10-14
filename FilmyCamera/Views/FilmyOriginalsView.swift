@@ -95,6 +95,9 @@ private struct FilmyDocumentThumbnail: View {
 struct FilmyPhotoEditorView: View {
     let documentID: UUID
     @ObservedObject var photoLibrary: PhotoLibraryService
+    /// Edit look from the Roll viewer: one Save as new frame action, no
+    /// delete, no overwrite of the linked Photos asset.
+    var savesAsNewFrame = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var document: FilmyPhotoDocument?
@@ -112,6 +115,12 @@ struct FilmyPhotoEditorView: View {
     @State private var message: String?
     @State private var confirmDelete = false
     @State private var selectedRevisionID: UUID?
+
+    init(documentID: UUID, photoLibrary: PhotoLibraryService, savesAsNewFrame: Bool = false) {
+        self.documentID = documentID
+        self.photoLibrary = photoLibrary
+        self.savesAsNewFrame = savesAsNewFrame
+    }
 
     var body: some View {
         ScrollView {
@@ -137,7 +146,7 @@ struct FilmyPhotoEditorView: View {
                     }.pickerStyle(.segmented)
                     developmentActions
                     if let message { Text(message).font(.callout).accessibilityIdentifier("filmy-document-message") }
-                    Text("Editing previews are SDR and limited to 1800 pixels. HDR is preserved in the saved HEIF when selected. Save version renders from the retained original at the selected output resolution. Every save creates a new version.")
+                    Text("Editing previews are SDR and limited to 1800 pixels. HDR is preserved in the saved HEIF when selected. \(saveActionName) renders from the retained original at the selected output resolution. Every save creates a new version.")
                         .font(.caption).foregroundStyle(.secondary)
                     revisionPicker(document)
                     exportControls(document)
@@ -145,13 +154,17 @@ struct FilmyPhotoEditorView: View {
                     Text(message).font(.callout).accessibilityIdentifier("filmy-document-message")
                 }
                 if busy { ProgressView("Processing photo").frame(maxWidth: .infinity) }
-                Button("Delete Filmy original and versions", role: .destructive) { confirmDelete = true }
-                    .accessibilityIdentifier("filmy-delete-original")
+                if !savesAsNewFrame {
+                    Button("Delete Filmy original and versions", role: .destructive) { confirmDelete = true }
+                        .accessibilityIdentifier("filmy-delete-original")
+                }
             }
             .padding(20).frame(maxWidth: 760).frame(maxWidth: .infinity)
         }
-        .navigationTitle("Develop again")
+        .navigationTitle(savesAsNewFrame ? "Edit look" : "Develop again")
         .toolbar(.visible, for: .navigationBar)
+        .toolbar { editLookToolbar }
+        .interactiveDismissDisabled(savesAsNewFrame && busy)
         .disabled(busy)
         .task { await load() }
         .onChange(of: message) { _, newValue in
@@ -165,6 +178,17 @@ struct FilmyPhotoEditorView: View {
                 }
             }
         } message: { Text("This cannot be undone. Existing exports in Apple Photos will not be deleted.") }
+    }
+
+    @ToolbarContentBuilder
+    private var editLookToolbar: some ToolbarContent {
+        if savesAsNewFrame {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") { dismiss() }
+                    .disabled(busy)
+                    .accessibilityIdentifier("gallery-edit-look-done")
+            }
+        }
     }
 
     private var imagePreview: some View {
@@ -195,10 +219,18 @@ struct FilmyPhotoEditorView: View {
         Button("Preview look") { Task { await develop(save: false) } }
             .buttonStyle(.bordered)
             .frame(maxWidth: .infinity, minHeight: 44)
-        Button("Save version") { Task { await develop(save: true) } }
-            .buttonStyle(.borderedProminent)
-            .frame(maxWidth: .infinity, minHeight: 44)
-            .accessibilityIdentifier("filmy-save-version")
+        if savesAsNewFrame {
+            Button("Save as new frame") { Task { await saveAsNewFrame() } }
+                .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .accessibilityHint("Saves this look as a new version and adds it to your Roll as a new frame. This frame is kept.")
+                .accessibilityIdentifier("filmy-save-new-frame")
+        } else {
+            Button("Save version") { Task { await develop(save: true) } }
+                .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .accessibilityIdentifier("filmy-save-version")
+        }
     }
 
     private func revisionPicker(_ document: FilmyPhotoDocument) -> some View {
@@ -221,9 +253,11 @@ struct FilmyPhotoEditorView: View {
         VStack(alignment: .leading, spacing: 12) {
             Divider()
             Text("Export saved version").font(.headline)
-            Button(document.photosAssetIdentifier == nil ? "Save to Photos" : "Update linked Photos asset") {
-                Task { await export(asNewCopy: false) }
-            }.buttonStyle(.borderedProminent).accessibilityIdentifier("filmy-export-photos")
+            if !savesAsNewFrame {
+                Button(document.photosAssetIdentifier == nil ? "Save to Photos" : "Update linked Photos asset") {
+                    Task { await export(asNewCopy: false) }
+                }.buttonStyle(.borderedProminent).accessibilityIdentifier("filmy-export-photos")
+            }
             if document.photosAssetIdentifier != nil {
                 Button("Export a new Photos copy") { Task { await export(asNewCopy: true) } }.buttonStyle(.bordered)
             }
@@ -277,6 +311,17 @@ struct FilmyPhotoEditorView: View {
         loadingRendition = false
     }
 
+    private var saveActionName: String { savesAsNewFrame ? "Save as new frame" : "Save version" }
+
+    /// Edit look: keep the look as a new version, then add it to Photos as a
+    /// new asset. The original and the linked Photos asset are never touched.
+    private func saveAsNewFrame() async {
+        let before = document?.currentRevision?.id
+        await develop(save: true)
+        guard let after = document?.currentRevision?.id, after != before else { return }
+        await export(asNewCopy: true)
+    }
+
     private func develop(save: Bool) async {
         guard !busy, let document, let current = document.currentRevision,
               let editing = document.revisionForEditing(selectedRevisionID), let recipe else { return }
@@ -323,7 +368,7 @@ struct FilmyPhotoEditorView: View {
                 self.document = updated
                 selectedRevisionID = updated.currentRevision?.id
                 message = "New version saved. Your original is unchanged."
-            } else { message = "Preview only. Save version before exporting." }
+            } else { message = savesAsNewFrame ? "Preview only. Tap Save as new frame to keep it." : "Preview only. Save version before exporting." }
         } catch { message = error.localizedDescription }
     }
 

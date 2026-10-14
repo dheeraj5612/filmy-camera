@@ -141,12 +141,7 @@ struct GalleryScreen: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 10) {
-                        rollHeading
-                            .padding(.horizontal, FilmyTheme.pageMargin)
-
-                        if captureCount > 0 {
-                            rollCapturesRow
-                        }
+                        rollHeadingBlock
 
                         if usesStackedImport && !photoLibrary.galleryAssets.isEmpty {
                             stackedImportButton
@@ -169,7 +164,7 @@ struct GalleryScreen: View {
                             originalsLink
                         }
                     }
-                    .padding(.top, 18)
+                    .padding(.top, dynamicTypeSize.isAccessibilitySize ? 18 : 8)
                     .padding(.bottom, 28)
                 }
             }
@@ -245,7 +240,7 @@ struct GalleryScreen: View {
         .buttonStyle(.plain)
         .accessibilityLabel("Import photo")
         .accessibilityInputLabels(["Import", "Import photo"])
-        .accessibilityHint("Choose a photo and apply the current film recipe")
+        .accessibilityHint("Pick a photo from Photos. You can change its look before you save a copy.")
         .accessibilityIdentifier("roll-import-photo")
     }
 
@@ -268,12 +263,52 @@ struct GalleryScreen: View {
         .buttonStyle(.filmySecondary)
         .accessibilityLabel("Import photo")
         .accessibilityInputLabels(["Import", "Import photo"])
-        .accessibilityHint("Choose a photo and apply the current film recipe")
+        .accessibilityHint("Pick a photo from Photos. You can change its look before you save a copy.")
         .accessibilityIdentifier("roll-import-photo")
         .padding(.horizontal, FilmyTheme.pageMargin)
     }
 
+    @ViewBuilder
+    private var rollHeadingBlock: some View {
+        if captureCount > 0 && !dynamicTypeSize.isAccessibilitySize {
+            ViewThatFits(in: .horizontal) {
+                rollHeadingWithCapturesInline
+                rollHeadingWithCapturesStacked
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                rollHeading
+                    .padding(.horizontal, FilmyTheme.pageMargin)
+                if captureCount > 0 {
+                    rollCapturesRow
+                }
+            }
+        }
+    }
+
+    private var rollHeadingWithCapturesInline: some View {
+        HStack(alignment: .center, spacing: 12) {
+            rollHeading
+            rollCapturesButton
+        }
+        .padding(.horizontal, FilmyTheme.pageMargin)
+    }
+
+    private var rollHeadingWithCapturesStacked: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            rollHeading
+                .padding(.horizontal, FilmyTheme.pageMargin)
+            rollCapturesRow
+        }
+    }
+
     private var rollCapturesRow: some View {
+        rollCapturesButton
+            .padding(.horizontal, FilmyTheme.pageMargin)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var rollCapturesButton: some View {
         Button {
             HapticFeedback.play(.selection)
             capturesModel.errorMessage = nil
@@ -301,8 +336,6 @@ struct GalleryScreen: View {
         .accessibilityValue(captureCount == 1 ? "1 item" : "\(captureCount) items")
         .accessibilityHint("Photos, videos and panoramas saved from Capture modes")
         .accessibilityIdentifier("roll-open-captures")
-        .padding(.horizontal, FilmyTheme.pageMargin)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var rollSummary: some View {
@@ -1428,6 +1461,56 @@ private final class GalleryChromeState: ObservableObject {
     @Published var isHidden = false
 }
 
+/// Maps a Roll frame (Photos identifier) to its kept Filmy original, so the
+/// viewer can offer Edit look. One instance per pager presentation. Reloads
+/// merge and never remove, so a frame keeps Edit for the whole viewer session
+/// even after an export re-links its document to the new copy.
+@MainActor
+private final class GalleryOriginalsIndex: ObservableObject {
+    @Published private(set) var documentIDs: [String: UUID] = [:]
+    /// Set after one successful scan, empty or not; a failed scan retries on
+    /// the next frame. One scan at a time; a reload asked for mid-scan runs
+    /// once after it.
+    private var hasLoaded = false
+    private var isLoading = false
+    private var reloadPending = false
+
+    func loadIfNeeded() {
+        guard !hasLoaded else { return }
+        reload()
+    }
+
+    func reload() {
+        guard !isLoading else {
+            reloadPending = true
+            return
+        }
+        isLoading = true
+        Task(priority: .utility) { [weak self] in
+            let inventory = try? await FilmyPhotoStore.shared.inventory()
+            guard let self else { return }
+            self.isLoading = false
+            if let inventory {
+                self.hasLoaded = true
+                var found: [String: UUID] = [:]
+                for document in inventory.documents {
+                    guard let identifier = document.photosAssetIdentifier, found[identifier] == nil else { continue }
+                    found[identifier] = document.id
+                }
+                self.documentIDs.merge(found) { _, new in new }
+            }
+            if self.reloadPending {
+                self.reloadPending = false
+                self.reload()
+            }
+        }
+    }
+}
+
+private struct EditLookTarget: Identifiable {
+    let id: UUID
+}
+
 /// UIKit owns the interactive horizontal slide and cancellation physics.
 /// Selection changes only after a completed transition, not during a drag.
 private struct GalleryPager: UIViewControllerRepresentable {
@@ -1469,6 +1552,7 @@ private struct GalleryPager: UIViewControllerRepresentable {
     final class Coordinator: NSObject, UIPageViewControllerDataSource, UIPageViewControllerDelegate {
         var parent: GalleryPager
         let chrome = GalleryChromeState()
+        let originals = GalleryOriginalsIndex()
         weak var pager: UIPageViewController?
         var pages: [String: GalleryPageController] = [:]
         private var assets: [PhotoLibraryGalleryAsset] = []
@@ -1560,6 +1644,7 @@ private struct GalleryPager: UIViewControllerRepresentable {
                 photoLibrary: parent.photoLibrary,
                 visibleIDs: parent.visibleIDs,
                 chrome: chrome,
+                originals: originals,
                 onBackToCamera: parent.onBackToCamera,
                 onClose: { [weak self] in self?.parent.selection = nil },
                 onZoomChanged: { [weak self] zoomed in
@@ -1693,6 +1778,7 @@ private struct GalleryDetailView: View {
     @ObservedObject var photoLibrary: PhotoLibraryService
     let visibleIDs: Set<String>?
     @ObservedObject var chrome: GalleryChromeState
+    @ObservedObject var originals: GalleryOriginalsIndex
     let onBackToCamera: () -> Void
 
     let onClose: () -> Void
@@ -1723,6 +1809,7 @@ private struct GalleryDetailView: View {
     @State private var isDraggingFrame = false
     @State private var shareGeneration = 0
     @State private var isShowingInfo = false
+    @State private var editLookTarget: EditLookTarget?
 
     /// The frames the pager walks: the Roll, narrowed by the look filter.
     private var pagedAssets: [PhotoLibraryGalleryAsset] {
@@ -1767,6 +1854,7 @@ private struct GalleryDetailView: View {
         .task(id: imageTaskID) {
             await loadImage()
         }
+        .task { originals.loadIfNeeded() }
         .onDisappear {
             shareGeneration &+= 1
             if !isShowingShareSheet, let shareURL {
@@ -1791,6 +1879,11 @@ private struct GalleryDetailView: View {
             if let shareURL {
                 ShareSheet(items: [shareURL])
                     .presentationDetents([.medium, .large])
+            }
+        }
+        .sheet(item: $editLookTarget, onDismiss: { originals.reload() }) { target in
+            NavigationStack {
+                FilmyPhotoEditorView(documentID: target.id, photoLibrary: photoLibrary, savesAsNewFrame: true)
             }
         }
         .alert(
@@ -1822,12 +1915,62 @@ private struct GalleryDetailView: View {
             if pagedAssets.count > 1 {
                 pagingControls
             }
-            if let metadata = photoLibrary.metadata(for: asset) {
-                metadataCard(metadata)
-            }
+            bottomInfoRow
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 14)
+    }
+
+    /// Edit look: the id of the kept original behind this frame. Photos
+    /// frames with read access only, so it never coexists with cachedFrameNote.
+    private var editDocumentID: UUID? {
+        guard asset.isPhotosAsset,
+              PhotoLibraryAuthorizationPolicy.canRead(photoLibrary.authorizationStatus) else { return nil }
+        return originals.documentIDs[asset.id]
+    }
+
+    /// True when the Edit capsule sits beside the metadata card (non-AX sizes).
+    private var editBesideCard: Bool {
+        editDocumentID != nil && !dynamicTypeSize.isAccessibilitySize
+    }
+
+    @ViewBuilder
+    private var bottomInfoRow: some View {
+        let metadata: SavedFrameMetadata? = photoLibrary.metadata(for: asset)
+        let showsEditButton = editBesideCard
+        if showsEditButton, let metadata {
+            HStack(alignment: .center, spacing: 8) {
+                metadataCard(metadata).layoutPriority(1)
+                editLookButton
+            }
+        } else if showsEditButton {
+            HStack {
+                Spacer(minLength: 0)
+                editLookButton
+            }
+        } else if let metadata {
+            metadataCard(metadata)
+        }
+    }
+
+    private var editLookButton: some View {
+        Button {
+            editLookTarget = editDocumentID.map { EditLookTarget(id: $0) }
+        } label: {
+            Label("Edit", systemImage: "slider.horizontal.3")
+                .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .frame(minHeight: FilmyTheme.minimumHitTarget)
+                .viewfinderChrome(Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .disabled(isDeleting)
+        .accessibilityLabel("Edit look")
+        .accessibilityHint("Opens this frame's kept original. Save as new frame adds a copy to your Roll and keeps this one.")
+        .accessibilityIdentifier("gallery-edit-look")
     }
 
     /// Controls stay visible for the failed state (Close, Try Again) and for
@@ -2086,6 +2229,8 @@ private struct GalleryDetailView: View {
                 Text(metadata.capturedAt, format: .dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
                     .font(.system(.caption, design: .rounded).weight(.medium))
                     .foregroundStyle(.white.opacity(0.76))
+                    .lineLimit(editBesideCard ? 1 : nil)
+                    .minimumScaleFactor(editBesideCard ? 0.8 : 1)
                 if let cachedFrameNote {
                     Text(cachedFrameNote)
                         .font(.system(.caption, design: .rounded).weight(.medium))
@@ -2164,6 +2309,14 @@ private struct GalleryDetailView: View {
 
     @ViewBuilder
     private var toolbarTrailingControls: some View {
+        if dynamicTypeSize.isAccessibilitySize, let editID = editDocumentID {
+            FilmyIconButton(systemName: "slider.horizontal.3", accessibilityLabel: "Edit look") {
+                editLookTarget = EditLookTarget(id: editID)
+            }
+            .disabled(isDeleting)
+            .accessibilityIdentifier("gallery-edit-look")
+        }
+
         FilmyIconButton(systemName: "info.circle", accessibilityLabel: "Frame info") {
             isShowingInfo = true
         }

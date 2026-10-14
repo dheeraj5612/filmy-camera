@@ -89,6 +89,7 @@ final class NormalRollManagementTests: XCTestCase {
         screenshot("frame-double-tap-zoom")
         photo.doubleTap()
         XCTAssertTrue(waitUntil { (photo.value as? String) == "Fit to screen" })
+        XCTAssertFalse(app.buttons["gallery-edit-look"].exists, "A frame without a kept original must not offer Edit look")
 
         let metadataBefore = app.descendants(matching: .any)["gallery-frame-metadata"].label
         XCTAssertFalse(metadataBefore.contains("Local copy"), "A Photos frame must not carry the cached-frame note")

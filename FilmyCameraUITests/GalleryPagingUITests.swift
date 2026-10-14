@@ -124,6 +124,22 @@ final class GalleryPagingUITests: XCTestCase {
         }
         XCTAssertTrue(waitUntil(timeout: 10) { !copy.exists })
         assertFrame(2, recipe: "Fine Monochrome")
+
+        // Edit look opens the kept original in the editor. Nothing is saved
+        // or deleted here: the test only checks the mode and closes it.
+        let edit = app.buttons["gallery-edit-look"]
+        XCTAssertTrue(edit.waitForExistence(timeout: 10) && edit.isHittable)
+        XCTAssertGreaterThanOrEqual(edit.frame.height, 44)
+        edit.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["filmy-edit-recipe"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["filmy-save-new-frame"].exists)
+        XCTAssertFalse(app.buttons["filmy-save-version"].exists)
+        XCTAssertFalse(app.buttons["filmy-delete-original"].exists)
+        XCTAssertFalse(app.buttons["filmy-export-photos"].exists)
+        XCTAssertTrue(app.navigationBars["Edit look"].exists)
+        attach("roll-paging-edit-look")
+        app.buttons["gallery-edit-look-done"].tap()
+        assertFrame(2, recipe: "Fine Monochrome")
         app.buttons["frame-back-to-camera"].tap()
         XCTAssertTrue(waitForFreshCameraFrames())
     }
