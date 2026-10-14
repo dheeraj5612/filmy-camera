@@ -206,6 +206,9 @@ final class NormalRollManagementTests: XCTestCase {
 
         openRoll()
         XCTAssertTrue(app.staticTexts["Local cache"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["gallery-photos-permission-settings"].waitForExistence(timeout: 10),
+                      "Denied Roll keeps its warning notice with the settings action")
+        screenshot("photos-denied-roll-notice")
         let saved = savedFrameButton()
         XCTAssertTrue(saved.waitForExistence(timeout: 15) && saved.isHittable)
         saved.tap()

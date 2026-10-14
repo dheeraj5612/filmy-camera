@@ -53,11 +53,11 @@ struct SceneAutoControl: View {
                     .minimumScaleFactor(0.7)
             }
             .font(.system(size: 10, weight: .bold, design: .rounded))
-            .foregroundStyle(enabled ? FilmyTheme.accent : FilmyTheme.secondary)
+            .foregroundStyle(enabled ? FilmyTheme.filmAccent : FilmyTheme.secondary)
             .padding(.horizontal, 9)
             .frame(width: 130, height: FilmyTheme.minimumHitTarget)
             .background(Color.black.opacity(0.68), in: Capsule())
-            .overlay { Capsule().stroke(FilmyTheme.accent.opacity(enabled ? 0.36 : 0.12), lineWidth: 1) }
+            .overlay { Capsule().stroke(enabled ? FilmyTheme.filmAccent.opacity(0.36) : FilmyTheme.line, lineWidth: 1) }
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)

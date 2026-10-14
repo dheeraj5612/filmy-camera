@@ -893,7 +893,7 @@ struct ExposureControl: View {
                     Text(valueText)
                         .font(.system(size: 14, weight: .bold, design: .monospaced))
                         .monospacedDigit()
-                        .foregroundStyle(value == 0 ? FilmyTheme.primary : FilmyTheme.accent)
+                        .foregroundStyle(roundedValue == 0 ? FilmyTheme.primary : FilmyTheme.filmAccent)
                 }
                 .frame(minWidth: 48, minHeight: 48)
                 .contentShape(Rectangle())
@@ -960,7 +960,7 @@ struct FocusLockControl: View {
                 .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.toolControlHeight)
                 .background {
                     if isLocked {
-                        Capsule().fill(FilmyTheme.accent)
+                        Capsule().fill(FilmyTheme.filmAccent)
                     } else {
                         ChromeShapeBackground(shape: Capsule())
                     }

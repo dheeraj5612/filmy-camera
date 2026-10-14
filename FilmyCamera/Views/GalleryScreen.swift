@@ -353,6 +353,7 @@ struct GalleryScreen: View {
                 .accessibilityHidden(true)
             Text("Newest first")
             Text("·")
+                .accessibilityHidden(true)
             Text(archiveSourceLabel)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -1196,7 +1197,7 @@ struct GalleryScreen: View {
 
     private var archiveAccessNotice: some View {
         HStack(alignment: .top, spacing: 12) {
-            SettingIcon(systemName: "lock.open")
+            SettingIcon(systemName: "exclamationmark.triangle", tint: FilmyTheme.warning)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Showing saved frames only")
@@ -1218,16 +1219,16 @@ struct GalleryScreen: View {
             Spacer(minLength: 0)
         }
         .padding(14)
-        .background(FilmyTheme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous))
+        .background(FilmyTheme.warning.opacity(0.08), in: RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous)
-                .strokeBorder(FilmyTheme.accent.opacity(0.26), lineWidth: 1)
+                .strokeBorder(FilmyTheme.warning.opacity(0.26), lineWidth: 1)
         }
     }
 
     private var readAccessNotice: some View {
         HStack(alignment: .top, spacing: 12) {
-            SettingIcon(systemName: "lock.open")
+            SettingIcon(systemName: "lock.open", tint: FilmyTheme.secondary)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Showing saved frames only")
@@ -1249,10 +1250,10 @@ struct GalleryScreen: View {
             Spacer(minLength: 0)
         }
         .padding(14)
-        .background(FilmyTheme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous))
+        .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous)
-                .strokeBorder(FilmyTheme.accent.opacity(0.26), lineWidth: 1)
+                .strokeBorder(FilmyTheme.line, lineWidth: 1)
         }
     }
 
@@ -2091,7 +2092,7 @@ private struct GalleryDetailView: View {
                     .font(.system(size: 28, weight: .medium))
                     .foregroundStyle(FilmyTheme.secondary)
                 Eyebrow(text: "FRAME COULDN’T LOAD")
-                Button("Try Again") {
+                Button("Try again") {
                     // Keep the bars up while the reload runs; the failure
                     // state that forced them visible clears at load start.
                     chrome.isHidden = false

@@ -213,7 +213,7 @@ struct ManualCameraControlsView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Eyebrow(text: "CAMERA", color: FilmyTheme.filmAccent)
+                    Eyebrow(text: "CAMERA", color: FilmyTheme.accent)
                     Text(controls.activeDeviceName)
                         .font(.system(.title3, design: .rounded).weight(.bold))
                         .foregroundStyle(FilmyTheme.primary)
@@ -304,13 +304,13 @@ struct ManualCameraControlsView: View {
                                     .padding(.top, 1)
                             }
                         }
-                        .foregroundStyle(selectedSection == section ? FilmyTheme.filmAccent : FilmyTheme.primary)
+                        .foregroundStyle(selectedSection == section ? FilmyTheme.accent : FilmyTheme.primary)
                         .padding(.horizontal, 12)
                         .frame(maxWidth: .infinity, minHeight: dynamicTypeSize.isAccessibilitySize ? 72 : 60, alignment: .leading)
-                        .background(selectedSection == section ? FilmyTheme.filmAccent.opacity(0.18) : FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .background(selectedSection == section ? FilmyTheme.accent.opacity(0.18) : FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .overlay {
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .strokeBorder(selectedSection == section ? FilmyTheme.filmAccent : FilmyTheme.line, lineWidth: 1)
+                                .strokeBorder(selectedSection == section ? FilmyTheme.accent : FilmyTheme.line, lineWidth: 1)
                         }
                     }
                     .buttonStyle(.plain)
@@ -376,7 +376,7 @@ struct ManualCameraControlsView: View {
                     } label: {
                         HStack(spacing: 12) {
                             Image(systemName: lens.isActive ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(lens.isActive ? FilmyTheme.filmAccent : FilmyTheme.secondary)
+                                .foregroundStyle(lens.isActive ? FilmyTheme.accent : FilmyTheme.secondary)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(lens.title)
                                     .font(.system(.subheadline, design: .rounded).weight(.bold))
@@ -393,7 +393,7 @@ struct ManualCameraControlsView: View {
                         .background(FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .overlay {
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(lens.isActive ? FilmyTheme.filmAccent : FilmyTheme.line, lineWidth: 1)
+                                .stroke(lens.isActive ? FilmyTheme.accent : FilmyTheme.line, lineWidth: 1)
                         }
                     }
                     .buttonStyle(.plain)
@@ -446,10 +446,7 @@ struct ManualCameraControlsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if controls.flashRequiresAutoExposure {
-                    Text("Flash is off in Manual. Auto restores it.")
-                        .font(.system(.caption, design: .rounded).weight(.semibold))
-                        .foregroundStyle(FilmyTheme.accent)
-                        .fixedSize(horizontal: false, vertical: true)
+                    ProReasonLine(text: "Flash is off in Manual. Auto restores it.")
                 }
             } else if !controls.manualExposureSupported {
                 unsupportedText("Manual ISO and shutter are unavailable on this camera.")
@@ -624,10 +621,10 @@ struct ManualCameraControlsView: View {
                 .font(.system(.subheadline, design: .rounded).weight(.bold))
                 .frame(maxWidth: .infinity, minHeight: max(FilmyTheme.minimumHitTarget, 44))
                 .foregroundStyle(selected ? FilmyTheme.background : FilmyTheme.primary)
-                .background(selected ? FilmyTheme.filmAccent : FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(selected ? FilmyTheme.accent : FilmyTheme.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(selected ? FilmyTheme.filmAccent : FilmyTheme.line, lineWidth: 1)
+                        .strokeBorder(selected ? FilmyTheme.accent : FilmyTheme.line, lineWidth: 1)
                 }
         }
         .buttonStyle(.plain)
@@ -661,7 +658,7 @@ struct ManualCameraControlsView: View {
                 if !active { onEnded() }
             })
             .disabled(isApplying)
-            .tint(FilmyTheme.filmAccent)
+            .tint(FilmyTheme.accent)
             .accessibilityIdentifier(id)
             .accessibilityLabel(title)
             .accessibilityValue(displayValue)
@@ -681,7 +678,7 @@ struct ManualCameraControlsView: View {
     }
 
     private func unsupportedText(_ text: String) -> some View {
-        ProReasonLine(text: text, permanent: true)
+        ProReasonLine(text: text)
     }
 
     private func syncDraftsIfIdle() {

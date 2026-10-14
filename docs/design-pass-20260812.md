@@ -23,7 +23,7 @@ Symbol rule: every warning or error carries a symbol or words. State is never co
 
 Casing rule: Sentence case for labels, buttons and titles. Uppercase only for short technical readouts: ISO, EV, RAW, HEIF, WB, MF, DR, AE/AF, and viewfinder readouts such as AUTO OFF.
 
-Camera chrome (EV, AE/AF lock, Scene Auto) moves to lime with skin2.
+Camera chrome uses lime for changed state: the EV readout when not 0, AE/AF locked, Scene Auto on and the tracked-subject box. Pro and Manual selection (section tabs, lens rows, mode buttons, sliders) is coral; menu values such as HEIF and Display P3 use secondary ink; the MANUAL chip is the only lime in the Pro sheet. Option explanations in Pro use info.circle and secondary ink; amber is kept for a setting conflict and lost Photos access.
 
 G7 Camera keeps its green palette in the `#if G7_APP` branch.
 

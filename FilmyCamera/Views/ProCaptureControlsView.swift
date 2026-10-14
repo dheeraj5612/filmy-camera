@@ -203,7 +203,7 @@ struct ProCaptureControlsView: View {
                 .accessibilityIdentifier("pro-live-photo")
                 .frame(minHeight: FilmyTheme.minimumHitTarget)
             if livePhotoDisabled {
-                reasonLine(livePhotoReason, permanent: !capabilities.livePhotoSupported)
+                reasonLine(livePhotoReason)
             } else {
                 captionLine("Your look is applied to the still and the movie.")
             }
@@ -214,7 +214,7 @@ struct ProCaptureControlsView: View {
                 .frame(minHeight: FilmyTheme.minimumHitTarget)
         }
         if let reason = capabilities.unavailableReason(for: settings) {
-            ProReasonLine(text: reason).accessibilityIdentifier("pro-capture-unavailable")
+            ProReasonLine(text: reason, warning: true).accessibilityIdentifier("pro-capture-unavailable")
         }
     }
 
@@ -236,8 +236,8 @@ struct ProCaptureControlsView: View {
         Text(text).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
     }
 
-    private func reasonLine(_ text: String, permanent: Bool = false) -> some View {
-        ProReasonLine(text: text, permanent: permanent)
+    private func reasonLine(_ text: String) -> some View {
+        ProReasonLine(text: text)
     }
 
     private func groupHeading(_ text: String) -> some View {
@@ -304,13 +304,13 @@ private struct ProChoiceRow<Control: View>: View {
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 4) {
                     label
-                    control()
+                    control().tint(FilmyTheme.secondary)
                 }
             } else {
                 HStack(spacing: 12) {
                     label
                     Spacer(minLength: 8)
-                    control()
+                    control().tint(FilmyTheme.secondary)
                 }
             }
         }
@@ -326,16 +326,21 @@ private struct ProChoiceRow<Control: View>: View {
     }
 }
 
-/// Reason an option is off: icon plus words. Permanent = this camera cannot do it.
+/// Reason an option is off: info icon plus secondary words. Warning = the
+/// chosen settings cannot be captured (amber triangle plus words).
 struct ProReasonLine: View {
     let text: String
-    var permanent = false
+    var warning = false
 
-    var body: some View {
-        Label(text, systemImage: permanent ? "info.circle" : "exclamationmark.circle")
-            .font(.caption)
-            .foregroundStyle(permanent ? FilmyTheme.secondary : Color.orange)
-            .fixedSize(horizontal: false, vertical: true)
+    @ViewBuilder var body: some View {
+        if warning {
+            FilmyNoticeLabel(message: text, kind: .warning, font: .caption)
+        } else {
+            Label(text, systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(FilmyTheme.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 
@@ -381,7 +386,7 @@ private struct TrackedSubjectBox: View {
         if let rect = state.trackedSubjectRectangle,
            let frame = FocusAssistOverlay.displayRect(rect, source: previewFrameSize, viewport: viewport) {
             RoundedRectangle(cornerRadius: 8)
-                .stroke(.yellow, lineWidth: 2)
+                .stroke(FilmyTheme.filmAccent, lineWidth: 2)
                 .frame(width: frame.width, height: frame.height)
                 .position(x: frame.midX, y: frame.midY)
         }
