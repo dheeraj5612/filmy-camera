@@ -58,7 +58,7 @@ struct FujiViewfinderOverlay: View {
                     VStack(spacing: 4) {
                         Image(uiImage: image).resizable().scaledToFit().frame(width: 112, height: 112)
                             .clipShape(Circle()).overlay(Circle().stroke(.white, lineWidth: 1))
-                        Text("RELATIVE CONTRAST \(Int(controller.focusContrast * 100))%")
+                        Text("Relative contrast \(Int(controller.focusContrast * 100))%")
                             .font(.system(size: 9, weight: .semibold, design: .monospaced))
                             .padding(4).background(.black.opacity(0.6), in: Capsule())
                     }
@@ -94,7 +94,7 @@ private struct FujiViewfinderStateChip: View {
         HStack(spacing: 6) {
             Image(systemName: state.isBlocked ? "exclamationmark.triangle.fill" : "circle.fill")
                 .imageScale(.small)
-                .foregroundStyle(state.isBlocked ? Color.orange : FilmyTheme.filmAccent)
+                .foregroundStyle(state.isBlocked ? FilmyTheme.warning : FilmyTheme.filmAccent)
             Text(state.text).minimumScaleFactor(0.75).lineLimit(2)
         }
         .font(.caption2.weight(.semibold).monospaced())
@@ -131,7 +131,7 @@ struct FujiShootingStatusView: View {
                 }
                 if let error = controller.errorMessage {
                     HStack(alignment: .top) {
-                        Text(error).font(.caption).fixedSize(horizontal: false, vertical: true)
+                        FilmyNoticeLabel(message: error, kind: .error, font: .caption)
                         Spacer()
                         Button("Dismiss") { controller.errorMessage = nil }.font(.caption).frame(minWidth: 44, minHeight: 44)
                     }
@@ -146,7 +146,7 @@ struct FujiShootingStatusView: View {
             .confirmationDialog(discardTitle, isPresented: $confirmDiscard, titleVisibility: .visible) {
                 Button("Discard layers", role: .destructive) { controller.cancel() }
                 Button("Keep composing", role: .cancel) {}
-            } message: { Text("The blended composite is discarded. Layer sources stay in RAW Develop.") }
+            } message: { Text("The blended composite is discarded. Layer sources stay in RAW develop.") }
         }
         }
         .onChange(of: controller.isComposing) { _, composing in if !composing { confirmDiscard = false } }

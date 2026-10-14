@@ -16,8 +16,8 @@ enum FujiDrive: String, Codable, CaseIterable, Identifiable, Sendable {
     var title: String {
         switch self {
         case .single: return "Single frame"
-        case .continuousLow: return "Continuous Low"
-        case .continuousHigh: return "Continuous High"
+        case .continuousLow: return "Continuous low"
+        case .continuousHigh: return "Continuous high"
         case .aeBracket: return "AE bracketing"
         case .isoBracket: return "ISO bracketing"
         case .whiteBalanceBracket: return "White balance bracketing"
@@ -226,7 +226,7 @@ enum FujiShootingError: LocalizedError, Equatable, Sendable {
         case .unsupportedFocus: return "Focus bracketing requires a lens with manual focus control."
         case .exposureOutOfRange: return "The requested bracket or highlight protection exceeds this lens's exposure range."
         case .invalidCombination(let detail): return detail
-        case .processingFailed: return "The frame could not be developed. Retained originals remain in RAW Develop or the capture source folder."
+        case .processingFailed: return "The frame could not be developed. Retained originals remain in RAW develop or the capture source folder."
         case .alignmentFailed: return "Frames moved too far to stack safely. Use a tripod and a smaller focus range."
         case .storageFailed: return "The capture could not be written to local storage. Free some space and retry."
         }

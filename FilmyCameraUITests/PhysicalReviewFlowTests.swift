@@ -557,7 +557,7 @@ final class PhysicalCaptureFeatureTests: XCTestCase {
         XCTAssertTrue(raw.waitForExistence(timeout: 8) && raw.isEnabled,
                       "Fuji RAW development must be available to inspect retained sequence sources")
         raw.tap()
-        XCTAssertTrue(app.staticTexts["RAW Develop"].waitForExistence(timeout: 12))
+        XCTAssertTrue(app.navigationBars["RAW develop"].waitForExistence(timeout: 12))
         XCTAssertTrue(
             app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH[c] %@", prefix)).firstMatch.waitForExistence(timeout: 20),
             "Fuji originals must retain a source labeled \(prefix)"
@@ -666,13 +666,13 @@ final class PhysicalFeatureGapTests: XCTestCase {
         launchPhysicalCamera()
         try openFujiDrive("interval")
 
-        guard app.buttons["Use Interval Shooting"].waitForExistence(timeout: 5) else {
-            XCTFail("Interval detail must expose Use Interval Shooting on a supported device")
+        guard app.buttons["Use interval shooting"].waitForExistence(timeout: 5) else {
+            XCTFail("Interval detail must expose Use interval shooting on a supported device")
             return
         }
         reduceStepper(containing: "Frames", to: "Frames: 2")
         reduceStepper(containing: "Interval", to: "Interval: 1 seconds")
-        app.buttons["Use Interval Shooting"].tap()
+        app.buttons["Use interval shooting"].tap()
         app.buttons["Back"].tap()
         XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
         app.buttons["Done"].tap()
@@ -688,7 +688,7 @@ final class PhysicalFeatureGapTests: XCTestCase {
         launchPhysicalCamera()
         try openFujiDrive("focusStack")
 
-        guard app.buttons["Use Focus Stacking · fused image"].waitForExistence(timeout: 5) else {
+        guard app.buttons["Use focus stacking · fused image"].waitForExistence(timeout: 5) else {
             let unavailable = app.staticTexts["Focus bracketing requires a lens with manual focus control."]
             if unavailable.exists {
                 throw XCTSkip(unavailable.label)
@@ -697,7 +697,7 @@ final class PhysicalFeatureGapTests: XCTestCase {
             return
         }
         reduceStepper(containing: "Positions", to: "Positions: 2")
-        app.buttons["Use Focus Stacking · fused image"].tap()
+        app.buttons["Use focus stacking · fused image"].tap()
         app.buttons["Back"].tap()
         XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
         app.buttons["Done"].tap()
@@ -787,7 +787,7 @@ final class PhysicalFeatureGapTests: XCTestCase {
         let raw = app.buttons["fuji-q-rawDevelopment"]
         XCTAssertTrue(raw.waitForExistence(timeout: 8) && raw.isEnabled)
         raw.tap()
-        XCTAssertTrue(app.staticTexts["RAW Develop"].waitForExistence(timeout: 12))
+        XCTAssertTrue(app.navigationBars["RAW develop"].waitForExistence(timeout: 12))
         for prefix in prefixes {
             XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH[c] %@", prefix)).firstMatch.waitForExistence(timeout: 20),
                           "Fuji originals must retain a source labeled \(prefix)")

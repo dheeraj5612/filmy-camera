@@ -39,7 +39,7 @@ For a code walkthrough, begin with [`FilmyCamera/ContentView.swift`](FilmyCamera
 
 ## Fuji-style shooting controls
 
-The camera's **Q** button opens persistent C1–C7 banks, customizable quick controls, three Auto ISO programs, digital prime cropping/lens lock, electronic/OVF-style/hybrid finders, Natural Live View, contrast-based split/microprism focus aids, and the Drive/BKT system. Capture tools include same-shot film/ISO/WB brackets, real exposure/RAW dynamic-range brackets, focus bracketing/stacking, computational ND, multiple exposures, preview-resolution pre-shot, and foreground interval shooting. The RAW library keeps untouched originals and editable development sidecars; failed Photos exports remain recoverable.
+The camera's **Q** button opens persistent C1–C7 banks, customizable quick controls, three Auto ISO programs, digital prime cropping/lens lock, electronic/OVF-style/hybrid finders, natural live view, contrast-based split/microprism focus aids, and the Drive/BKT system. Capture tools include same-shot film/ISO/WB brackets, real exposure/RAW dynamic-range brackets, focus bracketing/stacking, computational ND, multiple exposures, preview-resolution pre-shot, and foreground interval shooting. The RAW library keeps untouched originals and editable development sidecars; failed Photos exports remain recoverable.
 
 See [the shooting-system guide](docs/fuji-shooting-system.md) for setup, supported behavior, resolution limits, hardware requirements, and device acceptance tests. OVF-style and focusing aids are electronic interpretations, ND is temporal averaging rather than an optical filter, and sensor DR200/400 requires RAW plus real underexposure. Physical-device validation remains necessary before release.
 

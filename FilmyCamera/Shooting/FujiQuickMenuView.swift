@@ -16,7 +16,7 @@ struct FujiQuickMenuView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     HStack {
-                        Text("SHOOTING SYSTEM").font(.caption.weight(.semibold)).tracking(2)
+                        Text("Shooting system").font(.caption.weight(.semibold)).foregroundStyle(FilmyTheme.secondary)
                         Spacer()
                         Text(controller.preferences.selectedBank.map { "C\($0)" } ?? "Custom").font(.headline.monospaced())
                     }
@@ -43,7 +43,7 @@ struct FujiQuickMenuView: View {
                         }
                     }
                     if let message = controller.validationMessage {
-                        Label(message, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.orange)
+                        FilmyNoticeLabel(message: message)
                     }
                     if controller.settingsLocked {
                         Text(controller.isComposing ? "A multiple exposure is in progress. Finish or discard its layers before changing the shooting setup." : "Finish or cancel shooting before changing the setup.")
@@ -57,7 +57,7 @@ struct FujiQuickMenuView: View {
                                 .disabled(controller.isBusy).frame(minHeight: 44)
                         }
                     }
-                    if let error = controller.errorMessage { Text(error).font(.footnote).foregroundStyle(.orange) }
+                    if let error = controller.errorMessage { FilmyNoticeLabel(message: error, kind: .error) }
                     NavigationLink("All shooting controls") {
                         List(FujiQuickControl.allCases) { control in NavigationLink(control.title) { destination(control) } }
                             .navigationTitle("Shooting controls")
@@ -68,7 +68,7 @@ struct FujiQuickMenuView: View {
                 }
                 .padding(20).frame(maxWidth: 680).frame(maxWidth: .infinity)
             }
-            .navigationTitle("Q Menu")
+            .navigationTitle("Q menu")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -212,7 +212,7 @@ private struct FujiBanksView: View {
     private var banksForm: some View {
         Form {
             if let message = controller.errorMessage {
-                Section { Text(message).font(.footnote).foregroundStyle(.orange) }
+                Section { FilmyNoticeLabel(message: message, kind: .error) }
             }
             Section {
                 FujiHint(short: "Save a setup, then recall it in one tap.",
@@ -406,16 +406,16 @@ private struct FujiControlDetail: View {
             }
         case .naturalView:
             Section {
-                Toggle("Natural Live View", isOn: bind(\.naturalLiveView))
+                Toggle("Natural live view", isOn: bind(\.naturalLiveView))
                 FujiHint(short: "Shows the scene without the recipe; saved photos still use it.",
                          long: "Preview without the film recipe's color, grain or tone processing. The selected recipe is still applied to every saved JPEG. OVF-style and Hybrid always use a natural main view.",
-                         topic: "Natural Live View", identifier: "fuji-hint-naturalView")
+                         topic: "Natural live view", identifier: "fuji-hint-naturalView")
             }
         case .nd:
             Section("Temporal ND · long exposure") {
                 Stepper("ND \(controller.settings.ndStops) · \(1 << controller.settings.ndStops) frames", value: bind(\.ndStops), in: 1...5)
                 Toggle("Keep component originals", isOn: bind(\.keepCompositeSources))
-                useDriveButton("Use Computational ND", .computationalND)
+                useDriveButton("Use computational ND", .computationalND)
                 FujiHint(short: "Blends 2–32 frames into one long-exposure look; use a tripod.",
                          long: "Average 2–32 equal-exposure stills in linear light for moving-water and motion-trail effects. Output is bounded to 6 MP. Use a tripod. This is sampled temporal integration, not a physical ND filter: it cannot prevent clipping within a source exposure and gaps may break motion trails.",
                          topic: "Computational ND", identifier: "fuji-hint-nd")
@@ -425,7 +425,7 @@ private struct FujiControlDetail: View {
                 Stepper("Layers: \(controller.settings.multipleExposureCount)", value: bind(\.multipleExposureCount), in: 2...9)
                 Picker("Blend", selection: bind(\.blendMode)) { ForEach(FujiBlendMode.allCases) { Text($0.title).tag($0) } }
                 Toggle("Keep component originals", isOn: bind(\.keepCompositeSources))
-                useDriveButton("Use Multiple Exposure", .multipleExposure)
+                useDriveButton("Use multiple exposure", .multipleExposure)
                 FujiHint(short: "Press once per layer; the photo saves after the last one.",
                          long: "Press the shutter for each layer. A translucent previous-layer guide helps you compose. Recipe, crop and blend are fixed from the first layer. The final composite is saved automatically at the chosen count; output is bounded to 6 MP.",
                          topic: "Multiple exposure", identifier: "fuji-hint-multipleExposure")
@@ -450,8 +450,8 @@ private struct FujiControlDetail: View {
                 Button("Set near to current focus") { controller.change(\.focusNear, to: Double(camera.manualControls.lensPosition)) }
                 Button("Set far to current focus") { controller.change(\.focusFar, to: Double(camera.manualControls.lensPosition)) }
                 Toggle("Keep component originals", isOn: bind(\.keepCompositeSources))
-                useDriveButton("Use Focus Bracketing · separate files", .focusBracket)
-                useDriveButton("Use Focus Stacking · fused image", .focusStack)
+                useDriveButton("Use focus bracketing · separate files", .focusBracket)
+                useDriveButton("Use focus stacking · fused image", .focusStack)
                 FujiHint(short: "Needs manual focus control, a tripod and a still subject.",
                          long: "Requires manual lens-position control. Stacking aligns small translations and fuses locally sharp regions, with a 6 MP budget. Use a tripod and a still subject. Parallax and focus breathing are not corrected; large misalignment fails rather than silently exporting a bad stack.",
                          topic: "Focus stacking", identifier: "fuji-hint-focusStack")
@@ -460,7 +460,7 @@ private struct FujiControlDetail: View {
             Section("Foreground interval shooting") {
                 Stepper("Frames: \(controller.settings.intervalCount)", value: bind(\.intervalCount), in: 2...120)
                 Stepper("Interval: \(Int(controller.settings.intervalSeconds)) seconds", value: bind(\.intervalSeconds), in: 1...3600)
-                useDriveButton("Use Interval Shooting", .interval)
+                useDriveButton("Use interval shooting", .interval)
                 FujiHint(short: "Keep Filmy open; leaving the app stops the sequence.",
                          long: "Intervals are measured start-to-start. The next frame waits when the sensor is slower than the requested interval; missed deadlines never cause a catch-up burst. Keep the app in the foreground. Backgrounding cancels the sequence and retains acquired sources.",
                          topic: "Interval shooting", identifier: "fuji-hint-interval")
@@ -505,37 +505,42 @@ private struct FujiControlDetail: View {
                     Text("⅓ EV").tag(1.0 / 3); Text("⅔ EV").tag(2.0 / 3); Text("1 EV").tag(1.0); Text("2 EV").tag(2.0)
                 }
                 Picker("Sequence", selection: bind(\.bracketOrder)) { ForEach(FujiBracketOrder.allCases) { Text($0.title).tag($0) } }
-                useDriveButton("Use AE Bracketing", .aeBracket)
+                useDriveButton("Use AE bracketing", .aeBracket)
             }
-            Section("Film Simulation BKT · one exposure") {
+            Section("Film simulation BKT · one exposure") {
                 ForEach(0..<3, id: \.self) { index in
                     Picker("Look \(index + 1)", selection: Binding(get: { controller.settings.filmRecipeIDs[index] }, set: { value in
                         var ids = controller.settings.filmRecipeIDs; ids[index] = value; controller.change(\.filmRecipeIDs, to: ids)
                     })) { ForEach(viewModel.recipes) { Text($0.name).tag($0.id) } }
                 }
-                useDriveButton("Use Film Simulation Bracketing", .filmBracket)
+                useDriveButton("Use film simulation bracketing", .filmBracket)
             }
             Section("Same-shot ISO / WB variants") {
                 Picker("ISO BKT step", selection: bind(\.isoBracketStep)) {
                     Text("⅓ EV").tag(1.0 / 3); Text("⅔ EV").tag(2.0 / 3); Text("1 EV").tag(1.0)
                 }
                 Stepper("WB step: \(controller.settings.whiteBalanceStep)", value: bind(\.whiteBalanceStep), in: 1...3)
-                useDriveButton("Use ISO Bracketing", .isoBracket)
-                useDriveButton("Use White Balance Bracketing", .whiteBalanceBracket)
+                useDriveButton("Use ISO bracketing", .isoBracket)
+                useDriveButton("Use white balance bracketing", .whiteBalanceBracket)
                 FujiHint(short: "Three developments of one exposure, not three sensor ISOs.",
                          long: "These create three developments of one exposure, not three different sensor ISO settings. WB shifts use Filmy's normalized temperature control.",
                          topic: "ISO and WB bracketing", identifier: "fuji-hint-bracketing")
             }
-            Section("Dynamic Range BKT · three exposures") {
-                useDriveButton("Use DR100 / DR200 / DR400 Bracketing", .dynamicRangeBracket)
+            Section("Dynamic range BKT · three exposures") {
+                useDriveButton("Use DR100 / DR200 / DR400 bracketing", .dynamicRangeBracket)
                 rawAvailability
             }
         }
     }
 
+    @ViewBuilder
     private var rawAvailability: some View {
-        Text(camera.supportsFujiRAW ? "RAW is available on this camera configuration." : "RAW is unavailable on this configuration. Choose a supported physical rear lens in Sensor controls.")
-            .font(.footnote).foregroundStyle(camera.supportsFujiRAW ? Color.secondary : Color.orange)
+        if camera.supportsFujiRAW {
+            Text("RAW is available on this camera configuration.")
+                .font(.footnote).foregroundStyle(.secondary)
+        } else {
+            FilmyNoticeLabel(message: "RAW is unavailable on this configuration. Choose a supported physical rear lens in Sensor controls.")
+        }
     }
     private func labeledSlider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
         VStack(alignment: .leading) {

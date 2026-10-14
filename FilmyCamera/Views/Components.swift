@@ -101,6 +101,12 @@ enum FilmyTheme {
     // Opaque neutral ink stays legible on all semantic surfaces.
     static let tertiary = Color(white: 0.65)
 
+    // Signal colours have one meaning each.
+    // accent: selection and primary action.
+    // filmAccent: changed from default or manual.
+    // warning: warnings, always with a symbol or words.
+    // danger: errors and destructive actions, always with a symbol or words.
+    // mint: live and success. Compare chrome uses accent plus primary ink.
     // Signal colors
     #if G7_APP
     static let accent = Color(red: 0.388, green: 1.0, blue: 0.604) // #63FF9A
@@ -110,12 +116,13 @@ enum FilmyTheme {
     static let mint = Color(red: 0.839, green: 1.0, blue: 0.886)
     #else
     static let accent = Color(red: 1, green: 0.471, blue: 0.329)
-    static let comparison = Color(red: 0.416, green: 0.863, blue: 1)
     static let accentWarm = Color(red: 1, green: 0.471, blue: 0.329)
     static let filmAccent = Color(red: 0.855, green: 0.953, blue: 0.396)
     static let mint = Color(red: 0.54, green: 0.92, blue: 0.69)
     #endif
     static let danger = Color(red: 1, green: 0.43, blue: 0.47)
+    /// Warnings only, always with a symbol or words. Errors use danger.
+    static let warning = Color(red: 1, green: 0.718, blue: 0.282)
 
     // Chrome that floats over the live viewfinder
     static let chromeFill = Color.black.opacity(0.76)
@@ -679,12 +686,22 @@ struct CameraStatusPill: View {
         availability == .running && isRunning
     }
 
+    private var dotColor: Color {
+        if isLive { return FilmyTheme.mint }
+        switch availability {
+        case .permissionDenied, .requestingPermission, .interrupted, .needsRecovery, .unavailable:
+            return FilmyTheme.warning
+        default:
+            return FilmyTheme.secondary
+        }
+    }
+
     var body: some View {
         HStack(spacing: 7) {
             Circle()
-                .fill(isLive ? FilmyTheme.mint : FilmyTheme.accent)
+                .fill(dotColor)
                 .frame(width: 7, height: 7)
-                .shadow(color: (isLive ? FilmyTheme.mint : FilmyTheme.accent).opacity(0.8), radius: 4)
+                .shadow(color: dotColor.opacity(0.8), radius: 4)
 
             Text(condensedMessage)
                 .font(.system(size: 11, weight: .semibold, design: .default))
@@ -1307,7 +1324,7 @@ struct ToastView: View {
         switch style {
         case .success: FilmyTheme.mint
         case .error: FilmyTheme.danger
-        case .info: FilmyTheme.accent
+        case .info: FilmyTheme.primary
         }
     }
 
@@ -1437,13 +1454,33 @@ struct PermissionBadge: View {
     var body: some View {
         Label(title, systemImage: isEnabled ? "checkmark.circle.fill" : "exclamationmark.circle")
             .font(.caption2.weight(.bold))
-            .foregroundStyle(isEnabled ? FilmyTheme.mint : FilmyTheme.accent)
+            .foregroundStyle(isEnabled ? FilmyTheme.mint : FilmyTheme.warning)
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
             .fixedSize(horizontal: false, vertical: true)
-            .background((isEnabled ? FilmyTheme.mint : FilmyTheme.accent).opacity(0.12), in: Capsule())
+            .background((isEnabled ? FilmyTheme.mint : FilmyTheme.warning).opacity(0.12), in: Capsule())
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(title)
+    }
+}
+
+/// One warning or error line. The symbol carries the state, so colour is
+/// never the only signal. VoiceOver and UI tests read the message unchanged.
+struct FilmyNoticeLabel: View {
+    enum Kind { case warning, error }
+    let message: String
+    var kind: Kind = .warning
+    var font: Font = .footnote
+
+    var body: some View {
+        Label {
+            Text(message).fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: kind == .error ? "exclamationmark.triangle.fill" : "exclamationmark.triangle")
+                .accessibilityHidden(true)
+        }
+        .font(font)
+        .foregroundStyle(kind == .error ? FilmyTheme.danger : FilmyTheme.warning)
     }
 }
 

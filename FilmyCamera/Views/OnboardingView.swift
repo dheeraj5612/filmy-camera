@@ -173,7 +173,7 @@ struct OnboardingView: View {
 
             comparisonLayout {
                 VStack(alignment: .leading, spacing: 4) {
-                    FilmRegistration(color: isShowingOriginal ? FilmyTheme.comparison : FilmyTheme.accent)
+                    FilmRegistration(color: isShowingOriginal ? FilmyTheme.primary : FilmyTheme.accent)
                     Text(isShowingOriginal ? "Original" : recipe.name)
                         .font(.headline)
                         .foregroundStyle(FilmyTheme.primary)
@@ -189,7 +189,7 @@ struct OnboardingView: View {
                 } label: {
                     Label(isShowingOriginal ? "Show look" : "Original", systemImage: "circle.lefthalf.filled")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(FilmyTheme.comparison)
+                        .foregroundStyle(FilmyTheme.accent)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 10)

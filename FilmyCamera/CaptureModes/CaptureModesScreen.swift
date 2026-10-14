@@ -167,7 +167,7 @@ struct CaptureModesScreen: View {
     private var statusBlock: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(model.state.message).font(.subheadline)
-            if let warning = model.state.warning { Text(warning).font(.caption).foregroundStyle(.orange) }
+            if let warning = model.state.warning { FilmyNoticeLabel(message: warning, font: .caption) }
             if let note = filmLookNote, !showingReferenceTray {
                 Text(note).font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("capture-modes-film-note")
             }
@@ -334,6 +334,21 @@ struct CaptureModesScreen: View {
         .accessibilityHidden(model.state.controlsExpanded)
     }
 
+    private func modeChipLabel(_ mode: CaptureMode) -> some View {
+        let isSelected: Bool = model.requestedMode == mode
+        let ink: Color = isSelected ? FilmyTheme.background : FilmyTheme.primary
+        let fill: Color = isSelected ? FilmyTheme.accent : FilmyTheme.panel
+        return HStack(spacing: 6) {
+            Label(mode.title, systemImage: mode.symbol)
+            Image(systemName: "checkmark").font(.caption.weight(.bold))
+                .opacity(isSelected ? 1 : 0).accessibilityHidden(true)
+        }
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(ink)
+        .padding(.horizontal, 14).frame(minHeight: 44)
+        .background(fill, in: Capsule())
+    }
+
     private var modeChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 10) {
@@ -342,10 +357,7 @@ struct CaptureModesScreen: View {
                         if model.requestedMode != mode { HapticFeedback.play(.selection) }
                         model.open(mode)
                     } label: {
-                        Label(mode.title, systemImage: mode.symbol)
-                            .font(.subheadline.weight(.semibold))
-                            .padding(.horizontal, 14).frame(minHeight: 44)
-                            .background(model.requestedMode == mode ? Color.white.opacity(0.22) : Color.white.opacity(0.07), in: Capsule())
+                        modeChipLabel(mode)
                     }
                     .buttonStyle(.plain)
                     .disabled(!model.canConfigure || !CaptureModesEngine.supportedModes.contains(mode))

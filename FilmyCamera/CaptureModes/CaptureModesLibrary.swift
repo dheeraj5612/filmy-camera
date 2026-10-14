@@ -27,7 +27,7 @@ struct CaptureModesLibrary: View {
                     Text("Photos, videos and panoramas saved from Capture modes.").font(.footnote).foregroundStyle(.secondary)
                 }
                 if let error = model.errorMessage {
-                    Section("Action needed") { Text(error).foregroundStyle(.orange).textSelection(.enabled) }
+                    Section("Action needed") { FilmyNoticeLabel(message: error, kind: .error, font: .body).textSelection(.enabled) }
                 }
                 if model.captures.isEmpty {
                     ContentUnavailableView("No captures yet", systemImage: "camera", description: Text("Completed originals are saved here before film processing starts."))
@@ -86,7 +86,7 @@ private struct CaptureModesDetail: View {
                 Text(media.createdAt, format: .dateTime)
                 if media.width > 0 { Text("\(media.width) × \(media.height) pixels · \(media.acceptedFrames) accepted frames") }
                 ForEach(media.notes, id: \.self) { Text($0).font(.caption).foregroundStyle(.secondary) }
-                if let error = model.errorMessage { Text(error).font(.caption).foregroundStyle(.orange) }
+                if let error = model.errorMessage { FilmyNoticeLabel(message: error, kind: .error, font: .caption) }
             }
             Section("Developed files") {
                 if model.exporting || model.state.phase == .processing {
@@ -288,7 +288,7 @@ private struct CaptureLibraryRow: View {
 
     private var originalsNote: some View {
         Text(readOnly ? "Originals retained." : "Originals retained. Processing can be retried.")
-            .font(.caption).foregroundStyle(.orange)
+            .font(.caption).foregroundStyle(FilmyTheme.secondary)
     }
 }
 

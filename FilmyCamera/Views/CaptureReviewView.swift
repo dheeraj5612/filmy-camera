@@ -444,7 +444,7 @@ struct CaptureReviewView: View {
             .lineLimit(1)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(FilmyTheme.comparison, in: Capsule())
+            .background(FilmyTheme.primary, in: Capsule())
             .overlay { Capsule().strokeBorder(.black, lineWidth: 1) }
             .padding(8)
             .allowsHitTesting(false)
@@ -466,7 +466,7 @@ struct CaptureReviewView: View {
                 .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(FilmyTheme.background)
                 .frame(width: 44, height: 44)
-                .background(FilmyTheme.comparison, in: Circle())
+                .background(FilmyTheme.primary, in: Circle())
                 .overlay { Circle().strokeBorder(.black, lineWidth: 2) }
                 .contentShape(Circle())
                 .gesture(
@@ -600,7 +600,7 @@ struct CaptureReviewView: View {
     private var renderStatusRow: some View {
         HStack(spacing: 8) {
             ProgressView()
-                .tint(FilmyTheme.filmAccent)
+                .tint(FilmyTheme.primary)
             Text(
                 isRenderingReview
                     ? "Developing \(pendingReviewRecipeName)…"
@@ -714,24 +714,29 @@ struct CaptureReviewView: View {
 
     private func finishButton(_ candidate: PhotoFinish) -> some View {
         let isSelected = selectedReviewFinish == candidate
+        let unselectedIcon = candidate == .instantPrint ? "rectangle.inset.filled" : "rectangle"
+        let iconName = isSelected ? "checkmark.circle.fill" : unselectedIcon
+        let inkColor = isSelected ? FilmyTheme.accent : FilmyTheme.secondary
+        let strokeColor = isSelected ? FilmyTheme.accent : FilmyTheme.lineStrong
+        let strokeWidth: CGFloat = isSelected ? 2 : 1
         return Button {
             guard !isSaving, !isPreparingReviewOriginal else { return }
             comparison.reset()
             onApplyReviewFinish(candidate)
         } label: {
-            Label(finishTitle(candidate), systemImage: candidate == .instantPrint ? "rectangle.inset.filled" : "rectangle")
+            Label(finishTitle(candidate), systemImage: iconName)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(isSelected ? FilmyTheme.background : FilmyTheme.secondary)
+                .foregroundStyle(inkColor)
                 .lineLimit(2)
             .frame(maxWidth: .infinity, minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
             .padding(.horizontal, 12)
             .background(
-                isSelected ? FilmyTheme.filmAccent : FilmyTheme.panel,
+                FilmyTheme.panel,
                 in: RoundedRectangle(cornerRadius: 14, style: .continuous)
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(isSelected ? FilmyTheme.filmAccent : FilmyTheme.lineStrong, lineWidth: 1)
+                    .strokeBorder(strokeColor, lineWidth: strokeWidth)
             }
         }
         .buttonStyle(.pressable)
@@ -848,7 +853,7 @@ struct CaptureReviewView: View {
     private func trackSegmentLabel(_ title: String, isSelected: Bool, showsProgress: Bool = false) -> some View {
         HStack(spacing: 6) {
             if showsProgress {
-                ProgressView().tint(isSelected ? FilmyTheme.background : FilmyTheme.comparison)
+                ProgressView().tint(isSelected ? FilmyTheme.background : FilmyTheme.primary)
             }
             Text(title)
                 .lineLimit(1)
@@ -860,7 +865,7 @@ struct CaptureReviewView: View {
         .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: 48)
         .background {
             if isSelected {
-                Capsule().fill(FilmyTheme.comparison).padding(3)
+                Capsule().fill(FilmyTheme.accent).padding(3)
             }
         }
         .contentShape(Rectangle())
@@ -869,7 +874,7 @@ struct CaptureReviewView: View {
     private func pillLabel(_ title: String, icon: String, isSelected: Bool, showsProgress: Bool = false) -> some View {
         HStack(spacing: 7) {
             if showsProgress {
-                ProgressView().tint(FilmyTheme.comparison)
+                ProgressView().tint(isSelected ? FilmyTheme.background : FilmyTheme.primary)
             } else {
                 Image(systemName: isSelected ? "checkmark" : icon)
             }
@@ -877,10 +882,10 @@ struct CaptureReviewView: View {
                 .lineLimit(1)
         }
         .font(.caption.weight(.bold))
-        .foregroundStyle(isSelected ? FilmyTheme.background : FilmyTheme.comparison)
+        .foregroundStyle(isSelected ? FilmyTheme.background : FilmyTheme.primary)
         .padding(.horizontal, 12)
         .frame(minHeight: 48)
-        .background(isSelected ? FilmyTheme.comparison : FilmyTheme.panel, in: Capsule())
+        .background(isSelected ? FilmyTheme.accent : FilmyTheme.panel, in: Capsule())
         .contentShape(Capsule())
     }
 
@@ -1028,7 +1033,7 @@ struct CaptureReviewView: View {
                 .accessibilityIdentifier("review-save-error-settings")
                 .accessibilityHint("Opens Filmy Camera Photos permissions")
         } else {
-            Button("Try Again", action: onSave)
+            Button("Try again", action: onSave)
                 .font(.system(.footnote, design: .rounded).weight(.bold))
                 .foregroundStyle(FilmyTheme.accent)
                 .frame(minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)

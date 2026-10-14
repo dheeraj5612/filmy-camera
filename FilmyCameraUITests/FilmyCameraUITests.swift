@@ -2719,7 +2719,7 @@ final class FilmyCameraUITests: XCTestCase {
             XCTFail("RAW develop must open")
             return
         }
-        XCTAssertTrue(app.staticTexts["RAW Develop"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.navigationBars["RAW develop"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Originals kept here stay on this device'")).firstMatch.waitForExistence(timeout: 5))
         attachScreenshot(named: "fuji-raw-library")
         app.navigationBars.buttons.element(boundBy: 0).tap()
@@ -2760,10 +2760,10 @@ final class FilmyCameraUITests: XCTestCase {
             XCTFail("Q menu and its ND tile must be reachable: fuji-q-menu is always in the top bar and fuji-q-nd is in the default quick controls")
             return
         }
-        let use = app.buttons["Use Computational ND"]
-        XCTAssertTrue(swipeUntilHittable(use, in: app), "Use Computational ND must scroll into reach")
+        let use = app.buttons["Use computational ND"]
+        XCTAssertTrue(swipeUntilHittable(use, in: app), "Use computational ND must scroll into reach")
         XCTAssertNotEqual(use.value as? String, "In use")
-        assertMinimumHitTarget(use, named: "Use Computational ND")
+        assertMinimumHitTarget(use, named: "Use computational ND")
         use.tap()
         XCTAssertTrue(waitUntil(timeout: 5) { use.value as? String == "In use" })
         XCTAssertEqual(use.value as? String, "In use")
@@ -2807,14 +2807,14 @@ final class FilmyCameraUITests: XCTestCase {
             XCTFail("Q menu and its ND tile must be reachable at the largest text size")
             return
         }
-        let largeUse = largeTextApp.buttons["Use Computational ND"]
-        XCTAssertTrue(swipeUntilHittable(largeUse, in: largeTextApp), "Use Computational ND must scroll into reach at the largest text size")
+        let largeUse = largeTextApp.buttons["Use computational ND"]
+        XCTAssertTrue(swipeUntilHittable(largeUse, in: largeTextApp), "Use computational ND must scroll into reach at the largest text size")
         // The first phase may have persisted the drive; make this phase independent of that.
         if largeUse.value as? String != "In use" {
             largeUse.tap()
             XCTAssertTrue(waitUntil(timeout: 5) { largeUse.value as? String == "In use" })
         }
-        assertMinimumHitTarget(largeUse, named: "Use Computational ND at the largest text size")
+        assertMinimumHitTarget(largeUse, named: "Use computational ND at the largest text size")
         XCTAssertEqual(largeUse.value as? String, "In use")
         attachScreenshot(named: "fuji-use-drive-in-use-largest-text")
 
@@ -2833,10 +2833,10 @@ final class FilmyCameraUITests: XCTestCase {
         }
         largeTextApp.navigationBars.buttons.element(boundBy: 0).tap()
         XCTAssertTrue(openDetail("fuji-q-bracketing", in: largeTextApp, menuIsOpen: true), "BKT settings detail must open")
-        assertLongRow(label: "Use DR100 / DR200 / DR400 Bracketing", shot: "fuji-use-row-dr-bracket-largest-text")
+        assertLongRow(label: "Use DR100 / DR200 / DR400 bracketing", shot: "fuji-use-row-dr-bracket-largest-text")
         largeTextApp.navigationBars.buttons.element(boundBy: 0).tap()
         XCTAssertTrue(openDetail("fuji-q-focusStack", in: largeTextApp, menuIsOpen: true), "Focus stack detail must open")
-        assertLongRow(label: "Use Focus Bracketing · separate files", shot: "fuji-use-row-focus-bracket-largest-text")
+        assertLongRow(label: "Use focus bracketing · separate files", shot: "fuji-use-row-focus-bracket-largest-text")
         largeTextApp.navigationBars.buttons.element(boundBy: 0).tap()
         // Reopen the Q menu so its scroll resets to the top; far-off lazy tiles may not be realized.
         largeTextApp.buttons["Done"].tap()

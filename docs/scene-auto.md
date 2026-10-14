@@ -2,8 +2,8 @@
 
 Scene Auto is an **explicit, session-only opt-in**, not a new launch default.
 Open **AUTO OFF** in the camera's status row and choose **Enable Scene Auto**.
-Use **Hold Current Settings** to stop adaptation, **Resume Scene Auto** to
-re-meter, or **Turn Scene Auto Off** to restore the previous sensor controls.
+Use **Hold current settings** to stop adaptation, **Resume Scene Auto** to
+re-meter, or **Turn Scene Auto off** to restore the previous sensor controls.
 A direct focus tap releases Hold and owns the focus target for at least six
 seconds. The existing AE/AF-lock action becomes an Auto Hold toggle while enabled.
 

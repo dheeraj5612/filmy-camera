@@ -6,6 +6,27 @@ Filmy Camera should feel like a quiet digital rangefinder: the viewfinder stays 
 
 The analog character comes from tone, color, grain, and halation. The interface does not need fake film borders or decorative chrome to communicate that character.
 
+## Palette (current)
+
+| Token | Value | Means | Never |
+| --- | --- | --- | --- |
+| `FilmyTheme.accent` coral | #FF7854 | selection, primary action, text buttons; also the Filmy mark and eyebrows | warning, error, "changed" state |
+| `FilmyTheme.filmAccent` lime | #DAF365 | changed from default or manual state: EV not 0, AE/AF locked, Scene Auto on, Fuji shooting state active | selection, action |
+| `FilmyTheme.warning` amber | #FFB748 | warning, always with `exclamationmark.triangle` or words | error, selection, benign or transitional states |
+| `FilmyTheme.danger` | #FF6E78 | the one error token: error, destructive; with `exclamationmark.triangle.fill` or words | warning |
+| `FilmyTheme.mint` | #8AEBB0 | live camera, success | anything else |
+| `primary` / `secondary` / `tertiary` ink, white | existing | neutral chrome, benign status, compare badges and divider | |
+
+`FilmyTheme.comparison` is removed from the Filmy palette; compare chrome uses accent plus primary ink.
+
+Symbol rule: every warning or error carries a symbol or words. State is never colour only.
+
+Casing rule: Sentence case for labels, buttons and titles. Uppercase only for short technical readouts: ISO, EV, RAW, HEIF, WB, MF, DR, AE/AF, and viewfinder readouts such as AUTO OFF.
+
+Camera chrome (EV, AE/AF lock, Scene Auto) moves to lime with skin2.
+
+G7 Camera keeps its green palette in the `#if G7_APP` branch.
+
 ## Research inputs
 
 - [Apple Camera Control HIG](https://developer.apple.com/design/human-interface-guidelines/camera-control) — keep custom camera controls out of system camera-control overlay areas.
@@ -99,7 +120,7 @@ iOS 26 with an ultra-thin-material fallback on iOS 17 and 18.
   with Xcode 26 and running on iOS 26, and fall back to the previous material
   on older systems and on the Xcode 16.4 CI toolchain (`#if compiler(>=6.2)`).
 - The dock is a glass pill with a warm-white selected segment; Import keeps
-  the amber accent as the one coloured action. The camera tab sits on black;
+  the amber accent as the one coloured action. (Superseded: the shipped accent is coral; see Palette (current).) The camera tab sits on black;
   Roll and Settings keep the warm page background.
 
 ### Verification
@@ -119,7 +140,7 @@ A second, larger visual pass. The goal was to make the viewfinder feel like a ca
 
 ### Visual system
 
-- Replaced the cool blue palette with a warm film system: near-black surfaces with a faint warm cast, soft warm-white ink, one amber accent for state, mint for live, and a coral halation color reserved for warmth cues. All tokens still live in `FilmyTheme`.
+- Replaced the cool blue palette with a warm film system: near-black surfaces with a faint warm cast, soft warm-white ink, one amber accent for state, mint for live, and a coral halation color reserved for warmth cues. (Superseded: the shipped accent is coral; see Palette (current).) All tokens still live in `FilmyTheme`.
 - Added shared chrome primitives (`viewfinderChrome`, `ChromeShapeBackground`), button styles (`filmyPrimary`, `filmySecondary`, `pressable`), and small typographic helpers (`Eyebrow`, `FilmyTag`, `MetricLabel`, `SettingIcon`) so every screen composes the same parts.
 - Standardized product vocabulary on **Recipe**. The camera no longer shows three different labels (film stock, current look, browse looks) for the same object.
 

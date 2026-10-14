@@ -155,11 +155,11 @@ struct FujiRAWLibraryView: View {
             if !controller.unreadableEntries.isEmpty {
                 Section("Needs repair") { FujiUnreadableRow(controller: controller, viewModel: viewModel) }
             }
-            if let error { Section { Text(error).foregroundStyle(.orange).font(.footnote) } }
-            if let message = controller.errorMessage { Section { Text(message).foregroundStyle(.orange).font(.footnote) } }
+            if let error { Section { FilmyNoticeLabel(message: error, kind: .error) } }
+            if let message = controller.errorMessage { Section { FilmyNoticeLabel(message: message, kind: .error) } }
             originalsSection
         }
-        .navigationTitle("RAW Develop").navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("RAW develop").navigationBarTitleDisplayMode(.inline)
         .task { await controller.reloadLibrary() }
         .onChange(of: FujiOriginalFilter.isOffered(for: controller.originals)) { _, isOffered in
             if !isOffered { kindFilter = .all }
@@ -279,7 +279,7 @@ struct FujiRAWDevelopView: View {
         GeometryReader { (proxy: GeometryProxy) in
             developContent(available: proxy.size.height)
         }
-        .navigationTitle("Develop Original").navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("Develop original").navigationBarTitleDisplayMode(.inline)
         .task {
             do { originalURL = try await controller.originalURL(original) }
             catch { self.error = error.localizedDescription }
@@ -374,9 +374,9 @@ struct FujiRAWDevelopView: View {
                     Text(capturedLine)
                         .font(.caption2.monospaced()).foregroundStyle(.secondary)
                 }
-                if let error { Text(error).font(.footnote).foregroundStyle(.orange) }
+                if let error { FilmyNoticeLabel(message: error, kind: .error) }
                 if dynamicTypeSize.isAccessibilitySize {
-                    if let saveError { Text(saveError).font(.footnote).foregroundStyle(.orange) }
+                    if let saveError { FilmyNoticeLabel(message: saveError, kind: .error) }
                     if let savedMessage { Text(savedMessage).font(.footnote) }
                 }
             }
@@ -434,9 +434,9 @@ struct FujiRAWDevelopView: View {
     private var saveBar: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let status = saveError ?? savedMessage {
-                Label(status, systemImage: saveError == nil ? "checkmark.circle" : "exclamationmark.triangle")
+                Label(status, systemImage: saveError == nil ? "checkmark.circle" : "exclamationmark.triangle.fill")
                     .font(.footnote).lineLimit(2)
-                    .foregroundStyle(saveError == nil ? FilmyTheme.primary : Color.orange)
+                    .foregroundStyle(saveError == nil ? FilmyTheme.primary : FilmyTheme.danger)
             }
             saveButton(inBar: true)
         }

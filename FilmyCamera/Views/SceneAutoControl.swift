@@ -10,11 +10,11 @@ struct SceneAutoControl: View {
     private var held: Bool { camera.sceneAuto.phase == .held }
     private var unavailable: Bool { !camera.isRunning || camera.availability != .running }
 
-    private var toggleTitle: String { enabled ? "Turn Scene Auto Off" : "Enable Scene Auto" }
+    private var toggleTitle: String { enabled ? "Turn Scene Auto off" : "Enable Scene Auto" }
     private var toggleDetail: String {
         enabled ? "Restores your previous controls and flash." : "Adapts exposure, color and focus for this session. Your look stays."
     }
-    private var holdTitle: String { held ? "Resume Scene Auto" : "Hold Current Settings" }
+    private var holdTitle: String { held ? "Resume Scene Auto" : "Hold current settings" }
     private var holdDetail: String {
         held ? "Starts adapting to the scene again." : "Freezes the current settings until you resume or tap to focus."
     }
