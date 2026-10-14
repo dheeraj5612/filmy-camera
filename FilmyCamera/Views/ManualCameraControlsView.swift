@@ -202,7 +202,7 @@ struct ManualCameraControlsView: View {
 
     private var sectionPicker: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Adjust")
+            Text("Camera")
                 .font(.system(.caption, design: .rounded).weight(.heavy))
                 .foregroundStyle(FilmyTheme.secondary)
                 .textCase(.uppercase)

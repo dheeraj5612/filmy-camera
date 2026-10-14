@@ -2,6 +2,7 @@ import Foundation
 import AVKit
 import SwiftUI
 import UIKit
+import Observation
 
 enum CameraActivityAction: Equatable {
     case start
@@ -11,6 +12,57 @@ enum CameraActivityAction: Equatable {
     /// once; the session is released if the user stays away.
     case stopAfterGrace
     case hold
+}
+
+/// First-run camera tips, one at a time in the gesture-hint slot. Wording follows
+/// CameraPreviewGesturePolicy: swipe = look, hold = original, vertical drag = exposure, tap = focus.
+enum CameraGestureTip: Int, CaseIterable, Hashable, Sendable {
+    case swipe, hold, drag, tap
+
+    var text: String {
+        switch self {
+        case .swipe: return "Swipe for looks \u{00B7} Pinch to zoom"
+        case .hold: return "Hold to see the original"
+        case .drag: return "Drag up or down for brightness"
+        case .tap: return "Tap to focus"
+        }
+    }
+
+    /// Time on screen, counted from insertion (includes the 1 s fade-in delay).
+    var duration: Duration { self == .swipe ? .seconds(8) : .seconds(6) }
+
+    /// Next tip after `current` not in `skipped`; nil ends the sequence.
+    static func next(after current: CameraGestureTip, skipped: Set<CameraGestureTip>) -> CameraGestureTip? {
+        allCases.first { $0.rawValue > current.rawValue && !skipped.contains($0) }
+    }
+}
+
+/// Tip progress for this app run. Outside CameraScreen because ContentView rebuilds it on every
+/// tab switch. Memory only: no settings key (AGENTS.md settings contract).
+@MainActor @Observable
+final class CameraGestureTipProgress {
+    static let shared = CameraGestureTipProgress()
+    private(set) var tip: CameraGestureTip? = .swipe
+    private(set) var learned: Set<CameraGestureTip> = []
+
+    /// Moves past the current tip; true when the sequence has ended.
+    @discardableResult
+    func advance(alsoSkipping unavailable: Set<CameraGestureTip> = []) -> Bool {
+        guard let current = tip else { return true }
+        tip = CameraGestureTip.next(after: current, skipped: learned.union(unavailable))
+        return tip == nil
+    }
+
+    /// Records a performed gesture; true when it is the tip on screen.
+    func noteUsed(_ used: CameraGestureTip) -> Bool {
+        learned.insert(used)
+        return tip == used
+    }
+
+    func reset() {
+        tip = .swipe
+        learned = []
+    }
 }
 
 enum CameraActivityPolicy {
@@ -225,6 +277,7 @@ struct CameraScreen: View {
     @State private var isShowingLiveAdjustments = false
     @State private var isShowingLookDrawer = false
     @AppStorage("cameraGestureHintSeen.v1") private var gestureHintSeen = false
+    private var gestureTips: CameraGestureTipProgress { .shared }
     @State private var originalPreviewOverride: Bool?
     @GestureState private var isHoldingOriginalPreview = false
     @GestureState private var isPreviewDragActive = false
@@ -454,6 +507,10 @@ struct CameraScreen: View {
             shooting.attach(camera: camera, viewModel: viewModel, active: active)
         }
         .onChange(of: camera.manualControls.activeDeviceID) { _, _ in shooting.invalidatePreview() }
+        .onChange(of: camera.manualControls.exposureMode) { _, mode in
+            // The drag tip cannot be used in manual exposure: move on instead of stalling the sequence.
+            if mode == .manual && gestureTips.tip == .drag { dismissGestureHint() }
+        }
         .onChange(of: camera.selectedLensID) { _, _ in shooting.invalidatePreview() }
         .onChange(of: camera.zoomFactor) { _, _ in shooting.invalidatePreview() }
         .onChange(of: viewModel.selectedRecipe) { _, _ in shooting.invalidatePreview() }
@@ -609,6 +666,7 @@ struct CameraScreen: View {
     private var cameraLifecycleView: some View {
         cameraPresentationsView
         .onAppear {
+            if !gestureHintSeen && gestureTips.tip == nil { gestureTips.reset() }
             shooting.attach(camera: camera, viewModel: viewModel, active: isShootingSessionActive)
             updateCameraActivity()
             updateIdleTimer()
@@ -1042,7 +1100,7 @@ struct CameraScreen: View {
                             lookFlash = nil
                             isPinching = true
                             pinchStartZoom = camera.zoomFactor
-                            dismissGestureHint()
+                            noteGestureTipUsed(.swipe)
                         }
                         camera.setZoom(pinchStartZoom * scale)
                     }
@@ -1056,6 +1114,7 @@ struct CameraScreen: View {
 
     private func focusPreview(at location: CGPoint, in size: CGSize) {
         guard canTriggerShutter, !isPinching else { return }
+        noteGestureTipUsed(.tap)
         HapticFeedback.play(.focus)
         let normalizedPoint = normalizedFocusPoint(for: location, in: size)
         camera.focus(at: normalizedPoint)
@@ -1089,7 +1148,7 @@ struct CameraScreen: View {
               ) else { return }
         viewModel.select(recipe: recipe)
         HapticFeedback.play(.selection)
-        dismissGestureHint()
+        noteGestureTipUsed(.swipe)
         flashSwipedLook(recipe)
         #endif
     }
@@ -1130,6 +1189,7 @@ struct CameraScreen: View {
     /// Hold-to-compare: newest claim wins the middle slot; release sets nothing.
     private func noteOriginalHold(_ holding: Bool) {
         if holding {
+            noteGestureTipUsed(.hold)
             lookFlash = nil
             isShowingExposureReadout = false
         }
@@ -1141,11 +1201,7 @@ struct CameraScreen: View {
     @ViewBuilder
     private var viewfinderMidSlot: some View {
         if !isReviewing {
-            switch CameraPreviewGesturePolicy.midSlot(
-                isHoldingOriginal: isHoldingOriginalPreview && camera.isRunning,
-                isShowingExposure: isShowingExposureReadout && camera.isRunning,
-                hasLookFlash: lookFlash != nil && isLookFlashVisible
-            ) {
+            switch currentMidSlot {
             case .original:
                 originalHoldPill
             case .exposure:
@@ -1307,6 +1363,7 @@ struct CameraScreen: View {
         }
         guard canAdjustPreviewExposure,
               CameraPreviewGesturePolicy.exposureDetent(from: camera.exposureBias, to: bias) != nil else { return }
+        noteGestureTipUsed(.drag)
         exposureDragSentBias = bias
         camera.setExposureBias(bias)
         focusFeedbackRevision += 1
@@ -1434,7 +1491,6 @@ struct CameraScreen: View {
                     minZoom: camera.minZoomFactor,
                     maxZoom: camera.maxZoomFactor,
                     onSelect: { factor in
-                        dismissGestureHint()
                         camera.setZoom(factor, reseedTracking: true)
                     },
                     onAdjust: { direction in
@@ -1443,13 +1499,18 @@ struct CameraScreen: View {
                     }
                 )
                 .frame(maxWidth: .infinity)
-                .overlay(alignment: .top) { gestureHintOverlay }
+                .overlay(alignment: .top) {
+                    if gestureTipSitsOnZoomRow(footerWidth: width) { gestureHintOverlay }
+                }
                 .opacity(camera.isRunning || isViewfinderChromePreview ? 1 : 0)
                 .disabled((!camera.isRunning && !isViewfinderChromePreview)
                     || shooting.settings.lockPrimeLens || shooting.settingsLocked)
                 .accessibilityHidden(!camera.isRunning && !isViewfinderChromePreview)
                 .transition(.opacity)
             }
+        }
+        .overlay(alignment: .top) {
+            if !gestureTipSitsOnZoomRow(footerWidth: width) { gestureHintOverlay }
         }
     }
 
@@ -2033,13 +2094,14 @@ struct CameraScreen: View {
                 if shouldOpen { originalPreviewOverride = nil }
                 isShowingLiveAdjustments = shouldOpen
             } label: {
-                Label("Adjust", systemImage: "slider.horizontal.3")
+                Label("Adjust", systemImage: "dial.low")
                     .font(.system(.caption, design: .rounded).weight(.bold))
                     .frame(minHeight: 44)
             }
             .tint(FilmyTheme.accent)
             .accessibilityIdentifier("live-recipe-adjustments")
-            .accessibilityHint("Adjust the look while watching the live camera preview")
+            .accessibilityLabel("Adjust look")
+            .accessibilityHint("Shows quick sliders over the live camera preview")
         }
     }
 
@@ -2102,7 +2164,7 @@ struct CameraScreen: View {
                 Button {
                     openRecipeDetail(viewModel.selectedRecipe)
                 } label: {
-                    Label("Tune", systemImage: "slider.horizontal.3")
+                    Label("Tune", systemImage: "slider.vertical.3")
                         .font(.system(size: 12, weight: .bold, design: .rounded))
                         .foregroundStyle(FilmyTheme.primary)
                         .padding(.horizontal, 12)
@@ -2112,6 +2174,7 @@ struct CameraScreen: View {
                 }
                 .buttonStyle(.pressable)
                 .accessibilityLabel("Tune \(viewModel.selectedRecipe.name)")
+                .accessibilityHint("Opens every setting for this look")
 
                 Button(action: toggleLookDrawer) {
                     Image(systemName: "xmark")
@@ -2536,6 +2599,7 @@ struct CameraScreen: View {
                 }
         }
         .buttonStyle(.pressable)
+        .accessibilityShowsLargeContentViewer { Label("Pro controls", systemImage: "slider.horizontal.3") }
         .accessibilityIdentifier("pro-controls-button")
         .accessibilityLabel("Pro controls")
         .accessibilityValue(
@@ -2543,7 +2607,7 @@ struct CameraScreen: View {
                 ? "Applying camera settings"
                 : (camera.manualControls.isAnyManualModeEnabled ? "Manual settings active" : "Auto settings")
         )
-        .accessibilityHint("Adjust ISO, shutter speed, white balance, and focus")
+        .accessibilityHint("Set ISO, shutter speed, white balance, and focus")
     }
 
     private var timerControl: some View {
@@ -2777,7 +2841,6 @@ struct CameraScreen: View {
 #endif
         guard canTriggerShutter else { return }
         HapticFeedback.play(.capture)
-        dismissGestureHint()
         closeLookAndAdjustDrawers()
         if captureDelay == .off {
             performShutterCapture()
@@ -2799,15 +2862,34 @@ struct CameraScreen: View {
     }
 
     private var gestureHintText: String {
+        let tip: CameraGestureTip = gestureTips.tip ?? .swipe
         #if G7_APP
-        return "Pinch to zoom"
-        #else
-        return "Swipe for looks \u{00B7} Pinch to zoom"
+        if tip == .swipe { return "Pinch to zoom" }
         #endif
+        return tip.text
+    }
+
+    private var currentMidSlot: CameraMidSlot {
+        CameraPreviewGesturePolicy.midSlot(
+            isHoldingOriginal: isHoldingOriginalPreview && camera.isRunning,
+            isShowingExposure: isShowingExposureReadout && camera.isRunning,
+            hasLookFlash: lookFlash != nil && isLookFlashVisible
+        )
     }
 
     private var showsGestureHint: Bool {
-        !gestureHintSeen && !Self.gestureHintSuppressed && camera.isRunning && !isReviewing
+        guard !gestureHintSeen, let tip = gestureTips.tip, !Self.gestureHintSuppressed,
+              camera.isRunning, !isReviewing, !isShowingLookDrawer, !isShowingLiveAdjustments else { return false }
+        if tip == .drag && !canAdjustPreviewExposure { return false }
+        return currentMidSlot == .none
+    }
+
+    /// Tall footer (open strip at accessibility sizes, or the G7 X two-row strip): the tip keeps
+    /// its shipped spot on the zoom row instead of rising into the middle of the picture.
+    private func gestureTipSitsOnZoomRow(footerWidth: CGFloat) -> Bool {
+        let stripOpen: Bool = isShowingTools && !isShowingLiveAdjustments && !hidesToolsForRecoveryPlaceholder
+        let tallStrip: Bool = dynamicTypeSize.isAccessibilitySize || toolStripUsesTwoRows(footerWidth - 24)
+        return stripOpen && tallStrip
     }
 
     @ViewBuilder
@@ -2826,27 +2908,44 @@ struct CameraScreen: View {
                 .padding(.horizontal, 16)
                 .frame(maxWidth: .infinity)
                 .alignmentGuide(.top) { dimensions in dimensions[.bottom] + 8 }
+                .id(gestureTips.tip)
                 .transition(gestureHintTransition)
                 .allowsHitTesting(false)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(gestureHintText)
                 .accessibilityIdentifier("camera-gesture-hint")
-                .task {
-                    try? await Task.sleep(for: .seconds(8))
-                    guard !Task.isCancelled else { return }
+                .task(id: gestureTips.tip) {
+                    guard let shown = gestureTips.tip else { return }
+                    try? await Task.sleep(for: shown.duration)
+                    guard !Task.isCancelled, gestureTips.tip == shown else { return }
                     dismissGestureHint()
                 }
         }
     }
 
     private var gestureHintTransition: AnyTransition {
-        if reduceMotion { return AnyTransition.opacity }
-        return AnyTransition.opacity.combined(with: AnyTransition.move(edge: .bottom))
+        let base: AnyTransition = reduceMotion
+            ? AnyTransition.opacity
+            : AnyTransition.opacity.combined(with: AnyTransition.move(edge: .bottom))
+        // One second of empty slot before each tip appears.
+        return AnyTransition.asymmetric(
+            insertion: base.animation(.easeOut(duration: 0.2).delay(1)),
+            removal: AnyTransition.opacity
+        )
     }
 
+    /// Timeout of the visible tip: moves to the next tip, or ends the sequence.
     private func dismissGestureHint() {
         guard !gestureHintSeen else { return }
-        withAnimation(.easeOut(duration: 0.2)) { gestureHintSeen = true }
+        let unavailable: Set<CameraGestureTip> = camera.manualControls.exposureMode == .manual ? [.drag] : []
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
+            if gestureTips.advance(alsoSkipping: unavailable) { gestureHintSeen = true }
+        }
+    }
+
+    private func noteGestureTipUsed(_ tip: CameraGestureTip) {
+        guard !gestureHintSeen, !gestureTips.learned.contains(tip) else { return }
+        if gestureTips.noteUsed(tip) { dismissGestureHint() }
     }
 
     private func performShutterCapture() {

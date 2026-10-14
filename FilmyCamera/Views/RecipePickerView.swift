@@ -991,7 +991,7 @@ struct RecipeDetailView: View {
                 : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
             headerLayout {
                 VStack(alignment: .leading, spacing: 4) {
-                    Eyebrow(text: "ADJUST", color: FilmyTheme.accent)
+                    Eyebrow(text: "TUNE", color: FilmyTheme.accent)
 
                     Text("Recipe controls")
                         .font(.system(.title3, design: .rounded).weight(.bold))

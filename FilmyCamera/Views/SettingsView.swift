@@ -314,13 +314,13 @@ struct SettingsView: View {
         .accessibilityIdentifier("settings-replay-gestures")
         .accessibilityLabel("Replay gestures")
         .accessibilityValue(replayGesturesValue)
-        .accessibilityHint("Shows the camera gesture hint again.")
+        .accessibilityHint("Shows the camera gesture tips again.")
     }
 
     private var replayGesturesDetail: String {
-        if gestureHintSeen { return "Show the camera gesture hint again." }
-        if didReplayGestureHint { return "Turned back on. It shows when the camera is running." }
-        return "Shows the next time the camera runs."
+        if gestureHintSeen { return "Show the camera gesture tips again." }
+        if didReplayGestureHint { return "Turned back on. They show when the camera is running." }
+        return "Tips show the next time the camera runs."
     }
 
     private var replayGesturesValue: String {

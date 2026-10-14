@@ -176,6 +176,41 @@ final class CameraPreviewGesturePolicyTests: XCTestCase {
         XCTAssertEqual(Policy.midSlot(isHoldingOriginal: false, isShowingExposure: false, hasLookFlash: false), .none)
     }
 
+    @MainActor
+    func testGestureTipsRunInOrderSkipLearnedAndMatchTheGestures() {
+        typealias Tip = CameraGestureTip
+        XCTAssertEqual(Tip.allCases, [.swipe, .hold, .drag, .tap])
+        XCTAssertEqual(Tip.next(after: .swipe, skipped: []), .hold)
+        XCTAssertEqual(Tip.next(after: .swipe, skipped: [.hold]), .drag)
+        XCTAssertNil(Tip.next(after: .hold, skipped: [.drag, .tap]))
+        XCTAssertNil(Tip.next(after: .tap, skipped: []))
+        XCTAssertEqual(Tip.swipe.text, "Swipe for looks \u{00B7} Pinch to zoom")
+        XCTAssertEqual(Tip.hold.text, "Hold to see the original")
+        XCTAssertEqual(Tip.drag.text, "Drag up or down for brightness")
+        XCTAssertEqual(Tip.tap.text, "Tap to focus")
+        XCTAssertEqual(Tip.swipe.duration, .seconds(8))
+        XCTAssertEqual(Tip.tap.duration, .seconds(6))
+
+        let progress = CameraGestureTipProgress()
+        XCTAssertEqual(progress.tip, .swipe)
+        XCTAssertFalse(progress.noteUsed(.drag))
+        XCTAssertFalse(progress.advance())
+        XCTAssertEqual(progress.tip, .hold)
+        XCTAssertFalse(progress.advance())
+        XCTAssertEqual(progress.tip, .tap)
+        XCTAssertTrue(progress.advance())
+        XCTAssertNil(progress.tip)
+
+        progress.reset()
+        XCTAssertEqual(progress.tip, .swipe)
+        XCTAssertTrue(progress.learned.isEmpty)
+        progress.advance()
+        progress.advance(alsoSkipping: [.drag])
+        XCTAssertEqual(progress.tip, .tap)
+
+        XCTAssertTrue(CameraPreviewGesturePolicy.previewAccessibilityHint.hasPrefix(Tip.tap.text + "."))
+    }
+
     func testLookResetUndoRestoresExactSnapshot() throws {
         typealias Undo = CameraPreviewGesturePolicy.LookResetUndo
         let builtIns = FilmRecipe.builtIns
