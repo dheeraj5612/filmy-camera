@@ -299,4 +299,45 @@ final class CaptureModesPolicyTests: XCTestCase {
         XCTAssertEqual(CaptureModesPolicy.shareLabel(original: false, isVideo: true, index: 1), "Share video 2")
         XCTAssertEqual(CaptureModesPolicy.shareLabel(original: true, isVideo: false, index: 0), "Share original 1")
     }
+
+    func testShotStartsOnlyFromReadyAndNeverForSceneReading() {
+        for next in [CaptureModesPhase.capturing, .recording, .processing] {
+            XCTAssertTrue(CaptureModesPolicy.startsShot(from: .ready, to: next, scanning: false), next.rawValue)
+        }
+        XCTAssertFalse(CaptureModesPolicy.startsShot(from: .ready, to: .capturing, scanning: true))
+        XCTAssertFalse(CaptureModesPolicy.startsShot(from: .capturing, to: .processing, scanning: false))
+        XCTAssertFalse(CaptureModesPolicy.startsShot(from: .ready, to: .ready, scanning: false))
+    }
+
+    func testFinishedCaptureIgnoresKnownAndPreSessionRecords() {
+        let opened = Date(timeIntervalSince1970: 1_000)
+        let older = CaptureMedia(id: UUID(), mode: .burst, createdAt: opened.addingTimeInterval(-60), recipeName: "Test")
+        let retried = CaptureMedia(id: UUID(), mode: .burst, createdAt: opened.addingTimeInterval(10), recipeName: "Test")
+        let fresh = CaptureMedia(id: UUID(), mode: .burst, createdAt: opened.addingTimeInterval(20), recipeName: "Test")
+        let newest = CaptureMedia(id: UUID(), mode: .burst, createdAt: opened.addingTimeInterval(30), recipeName: "Test")
+        XCTAssertNil(CaptureModesPolicy.finishedCapture(in: [older], known: [], openedAt: opened))
+        XCTAssertNil(CaptureModesPolicy.finishedCapture(in: [retried], known: [retried.id], openedAt: opened))
+        XCTAssertEqual(CaptureModesPolicy.finishedCapture(in: [fresh, retried], known: [retried.id], openedAt: opened)?.id, fresh.id)
+        XCTAssertEqual(CaptureModesPolicy.finishedCapture(in: [newest, fresh], known: [], openedAt: opened)?.id, newest.id)
+    }
+
+    func testSavedCardStatusSaysWhereTheShotIs() {
+        var media = CaptureMedia(id: UUID(), mode: .burst, createdAt: Date(), recipeName: "Test")
+        let notApplied = CaptureModesPolicy.savedCardStatus(media)
+        XCTAssertEqual(notApplied.text, "Film look not applied. Open to retry.")
+        media.outputs = ["a.jpg", "b.jpg"]
+        let none = CaptureModesPolicy.savedCardStatus(media)
+        XCTAssertEqual(none.text, "Not in Photos")
+        media.photosIdentifiers = ["a.jpg": "x"]
+        let partly = CaptureModesPolicy.savedCardStatus(media)
+        XCTAssertEqual(partly.text, "Partly in Photos")
+        media.photosIdentifiers = ["a.jpg": "x", "b.jpg": "y"]
+        let all = CaptureModesPolicy.savedCardStatus(media)
+        XCTAssertEqual(all.text, "In Photos")
+        for status in [notApplied, none, partly, all] {
+            XCTAssertFalse(status.symbol.isEmpty)
+            XCTAssertFalse(status.text.localizedCaseInsensitiveContains("originals"))
+            XCTAssertFalse(status.text.contains("Roll"))
+        }
+    }
 }

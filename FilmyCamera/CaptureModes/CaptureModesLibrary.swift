@@ -5,8 +5,23 @@ struct CaptureModesLibrary: View {
     @ObservedObject var model: CaptureModesModel
     var readOnly = false
     @Environment(\.dismiss) private var dismiss
+    @State private var path: [UUID]
+    /// Merge-only snapshot so a capture deleted from its detail keeps that detail on screen while it slides out.
+    @State private var lastKnown: [UUID: CaptureMedia] = [:]
+
+    @MainActor
+    init(model: CaptureModesModel, readOnly: Bool = false, initialCaptureID: UUID? = nil) {
+        _model = ObservedObject(wrappedValue: model)
+        self.readOnly = readOnly
+        _path = State(initialValue: initialCaptureID.map { [$0] } ?? [])
+        // Seed the snapshot so a deep-linked detail deleted before the root's onChange fires still has its record.
+        var seeded: [UUID: CaptureMedia] = [:]
+        for capture in model.captures { seeded[capture.id] = capture }
+        _lastKnown = State(initialValue: seeded)
+    }
+
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
                 if readOnly {
                     Text("Photos, videos and panoramas saved from Capture modes.").font(.footnote).foregroundStyle(.secondary)
@@ -18,18 +33,30 @@ struct CaptureModesLibrary: View {
                     ContentUnavailableView("No captures yet", systemImage: "camera", description: Text("Completed originals are saved here before film processing starts."))
                 }
                 ForEach(model.captures) { capture in
-                    NavigationLink {
-                        CaptureModesDetail(model: model, initial: capture, readOnly: readOnly)
-                    } label: {
+                    NavigationLink(value: capture.id) {
                         CaptureLibraryRow(capture: capture, readOnly: readOnly)
                     }
                 }
+            }
+            .navigationDestination(for: UUID.self) { (id: UUID) in destination(id) }
+            .onChange(of: model.captures.map(\.id), initial: true) { _, _ in
+                for capture in model.captures { lastKnown[capture.id] = capture }
             }
             .navigationTitle("Filmy Captures")
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
             .overlay { if model.exporting { ProgressView("Exporting to Photos").padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)) } }
             .task { model.refresh() }
         }.preferredColorScheme(.dark)
+    }
+
+    @ViewBuilder
+    private func destination(_ id: UUID) -> some View {
+        let capture = model.captures.first(where: { $0.id == id }) ?? lastKnown[id]
+        if let capture {
+            CaptureModesDetail(model: model, initial: capture, readOnly: readOnly)
+        } else {
+            ContentUnavailableView("Capture not found", systemImage: "photo", description: Text("It is no longer in Filmy Captures."))
+        }
     }
 }
 

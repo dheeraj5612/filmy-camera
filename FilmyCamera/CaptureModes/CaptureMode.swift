@@ -326,4 +326,22 @@ enum CaptureModesPolicy {
         if original { return "Share original \(index + 1)" }
         return isVideo ? "Share video \(index + 1)" : "Share photo \(index + 1)"
     }
+
+    /// After-shot card status line. An originals-only record has nothing to export yet.
+    static func savedCardStatus(_ media: CaptureMedia) -> (text: String, symbol: String) {
+        if media.outputs.isEmpty { return ("Film look not applied. Open to retry.", "exclamationmark.circle") }
+        return photosStatus(media)
+    }
+
+    /// A shot starts when the phase leaves Ready for capturing, recording or processing (SwiftUI may coalesce the
+    /// intermediate phase). Read scene never counts.
+    static func startsShot(from old: CaptureModesPhase, to new: CaptureModesPhase, scanning: Bool) -> Bool {
+        old == .ready && !scanning && (new == .capturing || new == .recording || new == .processing)
+    }
+
+    /// The record a finished shot produced: the newest one not listed when the shot started and created after the
+    /// workspace opened. Retries (already listed) and older captures loading late never qualify. `captures` is newest first.
+    static func finishedCapture(in captures: [CaptureMedia], known: Set<UUID>, openedAt: Date) -> CaptureMedia? {
+        captures.first { !known.contains($0.id) && $0.createdAt >= openedAt }
+    }
 }
