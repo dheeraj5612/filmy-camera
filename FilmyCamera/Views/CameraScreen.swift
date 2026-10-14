@@ -197,6 +197,15 @@ private struct ViewfinderChromeHeightKey: PreferenceKey {
     }
 }
 
+/// Height of the open tool strip, so the gesture tip can tell one row from two.
+private struct ToolStripHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 private enum SavedFrameAnchor: Hashable, Sendable { case viewfinder, rollThumbnail }
 
 private struct SavedFrameAnchorKey: PreferenceKey {
@@ -290,6 +299,8 @@ struct CameraScreen: View {
     @State private var lookStripActive: [FilmRecipe] = []
     @State private var focusPoint: CGPoint?
     @State private var focusNormalizedPoint: CGPoint?
+    /// Measured from the open tool strip (taller than two controls means two rows). Kept across hides.
+    @State private var isToolStripTwoRows = false
     @State private var pinchStartZoom: CGFloat = 1
     @State private var isPinching = false
     @State private var previewDragMaySelectLook: Bool?
@@ -2604,6 +2615,7 @@ struct CameraScreen: View {
         }
         .buttonStyle(.pressable)
         .disabled(isNavigationRecoveryLocked)
+        .accessibilityShowsLargeContentViewer { Label("Roll", systemImage: "square.grid.3x3") }
         .accessibilityIdentifier("roll-tab")
         .accessibilityLabel("Open roll")
         .accessibilityHint("Shows the frames you have kept")
@@ -2623,20 +2635,17 @@ struct CameraScreen: View {
         .padding(.vertical, -12)
     }
 
-    private func toolStripUsesTwoRows(_ minWidth: CGFloat) -> Bool {
-        isCompactDigitalMode && minWidth < 300
-    }
-
     private func toolStrip(minWidth: CGFloat) -> some View {
-        Group {
-            if toolStripUsesTwoRows(minWidth) {
-                toolStripTwoRows(minWidth: minWidth)
-            } else {
-                toolStripScroller(minWidth: minWidth) {
-                    toolStripExposureGroup(compactFocusLock: false)
-                    toolStripButtonGroup
-                }
-            }
+        ViewThatFits(in: .horizontal) {
+            toolStripOneRow
+            toolStripBalancedRows
+            toolStripTwoRows(minWidth: minWidth)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background { toolStripHeightProbe }
+        .onPreferenceChange(ToolStripHeightKey.self) { (height: CGFloat) in
+            let twoRows: Bool = height > FilmyTheme.toolControlHeight * 2
+            if isToolStripTwoRows != twoRows { isToolStripTwoRows = twoRows }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(
@@ -2646,10 +2655,45 @@ struct CameraScreen: View {
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 
+    private var toolStripHeightProbe: some View {
+        GeometryReader { (proxy: GeometryProxy) in
+            Color.clear.preference(key: ToolStripHeightKey.self, value: proxy.size.height)
+        }
+    }
+
+    /// A: every tool on one row.
+    private var toolStripOneRow: some View {
+        HStack(spacing: 8) {
+            toolStripExposureGroup
+            toolStripGridButton
+            toolStripTrailingGroup
+        }
+        .padding(4)
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    /// C: exposure and grid on the first row, lens, Pro and timer on the second.
+    private var toolStripBalancedRows: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                toolStripExposureGroup
+                toolStripGridButton
+            }
+            .padding(4)
+            .fixedSize(horizontal: true, vertical: false)
+
+            HStack(spacing: 8) {
+                toolStripTrailingGroup
+            }
+            .padding(4)
+            .fixedSize(horizontal: true, vertical: false)
+        }
+    }
+
     private func toolStripTwoRows(minWidth: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                toolStripExposureGroup(compactFocusLock: true)
+                toolStripExposureGroup
             }
             .padding(4)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -2677,8 +2721,7 @@ struct CameraScreen: View {
         .mask { toolStripFadeMask }
     }
 
-    @ViewBuilder
-    private func toolStripExposureGroup(compactFocusLock: Bool) -> some View {
+    private var toolStripExposureGroup: some View {
         ExposureControl(value: camera.exposureBias, onReset: {
             camera.setExposureBias(0)
         }) { direction in
@@ -2687,32 +2730,113 @@ struct CameraScreen: View {
         }
         .opacity(camera.manualControls.exposureMode == .manual ? 0.45 : 1)
         .disabled(camera.manualControls.exposureMode == .manual || camera.manualControls.isApplying)
+        .overlay(alignment: .topLeading) { focusLockPill }
+    }
 
-        if (focusPoint != nil || camera.isFocusExposureLocked),
-           let focusNormalizedPoint,
-           camera.manualControls.exposureMode != .manual,
-           camera.manualControls.focusMode != .manual {
-            FocusLockControl(isLocked: camera.isFocusExposureLocked, showsTitle: !compactFocusLock) {
+    /// True while the AE/AF lock pill is offered: after a focus tap, or while locked.
+    private var isFocusLockPillShowing: Bool {
+        let hasPoint: Bool = focusPoint != nil || camera.isFocusExposureLocked
+        return hasPoint
+            && focusNormalizedPoint != nil
+            && camera.manualControls.exposureMode != .manual
+            && camera.manualControls.focusMode != .manual
+    }
+
+    /// Floats 8 pt above the exposure control, over the picture, so it never changes the strip's rows.
+    @ViewBuilder
+    private var focusLockPill: some View {
+        if isFocusLockPillShowing, let focusNormalizedPoint {
+            FocusLockControl(isLocked: camera.isFocusExposureLocked, showsTitle: true) {
                 camera.toggleFocusExposureLock(at: focusNormalizedPoint)
             }
+            .alignmentGuide(.top) { (dimensions: ViewDimensions) in dimensions[.bottom] + 8 }
+        }
+    }
+
+    /// Keeps a slot as wide as its widest state, so a changing label never reflows the row.
+    private func toolStripStableSlot<Content: View, Reserve: View>(
+        @ViewBuilder content: () -> Content,
+        @ViewBuilder reserve: () -> Reserve
+    ) -> some View {
+        ZStack(alignment: .leading) {
+            reserve()
+                .hidden()
+                .accessibilityHidden(true)
+            content()
+        }
+    }
+
+    /// Every armed timer title, overlaid so the widest rendered one sets the reserve.
+    private static let armedCaptureDelays: [CaptureDelay] = CaptureDelay.allCases.filter { $0 != .off }
+
+    private var timerReserve: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "timer")
+                .font(.system(size: 14, weight: .bold))
+            ZStack(alignment: .leading) {
+                ForEach(Self.armedCaptureDelays) { (delay: CaptureDelay) in
+                    Text(delay.title)
+                        .font(.system(.caption2, design: .rounded).weight(.bold))
+                        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(minHeight: FilmyTheme.toolControlHeight)
+    }
+
+    private var timerSlot: some View {
+        toolStripStableSlot {
+            timerControl
+        } reserve: {
+            timerReserve
+        }
+    }
+
+    /// Every lens title, overlaid so the widest rendered one sets the reserve.
+    private var lensReserve: some View {
+        ZStack(alignment: .leading) {
+            ForEach(camera.availableLenses) { lens in
+                Label(lens.title, systemImage: "camera.aperture")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(minHeight: FilmyTheme.toolControlHeight)
+    }
+
+    private var lensSlot: some View {
+        toolStripStableSlot {
+            CameraLensMenu(camera: camera)
+        } reserve: {
+            lensReserve
         }
     }
 
     @ViewBuilder
-    private var toolStripButtonGroup: some View {
+    private var toolStripGridButton: some View {
         gridToggle(
             accessibilityIdentifier: isCompactDigitalMode
                 ? "g7x-grid-control"
                 : "grid-control"
         )
+    }
 
+    @ViewBuilder
+    private var toolStripTrailingGroup: some View {
         if camera.availableLenses.count > 1 {
-            CameraLensMenu(camera: camera)
+            lensSlot
         }
 
         proControlsButton
 
-        timerControl
+        timerSlot
+    }
+
+    @ViewBuilder
+    private var toolStripButtonGroup: some View {
+        toolStripGridButton
+        toolStripTrailingGroup
     }
 
     private var proControlsButton: some View {
@@ -3018,14 +3142,18 @@ struct CameraScreen: View {
               camera.isRunning, !isReviewing, !isShowingLookDrawer, !isShowingLiveAdjustments,
               !isViewfinderCoveredBySheet, !isImporting else { return false }
         if tip == .drag && !canAdjustPreviewExposure { return false }
+        // The focus-lock pill floats where the tip would sit; the tip waits until it is gone.
+        // On a tall strip the tip sits on the zoom row, so only the footer-top tip yields.
+        if isShowingTools && isFocusLockPillShowing && !gestureTipSitsOnZoomRow(footerWidth: 0) { return false }
         return currentMidSlot == .none
     }
 
-    /// Tall footer (open strip at accessibility sizes, or the G7 X two-row strip): the tip keeps
+    /// Tall footer (open strip at accessibility sizes, or a two-row strip): the tip keeps
     /// its shipped spot on the zoom row instead of rising into the middle of the picture.
     private func gestureTipSitsOnZoomRow(footerWidth: CGFloat) -> Bool {
+        // footerWidth kept for call-site stability; rows come from the measured strip.
         let stripOpen: Bool = isShowingTools && !isShowingLiveAdjustments && !hidesToolsForRecoveryPlaceholder
-        let tallStrip: Bool = dynamicTypeSize.isAccessibilitySize || toolStripUsesTwoRows(footerWidth - 24)
+        let tallStrip: Bool = dynamicTypeSize.isAccessibilitySize || isToolStripTwoRows
         return stripOpen && tallStrip
     }
 

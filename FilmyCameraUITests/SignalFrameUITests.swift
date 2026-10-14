@@ -56,6 +56,7 @@ final class SignalFrameUITests: XCTestCase {
             accuracy: 2,
             "Top bar stays one row at AX5"
         )
+        XCTAssertLessThanOrEqual(app.buttons["roll-tab"].frame.height, 80, "Roll stays inside the 80 pt shutter row at the largest text")
         let modes = app.buttons["open-capture-modes"]
         XCTAssertTrue(modes.waitForExistence(timeout: 5))
         XCTAssertLessThanOrEqual(modes.frame.height, 52, "Capture modes bar stays one line")

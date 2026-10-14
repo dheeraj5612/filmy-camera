@@ -414,8 +414,8 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertNotEqual(grid.value as? String, initialGridValue)
 
         let pro = compactApp.buttons["pro-controls-button"]
-        // Strip width equals the minWidth passed to toolStrip; keep 300 in sync with toolStripUsesTwoRows.
-        let stripUsesTwoRows = captureControls.frame.width < 300
+        // Same measured rule as the app: taller than two 48 pt controls means two rows.
+        let stripUsesTwoRows: Bool = captureControls.frame.height > 96
         if stripUsesTwoRows {
             XCTAssertGreaterThan(captureControls.frame.height, 80, "Narrow G7 X strip uses two rows")
             XCTAssertTrue(pro.isHittable, "Pro must be reachable without swiping")
@@ -423,11 +423,19 @@ final class FilmyCameraUITests: XCTestCase {
             XCTAssertTrue(compactApp.windows.firstMatch.frame.contains(pro.frame))
             XCTAssertFalse(pro.frame.intersects(compactApp.descendants(matching: .any)["zoom-control"].frame))
         }
-        for _ in 0..<3 where !pro.exists || !pro.isHittable { captureControls.swipeLeft() }
-        assertMinimumHitTarget(pro, named: "Pro controls")
         let timer = compactApp.buttons["timer-control"]
+        #if targetEnvironment(simulator)
+        // The simulator has at most one lens and no focus lock, so the strip is one or two rows with no scroller.
+        XCTAssertTrue(pro.isHittable, "Pro reachable without swiping")
+        XCTAssertTrue(timer.isHittable, "Timer reachable without swiping")
+        #else
+        // A device can reach the scrolling variant at large text or with unusual lens sets.
+        for _ in 0..<3 where !pro.exists || !pro.isHittable { captureControls.swipeLeft() }
         for _ in 0..<3 where !timer.exists || !timer.isHittable { captureControls.swipeLeft() }
+        #endif
+        assertMinimumHitTarget(pro, named: "Pro controls")
         assertMinimumHitTarget(timer, named: "Self-timer")
+        let proOrigin: CGPoint = pro.frame.origin
         let setup = compactApp.buttons["capture-setup-open"]
         XCTAssertEqual(timer.value as? String, "Off")
         for (spoken, summary) in [("3 seconds", "Timer 3s, "), ("5 seconds", "Timer 5s, "),
@@ -435,6 +443,8 @@ final class FilmyCameraUITests: XCTestCase {
             timer.tap()
             XCTAssertEqual(timer.value as? String, spoken)
             XCTAssertTrue((setup.value as? String)?.hasPrefix(summary) == true)
+            XCTAssertEqual(pro.frame.minX, proOrigin.x, accuracy: 1)
+            XCTAssertEqual(pro.frame.minY, proOrigin.y, accuracy: 1, "Arming the timer never moves the strip's rows")
             if spoken == "3 seconds" { attachScreenshot(named: "g7x-timer-control-armed") }
         }
 
@@ -445,10 +455,21 @@ final class FilmyCameraUITests: XCTestCase {
             preview.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.45)).tap()
             let lock = compactApp.buttons["Lock focus and exposure"]
             if lock.waitForExistence(timeout: 2) {
-                if stripUsesTwoRows {
-                    XCTAssertTrue(pro.isHittable)
-                    XCTAssertLessThanOrEqual(lock.frame.width, 52)
+                XCTAssertEqual(pro.frame.minY, proOrigin.y, accuracy: 1, "A focus tap never changes the strip's rows")
+                XCTAssertTrue(pro.isHittable)
+                assertMinimumHitTarget(lock, named: "Focus lock")
+                XCTAssertTrue(lock.isHittable, "The focus-lock pill is not clipped or covered")
+                let lockFrame: CGRect = lock.frame
+                XCTAssertFalse(lockFrame.intersects(pro.frame))
+                XCTAssertFalse(lockFrame.intersects(timer.frame))
+                XCTAssertFalse(lockFrame.intersects(compactApp.descendants(matching: .any)["exposure-control"].frame))
+                XCTAssertFalse(lockFrame.intersects(compactApp.descendants(matching: .any)["zoom-control"].frame))
+                let gestureTip = compactApp.descendants(matching: .any)["camera-gesture-hint"]
+                if gestureTip.exists {
+                    XCTAssertFalse(lockFrame.intersects(gestureTip.frame), "The focus-lock pill and the gesture tip never overlap")
                 }
+                // `camera-preview` is the live viewfinder element; the pill floats over the picture.
+                XCTAssertTrue(preview.frame.contains(lockFrame), "The focus-lock pill stays inside the viewfinder")
                 attachScreenshot(named: "g7x-focus-lock-controls")
             }
         }
@@ -1642,6 +1663,18 @@ final class FilmyCameraUITests: XCTestCase {
         screenshot.name = "viewfinder-first-chrome-preview"
         screenshot.lifetime = .keepAlways
         add(screenshot)
+
+        // The film tool strip: Pro and timer are reachable without a swipe, in two rows on a 375 pt phone.
+        controlsToggle.tap()
+        let rail = previewApp.descendants(matching: .any)["camera-utility-rail"]
+        XCTAssertTrue(rail.waitForExistence(timeout: 5))
+        XCTAssertTrue(previewApp.buttons["pro-controls-button"].isHittable, "Film strip shows Pro without swiping")
+        XCTAssertTrue(previewApp.buttons["timer-control"].isHittable, "Film strip shows the timer without swiping")
+        // Measured on the 375x667 simulator; a 375x812 mini fits one row with a single lens.
+        if previewWidth < 390 && previewApp.windows.firstMatch.frame.height < 700 {
+            XCTAssertGreaterThan(rail.frame.height, 80, "375 pt film strip uses two rows, not a scroller")
+        }
+        attachScreenshot(named: "film-tool-strip-open")
 
         previewApp.terminate()
 
