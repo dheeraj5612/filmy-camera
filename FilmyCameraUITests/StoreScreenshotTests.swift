@@ -393,6 +393,11 @@ final class LookLibraryUITests: XCTestCase {
         XCTAssertFalse(app.buttons["library-recipe-g7x-compact"].exists)
         snapshot(app, "looks-favorites")
         muted.tap()
+        let picked = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == 'Selected'"), object: muted)
+        XCTAssertEqual(XCTWaiter.wait(for: [picked], timeout: 5), .completed, "Picking a look marks it selected")
+        XCTAssertTrue(app.buttons["look-library-close"].exists, "Picking a look keeps the camera library open")
+        XCTAssertTrue(app.descendants(matching: .any)["look-library-current"].exists, "The library names the look in use")
+        app.buttons["look-library-close"].tap()
         XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["recipe-menu"].label.contains("Muted Color"))
         app.terminate()
@@ -609,6 +614,9 @@ final class CaptureSetupUITests: XCTestCase {
         search.typeText("CCD Daylight\n")
         let style = app.buttons["library-recipe-digital-ccd-daylight"]
         XCTAssertTrue(style.waitForExistence(timeout: 5)); style.tap()
+        let close = app.buttons["look-library-close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5), "Picking a look keeps the camera library open")
+        close.tap()
         XCTAssertTrue(menu.waitForExistence(timeout: 5)); XCTAssertTrue(menu.label.contains("CCD Daylight"))
         app.terminate(); app.launch()
         XCTAssertTrue(menu.waitForExistence(timeout: 15)); XCTAssertTrue(menu.label.contains("CCD Daylight"))

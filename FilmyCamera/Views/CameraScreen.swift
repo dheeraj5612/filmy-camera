@@ -78,6 +78,11 @@ enum CameraActivityPolicy {
     /// Kept as the review grace alias for existing policy clients and tests.
     static let gracePeriod = reviewGracePeriod
 
+    /// The camera look library hides the viewfinder only at its large detent.
+    static func lookLibraryCoversViewfinder(isPresented: Bool, atLargeDetent: Bool) -> Bool {
+        isPresented && atLargeDetent
+    }
+
     static func deferredStopDelay(hasReview: Bool) -> TimeInterval {
         hasReview ? reviewGracePeriod : inactiveGracePeriod
     }
@@ -349,6 +354,7 @@ struct CameraScreen: View {
     @GestureState private var isHoldingOriginalPreview = false
     @GestureState private var isPreviewDragActive = false
     @State private var isShowingLookLibrary = false
+    @State private var lookLibraryDetent: PresentationDetent = .large
     @State private var isShowingRecipeManager = false
     @State private var quickRecipeQuery = ""
     @State private var isSearchingLooks = false
@@ -693,23 +699,8 @@ struct CameraScreen: View {
                 .presentationDragIndicator(.visible)
                 .presentationBackground(FilmyTheme.background)
         }
-        .sheet(isPresented: $isShowingLookLibrary) {
-            LookLibraryView(
-                recipes: viewModel.recipes,
-                selectedRecipeID: viewModel.effectiveSelectedRecipeID,
-                onSelect: { recipe in
-                    guard membership.requireRecipe(recipe.id) else { return }
-                    viewModel.select(recipe: recipe)
-                    isShowingLookLibrary = false
-                    isShowingLookDrawer = false
-                },
-                onClose: { isShowingLookLibrary = false },
-                libraryPreferences: $viewModel.libraryPreferences
-            )
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
-            .presentationBackground(FilmyTheme.background)
-            .presentationCornerRadius(28)
+        .sheet(isPresented: $isShowingLookLibrary, onDismiss: resetLookLibraryDetent) {
+            cameraLookLibrarySheet
         }
         .sheet(isPresented: $isShowingRecipeManager) {
             RecipeLibraryManagerView(
@@ -760,6 +751,34 @@ struct CameraScreen: View {
                 .presentationDragIndicator(.visible)
                 .presentationBackground(FilmyTheme.background)
         }
+    }
+
+    private var cameraLookLibrarySheet: some View {
+        LookLibraryView(
+            recipes: viewModel.recipes,
+            selectedRecipeID: viewModel.effectiveSelectedRecipeID,
+            onSelect: pickLibraryLook,
+            onClose: { isShowingLookLibrary = false },
+            libraryPreferences: $viewModel.libraryPreferences,
+            staysOpenOnSelect: true,
+            presentationDetent: $lookLibraryDetent
+        )
+        .presentationDetents([.medium, .large], selection: $lookLibraryDetent)
+        .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+        .presentationDragIndicator(.visible)
+        .presentationBackground(FilmyTheme.background)
+        .presentationCornerRadius(28)
+    }
+
+    private func resetLookLibraryDetent() {
+        lookLibraryDetent = .large
+    }
+
+    private func pickLibraryLook(_ recipe: FilmRecipe) {
+        guard membership.requireRecipe(recipe.id) else { return }
+        viewModel.select(recipe: recipe)
+        originalPreviewOverride = nil
+        UIAccessibility.post(notification: .announcement, argument: "Using \(recipe.name)")
     }
 
     private var cameraLifecycleView: some View {
@@ -2447,10 +2466,11 @@ struct CameraScreen: View {
         lookStripCatalog.isEmpty ? viewModel.recipes : lookStripCatalog
     }
 
-    /// Re-reads the quick menu and, when Favorites or search is on, the catalog after the library or Packs sheet closes.
+    /// Re-reads the quick menu and, when Favorites or search is on, the catalog after the library or Packs sheet closes. Open search results are re-run.
     private func refreshLookStripAfterSheet() {
         lookStripActive = viewModel.quickRecipes
         refreshLookCatalogIfShown()
+        if isSearchingLooks { updateLookSearchResults(quickRecipeQuery) }
     }
 
     /// The list for the current mode. Favorites and search read the whole
@@ -2500,7 +2520,7 @@ struct CameraScreen: View {
                 showsFavoriteBadges: mode != .favorites,
                 onToggleFavorite: toggleDrawerFavorite,
                 keepsOrder: mode == .recent || mode == .results,
-                listMarker: lookStripMarker(mode: mode, shownCount: shown.count)
+                listMarker: lookStripMarker(mode: mode, shownCount: visible.count)
             )
             .id(mode.rawValue)
         }
@@ -3595,12 +3615,16 @@ struct CameraScreen: View {
         viewModel.isReviewingImport
     }
 
-    /// The five `.large` sheets that hide the viewfinder at compact width.
+    /// The `.large` sheets that hide the viewfinder at compact width (the camera look library only at its large detent).
     /// Manual controls (medium detent) and the Fuji menu are excluded on
     /// purpose: the finder is live behind them and the Fuji sampler consumes
     /// frames.
     private var isFullHeightSheetOpen: Bool {
-        isShowingLookLibrary || isShowingRecipeManager || recipeForDetail != nil
+        let libraryCovers: Bool = CameraActivityPolicy.lookLibraryCoversViewfinder(
+            isPresented: isShowingLookLibrary,
+            atLargeDetent: lookLibraryDetent == .large
+        )
+        return libraryCovers || isShowingRecipeManager || recipeForDetail != nil
             || isShowingSmartRecipes || isShowingCaptureSetup || isShowingPendingOriginals
     }
 

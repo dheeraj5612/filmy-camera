@@ -1227,4 +1227,11 @@ final class CameraServiceAvailabilityTests: XCTestCase {
             []
         )
     }
+
+    func testLookLibraryCoversFinderOnlyAtLargeDetent() {
+        XCTAssertFalse(CameraActivityPolicy.lookLibraryCoversViewfinder(isPresented: true, atLargeDetent: false))
+        XCTAssertTrue(CameraActivityPolicy.lookLibraryCoversViewfinder(isPresented: true, atLargeDetent: true))
+        XCTAssertFalse(CameraActivityPolicy.lookLibraryCoversViewfinder(isPresented: false, atLargeDetent: true))
+        XCTAssertFalse(CameraActivityPolicy.lookLibraryCoversViewfinder(isPresented: false, atLargeDetent: false))
+    }
 }

@@ -736,6 +736,24 @@ enum RecipeDetailCommitPolicy {
     }
 }
 
+/// One-line character of a look, built from the same pairs as the control chips.
+enum LookCharacter {
+    static func pairs(for recipe: FilmRecipe) -> [(String, String)] {
+        let base: [(String, String)] = recipe.controlSummary
+        guard recipe.filmBase.supportsMonochromaticColorAxes else { return base }
+        return base.map { (pair: (String, String)) -> (String, String) in
+            pair.0 == "Color" ? ("Color", "Black and white") : pair
+        }
+    }
+
+    static func line(for recipe: FilmRecipe) -> String {
+        let parts: [String] = pairs(for: recipe).map { (pair: (String, String)) -> String in
+            "\(pair.0): \(pair.1)"
+        }
+        return parts.joined(separator: " \u{00B7} ")
+    }
+}
+
 struct RecipeDetailView: View {
     private enum EditorSection: String, CaseIterable, Identifiable {
         case tone
@@ -846,7 +864,7 @@ struct RecipeDetailView: View {
                                     Text("About this look")
                                         .font(.system(.headline, design: .rounded).weight(.bold))
                                         .foregroundStyle(FilmyTheme.primary)
-                                    Text(isShowingLookInfo ? "Description and camera reference" : "Description, reference, and provenance")
+                                    Text(isShowingLookInfo ? "Description and camera reference" : lookCharacterLine)
                                         .font(.system(.caption, design: .rounded).weight(.medium))
                                         .foregroundStyle(FilmyTheme.secondary)
                                 }
@@ -863,7 +881,7 @@ struct RecipeDetailView: View {
                         .accessibilityIdentifier("recipe-info-toggle")
                         .accessibilityLabel("About this look")
                         .accessibilityValue(isShowingLookInfo ? "Expanded" : "Collapsed")
-                        .accessibilityHint("Shows the description, camera reference, and provenance")
+                        .accessibilityHint("\(lookCharacterLine). Shows the description, camera reference, and provenance")
 
                         if isShowingLookInfo {
                             VStack(alignment: .leading, spacing: 18) {
@@ -1173,9 +1191,13 @@ struct RecipeDetailView: View {
         return Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
     }
 
+    private var lookCharacterLine: String {
+        LookCharacter.line(for: draft)
+    }
+
     private var controlSummary: some View {
         LazyVGrid(columns: summaryColumns, spacing: 8) {
-            ForEach(draft.controlSummary, id: \.0) { control in
+            ForEach(LookCharacter.pairs(for: draft), id: \.0) { control in
                 VStack(alignment: .leading, spacing: 5) {
                     Eyebrow(text: control.0.uppercased())
                         .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
