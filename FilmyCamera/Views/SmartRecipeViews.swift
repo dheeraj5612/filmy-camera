@@ -43,10 +43,13 @@ struct SmartRecipeEntryPoint: View {
             capsule(named: named)
             if !hasAction {
                 // Holds the action slot's ideal width for the fit test only; invisible, takes no taps.
+                // Flexible and lowest priority, so a tight row shrinks it before the opener.
                 Color.clear
-                    .frame(width: FilmyTheme.minimumHitTarget, height: 0)
+                    .frame(minWidth: 0, idealWidth: FilmyTheme.minimumHitTarget, maxWidth: FilmyTheme.minimumHitTarget)
+                    .frame(height: 0)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
+                    .layoutPriority(-1)
             }
         }
         .frame(maxWidth: 290, alignment: .leading)
