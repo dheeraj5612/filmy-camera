@@ -267,6 +267,17 @@ final class SmartRecipeIntegrationTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testEntryCopyKeepsOpenerNameAndPutsSuggestionOnButton() {
+        XCTAssertEqual(SmartRecipeEntryCopy.openerLabel, "Smart looks")
+        XCTAssertEqual(SmartRecipeEntryCopy.quickApplyTitle("Classic Chrome"), "Use Classic Chrome")
+        XCTAssertEqual(SmartRecipeStore.Status.ready.entryValue, "")
+        XCTAssertEqual(SmartRecipeStore.Status.waiting.entryValue, "")
+        XCTAssertEqual(SmartRecipeStore.Status.cooling.entryValue, "Paused: phone is warm")
+        XCTAssertEqual(SmartRecipeStore.Status.unavailable.entryValue, "Suggestions unavailable")
+        XCTAssertEqual(SmartRecipeStore.Status.off.entryValue, "Off")
+    }
+
     func testWorkerRejectsCoveredLens() async {
         let worker = SmartRecipeImageWorker()
         let source = CIImage(color: .black).cropped(to: CGRect(x: 0, y: 0, width: 64, height: 64))

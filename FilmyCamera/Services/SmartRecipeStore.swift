@@ -142,8 +142,16 @@ final class SmartRecipeStore: ObservableObject {
             case .analyzing: return "Reading the scene"
             case .ready: return "Smart looks"
             case .insufficientLight: return "Point at a scene"
-            case .cooling: return "Suggestions paused for heat"
-            case .unavailable: return "Light-based suggestions unavailable"
+            case .cooling: return "Paused: phone is warm"
+            case .unavailable: return "Suggestions unavailable"
+            }
+        }
+        /// VoiceOver value for the opener: silent when idle or ready, otherwise the status.
+        var entryValue: String {
+            switch self {
+            case .waiting, .ready: return ""
+            case .off: return "Off"
+            default: return title
             }
         }
     }

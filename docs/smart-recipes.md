@@ -2,11 +2,12 @@
 
 ## Using the feature
 
-Frame the scene normally. The Smart looks pill in the camera's reserved status row shows a
-recommended recipe once two observations agree. Tap **Apply** for that look, or tap its name
-to compare three alternatives on the same frozen viewfinder frame. Natural, Vivid, Cinema,
-and B&W let the photographer choose an aesthetic direction. The unfiltered toggle compares
-all three against the same input. Selecting a suggestion uses the existing recipe-selection
+Frame the scene normally. The Smart looks pill in the camera's reserved status row always
+reads "Smart looks"; once two observations agree, a **Use <name>** button beside it offers the
+recommended look. Tap that button to apply it, or tap **Smart looks** to compare three
+alternatives on the same frozen viewfinder frame. The Style picker (Natural, Vivid, Cinema,
+B&W) chooses an aesthetic direction. **Show the original frame** compares all three against
+the same input. Selecting a suggestion uses the existing recipe-selection
 and capture pipeline, including effective user edits. It never changes already saved photos.
 
 Undo restores the previously selected recipe only while the suggested recipe is still selected.

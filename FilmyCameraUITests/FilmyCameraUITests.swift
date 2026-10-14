@@ -2091,7 +2091,7 @@ final class FilmyCameraUITests: XCTestCase {
             var viewport = scrollView.frame.intersection(screenFrame)
             let actionButton = app.buttons.matching(
                 NSPredicate(
-                    format: "label BEGINSWITH 'Done editing ' OR label BEGINSWITH 'Apply changes to ' OR label BEGINSWITH 'Use '"
+                    format: "(label BEGINSWITH 'Done editing ' OR label BEGINSWITH 'Apply changes to ' OR label BEGINSWITH 'Use ') AND identifier != 'smart-recipes-quick-apply'"
                 )
             ).firstMatch
             if actionButton.exists {

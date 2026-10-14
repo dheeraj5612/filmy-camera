@@ -85,10 +85,10 @@ See [the catalog and fidelity audit](docs/recipe-library-and-fidelity.md), [all 
 ## Smart looks
 
 The Smart looks control above the viewfinder offers on-device, scene-aware recipe suggestions.
-Tap **Apply** for the leading recommendation, or open it to compare three renders of the same
-frame, choose Natural, Vivid, Cinema, or B&W, and apply a look with one tap. Undo restores the
-previous look unless you have since chosen another manually. Suggestions never select a recipe
-or save a photo automatically. Toggle analysis off in the Smart looks sheet.
+Tap **Use <name>** beside it for the leading recommendation, or tap **Smart looks** to compare
+three renders of the same frame, pick a Style (Natural, Vivid, Cinema, or B&W), and apply a look
+with one tap. Undo restores the previous look unless you have since chosen another manually.
+Suggestions never select a recipe or save a photo automatically. Toggle analysis off in the Smart looks sheet.
 
 The engine combines Apple Vision scene/face detection with light, contrast, and color measurements
 and ranks the actual available recipes, including edited controls. It uses bounded, throttled

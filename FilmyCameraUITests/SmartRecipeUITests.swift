@@ -14,13 +14,26 @@ final class SmartRecipeUITests: XCTestCase {
         let app = launch(suite: "FilmyCameraUITests.Smart.\(UUID().uuidString)")
         let entry = app.buttons["smart-recipes-open"]
         XCTAssertTrue(entry.waitForExistence(timeout: 15))
+        XCTAssertEqual(entry.label, "Smart looks")
         XCTAssertTrue(entry.isHittable)
         entry.tap()
         XCTAssertTrue(app.switches["smart-recipes-enabled"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.otherElements["smart-recipes-empty"].exists
-            || app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Return to the viewfinder")).firstMatch.exists)
+            || app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "No suggestions yet")).firstMatch.exists)
         XCTAssertFalse(app.buttons["smart-recipes-quick-apply"].exists)
-        app.buttons["Done"].tap()
+        let back = app.buttons["smart-recipes-empty-close"]
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        for _ in 0..<4 where !back.isHittable { app.swipeUp() }
+        XCTAssertTrue(back.isHittable)
+        XCTAssertGreaterThanOrEqual(back.frame.height, 44)
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "smart-looks-empty-sheet"
+        shot.lifetime = .keepAlways
+        add(shot)
+        back.tap()
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"),
+                                             object: app.switches["smart-recipes-enabled"])
+        XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 5), .completed)
         XCTAssertTrue(entry.waitForExistence(timeout: 5))
     }
 
@@ -43,5 +56,10 @@ final class SmartRecipeUITests: XCTestCase {
         XCTAssertEqual(toggle.value as? String, "0")
         toggle.tap()
         XCTAssertEqual(toggle.value as? String, "1")
+        app.buttons["Done"].tap()
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"),
+                                             object: toggle)
+        XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 5), .completed)
+        XCTAssertTrue(entry.waitForExistence(timeout: 5))
     }
 }

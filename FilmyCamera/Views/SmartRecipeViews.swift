@@ -1,6 +1,13 @@
 import CoreImage
 import SwiftUI
 
+/// One source for both Smart looks entry forms (`SmartRecipeEntryPoint`, `CompactSmartRecipeEntry`).
+enum SmartRecipeEntryCopy {
+    static let openerLabel = "Smart looks"
+    static let openerHint = "See three looks matched to this scene."
+    static func quickApplyTitle(_ name: String) -> String { "Use \(name)" }
+}
+
 /// Uses the existing fixed-height indicator row, so recommendations cannot resize the viewfinder.
 struct SmartRecipeEntryPoint: View {
     @ObservedObject var store: SmartRecipeStore
@@ -9,39 +16,47 @@ struct SmartRecipeEntryPoint: View {
     let onOpen: () -> Void
     let onApply: (String) -> Void
     let onUndo: () -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var isUndoShowing: Bool { store.undo?.appliedID == selectedID }
+    private var quickApplyOption: SmartRecipeOption? {
+        guard !isUndoShowing, let option = store.options.first, option.id != selectedID else { return nil }
+        return option
+    }
+    private var hasAction: Bool { isUndoShowing || quickApplyOption != nil }
+
     var body: some View {
-        let top = store.options.first
+        if dynamicTypeSize <= .large {
+            entry(named: true)
+        } else {
+            // Larger text: the name needs room for itself plus a 44 pt action slot whether or not a
+            // suggestion is showing, so the form never changes with the suggestion.
+            ViewThatFits(in: .horizontal) {
+                entry(named: true)
+                entry(named: false)
+            }
+        }
+    }
+
+    private func entry(named: Bool) -> some View {
         HStack(spacing: 0) {
-            Button(action: onOpen) {
-                HStack(spacing: 5) {
-                    Image(systemName: "sparkles")
-                    Text(top?.recipe.name ?? store.status.title).lineLimit(1)
-                }
-                .font(.caption2.weight(.semibold))
-                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-                .padding(.horizontal, 10)
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Rectangle())
+            capsule(named: named)
+            if !hasAction {
+                // Holds the action slot's ideal width for the fit test only; invisible, takes no taps.
+                Color.clear
+                    .frame(width: FilmyTheme.minimumHitTarget, height: 0)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             }
-            .accessibilityLabel("Smart look suggestions")
-            .accessibilityValue(top?.recipe.name ?? store.status.title)
-            .accessibilityHint("Compare three scene-matched recipes. Suggestions never change your look automatically.")
-            .accessibilityIdentifier("smart-recipes-open")
-            if store.undo?.appliedID == selectedID {
-                Button(action: onUndo) {
-                    Text("Undo").frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
-                }
-                    .disabled(!canApply)
-                    .accessibilityLabel("Undo smart look")
-                    .accessibilityIdentifier("smart-recipes-undo")
-            } else if let option = top, option.id != selectedID {
-                Button { onApply(option.id) } label: {
-                    Text("Apply").frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
-                }
-                    .disabled(!canApply)
-                    .accessibilityLabel("Apply \(option.recipe.name)")
-                    .accessibilityIdentifier("smart-recipes-quick-apply")
-            }
+        }
+        .frame(maxWidth: 290, alignment: .leading)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func capsule(named: Bool) -> some View {
+        HStack(spacing: 0) {
+            opener(named: named)
+            action
         }
         .font(.caption2.weight(.bold))
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
@@ -49,8 +64,61 @@ struct SmartRecipeEntryPoint: View {
         .buttonStyle(.plain)
         .padding(.trailing, 4)
         .background(Color.white.opacity(0.07), in: Capsule())
-        .frame(maxWidth: 290, alignment: .leading)
-        .accessibilityElement(children: .contain)
+    }
+
+    private func opener(named: Bool) -> some View {
+        Button(action: onOpen) {
+            HStack(spacing: 5) {
+                Image(systemName: "sparkles")
+                if named {
+                    Text(SmartRecipeEntryCopy.openerLabel).lineLimit(1)
+                }
+            }
+            .font(.caption2.weight(.semibold))
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+            .padding(.horizontal, named ? 10 : 0)
+            .fixedSize(horizontal: true, vertical: false)
+            .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
+            .contentShape(Rectangle())
+        }
+        .accessibilityLabel(SmartRecipeEntryCopy.openerLabel)
+        .accessibilityValue(store.status.entryValue)
+        .accessibilityHint(SmartRecipeEntryCopy.openerHint)
+        .accessibilityIdentifier("smart-recipes-open")
+        .layoutPriority(1)
+    }
+
+    @ViewBuilder private var action: some View {
+        if isUndoShowing {
+            undoButton
+        } else if let option = quickApplyOption {
+            quickApplyButton(option)
+        }
+    }
+
+    private var undoButton: some View {
+        Button(action: onUndo) {
+            Text("Undo")
+                .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
+                .contentShape(Rectangle())
+        }
+        .disabled(!canApply)
+        .accessibilityLabel("Undo smart look")
+        .accessibilityIdentifier("smart-recipes-undo")
+    }
+
+    private func quickApplyButton(_ option: SmartRecipeOption) -> some View {
+        let title = SmartRecipeEntryCopy.quickApplyTitle(option.recipe.name)
+        return Button { onApply(option.id) } label: {
+            Text(title).lineLimit(1).truncationMode(.tail)
+                .padding(.horizontal, 8)
+                .frame(minWidth: FilmyTheme.minimumHitTarget, idealWidth: FilmyTheme.minimumHitTarget,
+                       minHeight: FilmyTheme.minimumHitTarget)
+                .contentShape(Rectangle())
+        }
+        .disabled(!canApply)
+        .accessibilityLabel(title)
+        .accessibilityIdentifier("smart-recipes-quick-apply")
     }
 }
 
@@ -80,7 +148,7 @@ struct SmartRecipeSheet: View {
                         .accessibilityIdentifier("smart-recipes-enabled")
                     if store.isEnabled {
                         heading
-                        Picker("Your direction", selection: Binding(
+                        Picker("Style", selection: Binding(
                             get: { store.intent },
                             set: { intent in store.setIntent(intent) }
                         )) {
@@ -89,23 +157,19 @@ struct SmartRecipeSheet: View {
                         .pickerStyle(.menu)
                         .accessibilityIdentifier("smart-recipes-intent")
                         if let snapshot, !options.isEmpty {
-                            Toggle("Compare with unfiltered frame", isOn: $showOriginal)
+                            Toggle("Show the original frame", isOn: $showOriginal)
                                 .font(.subheadline)
                                 .accessibilityIdentifier("smart-recipes-original")
                             ForEach(options) { option in optionCard(option, snapshot: snapshot) }
-                            Text("Previews use the same frozen viewfinder frame. Apply changes your live look and the next shot, not photos already saved.")
+                            Text("Previews use the frame from when you opened this. Applying a look changes the next photo, not saved ones.")
                                 .font(.footnote).foregroundStyle(.secondary)
                         } else {
-                            Label("Return to the viewfinder and frame a scene to get suggestions.", systemImage: "viewfinder")
-                                .padding(20)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18))
-                                .accessibilityIdentifier("smart-recipes-empty")
+                            emptyState
                         }
                     }
                     VStack(alignment: .leading, spacing: 8) {
-                        Label("On-device. No uploads or account required.", systemImage: "lock.shield")
-                        Text("Scene recognition and light/color measurements suggest starting points, not a single correct look. No face identity is inferred or stored. Turning suggestions off stops analysis.")
+                        Label("On your phone. No account or uploads.", systemImage: "lock.shield")
+                        Text("No face identity is inferred or stored. Turning suggestions off stops analysis.")
                     }
                     .font(.footnote).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -120,6 +184,32 @@ struct SmartRecipeSheet: View {
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done", action: onClose) } }
             .tint(FilmyTheme.accent)
         }
+    }
+    private static var isPhoneWarm: Bool {
+        let thermal = ProcessInfo.processInfo.thermalState
+        return thermal == .serious || thermal == .critical
+    }
+    private var emptyState: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("No suggestions yet. Point the camera at a scene, then reopen.", systemImage: "viewfinder")
+                .fixedSize(horizontal: false, vertical: true)
+            if Self.isPhoneWarm {
+                Label(SmartRecipeStore.Status.cooling.title, systemImage: "thermometer.high")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            Button(action: onClose) {
+                Label("Back to camera", systemImage: "camera")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: FilmyTheme.minimumHitTarget)
+            }
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("smart-recipes-empty-close")
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("smart-recipes-empty")
     }
     private var heading: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -201,7 +291,7 @@ private struct SmartRecipeThumbnail: View {
             Image(decorative: showOriginal ? snapshot.image : rendered ?? snapshot.image, scale: 1)
                 .resizable().scaledToFit().frame(maxWidth: .infinity, maxHeight: .infinity)
             if showOriginal || rendered == nil {
-                Text(showOriginal ? "Unfiltered" : "Preparing preview")
+                Text(showOriginal ? "Original" : "Preparing preview")
                     .font(.caption.weight(.semibold))
                     .padding(6).background(.ultraThinMaterial, in: Capsule()).padding(4)
             }

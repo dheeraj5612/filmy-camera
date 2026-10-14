@@ -182,7 +182,6 @@ final class AdditionalInteractionTests: XCTestCase {
         let chromeToggle = app.buttons["camera-chrome-toggle"]
         XCTAssertTrue(chromeToggle.waitForExistence(timeout: 5))
         XCTAssertEqual(chromeToggle.value as? String, "Expanded")
-        _ = waitUntil(timeout: 10) { (entry.value as? String) != "Smart looks" }
         guard waitUntil(timeout: 30, { app.buttons["smart-recipes-quick-apply"].exists }) else {
             throw XCTSkip("No Smart Look differing from the current look was published")
         }

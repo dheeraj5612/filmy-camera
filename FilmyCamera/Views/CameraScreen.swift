@@ -2740,9 +2740,9 @@ private struct CompactSmartRecipeEntry: View {
                     .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
                     .contentShape(Rectangle())
             }
-            .accessibilityLabel("Smart look suggestions")
-            .accessibilityValue(top?.recipe.name ?? store.status.title)
-            .accessibilityHint("Compare three scene-matched recipes. Suggestions never change your look automatically.")
+            .accessibilityLabel(SmartRecipeEntryCopy.openerLabel)
+            .accessibilityValue(store.status.entryValue)
+            .accessibilityHint(SmartRecipeEntryCopy.openerHint)
             .accessibilityIdentifier("smart-recipes-open")
             if store.undo?.appliedID == selectedID {
                 Button(action: onUndo) {
@@ -2754,11 +2754,11 @@ private struct CompactSmartRecipeEntry: View {
                 .accessibilityIdentifier("smart-recipes-undo")
             } else if let option = top, option.id != selectedID {
                 Button { onApply(option.id) } label: {
-                    Text("Apply").frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
+                    Text("Use").frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
                         .contentShape(Rectangle())
                 }
                 .disabled(!canApply)
-                .accessibilityLabel("Apply \(option.recipe.name)")
+                .accessibilityLabel(SmartRecipeEntryCopy.quickApplyTitle(option.recipe.name))
                 .accessibilityIdentifier("smart-recipes-quick-apply")
             }
         }
