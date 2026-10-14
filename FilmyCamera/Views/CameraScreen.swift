@@ -2393,7 +2393,8 @@ struct CameraScreen: View {
         return VStack(spacing: 0) {
             lookStripHeader(activeCount: lookStripActive.count)
                 .contentShape(Rectangle())
-                .simultaneousGesture(lookStripDismissDrag)
+                .highPriorityGesture(lookStripDismissDrag, including: lookHeaderPriorityDragMask)
+                .simultaneousGesture(lookStripDismissDrag, including: lookHeaderSimultaneousDragMask)
             lookStripContent(visible: visible, shown: shown, mode: mode)
         }
         .padding(.horizontal, 4)
@@ -2559,6 +2560,8 @@ struct CameraScreen: View {
 
     /// Swipe down on the header closes the picker. The look row scrolls
     /// vertically between groups, so the gesture is attached to the header only.
+    /// It takes priority over the header buttons, so a swipe that starts on an
+    /// icon closes the picker without also firing that icon; taps still reach them.
     private var lookStripDismissDrag: some Gesture {
         DragGesture(minimumDistance: 16)
             .onEnded { (value: DragGesture.Value) in
@@ -2567,6 +2570,11 @@ struct CameraScreen: View {
                 closeLookDrawer()
             }
     }
+
+    /// While searching, the swipe stays simultaneous instead, so the search
+    /// field's own caret, loupe and selection drags are never preempted.
+    private var lookHeaderPriorityDragMask: GestureMask { isSearchingLooks ? .subviews : .all }
+    private var lookHeaderSimultaneousDragMask: GestureMask { isSearchingLooks ? .all : .subviews }
 
     @ViewBuilder
     private func lookStripHeader(activeCount: Int) -> some View {
@@ -3206,7 +3214,7 @@ struct CameraScreen: View {
         .accessibilityIdentifier("g7x-date-stamp-control")
         .accessibilityLabel("Date stamp")
         .accessibilityValue(dateStampEnabled ? "On" : "Off")
-        .accessibilityHint("Prints the capture date on saved photos. The viewfinder does not show it.")
+        .accessibilityHint("Prints the capture date on saved photos with every look. The viewfinder does not show it.")
     }
 
     private var dateStampNoticeAnimation: Animation? {
@@ -3217,7 +3225,7 @@ struct CameraScreen: View {
         HapticFeedback.play(.selection)
         let enabled: Bool = !dateStampEnabled
         dateStampEnabled = enabled
-        let message: String = enabled ? "Date stamp on, saved photos only" : "Date stamp off"
+        let message: String = enabled ? "Date stamp on for all looks, saved photos only" : "Date stamp off"
         dateStampNoticeTask?.cancel()
         withAnimation(dateStampNoticeAnimation) { dateStampNotice = message }
         dateStampNoticeTask = Task { @MainActor in
@@ -3235,6 +3243,8 @@ struct CameraScreen: View {
             Text(message)
                 .font(.caption.weight(.semibold))
                 .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
                 .foregroundStyle(.white)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)

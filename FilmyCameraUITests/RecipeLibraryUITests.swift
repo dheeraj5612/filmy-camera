@@ -59,13 +59,20 @@ final class RecipeLibraryUITests: XCTestCase {
         XCTAssertTrue(drawer.exists, "A viewfinder tap focuses and leaves the look picker open")
         XCTAssertTrue(menu.label.contains("G7 X Compact"))
 
-        let top = drawer.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0)).withOffset(CGVector(dx: 0, dy: 24))
+        // The swipe starts on a header icon: it closes the picker and fires nothing.
+        let library = app.buttons["look-library-open"]
+        XCTAssertTrue(library.isHittable)
+        let top = library.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         top.press(forDuration: 0.05, thenDragTo: top.withOffset(CGVector(dx: 0, dy: 90)))
         let drawerClosed = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "exists == false"),
             object: app.buttons["recipe-drawer-close"]
         )
         XCTAssertEqual(XCTWaiter.wait(for: [drawerClosed], timeout: 5), .completed)
+        XCTAssertFalse(app.buttons["look-library-close"].waitForExistence(timeout: 1.5),
+                       "A swipe down from the library icon never opens the look library")
+        XCTAssertTrue(menu.isHittable, "The camera is uncovered after the swipe")
+        XCTAssertTrue(menu.label.contains("G7 X Compact"))
 
         menu.tap()
         let close = app.buttons["recipe-drawer-close"]

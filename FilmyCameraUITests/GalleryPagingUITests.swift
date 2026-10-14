@@ -142,11 +142,6 @@ final class GalleryPagingUITests: XCTestCase {
         XCTAssertEqual(done.label, "Done")
         let editPhoto = app.descendants(matching: .any)["filmy-edit-photo"]
         XCTAssertTrue(editPhoto.exists)
-        if UIDevice.current.userInterfaceIdiom == .phone {
-            // Photo-first: at least 55% of the screen, or as wide as the content allows.
-            XCTAssertTrue(editPhoto.frame.height >= app.frame.height * 0.55
-                          || editPhoto.frame.width >= app.frame.width - 21, "The photo leads the editor")
-        }
         let save = app.buttons["filmy-save-new-frame"]
         XCTAssertTrue(save.isHittable && save.frame.maxY <= app.frame.maxY, "Save stays pinned on screen")
         XCTAssertTrue(app.descendants(matching: .any)["filmy-edit-recipe"].isHittable, "Look row is above the fold")
@@ -154,6 +149,12 @@ final class GalleryPagingUITests: XCTestCase {
         // The look row is disabled until the saved version shows; the loaded photo is the signal.
         let loadedPhoto = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Photo with")).firstMatch
         XCTAssertTrue(loadedPhoto.waitForExistence(timeout: 10), "The saved version loads before a look is picked")
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            // Photo-first, measured on the photo itself (the container is always full width):
+            // as wide as the content allows (width less the 20 pt margin), or at least half the screen tall.
+            XCTAssertTrue(loadedPhoto.frame.width >= app.frame.width - 21
+                          || loadedPhoto.frame.height >= app.frame.height * 0.5, "The photo leads the editor")
+        }
         XCTAssertTrue(waitUntil(timeout: 10) { app.descendants(matching: .any)["filmy-edit-recipe"].isEnabled }, "Look row unlocks once the saved version loads")
         app.descendants(matching: .any)["filmy-edit-recipe"].tap()
         let search = app.textFields["look-library-search"]

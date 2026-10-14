@@ -382,6 +382,8 @@ struct FilmyPhotoEditorView: View {
             finishSegment(.instantPrint, title: "Instant Print", identifier: "filmy-edit-finish-instant",
                           isDisabled: document.hasLivePhoto)
         }
+        // Both segments take the taller one's height when a title wraps at accessibility sizes.
+        .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity)
         .background(FilmyTheme.panel, in: Capsule())
         .overlay(Capsule().stroke(FilmyTheme.line, lineWidth: 1))
@@ -411,7 +413,7 @@ struct FilmyPhotoEditorView: View {
             .font(.caption.weight(.bold))
             .foregroundStyle(isSelected ? FilmyTheme.background : FilmyTheme.primary)
             .padding(.horizontal, 12)
-            .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: 48)
+            .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: 48, maxHeight: .infinity)
             .background {
                 if isSelected {
                     Capsule().fill(FilmyTheme.accent).padding(3)
@@ -549,7 +551,10 @@ struct FilmyPhotoEditorView: View {
 
     private var photoAccessibilityLabel: String {
         if showsOriginalFrame { return "Original photo, without the look" }
-        return "Photo with \(recipe?.name ?? "the selected look")"
+        let name: String = recipe?.name ?? "the selected look"
+        // The previous frame stays on screen until the new version is ready.
+        if developingPreview || loadingRendition { return "Photo, developing \(name)" }
+        return "Photo with \(name)"
     }
 
     private func photoLayers(image: UIImage, fitted: CGSize) -> some View {
@@ -597,6 +602,7 @@ struct FilmyPhotoEditorView: View {
             lookSegment
             originalButton(segmented: true)
         }
+        .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity)
         .background(FilmyTheme.panel, in: Capsule())
         .overlay { Capsule().strokeBorder(FilmyTheme.line, lineWidth: 1) }
