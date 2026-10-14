@@ -2144,4 +2144,104 @@ final class FilmyCameraUITests: XCTestCase {
         attachment.lifetime = .keepAlways
         add(attachment)
     }
+
+    func testFujiUseDriveShowsInUseFeedback() throws {
+        // Opens Q, then the ND detail. False when either is not reachable here.
+        // Lazy lists create rows only near the viewport, so an element may not exist until it is scrolled to.
+        func swipeUntilHittable(_ element: XCUIElement, in target: XCUIApplication) -> Bool {
+            func reached() -> Bool { element.exists && element.isHittable }
+            var swipes = 0
+            while !reached() && swipes < 12 {
+                target.swipeUp()
+                swipes += 1
+            }
+            // Swiping down at the top of the sheet would dismiss it, so only do it when the row sits above the viewport.
+            let windowMidY = target.windows.firstMatch.frame.midY
+            swipes = 0
+            while !reached() && element.exists && element.frame.midY < windowMidY && swipes < 12 {
+                target.swipeDown()
+                swipes += 1
+            }
+            return reached()
+        }
+        func openDetail(_ tileID: String, in target: XCUIApplication, menuIsOpen: Bool = false) -> Bool {
+            if !menuIsOpen {
+                let menu = target.buttons["fuji-q-menu"]
+                guard menu.waitForExistence(timeout: 8), waitUntil(timeout: 8, condition: { menu.isHittable }) else { return false }
+                menu.tap()
+                // The first tile is built up front; waiting for it means the sheet is up before scrolling.
+                guard target.buttons["fuji-q-banks"].waitForExistence(timeout: 8) else { return false }
+            }
+            let tile = target.buttons[tileID]
+            guard swipeUntilHittable(tile, in: target) else { return false }
+            tile.tap()
+            return true
+        }
+        func openNDDetail(in target: XCUIApplication) -> Bool { openDetail("fuji-q-nd", in: target) }
+
+        guard openNDDetail(in: app) else { throw XCTSkip("Q menu is not reachable in this environment") }
+        let use = app.buttons["Use Computational ND"]
+        XCTAssertTrue(swipeUntilHittable(use, in: app), "Use Computational ND must scroll into reach")
+        XCTAssertNotEqual(use.value as? String, "In use")
+        assertMinimumHitTarget(use, named: "Use Computational ND")
+        use.tap()
+        XCTAssertTrue(waitUntil(timeout: 5) { use.value as? String == "In use" })
+        XCTAssertEqual(use.value as? String, "In use")
+        attachScreenshot(named: "fuji-use-drive-in-use")
+
+        #if !targetEnvironment(simulator)
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        let done = app.buttons["Done"]
+        XCTAssertTrue(done.waitForExistence(timeout: 5))
+        done.tap()
+        let chip = app.descendants(matching: .any)["fuji-viewfinder-state"]
+        XCTAssertTrue(chip.waitForExistence(timeout: 8))
+        XCTAssertEqual(chip.value as? String, "Computational ND, 3 stops, 8 frames")
+        attachScreenshot(named: "fuji-viewfinder-state-chip")
+        #endif
+
+        app.terminate()
+        let largeTextApp = makeApplication()
+        largeTextApp.launchArguments = [
+            "-ui-testing",
+            "-selectedRecipeID",
+            "classic-chrome",
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityXXXL"
+        ]
+        largeTextApp.launch()
+        defer { largeTextApp.terminate() }
+
+        guard openNDDetail(in: largeTextApp) else { throw XCTSkip("Q menu is not reachable at the largest text size") }
+        let largeUse = largeTextApp.buttons["Use Computational ND"]
+        XCTAssertTrue(swipeUntilHittable(largeUse, in: largeTextApp), "Use Computational ND must scroll into reach at the largest text size")
+        // The first phase may have persisted the drive; make this phase independent of that.
+        if largeUse.value as? String != "In use" {
+            largeUse.tap()
+            XCTAssertTrue(waitUntil(timeout: 5) { largeUse.value as? String == "In use" })
+        }
+        assertMinimumHitTarget(largeUse, named: "Use Computational ND at the largest text size")
+        XCTAssertEqual(largeUse.value as? String, "In use")
+        attachScreenshot(named: "fuji-use-drive-in-use-largest-text")
+
+        // The two longest Use rows must stay inside the window horizontally at the largest text size.
+        let window = largeTextApp.windows.firstMatch.frame
+        func assertLongRow(label: String, shot: String) {
+            let row = largeTextApp.buttons[label]
+            XCTAssertTrue(swipeUntilHittable(row, in: largeTextApp), label + " must scroll into reach at the largest text size")
+            assertMinimumHitTarget(row, named: label + " at the largest text size")
+            let frame = row.frame
+            XCTAssertGreaterThanOrEqual(frame.minX, window.minX, label + " is clipped at the leading edge")
+            XCTAssertLessThanOrEqual(frame.maxX, window.maxX, label + " is clipped at the trailing edge")
+            // Vertical containment is not asserted: isHittable only needs the row centre on screen, so a row
+            // straddling the scroll edge is legitimate. assertMinimumHitTarget covers the 44 pt floor.
+            attachScreenshot(named: shot)
+        }
+        largeTextApp.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(openDetail("fuji-q-bracketing", in: largeTextApp, menuIsOpen: true), "BKT settings detail must open")
+        assertLongRow(label: "Use DR100 / DR200 / DR400 Bracketing", shot: "fuji-use-row-dr-bracket-largest-text")
+        largeTextApp.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(openDetail("fuji-q-focusStack", in: largeTextApp, menuIsOpen: true), "Focus stack detail must open")
+        assertLongRow(label: "Use Focus Bracketing · separate files", shot: "fuji-use-row-focus-bracket-largest-text")
+    }
 }

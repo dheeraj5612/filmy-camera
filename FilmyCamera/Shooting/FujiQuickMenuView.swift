@@ -190,6 +190,25 @@ private struct FujiControlDetail: View {
     private func bind<T>(_ key: WritableKeyPath<FujiShootingSettings, T>) -> Binding<T> {
         Binding(get: { controller.settings[keyPath: key] }, set: { controller.change(key, to: $0) })
     }
+
+    private func useDriveButton(_ title: String, _ drive: FujiDrive) -> some View {
+        let inUse = controller.settings.drive == drive
+        return Button {
+            let wasInUse = controller.settings.drive == drive
+            controller.change(\.drive, to: drive)
+            if !wasInUse && controller.settings.drive == drive { HapticFeedback.play(.selection) }
+        } label: {
+            HStack(spacing: 8) {
+                Text(title)
+                Spacer(minLength: 0)
+                if inUse { Image(systemName: "checkmark").font(.body.weight(.semibold)).accessibilityHidden(true) }
+            }
+        }
+        .frame(minHeight: 44)
+        .accessibilityLabel(title)
+        .accessibilityValue(inUse ? "In use" : "")
+    }
+
     var body: some View {
         Form { content }
             .navigationTitle(control.title).navigationBarTitleDisplayMode(.inline)
@@ -252,7 +271,7 @@ private struct FujiControlDetail: View {
             Section("Temporal ND") {
                 Stepper("ND \(controller.settings.ndStops) · \(1 << controller.settings.ndStops) frames", value: bind(\.ndStops), in: 1...5)
                 Toggle("Keep component originals", isOn: bind(\.keepCompositeSources))
-                Button("Use Computational ND") { controller.change(\.drive, to: .computationalND) }.frame(minHeight: 44)
+                useDriveButton("Use Computational ND", .computationalND)
                 Text("Average 2–32 equal-exposure stills in linear light for moving-water and motion-trail effects. Output is bounded to 6 MP. Use a tripod. This is sampled temporal integration, not a physical ND filter: it cannot prevent clipping within a source exposure and gaps may break motion trails.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
@@ -261,7 +280,7 @@ private struct FujiControlDetail: View {
                 Stepper("Layers: \(controller.settings.multipleExposureCount)", value: bind(\.multipleExposureCount), in: 2...9)
                 Picker("Blend", selection: bind(\.blendMode)) { ForEach(FujiBlendMode.allCases) { Text($0.title).tag($0) } }
                 Toggle("Keep component originals", isOn: bind(\.keepCompositeSources))
-                Button("Use Multiple Exposure") { controller.change(\.drive, to: .multipleExposure) }.frame(minHeight: 44)
+                useDriveButton("Use Multiple Exposure", .multipleExposure)
                 Text("Press the shutter for each layer. A translucent previous-layer guide helps you compose. Recipe, crop and blend are fixed from the first layer. The final composite is saved automatically at the chosen count; output is bounded to 6 MP.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
@@ -284,8 +303,8 @@ private struct FujiControlDetail: View {
                 Button("Set near to current focus") { controller.change(\.focusNear, to: Double(camera.manualControls.lensPosition)) }
                 Button("Set far to current focus") { controller.change(\.focusFar, to: Double(camera.manualControls.lensPosition)) }
                 Toggle("Keep component originals", isOn: bind(\.keepCompositeSources))
-                Button("Use Focus Bracketing · separate files") { controller.change(\.drive, to: .focusBracket) }.frame(minHeight: 44)
-                Button("Use Focus Stacking · fused image") { controller.change(\.drive, to: .focusStack) }.frame(minHeight: 44)
+                useDriveButton("Use Focus Bracketing · separate files", .focusBracket)
+                useDriveButton("Use Focus Stacking · fused image", .focusStack)
                 Text("Requires manual lens-position control. Stacking aligns small translations and fuses locally sharp regions, with a 6 MP budget. Use a tripod and a still subject. Parallax and focus breathing are not corrected; large misalignment fails rather than silently exporting a bad stack.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
@@ -293,7 +312,7 @@ private struct FujiControlDetail: View {
             Section("Foreground interval shooting") {
                 Stepper("Frames: \(controller.settings.intervalCount)", value: bind(\.intervalCount), in: 2...120)
                 Stepper("Interval: \(Int(controller.settings.intervalSeconds)) seconds", value: bind(\.intervalSeconds), in: 1...3600)
-                Button("Use Interval Shooting") { controller.change(\.drive, to: .interval) }.frame(minHeight: 44)
+                useDriveButton("Use Interval Shooting", .interval)
                 Text("Intervals are measured start-to-start. The next frame waits when the sensor is slower than the requested interval; missed deadlines never cause a catch-up burst. Keep the app in the foreground. Backgrounding cancels the sequence and retains acquired sources.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
@@ -336,7 +355,7 @@ private struct FujiControlDetail: View {
                     Text("⅓ EV").tag(1.0 / 3); Text("⅔ EV").tag(2.0 / 3); Text("1 EV").tag(1.0); Text("2 EV").tag(2.0)
                 }
                 Picker("Sequence", selection: bind(\.bracketOrder)) { ForEach(FujiBracketOrder.allCases) { Text($0.title).tag($0) } }
-                Button("Use AE Bracketing") { controller.change(\.drive, to: .aeBracket) }.frame(minHeight: 44)
+                useDriveButton("Use AE Bracketing", .aeBracket)
             }
             Section("Film Simulation BKT · one exposure") {
                 ForEach(0..<3, id: \.self) { index in
@@ -344,20 +363,20 @@ private struct FujiControlDetail: View {
                         var ids = controller.settings.filmRecipeIDs; ids[index] = value; controller.change(\.filmRecipeIDs, to: ids)
                     })) { ForEach(viewModel.recipes) { Text($0.name).tag($0.id) } }
                 }
-                Button("Use Film Simulation Bracketing") { controller.change(\.drive, to: .filmBracket) }.frame(minHeight: 44)
+                useDriveButton("Use Film Simulation Bracketing", .filmBracket)
             }
             Section("Same-shot ISO / WB variants") {
                 Picker("ISO BKT step", selection: bind(\.isoBracketStep)) {
                     Text("⅓ EV").tag(1.0 / 3); Text("⅔ EV").tag(2.0 / 3); Text("1 EV").tag(1.0)
                 }
                 Stepper("WB step: \(controller.settings.whiteBalanceStep)", value: bind(\.whiteBalanceStep), in: 1...3)
-                Button("Use ISO Bracketing") { controller.change(\.drive, to: .isoBracket) }.frame(minHeight: 44)
-                Button("Use White Balance Bracketing") { controller.change(\.drive, to: .whiteBalanceBracket) }.frame(minHeight: 44)
+                useDriveButton("Use ISO Bracketing", .isoBracket)
+                useDriveButton("Use White Balance Bracketing", .whiteBalanceBracket)
                 Text("These create three developments of one exposure, not three different sensor ISO settings. WB shifts use Filmy's normalized temperature control.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
             Section("Dynamic Range BKT · three exposures") {
-                Button("Use DR100 / DR200 / DR400 Bracketing") { controller.change(\.drive, to: .dynamicRangeBracket) }.frame(minHeight: 44)
+                useDriveButton("Use DR100 / DR200 / DR400 Bracketing", .dynamicRangeBracket)
                 rawAvailability
             }
         }

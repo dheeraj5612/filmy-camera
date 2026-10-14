@@ -346,3 +346,68 @@ struct FujiCapturePlan: Equatable, Sendable {
         return Self(steps: steps, settings: settings)
     }
 }
+
+/// Glanceable Q state for the viewfinder chip. Display only: capture never reads it.
+struct FujiViewfinderState: Equatable, Sendable {
+    let text: String
+    let spoken: String
+    /// True when FujiCapturePlan.make refuses the current setup (the shutter is disabled then). Known gap: no chip
+    /// is shown for a refused Single setup (e.g. pre-shot with RAW or DR200/400); the Q tile carries that state.
+    let isBlocked: Bool
+
+    /// A bank is named only while the live setup still equals what it saved.
+    static func activeBank(id: Int, saved: FujiShootingSettings, current: FujiShootingSettings,
+                           lookOrCameraEdited: Bool) -> Int? {
+        saved == current && !lookOrCameraEdited ? id : nil
+    }
+
+    static func make(settings: FujiShootingSettings, activeBank: Int?) -> FujiViewfinderState? {
+        if activeBank == nil && settings.drive == .single { return nil }
+        let shown = settings.normalized()
+        var texts: [String] = []
+        var spokens: [String] = []
+        if let activeBank {
+            texts.append("C\(activeBank)")
+            spokens.append("Bank C\(activeBank)")
+        }
+        if let drive = driveParts(shown) {
+            texts.append(drive.text)
+            spokens.append(drive.spoken)
+        }
+        let blocked = (try? FujiCapturePlan.make(settings)) == nil
+        var spoken = spokens.joined(separator: ", ")
+        if blocked { spoken += ", cannot shoot, open Q" }
+        return FujiViewfinderState(text: texts.joined(separator: " · "), spoken: spoken, isBlocked: blocked)
+    }
+
+    private static func driveParts(_ settings: FujiShootingSettings) -> (text: String, spoken: String)? {
+        switch settings.drive {
+        case .single:
+            return nil
+        case .continuousLow:
+            return ("CONT L ×\(settings.burstCount)", "Continuous Low, \(settings.burstCount) frames")
+        case .continuousHigh:
+            return ("CONT H ×\(settings.burstCount)", "Continuous High, \(settings.burstCount) frames")
+        case .aeBracket:
+            return ("AE BKT ×\(settings.bracketCount)", "AE bracketing, \(settings.bracketCount) frames")
+        case .isoBracket:
+            return ("ISO BKT", "ISO bracketing, 3 variants")
+        case .whiteBalanceBracket:
+            return ("WB BKT", "White balance bracketing, 3 variants")
+        case .filmBracket:
+            return ("FILM BKT", "Film simulation bracketing, 3 looks")
+        case .dynamicRangeBracket:
+            return ("DR BKT", "Dynamic range bracketing, 3 exposures")
+        case .focusBracket:
+            return ("FOCUS BKT ×\(settings.focusCount)", "Focus bracketing, \(settings.focusCount) frames")
+        case .focusStack:
+            return ("FOCUS STACK ×\(settings.focusCount)", "Focus stacking, \(settings.focusCount) frames")
+        case .computationalND:
+            return ("ND \(settings.ndStops)", "Computational ND, \(settings.ndStops) stops, \(1 << settings.ndStops) frames")
+        case .multipleExposure:
+            return ("MULTI ×\(settings.multipleExposureCount)", "Multiple exposure, \(settings.multipleExposureCount) layers")
+        case .interval:
+            return ("INTERVAL ×\(settings.intervalCount)", "Interval shooting, \(settings.intervalCount) frames")
+        }
+    }
+}

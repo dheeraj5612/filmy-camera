@@ -3,6 +3,18 @@ import SwiftUI
 struct FujiViewfinderOverlay: View {
     @ObservedObject var controller: FujiShootingController
     @ObservedObject var camera: CameraService
+    private var viewfinderState: FujiViewfinderState? {
+        let preferences = controller.preferences
+        var bank: Int?
+        // Sequences move exposure, focus and look, so the bank is judged only at rest.
+        if !controller.settingsLocked, let id = preferences.selectedBank,
+           let saved = preferences.banks.first(where: { $0.id == id }) {
+            bank = FujiViewfinderState.activeBank(id: id, saved: saved.settings, current: controller.settings,
+                                                  lookOrCameraEdited: controller.bankIsDirty(saved))
+        }
+        return FujiViewfinderState.make(settings: controller.settings, activeBank: bank)
+    }
+
     var body: some View {
         GeometryReader { proxy in
             ZStack {
@@ -27,6 +39,15 @@ struct FujiViewfinderOverlay: View {
                         }
                         Spacer()
                     }.padding(10)
+                }
+                if let state = viewfinderState {
+                    // Leading edge, below the overlaid top bar and the histogram's default corner
+                    // (54 + 8 + 8 + 82 + 8), above the tool rail and zoom row on short finders.
+                    let chipTop = min(160, max(70, proxy.size.height - 170))
+                    FujiViewfinderStateChip(state: state)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .padding(.horizontal, 10)
+                        .padding(.top, chipTop)
                 }
                 if let image = controller.focusImage, controller.settings.focusAssist != .off, !controller.isBusy {
                     VStack(spacing: 4) {
@@ -58,6 +79,27 @@ struct FujiViewfinderOverlay: View {
             }
             .foregroundStyle(.white).allowsHitTesting(false)
         }
+    }
+}
+
+private struct FujiViewfinderStateChip: View {
+    let state: FujiViewfinderState
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: state.isBlocked ? "exclamationmark.triangle.fill" : "circle.fill")
+                .imageScale(.small)
+                .foregroundStyle(state.isBlocked ? Color.orange : FilmyTheme.filmAccent)
+            Text(state.text).minimumScaleFactor(0.75).lineLimit(2)
+        }
+        .font(.caption2.weight(.semibold).monospaced())
+        .foregroundStyle(.white)
+        .padding(8)
+        .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Shooting state")
+        .accessibilityValue(state.spoken)
+        .accessibilityIdentifier("fuji-viewfinder-state")
     }
 }
 

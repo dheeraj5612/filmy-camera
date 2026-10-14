@@ -22,12 +22,20 @@ struct FujiSequenceRequest: Sendable {
 final class FujiShootingController: ObservableObject {
     @Published var preferences: FujiPreferences {
         didSet {
-            preferences = preferences.normalized()
+            // Swift 6.4 re-runs this observer for the assignment below; the flag keeps one pass per outside write.
+            if isNormalizingPreferences { return }
+            let normalized = preferences.normalized()
+            if normalized != preferences {
+                isNormalizingPreferences = true
+                preferences = normalized
+                isNormalizingPreferences = false
+            }
             do { defaults.set(try JSONEncoder().encode(preferences), forKey: "fuji.shooting.v1") }
             catch { errorMessage = "Shooting settings could not be saved." }
             refreshPreview()
         }
     }
+    private var isNormalizingPreferences = false
     @Published private(set) var isBusy = false
     @Published private(set) var status = ""
     @Published var errorMessage: String?

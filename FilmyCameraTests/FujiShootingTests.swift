@@ -612,6 +612,176 @@ final class FujiShootingTests: XCTestCase {
             format: .RGBAf, colorSpace: FujiImageProcessor.linearSpace)
         return result
     }
+
+    func testViewfinderStateIsNilForSingleFrameWithoutBank() {
+        XCTAssertNil(FujiViewfinderState.make(settings: FujiShootingSettings(), activeBank: nil))
+    }
+
+    func testViewfinderStateNamesBankDriveBracketAndND() throws {
+        var settings = FujiShootingSettings()
+        let bankOnly = FujiViewfinderState.make(settings: settings, activeBank: 3)
+        XCTAssertEqual(bankOnly?.text, "C3")
+        XCTAssertEqual(bankOnly?.spoken, "Bank C3")
+
+        settings.drive = .aeBracket
+        settings.bracketCount = 5
+        XCTAssertEqual(FujiViewfinderState.make(settings: settings, activeBank: nil)?.text, "AE BKT ×5")
+        XCTAssertEqual(try FujiCapturePlan.make(settings).steps.count, 5)
+
+        settings.drive = .computationalND
+        settings.ndStops = 4
+        let nd = FujiViewfinderState.make(settings: settings, activeBank: nil)
+        XCTAssertEqual(nd?.text, "ND 4")
+        XCTAssertEqual(nd?.spoken, "Computational ND, 4 stops, 16 frames")
+        XCTAssertEqual(try FujiCapturePlan.make(settings).steps.count, 16)
+
+        var burst = FujiShootingSettings()
+        burst.drive = .continuousHigh
+        XCTAssertEqual(FujiViewfinderState.make(settings: burst, activeBank: nil)?.text, "CONT H ×5")
+
+        settings.drive = .interval
+        settings.intervalCount = 120
+        XCTAssertEqual(FujiViewfinderState.make(settings: settings, activeBank: nil)?.text, "INTERVAL ×120")
+
+        settings.drive = .focusStack
+        settings.focusCount = 20
+        XCTAssertEqual(FujiViewfinderState.make(settings: settings, activeBank: nil)?.text, "FOCUS STACK ×20")
+
+        var both = FujiShootingSettings()
+        both.drive = .aeBracket
+        let state = FujiViewfinderState.make(settings: both, activeBank: 1)
+        XCTAssertEqual(state?.text, "C1 · AE BKT ×3")
+        XCTAssertEqual(state?.spoken, "Bank C1, AE bracketing, 3 frames")
+    }
+
+    func testViewfinderStateCoversEveryDriveWithoutReusingDriveTitles() {
+        var texts = Set<String>()
+        for drive in FujiDrive.allCases where drive != .single {
+            var settings = FujiShootingSettings()
+            settings.drive = drive
+            let state = FujiViewfinderState.make(settings: settings, activeBank: nil)
+            XCTAssertNotNil(state, drive.rawValue)
+            XCTAssertFalse(state?.text.isEmpty ?? true, drive.rawValue)
+            XCTAssertNotEqual(state?.spoken, drive.title, drive.rawValue)
+            XCTAssertTrue(texts.insert(state?.text ?? "").inserted, "\(drive.rawValue) text must be unique")
+        }
+    }
+
+    func testViewfinderBankIsNamedOnlyWhileSetupMatchesTheBank() {
+        let saved = FujiShootingSettings()
+        XCTAssertEqual(FujiViewfinderState.activeBank(id: 1, saved: saved, current: saved, lookOrCameraEdited: false), 1)
+        var current = saved
+        current.drive = .aeBracket
+        XCTAssertNil(FujiViewfinderState.activeBank(id: 1, saved: saved, current: current, lookOrCameraEdited: false))
+        current = saved
+        current.captureRAW = true
+        XCTAssertNil(FujiViewfinderState.activeBank(id: 1, saved: saved, current: current, lookOrCameraEdited: false))
+        XCTAssertNil(FujiViewfinderState.activeBank(id: 1, saved: saved, current: saved, lookOrCameraEdited: true))
+    }
+
+    func testViewfinderStateMarksSetupsThePlanRefuses() {
+        var settings = FujiShootingSettings()
+        settings.drive = .aeBracket
+        XCTAssertEqual(FujiViewfinderState.make(settings: settings, activeBank: nil)?.isBlocked, false)
+
+        settings.preShotSeconds = 0.5
+        let state = FujiViewfinderState.make(settings: settings, activeBank: nil)
+        XCTAssertEqual(state?.isBlocked, true)
+        XCTAssertThrowsError(try FujiCapturePlan.make(settings))
+        XCTAssertEqual(state?.spoken.hasSuffix("cannot shoot, open Q"), true)
+        XCTAssertEqual(state?.text, "AE BKT ×3")
+
+        var focus = FujiShootingSettings()
+        focus.drive = .focusBracket
+        focus.focusNear = 0.5
+        focus.focusFar = 0.5
+        XCTAssertEqual(FujiViewfinderState.make(settings: focus, activeBank: nil)?.isBlocked, true)
+    }
+
+    func testUseDriveChangeIsReflectedInViewfinderState() throws {
+        let suite = "FujiShootingTests.UseDrive.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let controller = FujiShootingController(defaults: defaults)
+        let before = controller.settings
+        XCTAssertNil(FujiViewfinderState.make(settings: before, activeBank: nil))
+
+        controller.change(\.drive, to: .aeBracket)
+
+        var expected = before
+        expected.drive = .aeBracket
+        XCTAssertEqual(controller.settings, expected, "Only drive may differ after a Use button")
+        XCTAssertEqual(FujiViewfinderState.make(settings: controller.settings, activeBank: nil)?.text, "AE BKT ×3")
+        let stored = try XCTUnwrap(defaults.data(forKey: "fuji.shooting.v1"))
+        XCTAssertEqual(try JSONDecoder().decode(FujiPreferences.self, from: stored), controller.preferences)
+    }
+
+    func testOutOfRangeWriteEndsNormalizedInMemoryAndInStoredBlob() throws {
+        let suite = "FujiShootingTests.OutOfRange.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let controller = FujiShootingController(defaults: defaults)
+        controller.change(\.burstCount, to: 99)
+        XCTAssertEqual(controller.settings.burstCount, 20)
+        let stored = try XCTUnwrap(defaults.data(forKey: "fuji.shooting.v1"))
+        let decoded = try JSONDecoder().decode(FujiPreferences.self, from: stored)
+        XCTAssertEqual(decoded.settings.burstCount, 20)
+        XCTAssertEqual(decoded, controller.preferences)
+    }
+
+    func testOneOutsideWriteStoresTheBlobExactlyOnce() throws {
+        let suite = "FujiShootingTests.WriteCount.\(UUID())"
+        let base = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { base.removePersistentDomain(forName: suite) }
+        let counting = FujiWriteCountingDefaults(suiteName: suite)!
+        let controller = FujiShootingController(defaults: counting)
+        XCTAssertEqual(counting.writes, 0, "Init must not store the blob")
+
+        controller.change(\.drive, to: .aeBracket)
+        XCTAssertEqual(counting.writes, 1, "A write that is already normal stores once")
+
+        counting.writes = 0
+        controller.change(\.burstCount, to: 99)
+        XCTAssertEqual(controller.settings.burstCount, 20)
+        XCTAssertEqual(counting.writes, 1, "A write that normalization changes still stores once")
+    }
+
+    func testNormalizedIsIdempotentForOutOfRangePreferences() {
+        var sample = FujiPreferences()
+        sample.settings.digitalCrop = 9
+        sample.settings.burstCount = 99
+        sample.settings.bracketCount = 4
+        sample.settings.intervalCount = 1000
+        sample.settings.autoISOProfiles[0].minimumISO = 5
+        sample.settings.autoISOProfiles[1].maximumISO = 1_000_000
+        sample.settings.autoISOProfiles[1].motionMultiplier = 99
+        sample.settings.autoISOIndex = 7
+        let once = sample.normalized()
+        XCTAssertNotEqual(once, sample)
+        XCTAssertEqual(once.normalized(), once)
+    }
+
+    func testTwoWritesInARowBothLand() throws {
+        let suite = "FujiShootingTests.TwoWrites.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let controller = FujiShootingController(defaults: defaults)
+        controller.change(\.drive, to: .aeBracket)
+        controller.change(\.burstCount, to: 12)
+        XCTAssertEqual(controller.settings.drive, .aeBracket)
+        XCTAssertEqual(controller.settings.burstCount, 12)
+        let stored = try XCTUnwrap(defaults.data(forKey: "fuji.shooting.v1"))
+        XCTAssertEqual(try JSONDecoder().decode(FujiPreferences.self, from: stored), controller.preferences)
+    }
+}
+
+/// Counts stores of the Fuji preferences blob; every other key passes through untouched.
+private final class FujiWriteCountingDefaults: UserDefaults, @unchecked Sendable {
+    var writes = 0
+    override func set(_ value: Any?, forKey defaultName: String) {
+        if defaultName == "fuji.shooting.v1" { writes += 1 }
+        super.set(value, forKey: defaultName)
+    }
 }
 
 private final class FujiTestDriver: FujiCaptureDriver, @unchecked Sendable {
