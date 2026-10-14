@@ -279,10 +279,11 @@ final class ComprehensiveSettingsTests: XCTestCase {
             setToggle(reveal(location, app), "1")
         }
 
-        // Replay gestures row: row, label, value and target size only. The value already reads "Hint turned back on" before the tap in this suite, so this is not tap coverage; the manual device frame is the proof.
+        // Replay gestures row: before the tap the value reads "Hint not seen yet" or "Hint already seen" depending on launch arguments, never "Hint turned back on", so the wait after the tap proves the tap.
         let replay = reveal(page.buttons["settings-replay-gestures"], app)
         XCTAssertGreaterThanOrEqual(replay.frame.height, 44)
         XCTAssertEqual(replay.label, "Replay gestures")
+        XCTAssertNotEqual(replay.value as? String, "Hint turned back on", "value before tap=\(String(describing: replay.value))")
         replay.tap()
         XCTAssertTrue(wait { replay.value as? String == "Hint turned back on" }, "value=\(String(describing: replay.value))")
         attach("settings-replay-gestures-confirmed")

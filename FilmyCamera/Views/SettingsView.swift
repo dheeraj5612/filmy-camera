@@ -56,6 +56,7 @@ struct SettingsView: View {
     @AppStorage(HistogramPlacement.horizontalPreferenceKey) private var histogramPositionX = 0.0
     @AppStorage(HistogramPlacement.verticalPreferenceKey) private var histogramPositionY = 0.0
     @AppStorage("cameraGestureHintSeen.v1") private var gestureHintSeen = false
+    @State private var didReplayGestureHint = false
 
     var body: some View {
         NavigationStack {
@@ -100,6 +101,9 @@ struct SettingsView: View {
         }
         .onChange(of: photoLibrary.hasLocalCache) { _, has in
             if !has { isConfirmingCacheClear = false }
+        }
+        .onChange(of: gestureHintSeen) { _, seen in
+            if seen { didReplayGestureHint = false }
         }
     }
 
@@ -309,20 +313,30 @@ struct SettingsView: View {
         .buttonStyle(.plain)
         .accessibilityIdentifier("settings-replay-gestures")
         .accessibilityLabel("Replay gestures")
-        .accessibilityValue(gestureHintSeen ? "Hint already seen" : "Hint turned back on")
+        .accessibilityValue(replayGesturesValue)
         .accessibilityHint("Shows the camera gesture hint again.")
     }
 
     private var replayGesturesDetail: String {
-        gestureHintSeen
-            ? "Show the camera gesture hint again."
-            : "Turned back on. It shows when the camera is running."
+        if gestureHintSeen { return "Show the camera gesture hint again." }
+        if didReplayGestureHint { return "Turned back on. It shows when the camera is running." }
+        return "Shows the next time the camera runs."
+    }
+
+    private var replayGesturesValue: String {
+        if gestureHintSeen { return "Hint already seen" }
+        if didReplayGestureHint { return "Hint turned back on" }
+        return "Hint not seen yet"
     }
 
     private func replayGestureHint() {
         HapticFeedback.play(.selection)
+        let alreadyConfirmed: Bool = didReplayGestureHint && !gestureHintSeen
+        didReplayGestureHint = true
         gestureHintSeen = false
-        UIAccessibility.post(notification: .announcement, argument: "Gesture hint turned back on.")
+        if !alreadyConfirmed {
+            UIAccessibility.post(notification: .announcement, argument: "Gesture hint turned back on.")
+        }
     }
 
     private var mirrorFrontRow: some View {
