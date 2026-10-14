@@ -305,6 +305,143 @@ final class ComprehensiveSettingsTests: XCTestCase {
         #endif
     }
 
+    func testAccessSectionUsesPlainPermissionWords() throws {
+        #if targetEnvironment(simulator)
+        continueAfterFailure = false
+        let app = makeApp()
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["settings-tab"].waitForExistence(timeout: 20))
+        app.buttons["settings-tab"].tap()
+
+        let photos = reveal(app.buttons["photos-permission-settings"], app)
+        XCTAssertTrue(photos.label.contains("Turn on Photos in Settings"), photos.label)
+        let save = reveal(app.buttons["photos-save-permission-settings"], app)
+        XCTAssertTrue(save.label.contains("Allow saving new photos"), save.label)
+        for button in [photos, save] {
+            XCTAssertGreaterThanOrEqual(button.frame.width, 44)
+            XCTAssertGreaterThanOrEqual(button.frame.height, 44)
+        }
+        XCTAssertEqual(
+            app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Open System Settings'")).count, 0)
+        XCTAssertTrue(app.staticTexts["Photos access is off for Filmy."].exists)
+        let photosBadge = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Photos, Off'")).firstMatch
+        XCTAssertTrue(photosBadge.exists, "The Photos badge must read its subject and state")
+        attach("settings-access-plain-words")
+        let cameraBadge = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Camera, Simulator'")).firstMatch
+        XCTAssertTrue(cameraBadge.exists, "The Camera badge must read its subject and state")
+        #else
+        throw XCTSkip("Needs the forced Photos-denied UI-test state")
+        #endif
+    }
+
+    func testStorageExplainerAndInlineClearCacheConfirmation() throws {
+        #if targetEnvironment(simulator)
+        continueAfterFailure = false
+        let app = makeApp()
+        app.launchArguments += ["-ui-testing-cache-confirm"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["settings-tab"].waitForExistence(timeout: 20))
+        app.buttons["settings-tab"].tap()
+
+        let clear = reveal(app.buttons["clear-local-cache"], app, requireHittable: false)
+        let places = ["photos", "roll", "captures"].map { app.descendants(matching: .any)["settings-storage-place-\($0)"] }
+        let photosPlace = reveal(places[0], app, requireHittable: false)
+        XCTAssertTrue(app.staticTexts["Where your photos are"].exists)
+        for place in places { XCTAssertTrue(place.exists, place.identifier) }
+        XCTAssertTrue(photosPlace.label.contains("saves here by itself"), photosPlace.label)
+        XCTAssertGreaterThanOrEqual(photosPlace.frame.minY, clear.frame.maxY, "The explainer sits below the clear row")
+        attach("settings-storage-where-photos-are")
+
+        let confirm = app.buttons["confirm-clear-local-cache"]
+        let keep = app.buttons["keep-local-cache"]
+        let row = reveal(app.buttons["clear-local-cache"], app)
+        XCTAssertEqual(row.value as? String, "Available")
+        row.tap()
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        XCTAssertTrue(keep.waitForExistence(timeout: 5))
+        XCTAssertTrue(confirm.isHittable && keep.isHittable)
+        XCTAssertGreaterThanOrEqual(confirm.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(keep.frame.height, 44)
+        XCTAssertTrue(app.buttons["Keep cache"].exists)
+        XCTAssertEqual(app.popovers.count + app.sheets.count, 0, "The confirmation is inline, not a popover")
+        XCTAssertLessThanOrEqual(keep.frame.maxY, confirm.frame.minY)
+        XCTAssertTrue(app.staticTexts["Clear cache?"].exists)
+        attach("settings-clear-cache-inline-confirm")
+
+        keep.tap()
+        XCTAssertTrue(wait { !confirm.exists })
+        XCTAssertEqual(row.value as? String, "Available")
+        XCTAssertTrue(row.isHittable)
+        row.tap()
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.tap()
+        XCTAssertTrue(wait { !confirm.exists })
+        XCTAssertTrue(row.exists)
+
+        app.terminate()
+        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        XCTAssertTrue(app.buttons["settings-tab"].waitForExistence(timeout: 20))
+        app.buttons["settings-tab"].tap()
+        reveal(app.buttons["clear-local-cache"], app).tap()
+        XCTAssertTrue(wait { keep.isHittable && confirm.isHittable },
+                      "Keep and Clear must both be reachable without scrolling at the largest text size")
+        attach("settings-clear-cache-inline-confirm-largest-text")
+        #else
+        throw XCTSkip("Needs the forced Photos-denied UI-test state")
+        #endif
+    }
+
+    func testOnboardingStartingLooksGridAndPermissionNote() throws {
+        #if targetEnvironment(simulator)
+        continueAfterFailure = false
+        let app = makeApp()
+        app.launchArguments += ["-ui-testing-onboarding"]
+        app.launch()
+        defer { app.terminate() }
+
+        let ids = ["g7x-compact", "classic-chrome", "nostalgic-negative", "acros-monochrome"]
+        let tiles = ids.map { app.buttons["onboarding-recipe-\($0)"] }
+        let t0 = tiles[0], t1 = tiles[1], t2 = tiles[2], t3 = tiles[3]
+        let cont = app.buttons["onboarding-continue"]
+        XCTAssertTrue(t0.waitForExistence(timeout: 15))
+        for tile in tiles {
+            XCTAssertTrue(tile.isHittable, tile.identifier)
+            XCTAssertGreaterThanOrEqual(tile.frame.height, 44, tile.identifier)
+        }
+        XCTAssertTrue(cont.isHittable)
+        XCTAssertLessThanOrEqual(t3.frame.maxY, cont.frame.minY)
+        XCTAssertLessThanOrEqual(abs(t0.frame.minY - t1.frame.minY), 2)
+        XCTAssertLessThanOrEqual(t0.frame.maxX, t1.frame.minX + 1)
+        XCTAssertGreaterThanOrEqual(t2.frame.minY, t0.frame.maxY)
+        XCTAssertLessThanOrEqual(abs(t2.frame.minX - t0.frame.minX), 2)
+        XCTAssertLessThanOrEqual(abs(t3.frame.minX - t1.frame.minX), 2)
+        XCTAssertGreaterThan(t0.frame.width, 140)
+        XCTAssertLessThanOrEqual(abs(t0.frame.width - t1.frame.width), 2)
+        XCTAssertEqual(t0.value as? String, "Selected")
+        t1.tap()
+        XCTAssertTrue(wait { t1.value as? String == "Selected" })
+
+        let note = app.staticTexts["onboarding-permission-note"]
+        XCTAssertTrue(note.exists)
+        XCTAssertTrue(note.label.contains("camera") && note.label.contains("Photos"), note.label)
+        XCTAssertGreaterThanOrEqual(
+            note.frame.minY, app.staticTexts["onboarding-save-explanation"].frame.maxY - 1)
+        if app.frame.height >= 870 {
+            XCTAssertTrue(app.scrollViews["onboarding-content"].frame.contains(note.frame))
+            XCTAssertLessThanOrEqual(note.frame.maxY, cont.frame.minY)
+        }
+        attach("onboarding-starting-looks-grid")
+        cont.tap()
+        XCTAssertTrue(app.buttons["roll-tab"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.descendants(matching: .any)["onboarding-screen"].exists)
+        #else
+        throw XCTSkip("Needs the simulator onboarding launch state")
+        #endif
+    }
+
     private func makeApp() -> XCUIApplication {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()

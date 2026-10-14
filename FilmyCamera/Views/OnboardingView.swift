@@ -51,7 +51,7 @@ struct OnboardingView: View {
                             .accessibilityAddTraits(.isHeader)
 
                         if let recipe = previewRecipe {
-                            sample(recipe, height: max(170, min(360, geometry.size.height * 0.40)))
+                            sample(recipe, height: sampleHeight(for: geometry.size.height))
                         }
                         #if !G7_APP
                         VStack(alignment: .leading, spacing: 10) {
@@ -62,11 +62,14 @@ struct OnboardingView: View {
                             recipeChooser
                         }
                         #endif
-                        Text("Camera photos save automatically to Photos. Imported photos save only when you choose.")
-                            .font(.footnote)
-                            .foregroundStyle(FilmyTheme.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("onboarding-save-explanation")
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Camera photos save automatically to Photos. Imported photos save only when you choose.")
+                                .font(.footnote)
+                                .foregroundStyle(FilmyTheme.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("onboarding-save-explanation")
+                            permissionNote
+                        }
                         Label("Processed on this device. No account.", systemImage: "lock")
                             .font(.caption)
                             .foregroundStyle(FilmyTheme.secondary)
@@ -94,7 +97,7 @@ struct OnboardingView: View {
             .accessibilityLabel("Open camera")
             .accessibilityValue(previewRecipe?.name ?? "Current look")
             .accessibilityIdentifier("onboarding-continue")
-            .accessibilityHint("Opens the camera with your selected look. Camera permission is requested there.")
+            .accessibilityHint("Opens the camera with your selected look. You may be asked for camera access there.")
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
             .frame(maxWidth: 620)
@@ -105,6 +108,20 @@ struct OnboardingView: View {
         .preferredColorScheme(.dark)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("onboarding-screen")
+    }
+
+    private var permissionNote: some View {
+        Text("You may be asked for camera, location and Photos access.")
+            .font(.caption)
+            .foregroundStyle(FilmyTheme.secondary)
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("onboarding-permission-note")
+    }
+
+    private func sampleHeight(for available: CGFloat) -> CGFloat {
+        let fraction: CGFloat = dynamicTypeSize.isAccessibilitySize ? 0.40 : 0.35
+        return max(170, min(360, available * fraction))
     }
 
     private var header: some View {
@@ -200,26 +217,36 @@ struct OnboardingView: View {
                     }
                 }
             } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(alignment: .top, spacing: 12) {
-                        ForEach(featuredRecipes) { recipe in
-                            recipeChoice(recipe, expanded: false)
-                        }
+                // Non-lazy grid: every tile exists before any scrolling.
+                VStack(spacing: 10) {
+                    ForEach(Array(stride(from: 0, to: featuredRecipes.count, by: 2)), id: \.self) { start in
+                        recipeGridRow(startingAt: start)
                     }
-                    .padding(.vertical, 4)
                 }
-                .scrollBounceBehavior(.basedOnSize)
             }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("onboarding-recipe-chooser")
     }
 
+    private func recipeGridRow(startingAt start: Int) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            recipeChoice(featuredRecipes[start], expanded: false)
+            if start + 1 < featuredRecipes.count {
+                recipeChoice(featuredRecipes[start + 1], expanded: false)
+            } else {
+                Color.clear
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 1)
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+
     private func recipeChoice(_ recipe: FilmRecipe, expanded: Bool) -> some View {
         let selected = selectedRecipeID == recipe.id
-        let layout = expanded
-            ? AnyLayout(HStackLayout(alignment: .center, spacing: 12))
-            : AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+        let layout = AnyLayout(HStackLayout(alignment: .center, spacing: expanded ? 12 : 8))
+        let minTileHeight: CGFloat? = expanded ? nil : 48
 
         return Button {
             guard !selected else { return }
@@ -230,8 +257,8 @@ struct OnboardingView: View {
             onSelectRecipe(recipe)
         } label: {
             layout {
-                RecipeSwatch(recipe: recipe, showsLabel: false)
-                    .frame(width: expanded ? 80 : 112, height: expanded ? 72 : 76)
+                RecipeSwatch(recipe: recipe, isSelected: selected && !expanded, showsLabel: false)
+                    .frame(width: expanded ? 80 : 48, height: expanded ? 72 : 48)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
 
@@ -245,6 +272,7 @@ struct OnboardingView: View {
                             .accessibilityHidden(true)
                         Text(recipe.name)
                             .font((expanded ? Font.body : Font.caption).weight(.semibold))
+                            .minimumScaleFactor(expanded ? 1 : 0.85)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .foregroundStyle(selected ? FilmyTheme.accent : FilmyTheme.primary)
@@ -255,8 +283,9 @@ struct OnboardingView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .frame(maxWidth: expanded ? .infinity : 112, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(maxWidth: .infinity, minHeight: minTileHeight, alignment: .leading)
             .padding(expanded ? 12 : 0)
             .background(expanded ? FilmyTheme.panel : .clear, in: RoundedRectangle(cornerRadius: 14))
             .contentShape(Rectangle())

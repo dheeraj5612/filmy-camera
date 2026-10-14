@@ -11,11 +11,30 @@ struct SettingsView: View {
 
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isConfirmingCacheClear = false
+    @AccessibilityFocusState private var cacheFocus: CacheFocus?
     @State private var cameraAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
     @State private var locationAuthorizationStatus = CLAuthorizationStatus.notDetermined
     @State private var isConfirmingCameraReset = false
     @State private var didResetCameraSettings = false
+
+    private enum CacheFocus: Hashable { case confirmTitle, clearRow }
+
+    private static let cacheSlotID = "settings-cache-clear-slot"
+
+    // UI-test preview of the clear-cache confirmation. The simulator never has
+    // a local cache, so Debug builds can open the panel to check its layout.
+    private static let forcesCacheConfirmPreview: Bool = {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        return arguments.contains("-ui-testing") && arguments.contains("-ui-testing-cache-confirm")
+        #else
+        return false
+        #endif
+    }()
+
+    private var canClearCache: Bool { photoLibrary.hasLocalCache || Self.forcesCacheConfirmPreview }
 
     private let privacyPolicyURL = URL(string: "https://dheeraj5612.github.io/filmycam-legal/privacy-policy.html")!
     private let supportURL = URL(string: "https://dheeraj5612.github.io/filmycam-legal/support.html")!
@@ -43,43 +62,29 @@ struct SettingsView: View {
             ZStack {
                 FilmyPageBackground()
 
-                ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 26) {
-                        settingsHeader
-                        if MonetizationConfiguration.isEnabled {
-                            AccountSettingsSection()
-                        }
-
-                        captureSettings
-                        permissions
-                        localCache
-                        about
-                        resetSection
+                ScrollViewReader { proxy in
+                    ScrollView(showsIndicators: false) {
+                        settingsContent
                     }
-                    .frame(maxWidth: FilmyLayout.readableMaxWidth)
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, FilmyTheme.pageMargin)
-                    .padding(.top, 18)
-                    .padding(.bottom, 40)
+                    .scrollBounceBehavior(.basedOnSize)
+                    .accessibilityIdentifier("settings-scroll")
+                    .onChange(of: isConfirmingCacheClear) { _, open in
+                        guard open else { return }
+                        let anchor: UnitPoint = dynamicTypeSize.isAccessibilitySize ? .top : .center
+                        let animation: Animation? = reduceMotion ? nil : .snappy(duration: 0.24)
+                        // Wait one turn so the taller panel is laid out first.
+                        Task { @MainActor in
+                            withAnimation(animation) {
+                                proxy.scrollTo(Self.cacheSlotID, anchor: anchor)
+                            }
+                        }
+                    }
                 }
-                .scrollBounceBehavior(.basedOnSize)
-                .accessibilityIdentifier("settings-scroll")
             }
             .safeAreaInset(edge: .top, spacing: 0) {
                 CameraReturnBar(accessibilityIdentifier: "settings-back-to-camera", action: onBackToCamera)
             }
             .toolbar(.hidden, for: .navigationBar)
-        }
-        .confirmationDialog("Clear the local frame cache?", isPresented: $isConfirmingCacheClear, titleVisibility: .visible) {
-            Button("Clear cache", role: .destructive) {
-                guard photoLibrary.hasLocalCache else { return }
-                HapticFeedback.play(.discard)
-                photoLibrary.clearLocalRollCache()
-            }
-            .accessibilityIdentifier("confirm-clear-local-cache")
-            Button("Keep cache", role: .cancel) { }
-        } message: {
-            Text("Only temporary copies on this device are removed. Photos originals are not deleted. Cached frames may disappear from the Roll while Photos access is limited or off.")
         }
         .confirmationDialog("Reset camera settings?", isPresented: $isConfirmingCameraReset, titleVisibility: .visible) {
             Button("Reset", role: .destructive, action: resetCameraSettings)
@@ -93,6 +98,29 @@ struct SettingsView: View {
             guard phase == .active else { return }
             refreshPermissionState()
         }
+        .onChange(of: photoLibrary.hasLocalCache) { _, has in
+            if !has { isConfirmingCacheClear = false }
+        }
+    }
+
+    private var settingsContent: some View {
+        VStack(alignment: .leading, spacing: 26) {
+            settingsHeader
+            if MonetizationConfiguration.isEnabled {
+                AccountSettingsSection()
+            }
+
+            captureSettings
+            permissions
+            localCache
+            about
+            resetSection
+        }
+        .frame(maxWidth: FilmyLayout.readableMaxWidth)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, FilmyTheme.pageMargin)
+        .padding(.top, 18)
+        .padding(.bottom, 40)
     }
 
     private var settingsHeader: some View {
@@ -222,10 +250,15 @@ struct SettingsView: View {
     private var locationStatusTitle: String {
         if !locationTaggingEnabled { return "Off in Filmy" }
         switch locationAuthorizationStatus {
-        case .authorizedWhenInUse, .authorizedAlways: return "Allowed"
+        case .authorizedWhenInUse, .authorizedAlways: return "On"
         case .denied, .restricted: return "Off"
         default: return "Not asked"
         }
+    }
+
+    private var locationStatusIsEnabled: Bool {
+        locationTaggingEnabled
+            && (locationAuthorizationStatus == .authorizedWhenInUse || locationAuthorizationStatus == .authorizedAlways)
     }
 
     private var locationNeedsSettings: Bool {
@@ -238,10 +271,7 @@ struct SettingsView: View {
             title: "Location",
             detail: "Used only to tag photos while the camera is open."
         ) {
-            PermissionBadge(
-                title: locationStatusTitle,
-                isEnabled: locationStatusTitle == "Allowed"
-            )
+            permissionBadge("Location", title: locationStatusTitle, isEnabled: locationStatusIsEnabled)
         }
         .accessibilityIdentifier("settings-location-access")
     }
@@ -303,27 +333,24 @@ struct SettingsView: View {
     private var permissions: some View {
         settingsSection(
             title: "ACCESS",
-            footer: "Filmy Camera only asks for the access needed to make and keep a frame."
+            footer: "Filmy only asks for what it needs to take and save your photos."
         ) {
             SettingRow(
                 systemName: "camera.fill",
                 title: "Camera",
                 detail: cameraStatusDetail
             ) {
-                PermissionBadge(
-                    title: cameraStatusTitle,
-                    isEnabled: cameraStatusIsEnabled
-                )
+                permissionBadge("Camera", title: cameraStatusTitle, isEnabled: cameraStatusIsEnabled)
             }
 
             if cameraPermissionNeedsSettings {
                 settingsDivider
                 settingsAction(
-                    title: "Open System Settings",
+                    title: "Turn on camera in Settings",
                     systemName: "arrow.up.right.square",
                     identifier: "camera-permission-settings",
-                    hint: "Opens Filmy Camera camera permissions",
-                    subtitle: "Continue in iOS Settings",
+                    hint: "Turn the camera on for Filmy there, then come back.",
+                    subtitle: "Opens the Settings app",
                     action: openSystemSettings
                 )
             }
@@ -334,11 +361,11 @@ struct SettingsView: View {
             if locationNeedsSettings {
                 settingsDivider
                 settingsAction(
-                    title: "Open System Settings",
+                    title: "Turn on location in Settings",
                     systemName: "arrow.up.right.square",
                     identifier: "location-permission-settings",
-                    hint: "Opens Filmy Camera location permissions",
-                    subtitle: "Continue in iOS Settings",
+                    hint: "Turn location on for Filmy there, then come back.",
+                    subtitle: "Opens the Settings app",
                     action: openSystemSettings
                 )
             }
@@ -346,10 +373,10 @@ struct SettingsView: View {
             if cameraPermissionNeedsRequest {
                 settingsDivider
                 settingsAction(
-                    title: "Request Camera Access",
+                    title: "Allow camera access",
                     systemName: "camera.badge.ellipsis",
                     identifier: "camera-permission-request",
-                    hint: "Shows the system camera permission prompt",
+                    hint: "Shows the camera permission prompt.",
                     action: requestCameraAccess
                 )
             }
@@ -361,21 +388,17 @@ struct SettingsView: View {
                 title: "Photos",
                 detail: photoStatusDetail
             ) {
-                PermissionBadge(
-                    title: photoStatusTitle,
-                    isEnabled: PhotoLibraryAuthorizationPolicy.canRead(photoLibrary.authorizationStatus)
-                        || photoLibrary.canSaveToPhotos
-                )
+                permissionBadge("Photos", title: photoStatusTitle, isEnabled: photosBadgeIsEnabled)
             }
 
             if photoLibrary.authorizationStatus == .denied || photoLibrary.authorizationStatus == .restricted {
                 settingsDivider
                 settingsAction(
-                    title: "Open System Settings",
+                    title: "Turn on Photos in Settings",
                     systemName: "arrow.up.right.square",
                     identifier: "photos-permission-settings",
-                    hint: "Opens Filmy Camera permissions",
-                    subtitle: "Continue in iOS Settings",
+                    hint: "Turn Photos on for Filmy there so the Roll can show your photos.",
+                    subtitle: "Opens the Settings app",
                     action: openSystemSettings
                 )
             } else if photoLibrary.authorizationStatus == .notDetermined {
@@ -384,7 +407,7 @@ struct SettingsView: View {
                     title: "Allow Photos access",
                     systemName: "photo.badge.plus",
                     identifier: "photos-permission-action",
-                    hint: "Requests Photos access for the Roll",
+                    hint: "Shows the Photos permission prompt so the Roll can show your photos.",
                     action: requestPhotoAccess
                 )
             }
@@ -393,20 +416,20 @@ struct SettingsView: View {
                 || photoLibrary.addOnlyAuthorizationStatus == .restricted {
                 settingsDivider
                 settingsAction(
-                    title: "Allow saving frames",
+                    title: "Allow saving new photos",
                     systemName: "arrow.up.right.square",
                     identifier: "photos-save-permission-settings",
-                    hint: "Opens Filmy Camera Photos permissions for saving frames",
-                    subtitle: "Continue in iOS Settings",
+                    hint: "Allow Filmy to add photos there so new photos can be saved.",
+                    subtitle: "Opens the Settings app",
                     action: openSystemSettings
                 )
             } else if photoLibrary.addOnlyAuthorizationStatus == .notDetermined {
                 settingsDivider
                 settingsAction(
-                    title: "Allow saving frames",
+                    title: "Allow saving new photos",
                     systemName: "photo.badge.plus",
                     identifier: "photos-save-permission-request",
-                    hint: "Requests Photos access needed to save finished frames",
+                    hint: "Shows the permission prompt for saving new photos.",
                     action: requestSaveAccess
                 )
             }
@@ -416,12 +439,12 @@ struct SettingsView: View {
     private var localCache: some View {
         settingsSection(
             title: "STORAGE",
-            footer: "A private fallback keeps finished frames close when Photos access is limited. It is excluded from backup and removable at any time."
+            footer: "The local cache keeps your photos close when Photos access is limited or off. It is not backed up, and you can clear it any time."
         ) {
             SettingRow(
                 systemName: "externaldrive.fill",
-                title: "Frame cache",
-                detail: photoLibrary.hasLocalCache ? "Temporary frames are stored on this device." : "No temporary frames right now."
+                title: "Local cache",
+                detail: photoLibrary.hasLocalCache ? "Temporary copies of your photos are on this device." : "No temporary copies right now."
             ) {
                 Text(photoLibrary.hasLocalCache ? "On device" : "Empty")
                     .font(.system(.caption, design: .rounded).weight(.bold))
@@ -430,38 +453,188 @@ struct SettingsView: View {
 
             settingsDivider
 
-            Button {
-                guard photoLibrary.hasLocalCache else { return }
-                HapticFeedback.play(.selection)
-                isConfirmingCacheClear = true
-            } label: {
-                HStack(alignment: .center, spacing: 13) {
-                    SettingIcon(
-                        systemName: "trash",
-                        tint: photoLibrary.hasLocalCache ? FilmyTheme.danger : FilmyTheme.tertiary
-                    )
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Clear local cache")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(photoLibrary.hasLocalCache ? FilmyTheme.danger : FilmyTheme.tertiary)
-                        Text(photoLibrary.hasLocalCache ? "Photos originals are kept" : "Nothing to remove")
-                            .font(.caption)
-                            .foregroundStyle(FilmyTheme.secondary)
-                    }
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(spacing: 0) {
+                if isConfirmingCacheClear && canClearCache {
+                    clearCacheConfirmPanel
+                } else {
+                    clearCacheRow
                 }
-                .padding(.vertical, 4)
-                .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .disabled(!photoLibrary.hasLocalCache)
-            .accessibilityIdentifier("clear-local-cache")
-            .accessibilityLabel("Clear local cache")
-            .accessibilityValue(photoLibrary.hasLocalCache ? "Available" : "Empty")
-            .accessibilityHint(photoLibrary.hasLocalCache ? "Asks before removing temporary copies. Photos originals are kept." : "There are no temporary camera frames to clear")
+            .id(Self.cacheSlotID)
+
+            settingsDivider
+
+            storageExplainer
         }
+    }
+
+    private var clearCacheRow: some View {
+        Button {
+            guard canClearCache else { return }
+            HapticFeedback.play(.selection)
+            setCacheConfirm(true)
+        } label: {
+            HStack(alignment: .center, spacing: 13) {
+                SettingIcon(
+                    systemName: "trash",
+                    tint: canClearCache ? FilmyTheme.danger : FilmyTheme.tertiary
+                )
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Clear local cache")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(canClearCache ? FilmyTheme.danger : FilmyTheme.tertiary)
+                    Text(canClearCache ? "Every photo in Photos is kept" : "Nothing to remove")
+                        .font(.caption)
+                        .foregroundStyle(FilmyTheme.secondary)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!canClearCache)
+        .accessibilityIdentifier("clear-local-cache")
+        .accessibilityLabel("Clear local cache")
+        .accessibilityValue(canClearCache ? "Available" : "Empty")
+        .accessibilityHint(canClearCache ? "Asks before removing temporary copies. Every photo in Photos is kept." : "There are no temporary copies to clear")
+        .accessibilityFocused($cacheFocus, equals: .clearRow)
+    }
+
+    // Replaces the clear row in place. No identifier on the container: an
+    // ancestor id can replace a descendant id on some OS versions.
+    private var clearCacheConfirmPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            cacheConfirmTitle
+            if dynamicTypeSize.isAccessibilitySize {
+                cacheConfirmButtons
+                cacheConfirmLines
+            } else {
+                cacheConfirmLines
+                cacheConfirmButtons
+            }
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .contain)
+        .accessibilityAction(.escape) { setCacheConfirm(false) }
+    }
+
+    private var cacheConfirmTitle: some View {
+        Text("Clear cache?")
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(FilmyTheme.primary)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityFocused($cacheFocus, equals: .confirmTitle)
+    }
+
+    private var cacheConfirmLines: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            cacheConfirmLine("minus.circle", "Removed: temporary copies on this device.")
+            cacheConfirmLine("checkmark.circle", "Kept: every photo in Photos.")
+            if photoLibrary.authorizationStatus != .authorized {
+                cacheConfirmLine("exclamationmark.triangle", cacheRoleWarning)
+            }
+        }
+    }
+
+    private var cacheRoleWarning: String {
+        photoLibrary.authorizationStatus == .limited
+            ? "Photos access is limited, so some of these photos may leave the Roll."
+            : "Until Photos access is on, these photos may leave the Roll."
+    }
+
+    private func cacheConfirmLine(_ systemName: String, _ text: String) -> some View {
+        Label(text, systemImage: systemName)
+            .font(.footnote)
+            .foregroundStyle(FilmyTheme.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var cacheConfirmButtons: some View {
+        VStack(spacing: 12) {
+            Button("Keep cache") {
+                HapticFeedback.play(.selection)
+                setCacheConfirm(false)
+            }
+            .buttonStyle(.filmySecondary)
+            .accessibilityIdentifier("keep-local-cache")
+            .accessibilityHint("Closes this panel. Nothing is removed.")
+
+            Button(action: confirmClearCache) {
+                Label("Clear cache", systemImage: "trash")
+                    .foregroundStyle(FilmyTheme.danger)
+            }
+            .buttonStyle(.filmySecondary)
+            .accessibilityIdentifier("confirm-clear-local-cache")
+            .accessibilityHint("Removes the temporary copies now.")
+        }
+    }
+
+    private func setCacheConfirm(_ open: Bool) {
+        withAnimation(reduceMotion ? nil : .snappy(duration: 0.24)) {
+            isConfirmingCacheClear = open
+        }
+        Task { @MainActor in
+            cacheFocus = open ? .confirmTitle : .clearRow
+        }
+    }
+
+    private func confirmClearCache() {
+        if photoLibrary.hasLocalCache {
+            HapticFeedback.play(.discard)
+            photoLibrary.clearLocalRollCache()
+        }
+        setCacheConfirm(false)
+    }
+
+    // Plain text on purpose: these are places, not controls.
+    private var storageExplainer: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Where your photos are")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(FilmyTheme.primary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+            storagePlace(
+                "Photos app",
+                "Every camera photo saves here by itself. Imported photos save only when you choose.",
+                id: "settings-storage-place-photos"
+            )
+            storagePlace(
+                "Roll",
+                "Shows your Filmy photos from Photos. Originals you can edit again stay in Filmy.",
+                id: "settings-storage-place-roll"
+            )
+            storagePlace(
+                "Captures",
+                "Shots from Capture modes stay in Filmy until you export them.",
+                id: "settings-storage-place-captures"
+            )
+            Text("Deleting the app removes what stays in Filmy.")
+                .font(.caption)
+                .foregroundStyle(FilmyTheme.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func storagePlace(_ title: String, _ detail: String, id: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(FilmyTheme.primary)
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(FilmyTheme.secondary)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(id)
     }
 
     private var about: some View {
@@ -561,9 +734,10 @@ struct SettingsView: View {
                         .font(.system(.subheadline, design: .default).weight(.semibold))
                         .foregroundStyle(FilmyTheme.accent)
                         .multilineTextAlignment(.leading)
-                    Text(subtitle ?? "Show the system permission prompt")
+                    Text(subtitle ?? "Shows the permission prompt")
                         .font(.system(.caption, design: .default).weight(.medium))
                         .foregroundStyle(FilmyTheme.secondary)
+                        .multilineTextAlignment(.leading)
                 }
 
                 Spacer(minLength: 8)
@@ -612,16 +786,27 @@ struct SettingsView: View {
 
     // MARK: - Status copy
 
+    private var photosBadgeIsEnabled: Bool {
+        PhotoLibraryAuthorizationPolicy.canRead(photoLibrary.authorizationStatus) || photoLibrary.canSaveToPhotos
+    }
+
+    // The badge alone reads "Off" with no subject, so name what it describes.
+    private func permissionBadge(_ name: String, title: String, isEnabled: Bool) -> some View {
+        PermissionBadge(title: title, isEnabled: isEnabled)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(name), \(title)")
+    }
+
     private var photoStatusTitle: String {
         let canRead = PhotoLibraryAuthorizationPolicy.canRead(photoLibrary.authorizationStatus)
         let canAdd = photoLibrary.canSaveToPhotos
         switch (canRead, canAdd, photoLibrary.authorizationStatus, photoLibrary.addOnlyAuthorizationStatus) {
-        case (true, true, .authorized, _): return "ALLOWED"
-        case (true, true, .limited, _): return "LIMITED"
-        case (false, true, _, _): return "SAVE ONLY"
-        case (_, false, .notDetermined, _), (_, false, _, .notDetermined): return "ASK"
-        case (false, false, .denied, _), (false, false, .restricted, _): return "OFF"
-        default: return "CHECK"
+        case (true, true, .authorized, _): return "On"
+        case (true, true, .limited, _): return "Limited"
+        case (false, true, _, _): return "Save only"
+        case (_, false, .notDetermined, _), (_, false, _, .notDetermined): return "Not asked"
+        case (false, false, .denied, _), (false, false, .restricted, _): return "Off"
+        default: return "Unknown"
         }
     }
 
@@ -637,16 +822,16 @@ struct SettingsView: View {
     }
 
     private var cameraStatusTitle: String {
-        if camera.availability == .simulator { return "SIMULATOR" }
+        if camera.availability == .simulator { return "Simulator" }
         switch cameraAuthorizationStatus {
         case .authorized:
-            return camera.availability == .running ? "LIVE" : "ALLOWED"
+            return "On"
         case .notDetermined:
-            return camera.availability == .requestingPermission ? "ASKING" : "ASK"
+            return camera.availability == .requestingPermission ? "Asking" : "Not asked"
         case .denied, .restricted:
-            return "OFF"
+            return "Off"
         @unknown default:
-            return "CHECK"
+            return "Unknown"
         }
     }
 
@@ -659,17 +844,17 @@ struct SettingsView: View {
         switch cameraAuthorizationStatus {
         case .authorized:
             switch camera.availability {
-            case .running: return "Live preview is ready to capture."
-            case .paused: return "Camera access is enabled; preview is paused."
+            case .running: return "The camera is on and ready."
+            case .paused: return "Camera access is on. The preview is paused."
             case .interrupted, .needsRecovery, .unavailable: return camera.statusMessage
-            default: return "Camera access is enabled. Open Camera to begin preview."
+            default: return "Camera access is on. Open the camera to start."
             }
         case .notDetermined:
             return camera.availability == .requestingPermission
-                ? "Waiting for camera permission."
-                : "Ask when you are ready to capture."
+                ? "Waiting for your answer to the permission prompt."
+                : "Filmy has not asked for the camera yet."
         case .denied, .restricted:
-            return "Enable camera access in Settings to preview and capture."
+            return "Camera access is off. Filmy cannot take photos until you turn it on."
         @unknown default:
             return "Camera permission status is unavailable."
         }
@@ -681,15 +866,28 @@ struct SettingsView: View {
         switch (canRead, canAdd) {
         case (true, true):
             return photoLibrary.authorizationStatus == .limited
-                ? "Limited access is enabled for selected photos; new frames can still be saved."
-                : "Read and save access is enabled."
+                ? "Filmy can see the photos you picked and can save new ones."
+                : "Filmy can show your photos and save new ones."
         case (false, true):
-            return "Save access is enabled; allow Photos access to view the Roll."
+            return "Filmy can save new photos. Allow Photos access to see them in the Roll."
         case (true, false):
-            return "The Roll is available; allow add access to save new frames."
+            return "The Roll can show your photos. Saving new photos is not on yet."
         default:
-            return "Ask when you are ready to build your roll."
+            return photoDeniedDetail
         }
+    }
+
+    private var photoDeniedDetail: String {
+        let read = photoLibrary.authorizationStatus
+        let add = photoLibrary.addOnlyAuthorizationStatus
+        let readDenied = read == .denied || read == .restricted
+        let addDenied = add == .denied || add == .restricted
+        if read == .notDetermined && add == .notDetermined { return "Filmy has not asked for Photos yet." }
+        if read == .notDetermined && addDenied { return "Filmy has not asked to see your photos. Saving new photos is off." }
+        if readDenied && add == .notDetermined {
+            return "Filmy cannot see your photos and has not asked to save new ones yet."
+        }
+        return "Photos access is off for Filmy."
     }
 
     private var appVersion: String {
