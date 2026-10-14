@@ -149,6 +149,63 @@ final class CameraPreviewGesturePolicyTests: XCTestCase {
             translation: .zero, viewportHeight: 0))
     }
 
+    func testFujiChipTopTracksMeasuredTopChrome() {
+        typealias Policy = CameraPreviewGesturePolicy
+        XCTAssertEqual(Policy.fujiChipTop(topChromeHeight: nil, viewfinderHeight: 874), 160)
+        XCTAssertEqual(Policy.fujiChipTop(topChromeHeight: 54, viewfinderHeight: 874), 160)
+        XCTAssertEqual(Policy.fujiChipTop(topChromeHeight: 90, viewfinderHeight: 874), 196)
+        XCTAssertEqual(Policy.fujiChipTop(topChromeHeight: nil, viewfinderHeight: 200), 70)
+        XCTAssertEqual(Policy.fujiChipTop(topChromeHeight: 90, viewfinderHeight: 300), 130)
+    }
+
+    func testLookPositionTextCountsFromOne() {
+        let recipes = Array(FilmRecipe.builtIns.prefix(5))
+        XCTAssertEqual(recipes.count, 5)
+        XCTAssertEqual(CameraPreviewGesturePolicy.lookPositionText(in: recipes, selectedIdentifier: recipes[0].id), "1 of 5")
+        XCTAssertEqual(CameraPreviewGesturePolicy.lookPositionText(in: recipes, selectedIdentifier: recipes[4].id), "5 of 5")
+        XCTAssertNil(CameraPreviewGesturePolicy.lookPositionText(in: recipes, selectedIdentifier: "no-such-look"))
+        XCTAssertNil(CameraPreviewGesturePolicy.lookPositionText(in: [], selectedIdentifier: recipes[0].id))
+    }
+
+    func testMidSlotNewestPrecedence() {
+        typealias Policy = CameraPreviewGesturePolicy
+        XCTAssertEqual(Policy.midSlot(isHoldingOriginal: true, isShowingExposure: true, hasLookFlash: true), .original)
+        XCTAssertEqual(Policy.midSlot(isHoldingOriginal: true, isShowingExposure: false, hasLookFlash: true), .original)
+        XCTAssertEqual(Policy.midSlot(isHoldingOriginal: false, isShowingExposure: true, hasLookFlash: true), .exposure)
+        XCTAssertEqual(Policy.midSlot(isHoldingOriginal: false, isShowingExposure: false, hasLookFlash: true), .lookName)
+        XCTAssertEqual(Policy.midSlot(isHoldingOriginal: false, isShowingExposure: false, hasLookFlash: false), .none)
+    }
+
+    func testLookResetUndoRestoresExactSnapshot() throws {
+        typealias Undo = CameraPreviewGesturePolicy.LookResetUndo
+        let builtIns = FilmRecipe.builtIns
+        XCTAssertGreaterThanOrEqual(builtIns.count, 2)
+        var edited = builtIns[0]
+        edited.markUserModified(parentRecipeID: builtIns[0].id)
+        let other = builtIns[1]
+        XCTAssertNil(Undo.make(recipeID: edited.id, overrides: [:]))
+        XCTAssertNil(Undo.make(recipeID: edited.id, overrides: [other.id: other]))
+        let undo = try XCTUnwrap(Undo.make(recipeID: edited.id, overrides: [edited.id: edited, other.id: other]))
+        XCTAssertEqual(undo.snapshot, edited)
+        let restored = undo.restored(into: [other.id: other])
+        XCTAssertEqual(restored[edited.id], edited)
+        XCTAssertEqual(restored[other.id], other)
+        XCTAssertEqual(restored.count, 2)
+    }
+
+    func testLookResetUndoInvalidatedByEditOfSameLookOnly() throws {
+        typealias Undo = CameraPreviewGesturePolicy.LookResetUndo
+        let recipe = FilmRecipe.builtIns[0]
+        let undo = try XCTUnwrap(Undo.make(recipeID: recipe.id, overrides: [recipe.id: recipe]))
+        XCTAssertTrue(undo.isInvalidated(byEditOf: recipe.id))
+        XCTAssertFalse(undo.isInvalidated(byEditOf: "another-look"))
+    }
+
+    func testActionToastNeverReplacesError() {
+        XCTAssertFalse(CameraPreviewGesturePolicy.actionToastMayShow(isErrorToastShowing: true))
+        XCTAssertTrue(CameraPreviewGesturePolicy.actionToastMayShow(isErrorToastShowing: false))
+    }
+
     private func direction(x: CGFloat, y: CGFloat) -> CameraLookDirection? {
         CameraPreviewGesturePolicy.lookDirection(translation: CGSize(width: x, height: y), viewportWidth: 390,
                                                 interactionEnabled: true, includesPinch: false)

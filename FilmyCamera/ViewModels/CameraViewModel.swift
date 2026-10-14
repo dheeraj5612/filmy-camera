@@ -142,6 +142,12 @@ final class CameraViewModel: ObservableObject {
         case photoLibrary
     }
 
+    /// A button the toast row shows beside the message. Each case is cleared with the toast.
+    enum ToastAction: Equatable {
+        case undoLookReset
+        case viewSavedFrame
+    }
+
     enum ToastStyle: Equatable {
         case success
         case error
@@ -316,6 +322,9 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var saveErrorRequiresSettings = false
     @Published private(set) var toastMessage: String?
     @Published private(set) var toastStyle: ToastStyle = .success
+    @Published private(set) var toastAction: ToastAction?
+    /// Exact override removed by the last Live Adjust Reset; set only while its Undo toast shows.
+    @Published private(set) var pendingLookUndo: CameraPreviewGesturePolicy.LookResetUndo?
     @Published private(set) var lastCaptureDate: Date?
     @Published private(set) var reviewImage: UIImage?
     @Published private(set) var reviewRecipe: FilmRecipe?
@@ -573,6 +582,7 @@ final class CameraViewModel: ObservableObject {
 
     func select(recipe: FilmRecipe) {
         guard Self.validRecipeIDs.contains(recipe.id), MembershipStore.shared.requireRecipe(recipe.id) else { return }
+        if recipe.id != selectedRecipeID { dismissLookResetUndoToast() }
         selectedRecipeID = recipe.id
     }
 
@@ -594,12 +604,37 @@ final class CameraViewModel: ObservableObject {
         customizedRecipe.markUserModified(parentRecipeID: parent.id)
         recipeOverrides[parent.id] = customizedRecipe
         persistRecipeOverrides()
+        if pendingLookUndo?.isInvalidated(byEditOf: parent.id) == true { dismissLookResetUndoToast() }
     }
 
     func reset(recipeID: String) {
         guard Self.validRecipeIDs.contains(recipeID) else { return }
         guard recipeOverrides.removeValue(forKey: recipeID) != nil else { return }
         persistRecipeOverrides()
+    }
+
+    /// Live Adjust Reset: resets the look, then offers Undo for the exact removed override.
+    /// An error toast is never replaced.
+    func resetLookWithUndo(recipeID: String) {
+        let undo = CameraPreviewGesturePolicy.LookResetUndo.make(recipeID: recipeID, overrides: recipeOverrides)
+        reset(recipeID: recipeID)
+        let isErrorShowing: Bool = toastStyle == .error && toastMessage != nil
+        // The pending-capture overlay renders only info toasts, so an Undo toast would be invisible there.
+        guard let undo, !hasPendingCapture,
+              CameraPreviewGesturePolicy.actionToastMayShow(isErrorToastShowing: isErrorShowing) else { return }
+        showToast("Look reset", action: .undoLookReset, duration: Self.actionToastDuration)
+        pendingLookUndo = undo
+    }
+
+    func undoLookReset() {
+        guard let undo = pendingLookUndo else { return }
+        recipeOverrides = undo.restored(into: recipeOverrides)
+        persistRecipeOverrides()
+        dismissToast()
+    }
+
+    private func dismissLookResetUndoToast() {
+        if toastAction == .undoLookReset { dismissToast() }
     }
 
     func isCustomized(_ recipe: FilmRecipe) -> Bool {
@@ -651,8 +686,7 @@ final class CameraViewModel: ObservableObject {
         // This update is ordered before capture on the camera's session queue.
         camera.setPremiumControlsEnabled(membership.hasFullAccess)
         isCapturing = true
-        toastTask?.cancel()
-        toastMessage = nil
+        dismissToast()
         saveErrorMessage = nil
         saveErrorRequiresSettings = false
         // Freeze both the sensor controller and the exact development used
@@ -1334,10 +1368,23 @@ final class CameraViewModel: ObservableObject {
         showToast(message, style: .info)
     }
 
-    private func showToast(_ message: String, style: ToastStyle = .success) {
+    /// Action toasts stay long enough to reach the button.
+    nonisolated static let actionToastDuration: Duration = .seconds(6)
+
+    func dismissToast() {
+        toastTask?.cancel()
+        toastMessage = nil
+        toastAction = nil
+        pendingLookUndo = nil
+    }
+
+    private func showToast(_ message: String, style: ToastStyle = .success,
+                           action: ToastAction? = nil, duration: Duration? = nil) {
         toastTask?.cancel()
         toastMessage = message
         toastStyle = style
+        toastAction = action
+        pendingLookUndo = nil
         switch style {
         case .success:
             HapticFeedback.play(.success)
@@ -1346,15 +1393,18 @@ final class CameraViewModel: ObservableObject {
         case .info:
             HapticFeedback.play(.warning)
         }
-        UIAccessibility.post(
-            notification: .announcement,
-            argument: "\(style.accessibilityTitle): \(message)"
-        )
-        let duration = Self.toastDuration(for: style)
+        var announcement = "\(style.accessibilityTitle): \(message)"
+        switch action {
+        case .undoLookReset: announcement += ". Undo available"
+        case .viewSavedFrame: announcement += ". View available"
+        case nil: break
+        }
+        UIAccessibility.post(notification: .announcement, argument: announcement)
+        let toastLifetime: Duration = duration ?? Self.toastDuration(for: style)
         toastTask = Task { [weak self] in
-            try? await Task.sleep(for: duration)
+            try? await Task.sleep(for: toastLifetime)
             guard !Task.isCancelled else { return }
-            self?.toastMessage = nil
+            self?.dismissToast()
         }
     }
 

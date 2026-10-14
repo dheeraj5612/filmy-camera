@@ -16,6 +16,14 @@ enum CameraExposureDetent: Equatable {
     case zero
 }
 
+/// Which single view owns the viewfinder's middle slot. Newest claim wins.
+enum CameraMidSlot: Equatable {
+    case none
+    case original
+    case exposure
+    case lookName
+}
+
 enum CameraPreviewGesturePolicy {
     /// Spoken to VoiceOver on the live preview. Camera flip is not offered here:
     /// it lives on the flip button and the "Switch camera" accessibility action.
@@ -119,5 +127,51 @@ enum CameraPreviewGesturePolicy {
         let target = index + (direction == .next ? 1 : -1)
         guard identifiers.indices.contains(target) else { return nil }
         return identifiers[target]
+    }
+
+    /// How long the look-name flash stays over the viewfinder.
+    static let lookFlashDuration: Duration = .milliseconds(900)
+
+    /// Hold-to-compare beats the exposure readout, which beats the look flash.
+    static func midSlot(isHoldingOriginal: Bool, isShowingExposure: Bool, hasLookFlash: Bool) -> CameraMidSlot {
+        if isHoldingOriginal { return .original }
+        if isShowingExposure { return .exposure }
+        return hasLookFlash ? .lookName : .none
+    }
+
+    /// "12 of 40", counted from one; nil when the look is not in the list.
+    static func lookPositionText(in recipes: [FilmRecipe], selectedIdentifier: String) -> String? {
+        guard let index = recipes.firstIndex(where: { $0.id == selectedIdentifier }) else { return nil }
+        return "\(index + 1) of \(recipes.count)"
+    }
+
+    /// Top of the Fuji viewfinder state chip: 106 pt under the measured top chrome
+    /// (54 pt when nothing is measured, which gives 160 pt), clamped above the tool rail.
+    static func fujiChipTop(topChromeHeight: CGFloat?, viewfinderHeight: CGFloat) -> CGFloat {
+        min((topChromeHeight ?? 54) + 106, max(70, viewfinderHeight - 170))
+    }
+
+    /// A short-lived Undo toast never replaces an error toast.
+    static func actionToastMayShow(isErrorToastShowing: Bool) -> Bool {
+        !isErrorToastShowing
+    }
+
+    /// The exact override a Live Adjust Reset removed, so Undo restores it unchanged.
+    struct LookResetUndo: Equatable, Sendable {
+        let recipeID: String
+        let snapshot: FilmRecipe
+
+        static func make(recipeID: String, overrides: [String: FilmRecipe]) -> LookResetUndo? {
+            guard let snapshot = overrides[recipeID] else { return nil }
+            return LookResetUndo(recipeID: recipeID, snapshot: snapshot)
+        }
+
+        func restored(into overrides: [String: FilmRecipe]) -> [String: FilmRecipe] {
+            var result = overrides
+            result[recipeID] = snapshot
+            return result
+        }
+
+        func isInvalidated(byEditOf id: String) -> Bool { id == recipeID }
     }
 }

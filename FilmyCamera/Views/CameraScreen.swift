@@ -127,6 +127,13 @@ private struct ViewfinderChromeHeightKey: PreferenceKey {
     }
 }
 
+/// The look name shown briefly mid-viewfinder after a swipe or a drawer pick.
+private struct LookFlash: Equatable {
+    let name: String
+    let position: String?
+    let id = UUID()
+}
+
 @MainActor
 private final class CompositionAssistStoreBox: ObservableObject {
     let store = CompositionAssistStore()
@@ -201,6 +208,7 @@ struct CameraScreen: View {
     @State private var previewDragAxis: CameraPreviewDragAxis?
     @State private var exposureDragStart: Float?
     @State private var isShowingExposureReadout = false
+    @State private var lookFlash: LookFlash?
     @State private var exposureDragCommitted = false
     @State private var exposureDragSentBias: Float?
     @State private var focusFeedbackRevision = 0
@@ -288,8 +296,7 @@ struct CameraScreen: View {
                                 .transition(.opacity)
                         }
                     } else if let toastMessage = viewModel.toastMessage {
-                        ToastView(message: toastMessage, style: viewModel.toastStyle)
-                            .transition(.opacity)
+                        toastRow(message: toastMessage)
                     } else if camera.isLensSmudged && !hasDismissedLensAdvisory && camera.availability == .running {
                         HStack(spacing: 12) {
                             Label("Wipe the camera lens for a clearer photo", systemImage: "camera.aperture")
@@ -449,6 +456,7 @@ struct CameraScreen: View {
                 previewDragMaySelectLook = nil
                 previewDragAxis = nil
                 isShowingExposureReadout = false
+                lookFlash = nil
                 // A cancelled exposure drag must still let the reticle time out.
                 if exposureDragStart != nil { focusFeedbackRevision += 1 }
                 exposureDragStart = nil
@@ -457,8 +465,12 @@ struct CameraScreen: View {
             }
         }
         .onChange(of: camera.isRunning) { _, running in
-            if !running { isShowingExposureReadout = false }
+            if !running {
+                isShowingExposureReadout = false
+                lookFlash = nil
+            }
         }
+        .onChange(of: isHoldingOriginalPreview) { _, holding in noteOriginalHold(holding) }
         .onChange(of: isPreviewDragActive) { _, active in
             // One main-actor turn later, so a normal onEnded always runs first.
             if !active { Task { @MainActor in resetCancelledPreviewDrag() } }
@@ -596,6 +608,7 @@ struct CameraScreen: View {
             if hasReview {
                 // The linger task dies with the unmounted readout, so clear it here.
                 isShowingExposureReadout = false
+                lookFlash = nil
                 camera.setFrameDeliveryPaused(true)
             }
             updateCameraActivity()
@@ -799,7 +812,7 @@ struct CameraScreen: View {
 
     private func viewfinder(size: CGSize, overlaysTopBar: Bool) -> some View {
         ZStack(alignment: .top) {
-            previewSurface
+            previewSurface(fujiTopChrome: overlaysTopBar ? viewfinderChromeHeights[.top] : nil)
 
             // The session is intentionally stopped while a frame is under
             // review. Keep the paused frame quiet behind the full-screen
@@ -871,9 +884,8 @@ struct CameraScreen: View {
                         }
                     }
             }
-            if isShowingExposureReadout && camera.isRunning && !isReviewing {
-                exposureDragReadout
-            }
+            viewfinderMidSlot
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: lookFlash?.id)
 
             // The shutter blink: the frame goes dark for an instant on
             // capture, the way a mechanical shutter interrupts the finder.
@@ -916,7 +928,7 @@ struct CameraScreen: View {
         .clipShape(RoundedRectangle(cornerRadius: FilmyTheme.viewfinderCornerRadius, style: .continuous))
     }
 
-    private var previewSurface: some View {
+    private func previewSurface(fujiTopChrome: CGFloat?) -> some View {
         GeometryReader { proxy in
             ZStack {
                 // Keep the renderer mounted across camera start/stop so its
@@ -931,7 +943,8 @@ struct CameraScreen: View {
                     .allowsHitTesting(false)
 
                 if !shouldShowCameraEmptyState {
-                    FujiViewfinderOverlay(controller: shooting, camera: camera, selectedRecipe: viewModel.selectedRecipe)
+                    FujiViewfinderOverlay(controller: shooting, camera: camera, selectedRecipe: viewModel.selectedRecipe,
+                                          topChromeHeight: fujiTopChrome)
                     livePreviewControls(in: proxy.size)
                 }
             }
@@ -944,6 +957,7 @@ struct CameraScreen: View {
                 exposureDragCommitted = false
                 exposureDragSentBias = nil
                 isShowingExposureReadout = false
+                lookFlash = nil
                 camera.updateOrientation(for: size)
             }
         }
@@ -985,6 +999,7 @@ struct CameraScreen: View {
                         if previewDragMaySelectLook != nil { previewDragMaySelectLook = false }
                         if !isPinching {
                             isShowingExposureReadout = false
+                            lookFlash = nil
                             isPinching = true
                             pinchStartZoom = camera.zoomFactor
                             dismissGestureHint()
@@ -1035,7 +1050,167 @@ struct CameraScreen: View {
         viewModel.select(recipe: recipe)
         HapticFeedback.play(.selection)
         dismissGestureHint()
+        flashSwipedLook(recipe)
         #endif
+    }
+
+    private var isLookFlashVisible: Bool { camera.isRunning || isViewfinderChromePreview }
+
+    /// Swipe order, which lists the compact digital looks first.
+    private func flashSwipedLook(_ recipe: FilmRecipe) {
+        let ordered: [FilmRecipe] = LookLibraryIndex.results(
+            in: viewModel.quickNavigationRecipes, query: "", filter: .all, favorites: [])
+        flashLook(id: recipe.id, among: ordered)
+    }
+
+    /// Drawer tile pick: the position counts over the list the user was looking at.
+    private func selectDrawerLook(id: String, among visible: [FilmRecipe]) {
+        let changed: Bool = id != viewModel.effectiveSelectedRecipeID
+        viewModel.select(recipe: viewModel.recipe(for: id))
+        originalPreviewOverride = nil
+        if changed { flashLook(id: id, among: visible) }
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) {
+            isShowingLookDrawer = false
+        }
+    }
+
+    /// Shows the look name only when the select took effect and the flash can be seen.
+    /// The announcement uses the same gate as the visible flash.
+    private func flashLook(id: String, among list: [FilmRecipe]) {
+        guard isLookFlashVisible, !isReviewing, !isHoldingOriginalPreview,
+              viewModel.effectiveSelectedRecipeID == id else { return }
+        let name: String = viewModel.recipe(for: id).name
+        let position: String? = CameraPreviewGesturePolicy.lookPositionText(in: list, selectedIdentifier: id)
+        isShowingExposureReadout = false
+        lookFlash = LookFlash(name: name, position: position)
+        let spoken: String = position.map { "\(name), \($0)" } ?? name
+        UIAccessibility.post(notification: .announcement, argument: spoken)
+    }
+
+    /// Hold-to-compare: newest claim wins the middle slot; release sets nothing.
+    private func noteOriginalHold(_ holding: Bool) {
+        if holding {
+            lookFlash = nil
+            isShowingExposureReadout = false
+        }
+        guard isLookFlashVisible, !isReviewing else { return }
+        HapticFeedback.play(.focus)
+        UIAccessibility.post(notification: .announcement, argument: holding ? "Showing original" : "Showing look")
+    }
+
+    @ViewBuilder
+    private var viewfinderMidSlot: some View {
+        if !isReviewing {
+            switch CameraPreviewGesturePolicy.midSlot(
+                isHoldingOriginal: isHoldingOriginalPreview && camera.isRunning,
+                isShowingExposure: isShowingExposureReadout && camera.isRunning,
+                hasLookFlash: lookFlash != nil && isLookFlashVisible
+            ) {
+            case .original:
+                originalHoldPill
+            case .exposure:
+                exposureDragReadout
+            case .lookName:
+                if let flash = lookFlash { lookFlashView(flash) }
+            case .none:
+                EmptyView()
+            }
+        }
+    }
+
+    private var originalHoldPill: some View {
+        Label("ORIGINAL", systemImage: "circle.lefthalf.filled")
+            .font(.system(.title3, design: .rounded).weight(.semibold))
+            .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .foregroundStyle(FilmyTheme.primary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .viewfinderChrome(Capsule(), fill: Color.black.opacity(0.6))
+            .accessibilityHidden(true)
+            .accessibilityIdentifier("camera-original-hold-pill")
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .allowsHitTesting(false)
+            .transition(.opacity)
+    }
+
+    private func lookFlashView(_ flash: LookFlash) -> some View {
+        VStack(spacing: 2) {
+            Text(flash.name)
+                .font(.system(.title3, design: .rounded).weight(.semibold))
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+            if let position = flash.position {
+                Text(position)
+                    .font(.footnote.weight(.semibold).monospacedDigit())
+            }
+        }
+        .foregroundStyle(FilmyTheme.primary)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+        .minimumScaleFactor(0.8)
+        .viewfinderChrome(RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius, style: .continuous),
+                          fill: Color.black.opacity(0.6))
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("camera-look-flash")
+        .padding(.horizontal, 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .allowsHitTesting(false)
+        .transition(.opacity)
+        .task(id: flash.id) { await expireLookFlash(id: flash.id) }
+    }
+
+    private func expireLookFlash(id: UUID) async {
+        try? await Task.sleep(for: CameraPreviewGesturePolicy.lookFlashDuration)
+        guard !Task.isCancelled, lookFlash?.id == id else { return }
+        lookFlash = nil
+    }
+
+    private func toastRow(message: String) -> some View {
+        toastRowContent(message: message).transition(.opacity)
+    }
+
+    @ViewBuilder
+    private func toastRowContent(message: String) -> some View {
+        if let action = viewModel.toastAction {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 4) {
+                    ToastView(message: message, style: viewModel.toastStyle)
+                    toastActionButton(action)
+                }
+                VStack(alignment: .trailing, spacing: 6) {
+                    ToastView(message: message, style: viewModel.toastStyle)
+                    toastActionButton(action)
+                }
+            }
+        } else {
+            ToastView(message: message, style: viewModel.toastStyle)
+        }
+    }
+
+    /// A sibling of ToastView, which stays a single static element.
+    @ViewBuilder
+    private func toastActionButton(_ action: CameraViewModel.ToastAction) -> some View {
+        switch action {
+        case .undoLookReset:
+            Button { viewModel.undoLookReset() } label: {
+                Label("Undo", systemImage: "arrow.uturn.backward")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(FilmyTheme.accent)
+                    .padding(.horizontal, 14)
+                    .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
+                    .viewfinderChrome(Capsule())
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.pressable)
+            .accessibilityIdentifier("camera-toast-undo")
+            .accessibilityLabel("Undo look reset")
+        case .viewSavedFrame:
+            EmptyView()
+        }
     }
 
     private var canAdjustPreviewExposure: Bool {
@@ -1064,6 +1239,7 @@ struct CameraScreen: View {
         if !exposureDragCommitted {
             guard CameraPreviewGesturePolicy.exposureDragReachesCommit(start: start, target: bias) else { return }
             exposureDragCommitted = true
+            lookFlash = nil
             isShowingExposureReadout = true
         }
         guard canAdjustPreviewExposure,
@@ -1177,7 +1353,7 @@ struct CameraScreen: View {
                 LiveRecipeControlsView(
                     recipe: viewModel.selectedRecipe,
                     onUpdate: viewModel.update,
-                    onReset: { viewModel.reset(recipeID: viewModel.selectedRecipeID) },
+                    onReset: { viewModel.resetLookWithUndo(recipeID: viewModel.selectedRecipeID) },
                     onClose: { isShowingLiveAdjustments = false }
                 )
             }
@@ -1695,6 +1871,8 @@ struct CameraScreen: View {
             if favorite { updated.remove(recipe.id) } else { updated.insert(recipe.id) }
             favoriteData = LookLibraryIndex.encodeFavorites(updated)
             HapticFeedback.play(.selection)
+            UIAccessibility.post(notification: .announcement,
+                                 argument: favorite ? "Removed from favorites" : "Added to favorites")
         } label: {
             Image(systemName: favorite ? "heart.fill" : "heart")
                 .font(.system(size: 17, weight: .semibold))
@@ -1962,11 +2140,7 @@ struct CameraScreen: View {
                 RecipePickerView(
                     recipes: visible,
                     selectedRecipeID: Binding(get: { viewModel.effectiveSelectedRecipeID }, set: { id in
-                        viewModel.select(recipe: viewModel.recipe(for: id))
-                        originalPreviewOverride = nil
-                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) {
-                            isShowingLookDrawer = false
-                        }
+                        selectDrawerLook(id: id, among: visible)
                     }),
                     onOpenDetail: openRecipeDetail,
                     compact: !favoritesOnly

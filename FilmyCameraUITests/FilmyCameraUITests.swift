@@ -27,6 +27,14 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertEqual(exposure.value as? String, changed)
         app.buttons["Reset recipe controls"].tap()
         XCTAssertEqual(exposure.value as? String, original)
+        let undo = app.buttons["camera-toast-undo"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 3))
+        XCTAssertGreaterThanOrEqual(undo.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(undo.frame.height, 44)
+        undo.tap()
+        XCTAssertEqual(exposure.value as? String, changed)
+        app.buttons["Reset recipe controls"].tap()
+        XCTAssertEqual(exposure.value as? String, original)
         app.buttons["Done"].tap()
         XCTAssertFalse(exposure.exists)
     }

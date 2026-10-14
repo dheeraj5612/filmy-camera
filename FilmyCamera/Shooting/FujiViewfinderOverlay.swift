@@ -5,6 +5,8 @@ struct FujiViewfinderOverlay: View {
     @ObservedObject var camera: CameraService
     /// Value input so SwiftUI re-evaluates the bank chip when the look or its live tuning changes; bankIsDirty reads the same recipe through the controller.
     let selectedRecipe: FilmRecipe
+    /// Measured height of the top bar when it overlays the viewfinder (iPad, landscape); nil on iPhone portrait.
+    var topChromeHeight: CGFloat? = nil
     private var viewfinderState: FujiViewfinderState? {
         let preferences = controller.preferences
         var bank: Int?
@@ -43,9 +45,10 @@ struct FujiViewfinderOverlay: View {
                     }.padding(10)
                 }
                 if let state = viewfinderState {
-                    // Leading edge, below the overlaid top bar and the histogram's default corner
-                    // (54 + 8 + 8 + 82 + 8), above the tool rail and zoom row on short finders.
-                    let chipTop = min(160, max(70, proxy.size.height - 170))
+                    // Leading edge, below the measured top bar and the histogram's default corner
+                    // (bar + 8 + 8 + 82 + 8; 160 when unmeasured), above the tool rail and zoom row on short finders.
+                    let chipTop = CameraPreviewGesturePolicy.fujiChipTop(topChromeHeight: topChromeHeight,
+                                                                         viewfinderHeight: proxy.size.height)
                     FujiViewfinderStateChip(state: state)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         .padding(.horizontal, 10)
