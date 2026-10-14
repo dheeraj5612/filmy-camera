@@ -54,7 +54,8 @@ enum CaptureImageProcessor {
             try Task.checkCancellation()
             let name = "filmy-\(media.mode.rawValue).heic"
             let rendered = FilmRenderer.render(result.image, recipe: recipe, quality: .photo)
-            try encode(rendered, to: CaptureMediaStore.file(name, in: media.id))
+            try encode(rendered, to: CaptureMediaStore.file(name, in: media.id), recipe: recipe,
+                       capturedAt: media.createdAt, metadataSource: urls[0], keepSourceOrientation: false)
             media.outputs = [name]
             media.width = Int(result.image.extent.width)
             media.height = Int(result.image.extent.height)
@@ -73,8 +74,8 @@ enum CaptureImageProcessor {
                     }
                     if media.mode == .portrait { image = try portrait(image, source: url) }
                     let rendered = FilmRenderer.render(image, recipe: recipe, quality: .photo)
-                    try encode(rendered, to: CaptureMediaStore.file(name, in: media.id), metadataSource: url,
-                               retainDepth: media.mode == .portrait)
+                    try encode(rendered, to: CaptureMediaStore.file(name, in: media.id), recipe: recipe,
+                               capturedAt: media.createdAt, metadataSource: url, retainDepth: media.mode == .portrait)
                     media.width = Int(image.extent.width)
                     media.height = Int(image.extent.height)
                 }
@@ -89,23 +90,35 @@ enum CaptureImageProcessor {
         return media
     }
 
-    static func encode(_ image: CIImage, to url: URL, metadataSource: URL? = nil, retainDepth: Bool = false) throws {
+    /// Writes the Capture Modes HEIC with the app's export metadata policy
+    /// (`PhotoOutputEncoder.exportProperties`): a whitelist of capture EXIF, app TIFF
+    /// software, provenance, finished dimensions, and the real output color space.
+    /// The source file's other dictionaries (TIFF, MakerApple, GPS) are never copied.
+    /// `keepSourceOrientation` is true only for sensor-oriented pixels; night and
+    /// panorama draw upright pixels and use the source for capture EXIF only.
+    static func encode(_ image: CIImage, to url: URL, recipe: FilmRecipe, capturedAt: Date,
+                       metadataSource: URL? = nil, retainDepth: Bool = false,
+                       keepSourceOrientation: Bool = true) throws {
         guard let cg = FilmRenderer.outputCGImage(image, from: image.extent.integral),
               let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.heic.identifier as CFString, 1, nil)
         else { throw CaptureModesError.invalidImage }
         let source = metadataSource.flatMap { CGImageSourceCreateWithURL($0 as CFURL, nil) }
-        var properties: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: 0.96,
-                                          kCGImagePropertyOrientation: 1]
-        if let source, let original = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] {
-            if retainDepth {
-                guard let width = original[kCGImagePropertyPixelWidth] as? Int,
-                      let height = original[kCGImagePropertyPixelHeight] as? Int,
-                      cg.width == width, cg.height == height else {
-                    throw CaptureModesError.unavailable("Depth cannot be retained after resizing. The original HEIC is unchanged.")
-                }
+        let original = source.flatMap { CGImageSourceCopyPropertiesAtIndex($0, 0, nil) as? [CFString: Any] }
+        if retainDepth, let original {
+            guard let width = original[kCGImagePropertyPixelWidth] as? Int,
+                  let height = original[kCGImagePropertyPixelHeight] as? Int,
+                  cg.width == width, cg.height == height else {
+                throw CaptureModesError.unavailable("Depth cannot be retained after resizing. The original HEIC is unchanged.")
             }
-            properties.merge(original) { _, original in original }
         }
+        // A failure to read the source metadata never fails the render.
+        let sourceData: Data = metadataSource.flatMap { try? Data(contentsOf: $0, options: .mappedIfSafe) } ?? Data()
+        // outputCGImage always renders into sRGB, so the defaults (sRGB profile, ColorSpace 1) are exact.
+        var properties: [String: Any] = PhotoOutputEncoder.exportProperties(
+            width: cg.width, height: cg.height, sourceData: sourceData, capturedAt: capturedAt, recipe: recipe)
+        properties[kCGImageDestinationLossyCompressionQuality as String] = 0.96
+        let sourceOrientation = original?[kCGImagePropertyOrientation] as? Int
+        properties[kCGImagePropertyOrientation as String] = keepSourceOrientation ? (sourceOrientation ?? 1) : 1
         CGImageDestinationAddImage(destination, cg, properties as CFDictionary)
         if retainDepth, let source {
             // This path has not rotated/cropped/resized pixels, so the original

@@ -113,12 +113,64 @@ final class CaptureModesProcessingTests: XCTestCase {
         let image = try XCTUnwrap(CIImage(contentsOf: source, options: [.applyOrientationProperty: false]))
         XCTAssertEqual(image.extent.width, 128)
         XCTAssertEqual(image.extent.height, 96)
-        try CaptureImageProcessor.encode(image, to: output, metadataSource: source)
+        try CaptureImageProcessor.encode(image, to: output, recipe: FilmRecipe.builtIns[0], capturedAt: Date(),
+                                         metadataSource: source)
         let result = try XCTUnwrap(CGImageSourceCreateWithURL(output as CFURL, nil))
         let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(result, 0, nil) as? [CFString: Any])
         XCTAssertEqual(properties[kCGImagePropertyOrientation] as? Int, 6)
         XCTAssertEqual(properties[kCGImagePropertyPixelWidth] as? Int, 128)
         XCTAssertEqual(properties[kCGImagePropertyPixelHeight] as? Int, 96)
+    }
+
+    func testEncodeFollowsExportMetadataPolicyInsteadOfCopyingTheSource() throws {
+        let types = CGImageDestinationCopyTypeIdentifiers() as? [String] ?? []
+        try XCTSkipUnless(types.contains(UTType.heic.identifier), "HEIC encoding is unavailable")
+        let png = try fixture()
+        let source = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
+        let still = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".heic")
+        let night = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".heic")
+        defer { [png, source, still, night].forEach { try? FileManager.default.removeItem(at: $0) } }
+        let pngSource = try XCTUnwrap(CGImageSourceCreateWithURL(png as CFURL, nil))
+        let pixels = try XCTUnwrap(CGImageSourceCreateImageAtIndex(pngSource, 0, nil))
+        let sourceProperties: [CFString: Any] = [
+            kCGImagePropertyOrientation: 6,
+            kCGImagePropertyTIFFDictionary: [kCGImagePropertyTIFFMake: "SourceMake",
+                                             kCGImagePropertyTIFFModel: "SourceModel",
+                                             kCGImagePropertyTIFFHostComputer: "SourceHost"],
+            kCGImagePropertyGPSDictionary: [kCGImagePropertyGPSLatitude: 12.5, kCGImagePropertyGPSLatitudeRef: "N",
+                                            kCGImagePropertyGPSLongitude: 77.5, kCGImagePropertyGPSLongitudeRef: "E"],
+            kCGImagePropertyExifDictionary: [kCGImagePropertyExifExposureTime: 0.125],
+            kCGImageDestinationLossyCompressionQuality: 0.95
+        ]
+        let writer = try XCTUnwrap(CGImageDestinationCreateWithURL(source as CFURL, UTType.jpeg.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(writer, pixels, sourceProperties as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(writer))
+        let image = try XCTUnwrap(CIImage(contentsOf: source, options: [.applyOrientationProperty: false]))
+        let recipe = FilmRecipe.builtIns[0]
+        try CaptureImageProcessor.encode(image, to: still, recipe: recipe, capturedAt: Date(timeIntervalSince1970: 1_700_000_000),
+                                         metadataSource: source)
+        func properties(_ url: URL) throws -> [CFString: Any] {
+            let result = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))
+            return try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(result, 0, nil) as? [CFString: Any])
+        }
+        let out = try properties(still)
+        XCTAssertEqual(out[kCGImagePropertyOrientation] as? Int, 6)
+        XCTAssertEqual(out[kCGImagePropertyPixelWidth] as? Int, 128)
+        XCTAssertEqual(out[kCGImagePropertyPixelHeight] as? Int, 96)
+        XCTAssertNil(out[kCGImagePropertyGPSDictionary])
+        let tiff = try XCTUnwrap(out[kCGImagePropertyTIFFDictionary] as? [CFString: Any])
+        XCTAssertEqual(tiff[kCGImagePropertyTIFFSoftware] as? String, "Filmy Camera")
+        XCTAssertNil(tiff[kCGImagePropertyTIFFMake])
+        XCTAssertNil(tiff[kCGImagePropertyTIFFHostComputer])
+        let exif = try XCTUnwrap(out[kCGImagePropertyExifDictionary] as? [CFString: Any])
+        XCTAssertEqual(exif[kCGImagePropertyExifExposureTime] as? Double ?? 0, 0.125, accuracy: 0.0001)
+        // Night and panorama: upright pixels, no orientation source, capture date from the media.
+        try CaptureImageProcessor.encode(image, to: night, recipe: recipe, capturedAt: Date(timeIntervalSince1970: 1_700_000_000),
+                                         keepSourceOrientation: false)
+        let nightOut = try properties(night)
+        XCTAssertEqual(nightOut[kCGImagePropertyOrientation] as? Int, 1)
+        let nightExif = try XCTUnwrap(nightOut[kCGImagePropertyExifDictionary] as? [CFString: Any])
+        XCTAssertNotNil(nightExif[kCGImagePropertyExifDateTimeOriginal] as? String)
     }
 
     func testPanoramaDoesNotPretendRepeatedStillFramesAreASweep() throws {
