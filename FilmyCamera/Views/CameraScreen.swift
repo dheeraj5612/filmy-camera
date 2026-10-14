@@ -230,6 +230,53 @@ private final class CompositionAssistStoreBox: ObservableObject {
     let store = CompositionAssistStore()
 }
 
+/// The preview aids the Aids tray toggles. Preview only: none reach saved pixels.
+private enum CameraAid: CaseIterable, Identifiable {
+    case level
+    case histogram
+    case zebras
+    case peaking
+    case loupe
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .level: return "Level"
+        case .histogram: return "Histogram"
+        case .zebras: return "Zebras"
+        case .peaking: return "Peaking"
+        case .loupe: return "Loupe"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .level: return "level"
+        case .histogram: return "chart.bar.xaxis"
+        case .zebras: return "circle.lefthalf.striped.horizontal"
+        case .peaking: return "scribble.variable"
+        case .loupe: return "plus.magnifyingglass"
+        }
+    }
+
+    var identifier: String {
+        switch self {
+        case .level: return "aids-level-toggle"
+        case .histogram: return "aids-histogram-toggle"
+        case .zebras: return "aids-zebras-toggle"
+        case .peaking: return "aids-peaking-toggle"
+        case .loupe: return "aids-loupe-toggle"
+        }
+    }
+}
+
+/// VoiceOver focus targets around the Aids button and tray.
+private enum CameraAidsFocus: Hashable {
+    case button
+    case close
+}
+
 /// The viewfinder and its capture controls. The picture keeps a stable frame
 /// while look and camera-tool drawers float above it. Wide layouts put the
 /// primary controls in an edge column; compact layouts keep them below the
@@ -310,6 +357,9 @@ struct CameraScreen: View {
     @State private var focusNormalizedPoint: CGPoint?
     /// Measured from the open tool strip (taller than two controls means two rows). Kept across hides.
     @State private var isToolStripTwoRows = false
+    /// The Aids tray replaces the tool strip in its slot while true.
+    @State private var isShowingAidsTray = false
+    @AccessibilityFocusState private var aidsFocus: CameraAidsFocus?
     @State private var pinchStartZoom: CGFloat = 1
     @State private var isPinching = false
     @State private var previewDragMaySelectLook: Bool?
@@ -1625,8 +1675,7 @@ struct CameraScreen: View {
                 )
             }
             if isShowingTools && !isShowingLiveAdjustments && !isShowingLookDrawer && !hidesToolsForRecoveryPlaceholder {
-                toolStrip(minWidth: width - 24)
-                    .overlay(alignment: .top) { dateStampNoticeOverlay }
+                toolStripSlot(minWidth: width - 24)
             }
 
             // Keep the zoom row mounted while the session stops/restarts.
@@ -2028,6 +2077,9 @@ struct CameraScreen: View {
         .accessibilityLabel("Switch camera")
         .accessibilityValue(camera.cameraPosition.title)
         .accessibilityHint("Switches between the front and back cameras.")
+        .accessibilityShowsLargeContentViewer {
+            Label("Switch camera", systemImage: "arrow.triangle.2.circlepath.camera")
+        }
     }
 
     private var settingsButton: some View {
@@ -2067,6 +2119,7 @@ struct CameraScreen: View {
         return Button {
             HapticFeedback.play(.selection)
             withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.82)) {
+                isShowingAidsTray = false
                 if isShowingLookDrawer {
                     isShowingLookDrawer = false
                     isShowingTools = true
@@ -2100,7 +2153,7 @@ struct CameraScreen: View {
         .accessibilityHint(
             isToolRailVisible
                 ? "Hides the control strip"
-                : "Shows exposure, grid, Pro controls and self-timer"
+                : "Shows exposure, grid, Pro, timer and aids"
         )
     }
 
@@ -2175,6 +2228,9 @@ struct CameraScreen: View {
         .accessibilityLabel(favorite ? "Remove \(recipe.name) from favorites" : "Favorite \(recipe.name)")
         .accessibilityValue(favorite ? "Favorite" : "Not favorite")
         .accessibilityHint("Favorites are shared with the look library. This does not change your look.")
+        .accessibilityShowsLargeContentViewer {
+            Label("Favorite", systemImage: favorite ? "heart.fill" : "heart")
+        }
     }
 
     /// Wide layouts use the edge column so the picture remains visually
@@ -3164,6 +3220,228 @@ struct CameraScreen: View {
     private var dateStampNoticeOverlay: some View { EmptyView() }
     #endif
 
+    /// The strip, or the Aids tray in the same slot while the tray is open.
+    @ViewBuilder
+    private func toolStripSlot(minWidth: CGFloat) -> some View {
+        if isShowingAidsTray {
+            aidsTray
+        } else {
+            toolStrip(minWidth: minWidth)
+                .overlay(alignment: .top) { dateStampNoticeOverlay }
+        }
+    }
+
+    private var aidsTrayAnimation: Animation? {
+        reduceMotion ? nil : .easeOut(duration: 0.2)
+    }
+
+    /// Effective on/off, as the viewfinder overlays use it.
+    private func isAidOn(_ aid: CameraAid) -> Bool {
+        switch aid {
+        case .level: return showHorizonLevel
+        case .histogram: return showHistogram
+        case .zebras: return showZebras
+        case .peaking: return showFocusPeaking
+        case .loupe: return camera.focusLoupeEnabled
+        }
+    }
+
+    private var activeAidCount: Int {
+        let flags: [Bool] = [
+            showHorizonLevel,
+            showHistogram,
+            showZebras,
+            showFocusPeaking,
+            camera.focusLoupeEnabled
+        ]
+        return flags.filter { $0 }.count
+    }
+
+    private func toggleAid(_ aid: CameraAid) {
+        let enabled: Bool = !isAidOn(aid)
+        switch aid {
+        case .level:
+            guard membership.require(.captureSetup) else { return }
+            storedShowHorizonLevel = enabled
+        case .histogram:
+            guard membership.require(.captureSetup) else { return }
+            storedShowHistogram = enabled
+        case .zebras:
+            guard membership.require(.captureSetup) else { return }
+            storedShowZebras = enabled
+        case .peaking:
+            guard membership.require(.captureSetup) else { return }
+            storedShowFocusPeaking = enabled
+        case .loupe:
+            guard membership.require(.manualControls) else { return }
+            camera.setFocusLoupeEnabled(enabled)
+        }
+        HapticFeedback.play(.selection)
+    }
+
+    private func openAidsTray() {
+        HapticFeedback.play(.selection)
+        withAnimation(aidsTrayAnimation) { isShowingAidsTray = true }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(200))
+            if isShowingAidsTray { aidsFocus = .close }
+        }
+    }
+
+    private func closeAidsTray() {
+        HapticFeedback.play(.selection)
+        withAnimation(aidsTrayAnimation) { isShowingAidsTray = false }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(200))
+            if !isShowingAidsTray { aidsFocus = .button }
+        }
+    }
+
+    private var aidsButton: some View {
+        let count: Int = activeAidCount
+        let anyOn: Bool = count > 0
+        let valueText: String = anyOn ? "\(count) on" : "All off"
+        return Button {
+            openAidsTray()
+        } label: {
+            Image(systemName: "scope")
+                .font(.body.weight(.semibold))
+                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+                .foregroundStyle(anyOn ? FilmyTheme.background : .white)
+                .frame(width: FilmyTheme.toolControlHeight, height: FilmyTheme.toolControlHeight)
+                .background {
+                    if anyOn {
+                        Circle().fill(FilmyTheme.filmAccent)
+                    } else {
+                        ChromeShapeBackground(shape: Circle())
+                    }
+                }
+                .overlay(alignment: .topTrailing) { aidsCountBadge(count) }
+                .contentShape(Circle())
+        }
+        .buttonStyle(.pressable)
+        .accessibilityShowsLargeContentViewer { Label("Shooting aids", systemImage: "scope") }
+        .accessibilityIdentifier("camera-aids-button")
+        .accessibilityLabel("Shooting aids")
+        .accessibilityValue(valueText)
+        .accessibilityHint("Shows level, histogram, zebras, focus peaking and loupe over the viewfinder. Aids never appear in saved photos.")
+        .accessibilityFocused($aidsFocus, equals: .button)
+    }
+
+    @ViewBuilder
+    private func aidsCountBadge(_ count: Int) -> some View {
+        if count > 0 {
+            Text("\(count)")
+                .font(.caption2.weight(.bold))
+                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+                .foregroundStyle(FilmyTheme.filmAccent)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
+                .background { Capsule().fill(FilmyTheme.background) }
+                .padding(2)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private var aidsTrayRow: some View {
+        HStack(spacing: 8) {
+            aidsBackButton
+            ForEach(CameraAid.allCases) { (aid: CameraAid) in
+                aidToggle(aid)
+            }
+        }
+        .padding(8)
+    }
+
+    private var aidsTray: some View {
+        ViewThatFits(in: .horizontal) {
+            aidsTrayRow
+                .fixedSize(horizontal: true, vertical: false)
+            ScrollView(.horizontal, showsIndicators: false) {
+                aidsTrayRow
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: FilmyTheme.cornerRadius)
+                .fill(Color.black.opacity(0.68))
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("camera-aids-tray")
+        .accessibilityLabel("Shooting aids")
+        .accessibilityHint("Aids never appear in saved photos.")
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    private var aidsBackButton: some View {
+        Button {
+            closeAidsTray()
+        } label: {
+            aidsCell(symbol: "chevron.backward", caption: "Back")
+                .foregroundStyle(.white)
+                .background { ChromeShapeBackground(shape: RoundedRectangle(cornerRadius: 12)) }
+                .contentShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.pressable)
+        .accessibilityShowsLargeContentViewer { Label("Back", systemImage: "chevron.backward") }
+        .accessibilityIdentifier("camera-aids-close")
+        .accessibilityLabel("Back to camera controls")
+        .accessibilityFocused($aidsFocus, equals: .close)
+    }
+
+    private func aidToggle(_ aid: CameraAid) -> some View {
+        let isOn: Bool = isAidOn(aid)
+        return Button {
+            toggleAid(aid)
+        } label: {
+            aidsCell(symbol: aid.symbol, caption: aid.title)
+                .foregroundStyle(isOn ? FilmyTheme.background : .white)
+                .background { aidToggleBackground(isOn: isOn) }
+                .overlay(alignment: .topTrailing) { aidOnBadge(isOn: isOn) }
+                .contentShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.pressable)
+        .accessibilityShowsLargeContentViewer { Label(aid.title, systemImage: aid.symbol) }
+        .accessibilityIdentifier(aid.identifier)
+        .accessibilityLabel(aid.title)
+        .accessibilityValue(isOn ? "On" : "Off")
+    }
+
+    private func aidsCell(symbol: String, caption: String) -> some View {
+        VStack(spacing: 2) {
+            Image(systemName: symbol)
+                .font(.body.weight(.semibold))
+                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+            Text(caption)
+                .font(.caption2.weight(.medium))
+                .lineLimit(1)
+                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+        }
+        .padding(.horizontal, 8)
+        .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.toolControlHeight + 8)
+    }
+
+    @ViewBuilder
+    private func aidToggleBackground(isOn: Bool) -> some View {
+        if isOn {
+            RoundedRectangle(cornerRadius: 12).fill(FilmyTheme.accent)
+        } else {
+            ChromeShapeBackground(shape: RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    @ViewBuilder
+    private func aidOnBadge(isOn: Bool) -> some View {
+        if isOn {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.caption2.weight(.bold))
+                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+                .foregroundStyle(FilmyTheme.background)
+                .padding(3)
+                .accessibilityHidden(true)
+        }
+    }
+
     @ViewBuilder
     private var toolStripTrailingGroup: some View {
         if camera.availableLenses.count > 1 {
@@ -3173,6 +3451,8 @@ struct CameraScreen: View {
         proControlsButton
 
         timerSlot
+
+        aidsButton
     }
 
     @ViewBuilder
@@ -3495,7 +3775,7 @@ struct CameraScreen: View {
     private func gestureTipSitsOnZoomRow(footerWidth: CGFloat) -> Bool {
         // footerWidth kept for call-site stability; rows come from the measured strip.
         let stripOpen: Bool = isShowingTools && !isShowingLiveAdjustments && !hidesToolsForRecoveryPlaceholder
-        let tallStrip: Bool = dynamicTypeSize.isAccessibilitySize || isToolStripTwoRows
+        let tallStrip: Bool = dynamicTypeSize.isAccessibilitySize || isToolStripTwoRows || isShowingAidsTray
         return stripOpen && tallStrip
     }
 
@@ -3606,6 +3886,7 @@ struct CameraScreen: View {
             isShowingLookDrawer = false
             isShowingLiveAdjustments = false
             isShowingTools = false
+            isShowingAidsTray = false
         }
     }
 
@@ -3633,6 +3914,7 @@ struct CameraScreen: View {
         withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.84)) {
             if !isShowingLookDrawer {
                 isShowingLiveAdjustments = false
+                isShowingAidsTray = false
                 lookStripActive = viewModel.quickRecipes
             }
             isShowingLookDrawer.toggle()

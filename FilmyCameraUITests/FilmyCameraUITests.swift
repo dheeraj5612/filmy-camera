@@ -1283,6 +1283,23 @@ final class FilmyCameraUITests: XCTestCase {
         attachScreenshot(named: "accessibility-camera-controls-timer")
         for _ in 0..<3 { accessibilityTimer.tap() }
         XCTAssertEqual(accessibilityTimer.value as? String, "Off")
+        let accessibilityAids = accessibilityApp.buttons["camera-aids-button"]
+        for _ in 0..<4 where !accessibilityAids.exists || !accessibilityAids.isHittable { accessibilityRail.swipeLeft() }
+        assertMinimumHitTarget(accessibilityAids, named: "Accessibility-size Aids")
+        assertContained(accessibilityAids, in: accessibilityApp.windows.firstMatch, named: "Aids")
+        accessibilityAids.tap()
+        let accessibilityTray = accessibilityApp.descendants(matching: .any)["camera-aids-tray"]
+        XCTAssertTrue(accessibilityTray.waitForExistence(timeout: 5), "Aids opens the tray at the largest text")
+        let accessibilityAidsClose = accessibilityApp.buttons["camera-aids-close"]
+        assertMinimumHitTarget(accessibilityAidsClose, named: "Accessibility-size Aids Back")
+        let accessibilityLoupe = accessibilityApp.buttons["aids-loupe-toggle"]
+        for _ in 0..<4 where !accessibilityLoupe.exists || !accessibilityLoupe.isHittable { accessibilityTray.swipeLeft() }
+        assertMinimumHitTarget(accessibilityLoupe, named: "Accessibility-size Aids loupe toggle")
+        for _ in 0..<4 where !accessibilityAidsClose.isHittable { accessibilityTray.swipeRight() }
+        assertMinimumHitTarget(accessibilityAidsClose, named: "Accessibility-size Aids Back")
+        attachScreenshot(named: "aids-tray-ax")
+        accessibilityAidsClose.tap()
+        XCTAssertTrue(accessibilityRail.waitForExistence(timeout: 5), "Back returns the tool strip")
         openRecipeDrawer(in: accessibilityApp)
         let tune = accessibilityApp.buttons["Tune Muted Color"]
         assertMinimumHitTarget(tune, named: "Accessibility-size Tune")
@@ -1711,6 +1728,7 @@ final class FilmyCameraUITests: XCTestCase {
         add(screenshot)
 
         // The film tool strip: Pro and timer are reachable without a swipe, in two rows on a 375 pt phone.
+        let closedCaptureFrame: CGRect = capture.frame
         controlsToggle.tap()
         let rail = previewApp.descendants(matching: .any)["camera-utility-rail"]
         XCTAssertTrue(rail.waitForExistence(timeout: 5))
@@ -1723,6 +1741,71 @@ final class FilmyCameraUITests: XCTestCase {
             XCTAssertGreaterThan(rail.frame.height, 80, "375 pt film strip uses two rows, not a scroller")
         }
         attachScreenshot(named: "film-tool-strip-open")
+
+        // Aids: one tap from the strip. The tray replaces the rail and never moves the shutter.
+        let sameFrameAsClosed: (CGRect, String) -> Void = { frame, state in
+            XCTAssertEqual(frame.minX, closedCaptureFrame.minX, accuracy: 1, "Shutter x moved with " + state)
+            XCTAssertEqual(frame.minY, closedCaptureFrame.minY, accuracy: 1, "Shutter y moved with " + state)
+            XCTAssertEqual(frame.width, closedCaptureFrame.width, accuracy: 1, "Shutter width changed with " + state)
+            XCTAssertEqual(frame.height, closedCaptureFrame.height, accuracy: 1, "Shutter height changed with " + state)
+        }
+        sameFrameAsClosed(capture.frame, "the strip open")
+        let aidsButton = previewApp.buttons["camera-aids-button"]
+        assertMinimumHitTarget(aidsButton, named: "Aids button")
+        assertContained(aidsButton, in: previewApp.windows.firstMatch, named: "Aids button")
+        XCTAssertEqual(aidsButton.label, "Shooting aids")
+        XCTAssertEqual(aidsButton.value as? String, "All off")
+        aidsButton.tap()
+        let aidsTray = previewApp.descendants(matching: .any)["camera-aids-tray"]
+        XCTAssertTrue(aidsTray.waitForExistence(timeout: 5), "Aids opens the tray")
+        let aidsClose = previewApp.buttons["camera-aids-close"]
+        assertMinimumHitTarget(aidsClose, named: "Aids Back")
+        XCTAssertEqual(aidsClose.label, "Back to camera controls")
+        sameFrameAsClosed(capture.frame, "the aids tray open")
+        let zebrasToggle = previewApp.buttons["aids-zebras-toggle"]
+        assertMinimumHitTarget(zebrasToggle, named: "Aids zebras toggle")
+        XCTAssertEqual(zebrasToggle.value as? String, "Off")
+        zebrasToggle.tap()
+        let zebrasOn = NSPredicate(format: "value == %@", "On")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: zebrasOn, object: zebrasToggle)],
+                                      timeout: 3), .completed, "Zebras toggle reads On after a tap")
+        attachScreenshot(named: "aids-tray-open")
+        let aidIdentifiers: [String] = ["aids-level-toggle", "aids-histogram-toggle", "aids-zebras-toggle",
+                                        "aids-peaking-toggle", "aids-loupe-toggle"]
+        if previewWidth < 390 && previewApp.windows.firstMatch.frame.height < 700 {
+            let trayWindow = previewApp.windows.firstMatch
+            for identifier in aidIdentifiers {
+                let aid = previewApp.buttons[identifier]
+                for _ in 0..<4 where !aid.exists || !aid.isHittable { aidsTray.swipeLeft() }
+                assertMinimumHitTarget(aid, named: identifier)
+                assertContained(aid, in: trayWindow, named: identifier)
+                XCTAssertTrue(aidsTray.frame.contains(CGPoint(x: aid.frame.midX, y: aid.frame.midY)),
+                              identifier + " centre lies inside the visible tray")
+            }
+            for _ in 0..<4 where !aidsClose.isHittable { aidsTray.swipeRight() }
+            assertMinimumHitTarget(aidsClose, named: "Aids Back at 375 pt")
+            assertContained(aidsClose, in: trayWindow, named: "Aids Back at 375 pt")
+            XCTAssertTrue(aidsTray.frame.contains(CGPoint(x: aidsClose.frame.midX, y: aidsClose.frame.midY)),
+                          "Aids Back centre lies inside the visible tray")
+        }
+        aidsClose.tap()
+        XCTAssertTrue(rail.waitForExistence(timeout: 5), "Back returns the tool strip")
+        let aidsOneOn = NSPredicate(format: "value == %@", "1 on")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: aidsOneOn, object: aidsButton)],
+                                      timeout: 3), .completed, "The Aids button tracks the zebras toggle")
+        assertMinimumHitTarget(previewApp.buttons["pro-controls-button"], named: "Pro controls after Aids Back")
+        sameFrameAsClosed(capture.frame, "the aids tray closed")
+        aidsButton.tap()
+        XCTAssertTrue(zebrasToggle.waitForExistence(timeout: 5))
+        zebrasToggle.tap()
+        let zebrasOff = NSPredicate(format: "value == %@", "Off")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: zebrasOff, object: zebrasToggle)],
+                                      timeout: 3), .completed, "Zebras toggle reads Off after a second tap")
+        aidsClose.tap()
+        XCTAssertTrue(rail.waitForExistence(timeout: 5))
+        let aidsAllOff = NSPredicate(format: "value == %@", "All off")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: aidsAllOff, object: aidsButton)],
+                                      timeout: 3), .completed, "The Aids button reads All off again")
 
         previewApp.terminate()
 
