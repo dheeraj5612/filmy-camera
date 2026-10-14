@@ -58,6 +58,7 @@ class SuiteRoutingTests(unittest.TestCase):
             "FilmyCameraUITests/ComprehensiveSettingsTests/testAccessSectionUsesPlainPermissionWords",
             "FilmyCameraUITests/ComprehensiveSettingsTests/testStorageExplainerAndInlineClearCacheConfirmation",
             "FilmyCameraUITests/ComprehensiveSettingsTests/testOnboardingStartingLooksGridAndPermissionNote",
+            "FilmyCameraUITests/ComprehensiveSettingsTests/testPendingPhotosExportsNoticeIsCalmAndDismissible",
         }
         self.assertEqual({test for test, group in tests.items() if group == "simulator-e2e"}, expected)
         e2e = set(run.phases("e2e", tests)[0][1])
