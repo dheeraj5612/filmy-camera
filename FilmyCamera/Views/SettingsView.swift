@@ -110,7 +110,8 @@ struct SettingsView: View {
                 AccountSettingsSection()
             }
 
-            captureSettings
+            cameraSettings
+            savedPhotoSettings
             permissions
             localCache
             about
@@ -151,19 +152,8 @@ struct SettingsView: View {
 
     // MARK: - Sections
 
-    private var captureSettings: some View {
-        settingsSection(title: "CAPTURE") {
-            if #available(iOS 26.0, *) {
-                SettingRow(
-                    systemName: "airpodspro",
-                    title: "AirPods camera remote",
-                    detail: "With supported AirPods connected, choose Camera Remote in their system settings. Use your chosen stem gesture to take a photo while Filmy Camera is open. The capture timer applies too."
-                ) {
-                    EmptyView()
-                }
-                settingsDivider
-            }
-
+    private var cameraSettings: some View {
+        settingsSection(title: "CAMERA") {
             VStack(alignment: .leading, spacing: 12) {
                 SettingRow(
                     systemName: "bolt.fill",
@@ -200,25 +190,139 @@ struct SettingsView: View {
             }
 
             settingsDivider
-            locationTaggingRow
-            settingsDivider
-            mirrorFrontRow
-            settingsDivider
-            dateStampRow
+            replayGesturesRow
+
+            if #available(iOS 26.0, *) {
+                settingsDivider
+                SettingRow(
+                    systemName: "airpodspro",
+                    title: "AirPods camera remote",
+                    detail: "With supported AirPods connected, choose Camera Remote in their system settings. Use your chosen stem gesture to take a photo while Filmy Camera is open. The capture timer applies too."
+                ) {
+                    EmptyView()
+                }
+            }
         }
     }
 
-    private var locationTaggingRow: some View {
-        SettingRow(
-            systemName: "location.fill",
-            title: "Location tagging",
-            detail: "Adds where you took each photo. Filmy only reads location while the camera is open."
+    private var savedPhotoSettings: some View {
+        settingsSection(
+            title: "SAVED PHOTOS",
+            footer: "These apply to each new photo you save."
         ) {
-            Toggle("Location tagging", isOn: $locationTaggingEnabled)
-                .labelsHidden()
-                .tint(FilmyTheme.accent)
-                .accessibilityIdentifier("settings-location-tagging")
+            dateStampRow
+            settingsDivider
+            mirrorFrontRow
+            settingsDivider
+            locationTaggingRow
+
+            if locationNeedsSettings {
+                settingsDivider
+                settingsAction(
+                    title: "Turn on location in Settings",
+                    systemName: "arrow.up.right.square",
+                    identifier: "location-permission-settings",
+                    hint: "Turn location on for Filmy there, then come back.",
+                    subtitle: "Opens the Settings app",
+                    action: openSystemSettings
+                )
+            }
         }
+    }
+
+    private var locationTagLayout: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+    }
+
+    private var locationTaggingRow: some View {
+        HStack(alignment: .top, spacing: 13) {
+            SettingIcon(systemName: "location.fill")
+            locationTagLayout {
+                locationTagText
+                locationTagToggle
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
+        .accessibilityElement(children: .contain)
+    }
+
+    private var locationTagText: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Location tag")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(FilmyTheme.primary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(locationTagDetail)
+                .font(.caption)
+                .foregroundStyle(FilmyTheme.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .layoutPriority(1)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("settings-location-access")
+    }
+
+    private var locationTagToggle: some View {
+        Toggle("Location tagging", isOn: $locationTaggingEnabled)
+            .labelsHidden()
+            .tint(FilmyTheme.accent)
+            .accessibilityIdentifier("settings-location-tagging")
+            .fixedSize(horizontal: !dynamicTypeSize.isAccessibilitySize, vertical: true)
+    }
+
+    private var locationTagDetail: String {
+        guard locationTaggingEnabled else {
+            return "Off. Photos are not tagged with where you took them."
+        }
+        switch locationAuthorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways:
+            return "On. Filmy reads location only while the camera is open."
+        case .denied, .restricted:
+            return "On, but iPhone location is off for Filmy."
+        default:
+            return "On. iPhone asks the first time you open the camera."
+        }
+    }
+
+    private var replayGesturesRow: some View {
+        Button(action: replayGestureHint) {
+            HStack(alignment: .center, spacing: 13) {
+                SettingIcon(systemName: "hand.draw")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Replay gestures")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(FilmyTheme.accent)
+                    Text(replayGesturesDetail)
+                        .font(.caption)
+                        .foregroundStyle(FilmyTheme.secondary)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity, minHeight: FilmyTheme.minimumHitTarget, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("settings-replay-gestures")
+        .accessibilityLabel("Replay gestures")
+        .accessibilityValue(gestureHintSeen ? "Hint already seen" : "Hint turned back on")
+        .accessibilityHint("Shows the camera gesture hint again.")
+    }
+
+    private var replayGesturesDetail: String {
+        gestureHintSeen
+            ? "Show the camera gesture hint again."
+            : "Turned back on. It shows when the camera is running."
+    }
+
+    private func replayGestureHint() {
+        HapticFeedback.play(.selection)
+        gestureHintSeen = false
+        UIAccessibility.post(notification: .announcement, argument: "Gesture hint turned back on.")
     }
 
     private var mirrorFrontRow: some View {
@@ -247,33 +351,8 @@ struct SettingsView: View {
         }
     }
 
-    private var locationStatusTitle: String {
-        if !locationTaggingEnabled { return "Off in Filmy" }
-        switch locationAuthorizationStatus {
-        case .authorizedWhenInUse, .authorizedAlways: return "On"
-        case .denied, .restricted: return "Off"
-        default: return "Not asked"
-        }
-    }
-
-    private var locationStatusIsEnabled: Bool {
-        locationTaggingEnabled
-            && (locationAuthorizationStatus == .authorizedWhenInUse || locationAuthorizationStatus == .authorizedAlways)
-    }
-
     private var locationNeedsSettings: Bool {
         locationAuthorizationStatus == .denied || locationAuthorizationStatus == .restricted
-    }
-
-    private var locationAccessRow: some View {
-        SettingRow(
-            systemName: "location.fill",
-            title: "Location",
-            detail: "Used only to tag photos while the camera is open."
-        ) {
-            permissionBadge("Location", title: locationStatusTitle, isEnabled: locationStatusIsEnabled)
-        }
-        .accessibilityIdentifier("settings-location-access")
     }
 
     private var resetSection: some View {
@@ -332,7 +411,7 @@ struct SettingsView: View {
 
     private var permissions: some View {
         settingsSection(
-            title: "ACCESS",
+            title: "PERMISSIONS",
             footer: "Filmy only asks for what it needs to take and save your photos."
         ) {
             SettingRow(
@@ -350,21 +429,6 @@ struct SettingsView: View {
                     systemName: "arrow.up.right.square",
                     identifier: "camera-permission-settings",
                     hint: "Turn the camera on for Filmy there, then come back.",
-                    subtitle: "Opens the Settings app",
-                    action: openSystemSettings
-                )
-            }
-
-            settingsDivider
-            locationAccessRow
-
-            if locationNeedsSettings {
-                settingsDivider
-                settingsAction(
-                    title: "Turn on location in Settings",
-                    systemName: "arrow.up.right.square",
-                    identifier: "location-permission-settings",
-                    hint: "Turn location on for Filmy there, then come back.",
                     subtitle: "Opens the Settings app",
                     action: openSystemSettings
                 )

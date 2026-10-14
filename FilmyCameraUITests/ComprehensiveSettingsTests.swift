@@ -194,6 +194,112 @@ final class ComprehensiveSettingsTests: XCTestCase {
         closeSetup(app)
     }
 
+    func testSettingsGroupsSavedPhotoSettingsAndReplaysGestureHint() {
+        continueAfterFailure = false
+        let app = makeApp()
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["settings-tab"].waitForExistence(timeout: 20))
+        app.buttons["settings-tab"].tap()
+        let page = app.scrollViews["settings-scroll"]
+        XCTAssertTrue(page.waitForExistence(timeout: 5))
+
+        // Sections appear in order in one downward pass.
+        let names = ["CAMERA", "SAVED PHOTOS", "PERMISSIONS", "STORAGE", "ABOUT", "RESET"]
+        let headers: [XCUIElement] = names.map { page.staticTexts[$0] }
+        for index in 0..<headers.count {
+            let header = reveal(headers[index], app, requireHittable: false, diagnosticName: names[index])
+            XCTAssertTrue(header.exists, "\(names[index]) section header must exist")
+            if index > 0 {
+                let previous = headers[index - 1]
+                XCTAssertTrue(!previous.exists || previous.frame.minY < header.frame.minY,
+                              "\(names[index - 1]) must come before \(names[index])")
+            }
+        }
+        XCTAssertFalse(page.staticTexts["CAPTURE"].exists)
+        XCTAssertFalse(page.staticTexts["ACCESS"].exists)
+        reveal(headers[0], app, requireHittable: false)
+        attach("settings-grouped-sections")
+
+        // Grouping: Camera controls above Saved photos, Saved photo settings above Permissions.
+        let saved = headers[1]
+        let perms = headers[2]
+        let haptic = reveal(page.switches["Haptic feedback"], app, requireHittable: false)
+        XCTAssertTrue(!saved.exists || haptic.frame.minY < saved.frame.minY)
+        let replayRow = reveal(page.buttons["settings-replay-gestures"], app, requireHittable: false)
+        XCTAssertTrue(!saved.exists || replayRow.frame.minY < saved.frame.minY)
+        let date = reveal(page.switches["Date stamp"], app, requireHittable: false)
+        XCTAssertTrue(!saved.exists || saved.frame.minY < date.frame.minY)
+        XCTAssertTrue(!perms.exists || date.frame.minY < perms.frame.minY)
+        let mirror = reveal(page.switches["Mirror front camera"], app, requireHittable: false)
+        XCTAssertTrue(!saved.exists || saved.frame.minY < mirror.frame.minY)
+        XCTAssertTrue(!perms.exists || mirror.frame.minY < perms.frame.minY)
+        XCTAssertTrue(!date.exists || date.frame.minY < mirror.frame.minY)
+        let location = page.switches["settings-location-tagging"]
+        reveal(location, app, requireHittable: false)
+        XCTAssertTrue(!saved.exists || saved.frame.minY < location.frame.minY)
+        XCTAssertTrue(!perms.exists || location.frame.minY < perms.frame.minY)
+        XCTAssertTrue(!mirror.exists || mirror.frame.minY < location.frame.minY)
+
+        // One merged Location row.
+        let access = page.descendants(matching: .any)["settings-location-access"]
+        XCTAssertEqual(page.descendants(matching: .any).matching(identifier: "settings-location-access").count, 1)
+        XCTAssertEqual(page.switches.matching(identifier: "settings-location-tagging").count, 1)
+        XCTAssertEqual(page.switches.matching(NSPredicate(format: "label == 'Location tagging'")).count, 1)
+        XCTAssertTrue(access.label.hasPrefix("Location tag"), "label=\(access.label)")
+        XCTAssertEqual(page.staticTexts.matching(NSPredicate(format: "label == 'Location'")).count, 0)
+
+        // The state line follows the toggle.
+        setToggle(reveal(location, app), "1")
+        let onLines = [
+            "On. Filmy reads location only while the camera is open.",
+            "On, but iPhone location is off for Filmy.",
+            "On. iPhone asks the first time you open the camera."
+        ]
+        let offLine = "Off. Photos are not tagged with where you took them."
+        XCTAssertTrue(wait { onLines.contains { access.label.contains($0) } }, "label=\(access.label)")
+        attach("settings-saved-photos")
+        let fix = page.buttons["location-permission-settings"]
+        let denied = access.label.contains(onLines[1])
+        if denied {
+            reveal(fix, app)
+            XCTAssertGreaterThanOrEqual(fix.frame.minY, location.frame.maxY)
+            XCTAssertTrue(!perms.exists || fix.frame.minY < perms.frame.minY)
+            XCTAssertTrue(fix.label.contains("Turn on location in Settings"), "label=\(fix.label)")
+            attach("settings-location-denied-action")
+            setToggle(reveal(location, app), "0")
+            XCTAssertTrue(wait { access.label.contains(offLine) }, "label=\(access.label)")
+            XCTAssertTrue(reveal(fix, app, requireHittable: false).exists)
+            setToggle(reveal(location, app), "1")
+        } else {
+            XCTAssertFalse(fix.exists)
+            setToggle(reveal(location, app), "0")
+            XCTAssertTrue(wait { access.label.contains(offLine) }, "label=\(access.label)")
+            XCTAssertFalse(fix.exists)
+            setToggle(reveal(location, app), "1")
+        }
+
+        // Replay gestures row: row, label, value and target size only. The value already reads "Hint turned back on" before the tap in this suite, so this is not tap coverage; the manual device frame is the proof.
+        let replay = reveal(page.buttons["settings-replay-gestures"], app)
+        XCTAssertGreaterThanOrEqual(replay.frame.height, 44)
+        XCTAssertEqual(replay.label, "Replay gestures")
+        replay.tap()
+        XCTAssertTrue(wait { replay.value as? String == "Hint turned back on" }, "value=\(String(describing: replay.value))")
+        attach("settings-replay-gestures-confirmed")
+
+        // Largest text keeps the Location row reachable.
+        app.terminate()
+        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        XCTAssertTrue(app.buttons["settings-tab"].waitForExistence(timeout: 20))
+        app.buttons["settings-tab"].tap()
+        let tag = reveal(page.switches["settings-location-tagging"], app)
+        XCTAssertTrue(tag.isHittable)
+        XCTAssertTrue(access.exists)
+        XCTAssertGreaterThanOrEqual(access.frame.height, 44)
+        attach("settings-saved-photos-largest-text")
+    }
+
     func testGrainSizeIsDisabledWhileGrainEffectIsOff() {
         let app = openRecipeEditor(recipeID: "classic-chrome", tuneTitle: "Tune Muted Color")
         defer { app.terminate() }
@@ -528,6 +634,7 @@ final class ComprehensiveSettingsTests: XCTestCase {
                       file: file, line: line)
     }
 
+    @discardableResult
     private func reveal(_ control: XCUIElement, _ app: XCUIApplication,
                         requireHittable: Bool = true,
                         diagnosticName: String = "unresolved control") -> XCUIElement {
