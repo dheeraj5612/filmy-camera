@@ -154,10 +154,10 @@ struct ContentView: View {
     @ObservedObject var camera: CameraService
     @ObservedObject var cameraViewModel: CameraViewModel
     @ObservedObject var photoLibrary: PhotoLibraryService
+    @Binding var selectedTab: Tab
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
-    @State private var selectedTab: Tab = .camera
     @State private var isShowingImporter = false
     @State private var importedPhotoItem: PhotosPickerItem?
     @State private var importTask: Task<Void, Never>?

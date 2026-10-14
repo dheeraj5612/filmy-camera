@@ -694,6 +694,10 @@ final class FilmyCameraUITests: XCTestCase {
             app.staticTexts["review-heading"].waitForExistence(timeout: 30),
             "The imported image should reach filtered review"
         )
+        XCTAssertTrue(
+            waitForDisappearance(app.buttons["open-capture-modes"], timeout: 2),
+            "Capture modes must not sit under the import review"
+        )
         // Whichever library photo the picker lists first, the caption must
         // say what happened: full resolution, or resized past the budget.
         XCTAssertTrue(
@@ -1271,17 +1275,42 @@ final class FilmyCameraUITests: XCTestCase {
     }
 
     func testEveryTopLevelPageCanReturnToCamera() throws {
+        let captureModes = app.buttons["open-capture-modes"]
+        XCTAssertTrue(
+            captureModes.waitForExistence(timeout: 8) && captureModes.isHittable,
+            "Capture modes must be reachable on the camera page"
+        )
+        XCTAssertGreaterThanOrEqual(captureModes.frame.height, 43.99, "Capture modes needs a 44pt height")
+
         let gallery = app.buttons["roll-tab"]
         gallery.tap()
 
         let galleryBack = app.buttons["roll-back-to-camera"]
+        XCTAssertTrue(galleryBack.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            waitForDisappearance(captureModes, timeout: 2),
+            "Capture modes belongs to the camera page, not the Roll"
+        )
         returnToMainCamera(using: galleryBack, named: "Roll back to camera")
+        XCTAssertTrue(
+            captureModes.waitForExistence(timeout: 5),
+            "Capture modes returns with the camera page"
+        )
 
         let settings = app.buttons["settings-tab"]
         settings.tap()
 
         let settingsBack = app.buttons["settings-back-to-camera"]
+        XCTAssertTrue(settingsBack.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            waitForDisappearance(captureModes, timeout: 2),
+            "Capture modes belongs to the camera page, not Settings"
+        )
         returnToMainCamera(using: settingsBack, named: "Settings back to camera")
+        XCTAssertTrue(
+            captureModes.waitForExistence(timeout: 5) && captureModes.isHittable,
+            "Capture modes returns after Settings"
+        )
 
         openRecipeDrawer(in: app)
 

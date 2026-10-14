@@ -118,6 +118,10 @@ final class NormalPhotoFlowTests: XCTestCase {
             XCTAssertTrue(revealFully(control, in: reviewScroll), "\(name) must scroll fully into view")
             assertReviewControl(control, name: name, containedInApp: true)
         }
+        XCTAssertTrue(
+            waitForDisappearance(app.buttons["open-capture-modes"], timeout: 2),
+            "Capture modes must not sit under the import review"
+        )
         attachScreenshot(named: "review-large-text")
 
         XCUIDevice.shared.orientation = .landscapeLeft
