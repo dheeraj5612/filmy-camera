@@ -2656,10 +2656,37 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Originals kept here stay on this device'")).firstMatch.waitForExistence(timeout: 5))
         attachScreenshot(named: "fuji-raw-library")
         app.navigationBars.buttons.element(boundBy: 0).tap()
+        let rawTile = app.buttons["fuji-q-rawDevelopment"]
+        XCTAssertTrue(rawTile.waitForExistence(timeout: 5))
+        XCTAssertTrue(rawTile.label.range(of: "(On|Off)( · [0-9]+ kept)?$", options: .regularExpression) != nil,
+                      "The RAW tile states On or Off, with a kept count only when originals exist: " + rawTile.label)
+        XCTAssertFalse(rawTile.label.contains("Originals"))
+        attachScreenshot(named: "fuji-q-raw-tile-value")
         let qHint = app.buttons["fuji-hint-q"]
         XCTAssertTrue(swipeUntilHittable(qHint, in: app), "The Q footer hint must scroll into reach")
         XCTAssertEqual(qHint.value as? String, "Collapsed")
         attachScreenshot(named: "fuji-q-footer-hint")
+        guard openDetail("fuji-q-interval", in: app, menuIsOpen: true) else {
+            XCTFail("Interval shooting detail must open")
+            return
+        }
+        let intervalHint = app.buttons["fuji-hint-interval"]
+        XCTAssertTrue(intervalHint.waitForExistence(timeout: 5))
+        XCTAssertTrue(swipeUntilHittable(intervalHint, in: app))
+        XCTAssertEqual(intervalHint.value as? String, "Collapsed")
+        attachScreenshot(named: "fuji-hint-interval")
+        intervalHint.tap()
+        XCTAssertTrue(app.staticTexts["fuji-hint-interval-text"].waitForExistence(timeout: 3))
+        attachScreenshot(named: "fuji-hint-interval-expanded")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        // Reopen the sheet so the grid starts at the top and the teleconverter tile is realized.
+        app.buttons["Done"].tap()
+        guard openDetail("fuji-q-teleconverter", in: app) else {
+            XCTFail("Teleconverter detail must open")
+            return
+        }
+        XCTAssertTrue(app.buttons["fuji-hint-teleconverter"].waitForExistence(timeout: 5))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
         app.buttons["Done"].tap()
 
         guard openNDDetail(in: app) else {
@@ -2771,5 +2798,22 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertTrue(swipeUntilHittable(recall, in: largeTextApp))
         assertMinimumHitTarget(recall, named: "Recall C1 at the largest text size")
         attachScreenshot(named: "fuji-banks-saved-largest-text")
+
+        // A saved C5 that is active must be in view when the banks list reopens at the largest text size.
+        let save5 = largeTextApp.buttons["fuji-bank-save-5"]
+        XCTAssertTrue(swipeUntilHittable(save5, in: largeTextApp))
+        save5.tap()
+        if largeTextApp.buttons["Replace bank"].waitForExistence(timeout: 2) { largeTextApp.buttons["Replace bank"].tap() }
+        let recall5 = largeTextApp.buttons["fuji-bank-recall-5"]
+        XCTAssertTrue(swipeUntilHittable(recall5, in: largeTextApp))
+        recall5.tap()
+        largeTextApp.navigationBars.buttons.element(boundBy: 0).tap()
+        // Reopen the Q menu so its scroll resets to the top; far-off lazy tiles may not be realized.
+        largeTextApp.buttons["Done"].tap()
+        XCTAssertTrue(openDetail("fuji-q-banks", in: largeTextApp), "Banks must reopen")
+        let reopened5 = largeTextApp.buttons["fuji-bank-recall-5"]
+        XCTAssertTrue(reopened5.waitForExistence(timeout: 5), "Form rows are lazy; the list must scroll to the active bank")
+        XCTAssertTrue(waitUntil(timeout: 5) { reopened5.isHittable }, "The active bank C5 must be in view without scrolling")
+        attachScreenshot(named: "fuji-banks-scrolled-to-active-largest-text")
     }
 }

@@ -31,6 +31,12 @@ enum FujiOriginalFilter: String, CaseIterable, Identifiable, Sendable {
         let sources: Int = records.count - raw
         return "\(raw) RAW, \(sources) source " + (sources == 1 ? "JPEG" : "JPEGs")
     }
+    /// Q-menu tile value: RAW state in words, plus the kept-RAW count once the library holds any.
+    static func tileValue(captureRAW: Bool, records: [FujiOriginalRecord]) -> String {
+        let state: String = captureRAW ? "On" : "Off"
+        let kept: Int = records.filter { $0.isRAW }.count
+        return kept == 0 ? state : "\(state) · \(kept) kept"
+    }
 }
 
 /// Value text for the RAW development sliders, in units. Clamps to the slider range before formatting.
@@ -232,6 +238,21 @@ struct FujiRAWLibraryView: View {
     }
 }
 
+/// Pinned Develop preview height. Pinned only on tall default-text screens; nil keeps the preview inside the Form.
+enum FujiDevelopLayout {
+    /// 16 padding + 1 divider + 100 save bar worst case.
+    static let chromeBudget: CGFloat = 117
+    /// Smallest Form viewport worth pinning for.
+    static let minimumFormHeight: CGFloat = 320
+
+    static func pinnedPreviewHeight(available: CGFloat, accessibilitySize: Bool) -> CGFloat? {
+        guard !accessibilitySize, available.isFinite else { return nil }
+        let height: CGFloat = min(340, (available * 0.38).rounded())
+        guard available - height - chromeBudget >= minimumFormHeight else { return nil }
+        return height
+    }
+}
+
 struct FujiRAWDevelopView: View {
     @ObservedObject var controller: FujiShootingController
     @ObservedObject var viewModel: CameraViewModel
@@ -255,74 +276,8 @@ struct FujiRAWDevelopView: View {
     }
 
     var body: some View {
-        Form {
-            Section {
-                ZStack {
-                    if let image {
-                        Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 340)
-                            .accessibilityLabel("RAW development preview")
-                    } else { Color.clear.frame(height: 240) }
-                    if isRendering { ProgressView("Developing preview").padding().background(.regularMaterial, in: Capsule()) }
-                }.frame(maxWidth: .infinity)
-                Text("\(original.isRAW ? "RAW" : "Processed source") · \(original.dynamicRange.title) · Original unchanged")
-                    .font(.caption.monospaced()).foregroundStyle(.secondary)
-                if let exposure = original.captureExposure {
-                    let capturedLine = "Captured ISO \(Int(exposure.iso)) · \(FujiMath.shutterText(exposure.seconds)) · protection \(exposure.protectedStops.formatted()) EV"
-                    Text(capturedLine)
-                        .font(.caption2.monospaced()).foregroundStyle(.secondary)
-                }
-                if let error { Text(error).font(.footnote).foregroundStyle(.orange) }
-                if dynamicTypeSize.isAccessibilitySize {
-                    if let saveError { Text(saveError).font(.footnote).foregroundStyle(.orange) }
-                    if let savedMessage { Text(savedMessage).font(.footnote) }
-                }
-            }
-            Section("Development recipe") {
-                Picker("Film recipe", selection: Binding(get: { draft.recipe.id }, set: { draft.recipe = viewModel.recipe(for: $0) })) {
-                    ForEach(viewModel.recipes) { Text($0.name).tag($0.id) }
-                }
-                Button("Edit film, tone, grain and color") { editingRecipe = true }.frame(minHeight: 44)
-            }
-            if original.isRAW {
-                Section("RAW exposure and white balance") {
-                    control("Exposure", value: $draft.adjustment.exposure, format: .exposure)
-                    Toggle("As-shot white balance", isOn: Binding(
-                        get: { draft.adjustment.useAsShotWhiteBalance },
-                        set: { asShot in
-                            draft.adjustment.useAsShotWhiteBalance = asShot
-                            let defaults = FujiRAWAdjustment()
-                            let untouched = draft.adjustment.temperature == defaults.temperature && draft.adjustment.tint == defaults.tint
-                            guard !asShot, untouched else { return }
-                            // Start the sliders at the as-shot balance instead of jumping to the 5600 K default.
-                            Task {
-                                guard let shot = await controller.asShotWhiteBalance(original) else { return }
-                                let stillUntouched = draft.adjustment.temperature == defaults.temperature && draft.adjustment.tint == defaults.tint
-                                guard !draft.adjustment.useAsShotWhiteBalance, stillUntouched else { return }
-                                draft.adjustment.temperature = shot.0; draft.adjustment.tint = shot.1
-                            }
-                        }))
-                    if !draft.adjustment.useAsShotWhiteBalance {
-                        control("Temperature", value: $draft.adjustment.temperature, format: .temperature)
-                        control("Tint", value: $draft.adjustment.tint, format: .tint)
-                    }
-                    control("Highlight shoulder", value: $draft.adjustment.highlightRecovery, format: .percent)
-                    control("Shadow lift", value: $draft.adjustment.shadowLift, format: .percent)
-                    Text("Highlight development can use information present in the original. It cannot recover sensor-clipped detail. Capture DR protection is fixed by the original exposure, not applied retroactively.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
-            }
-            Section {
-                if dynamicTypeSize.isAccessibilitySize { saveButton(inBar: false) }
-                Button("Revert to saved development") { draft = original }.disabled(isSaving).frame(minHeight: 44)
-                if let originalURL {
-                    ShareLink(item: originalURL) { Label("Export unchanged original", systemImage: "square.and.arrow.up") }.frame(minHeight: 44)
-                }
-                Text("Development settings are stored as a sidecar when you save. Your shooting recipe and C banks are not changed.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            }
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if !dynamicTypeSize.isAccessibilitySize { saveBar }
+        GeometryReader { (proxy: GeometryProxy) in
+            developContent(available: proxy.size.height)
         }
         .navigationTitle("Develop Original").navigationBarTitleDisplayMode(.inline)
         .task {
@@ -371,6 +326,111 @@ struct FujiRAWDevelopView: View {
                 onReset: { draft.recipe = viewModel.originalRecipe(for: draft.recipe.id) })
         }
     }
+
+    private func developContent(available: CGFloat) -> some View {
+        let pinned: CGFloat? = FujiDevelopLayout.pinnedPreviewHeight(available: available, accessibilitySize: dynamicTypeSize.isAccessibilitySize)
+        return VStack(spacing: 0) {
+            if let pinned {
+                previewPane(height: pinned)
+                    .frame(height: pinned)
+                    .padding(.horizontal, FilmyLayout.compactHorizontalMargin)
+                    .padding(.vertical, 8)
+                    .background(Color(uiColor: .systemGroupedBackground))
+                Divider()
+            }
+            developForm(pinnedHeight: pinned)
+        }
+    }
+
+    private func previewPane(height: CGFloat?) -> some View {
+        ZStack {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: height ?? 340)
+                    .accessibilityLabel("RAW development preview")
+            } else { Color.clear.frame(height: height ?? 240) }
+            if isRendering { ProgressView("Developing preview").padding().background(.regularMaterial, in: Capsule()) }
+        }.frame(maxWidth: .infinity)
+    }
+
+    private var resetSlidersButton: some View {
+        Button {
+            draft.adjustment = FujiRAWAdjustment()
+        } label: {
+            Text("Reset sliders").frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        }
+        .disabled(isSaving || draft.adjustment == FujiRAWAdjustment())
+        .accessibilityHint("Returns exposure, white balance and tone to defaults. The original is not changed.")
+        .accessibilityIdentifier("fuji-develop-reset")
+    }
+
+    private func developForm(pinnedHeight: CGFloat?) -> some View {
+        Form {
+            Section {
+                if pinnedHeight == nil { previewPane(height: nil) }
+                Text("\(original.isRAW ? "RAW" : "Processed source") · \(original.dynamicRange.title) · Original unchanged")
+                    .font(.caption.monospaced()).foregroundStyle(.secondary)
+                if let exposure = original.captureExposure {
+                    let capturedLine = "Captured ISO \(Int(exposure.iso)) · \(FujiMath.shutterText(exposure.seconds)) · protection \(exposure.protectedStops.formatted()) EV"
+                    Text(capturedLine)
+                        .font(.caption2.monospaced()).foregroundStyle(.secondary)
+                }
+                if let error { Text(error).font(.footnote).foregroundStyle(.orange) }
+                if dynamicTypeSize.isAccessibilitySize {
+                    if let saveError { Text(saveError).font(.footnote).foregroundStyle(.orange) }
+                    if let savedMessage { Text(savedMessage).font(.footnote) }
+                }
+            }
+            Section("Development recipe") {
+                Picker("Film recipe", selection: Binding(get: { draft.recipe.id }, set: { draft.recipe = viewModel.recipe(for: $0) })) {
+                    ForEach(viewModel.recipes) { Text($0.name).tag($0.id) }
+                }
+                Button("Edit film, tone, grain and color") { editingRecipe = true }.frame(minHeight: 44)
+            }
+            if original.isRAW {
+                Section("RAW exposure and white balance") {
+                    control("Exposure", value: $draft.adjustment.exposure, format: .exposure)
+                    Toggle("As-shot white balance", isOn: Binding(
+                        get: { draft.adjustment.useAsShotWhiteBalance },
+                        set: { asShot in
+                            draft.adjustment.useAsShotWhiteBalance = asShot
+                            let defaults = FujiRAWAdjustment()
+                            let untouched = draft.adjustment.temperature == defaults.temperature && draft.adjustment.tint == defaults.tint
+                            guard !asShot, untouched else { return }
+                            // Start the sliders at the as-shot balance instead of jumping to the 5600 K default.
+                            Task {
+                                guard let shot = await controller.asShotWhiteBalance(original) else { return }
+                                let stillUntouched = draft.adjustment.temperature == defaults.temperature && draft.adjustment.tint == defaults.tint
+                                guard !draft.adjustment.useAsShotWhiteBalance, stillUntouched else { return }
+                                draft.adjustment.temperature = shot.0; draft.adjustment.tint = shot.1
+                            }
+                        }))
+                    if !draft.adjustment.useAsShotWhiteBalance {
+                        control("Temperature", value: $draft.adjustment.temperature, format: .temperature)
+                        control("Tint", value: $draft.adjustment.tint, format: .tint)
+                    }
+                    control("Highlight shoulder", value: $draft.adjustment.highlightRecovery, format: .percent)
+                    control("Shadow lift", value: $draft.adjustment.shadowLift, format: .percent)
+                    resetSlidersButton
+                    FujiHint(short: "Recovers highlight detail the original holds; clipped areas stay clipped.",
+                             long: "Highlight development can use information present in the original. It cannot recover sensor-clipped detail. Capture DR protection is fixed by the original exposure, not applied retroactively.",
+                             topic: "highlight development", identifier: "fuji-hint-rawDevelop")
+                }
+            }
+            Section {
+                if dynamicTypeSize.isAccessibilitySize { saveButton(inBar: false) }
+                Button("Revert to saved development") { draft = original }.disabled(isSaving).frame(minHeight: 44)
+                if let originalURL {
+                    ShareLink(item: originalURL) { Label("Export unchanged original", systemImage: "square.and.arrow.up") }.frame(minHeight: 44)
+                }
+                Text("Development settings are stored as a sidecar when you save. Your shooting recipe and C banks are not changed.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !dynamicTypeSize.isAccessibilitySize { saveBar }
+        }
+    }
+
     private var saveBar: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let status = saveError ?? savedMessage {

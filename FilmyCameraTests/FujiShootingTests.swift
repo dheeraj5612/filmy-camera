@@ -844,6 +844,36 @@ final class FujiShootingTests: XCTestCase {
         XCTAssertEqual(FujiRAWSliderFormat.exposure.text(.nan, locale: posix), "\u{2013}")
         XCTAssertEqual(FujiRAWSliderFormat.exposure.text(.infinity, locale: posix), "\u{2013}")
     }
+
+    func testRAWTileValueCountsKeptRAWOriginals() {
+        let raw1 = originalRecord(isRAW: true, label: "R1")
+        let raw2 = originalRecord(isRAW: true, label: "R2")
+        let jpeg = originalRecord(isRAW: false, label: "J")
+        XCTAssertEqual(FujiOriginalFilter.tileValue(captureRAW: false, records: []), "Off")
+        XCTAssertEqual(FujiOriginalFilter.tileValue(captureRAW: true, records: []), "On")
+        XCTAssertEqual(FujiOriginalFilter.tileValue(captureRAW: true, records: [raw1, raw2, jpeg]), "On · 2 kept")
+        XCTAssertEqual(FujiOriginalFilter.tileValue(captureRAW: false, records: [raw1]), "Off · 1 kept")
+        XCTAssertEqual(FujiOriginalFilter.tileValue(captureRAW: true, records: [jpeg]), "On")
+    }
+
+    func testBankScrollTargetsOnlySavedNonFirstActiveBank() {
+        let saved: Set<Int> = [1, 3, 5]
+        XCTAssertEqual(FujiBankScroll.target(selectedBank: 5, savedIDs: saved, accessibilitySize: true), "bank-5")
+        XCTAssertEqual(FujiBankScroll.target(selectedBank: 3, savedIDs: saved, accessibilitySize: true), "bank-3")
+        XCTAssertNil(FujiBankScroll.target(selectedBank: 5, savedIDs: saved, accessibilitySize: false))
+        XCTAssertNil(FujiBankScroll.target(selectedBank: nil, savedIDs: saved, accessibilitySize: true))
+        XCTAssertNil(FujiBankScroll.target(selectedBank: 1, savedIDs: saved, accessibilitySize: true))
+        XCTAssertNil(FujiBankScroll.target(selectedBank: 4, savedIDs: saved, accessibilitySize: true))
+    }
+
+    func testDevelopPreviewPinsOnlyOnTallDefaultTextScreens() {
+        XCTAssertEqual(FujiDevelopLayout.pinnedPreviewHeight(available: 734, accessibilitySize: false), 279)
+        XCTAssertNil(FujiDevelopLayout.pinnedPreviewHeight(available: 700, accessibilitySize: false))
+        XCTAssertNil(FujiDevelopLayout.pinnedPreviewHeight(available: 603, accessibilitySize: false))
+        XCTAssertEqual(FujiDevelopLayout.pinnedPreviewHeight(available: 2000, accessibilitySize: false), 340)
+        XCTAssertNil(FujiDevelopLayout.pinnedPreviewHeight(available: 734, accessibilitySize: true))
+        XCTAssertNil(FujiDevelopLayout.pinnedPreviewHeight(available: .nan, accessibilitySize: false))
+    }
 }
 
 /// Counts stores of the Fuji preferences blob; every other key passes through untouched.

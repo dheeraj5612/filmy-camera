@@ -104,7 +104,7 @@ struct FujiQuickMenuView: View {
         case .nd: return "\(1 << settings.ndStops) frames"
         case .multipleExposure: return "\(settings.multipleExposureCount) · \(settings.blendMode.title)"
         case .preShot: return settings.preShotSeconds > 0 ? String(format: "%.1f seconds", settings.preShotSeconds) : "Off"
-        case .rawDevelopment: return settings.captureRAW ? "RAW + JPEG" : "Originals"
+        case .rawDevelopment: return FujiOriginalFilter.tileValue(captureRAW: settings.captureRAW, records: controller.originals)
         case .bracketing: return "\(settings.bracketCount) · \(settings.bracketStep.formatted()) EV"
         case .focusStack: return "\(settings.focusCount) positions"
         case .interval: return "\(settings.intervalCount) · \(Int(settings.intervalSeconds))s"
@@ -135,7 +135,7 @@ private struct FujiQEditor: View {
 }
 
 /// One plain line always visible; the full explanation one tap away. Expansion is not stored.
-private struct FujiHint: View {
+struct FujiHint: View {
     let short: String
     let long: String
     let topic: String
@@ -176,14 +176,40 @@ private struct FujiHint: View {
     }
 }
 
+/// Where the banks list scrolls on appearance: only at accessibility text sizes, only to a saved bank after C1.
+enum FujiBankScroll {
+    static func target(selectedBank: Int?, savedIDs: Set<Int>, accessibilitySize: Bool) -> String? {
+        guard accessibilitySize, let n = selectedBank, n > 1, savedIDs.contains(n) else { return nil }
+        return "bank-\(n)"
+    }
+}
+
 private struct FujiBanksView: View {
     @ObservedObject var controller: FujiShootingController
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var names: [Int: String] = [:]
     @State private var pendingOverwrite: Int?
     @State private var savedIndex: Int?
+    @State private var scrolledToActive = false
 
     var body: some View {
+        ScrollViewReader { proxy in
+            banksForm
+                .onAppear { scrollToActiveBank(proxy) }
+        }
+    }
+
+    private func scrollToActiveBank(_ proxy: ScrollViewProxy) {
+        if !scrolledToActive {
+            let saved: Set<Int> = Set(controller.preferences.banks.map { $0.id })
+            let target: String? = FujiBankScroll.target(selectedBank: controller.preferences.selectedBank, savedIDs: saved,
+                                                        accessibilitySize: dynamicTypeSize.isAccessibilitySize)
+            if let target { proxy.scrollTo(target, anchor: .top) }
+        }
+        scrolledToActive = true
+    }
+
+    private var banksForm: some View {
         Form {
             if let message = controller.errorMessage {
                 Section { Text(message).font(.footnote).foregroundStyle(.orange) }
@@ -256,6 +282,7 @@ private struct FujiBanksView: View {
                 Text("C\(index)").font(.headline).accessibilityAddTraits(.isHeader)
                 Text(bank.recipe.name).font(.footnote).foregroundStyle(.secondary)
             }
+                .id("bank-\(index)")
             recallRow(index, bank)
             TextField("Name", text: nameBinding(index, bank), prompt: Text("Custom \(index)"))
                 .accessibilityLabel("C\(index) name")
@@ -352,14 +379,16 @@ private struct FujiControlDetail: View {
                 Picker("Digital crop", selection: bind(\.digitalCrop)) {
                     Text("Native · 1×").tag(1.0); Text("1.4×").tag(1.4); Text("2×").tag(2.0); Text("3×").tag(3.0)
                 }.pickerStyle(.segmented)
-                Text("The crop is applied to the saved pixels without upscaling. A 2× crop retains one quarter of the source pixels. A prime lock disables hardware zoom and lens changes until unlocked here. RAW originals stay uncropped.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                FujiHint(short: "Crops the saved photo; a lens lock turns off zoom.",
+                         long: "The crop is applied to the saved pixels without upscaling. A 2× crop retains one quarter of the source pixels. A prime lock disables hardware zoom and lens changes until unlocked here. RAW originals stay uncropped.",
+                         topic: "Digital crop", identifier: "fuji-hint-teleconverter")
             }
         case .viewfinder:
             Section("Finder") {
                 Picker("Viewfinder", selection: bind(\.viewfinder)) { ForEach(FujiViewfinder.allCases) { Text($0.title).tag($0) } }
-                Text("EVF previews the developed crop. OVF-style shows an unfiltered electronic view outside the crop, with bright framing lines. Hybrid adds a processed crop inset. An iPhone does not contain an optical viewfinder.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                FujiHint(short: "EVF shows the developed crop; OVF-style and Hybrid show more of the scene.",
+                         long: "EVF previews the developed crop. OVF-style shows an unfiltered electronic view outside the crop, with bright framing lines. Hybrid adds a processed crop inset. An iPhone does not contain an optical viewfinder.",
+                         topic: "Viewfinder", identifier: "fuji-hint-viewfinder")
             }
         case .focusAssist:
             Section("Manual focus aids") {
@@ -370,18 +399,20 @@ private struct FujiControlDetail: View {
                         .accessibilityLabel("Manual focus position")
                     Button("Return to autofocus") { camera.setAutoFocus() }.frame(minHeight: 44)
                 }
-                Text("Split image and microprism breakup are driven by relative center-patch contrast. They are visual focusing aids, not phase-detection measurements or a focus guarantee. Reset the contrast reference after reframing; use peaking or magnification to confirm fine focus.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                FujiHint(short: "Visual aids only. Reset the reference after reframing.",
+                         long: "Split image and microprism breakup are driven by relative center-patch contrast. They are visual focusing aids, not phase-detection measurements or a focus guarantee. Reset the contrast reference after reframing; use peaking or magnification to confirm fine focus.",
+                         topic: "Focus aids", identifier: "fuji-hint-focusAssist")
                 Button("Reset contrast reference") { controller.invalidatePreview() }.frame(minHeight: 44)
             }
         case .naturalView:
             Section {
                 Toggle("Natural Live View", isOn: bind(\.naturalLiveView))
-                Text("Preview without the film recipe's color, grain or tone processing. The selected recipe is still applied to every saved JPEG. OVF-style and Hybrid always use a natural main view.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                FujiHint(short: "Shows the scene without the recipe; saved photos still use it.",
+                         long: "Preview without the film recipe's color, grain or tone processing. The selected recipe is still applied to every saved JPEG. OVF-style and Hybrid always use a natural main view.",
+                         topic: "Natural Live View", identifier: "fuji-hint-naturalView")
             }
         case .nd:
-            Section("Temporal ND") {
+            Section("Temporal ND · long exposure") {
                 Stepper("ND \(controller.settings.ndStops) · \(1 << controller.settings.ndStops) frames", value: bind(\.ndStops), in: 1...5)
                 Toggle("Keep component originals", isOn: bind(\.keepCompositeSources))
                 useDriveButton("Use Computational ND", .computationalND)
@@ -421,16 +452,18 @@ private struct FujiControlDetail: View {
                 Toggle("Keep component originals", isOn: bind(\.keepCompositeSources))
                 useDriveButton("Use Focus Bracketing · separate files", .focusBracket)
                 useDriveButton("Use Focus Stacking · fused image", .focusStack)
-                Text("Requires manual lens-position control. Stacking aligns small translations and fuses locally sharp regions, with a 6 MP budget. Use a tripod and a still subject. Parallax and focus breathing are not corrected; large misalignment fails rather than silently exporting a bad stack.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                FujiHint(short: "Needs manual focus control, a tripod and a still subject.",
+                         long: "Requires manual lens-position control. Stacking aligns small translations and fuses locally sharp regions, with a 6 MP budget. Use a tripod and a still subject. Parallax and focus breathing are not corrected; large misalignment fails rather than silently exporting a bad stack.",
+                         topic: "Focus stacking", identifier: "fuji-hint-focusStack")
             }
         case .interval:
             Section("Foreground interval shooting") {
                 Stepper("Frames: \(controller.settings.intervalCount)", value: bind(\.intervalCount), in: 2...120)
                 Stepper("Interval: \(Int(controller.settings.intervalSeconds)) seconds", value: bind(\.intervalSeconds), in: 1...3600)
                 useDriveButton("Use Interval Shooting", .interval)
-                Text("Intervals are measured start-to-start. The next frame waits when the sensor is slower than the requested interval; missed deadlines never cause a catch-up burst. Keep the app in the foreground. Backgrounding cancels the sequence and retains acquired sources.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                FujiHint(short: "Keep Filmy open; leaving the app stops the sequence.",
+                         long: "Intervals are measured start-to-start. The next frame waits when the sensor is slower than the requested interval; missed deadlines never cause a catch-up burst. Keep the app in the foreground. Backgrounding cancels the sequence and retains acquired sources.",
+                         topic: "Interval shooting", identifier: "fuji-hint-interval")
             }
         default: EmptyView()
         }
@@ -443,8 +476,9 @@ private struct FujiControlDetail: View {
                     Text("Off").tag(nil as Int?)
                     ForEach(0..<3, id: \.self) { Text("AUTO \($0 + 1)").tag(Optional($0)) }
                 }
-                Text("Raises ISO before slowing below the preferred shutter. At maximum ISO it permits slower shutter speeds. The app continuously meters on a supported physical lens. Exposure is held through a bracket or sweep.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                FujiHint(short: "Raises ISO first, then slows the shutter at the ISO limit.",
+                         long: "Raises ISO before slowing below the preferred shutter. At maximum ISO it permits slower shutter speeds. The app continuously meters on a supported physical lens. Exposure is held through a bracket or sweep.",
+                         topic: "Auto ISO", identifier: "fuji-hint-autoISO")
                 let appliedLine = "Applied: ISO \(Int(camera.manualControls.iso)) · \(FujiMath.shutterText(camera.manualControls.exposureDurationSeconds))"
                 Text(appliedLine)
                     .font(.caption.monospaced())
@@ -465,7 +499,7 @@ private struct FujiControlDetail: View {
 
     private var bracketing: some View {
         Group {
-            Section("AE BKT") {
+            Section("AE BKT · exposure") {
                 Picker("Frames", selection: bind(\.bracketCount)) { ForEach([3, 5, 7, 9], id: \.self) { Text("\($0)").tag($0) } }
                 Picker("Step", selection: bind(\.bracketStep)) {
                     Text("⅓ EV").tag(1.0 / 3); Text("⅔ EV").tag(2.0 / 3); Text("1 EV").tag(1.0); Text("2 EV").tag(2.0)
@@ -488,8 +522,9 @@ private struct FujiControlDetail: View {
                 Stepper("WB step: \(controller.settings.whiteBalanceStep)", value: bind(\.whiteBalanceStep), in: 1...3)
                 useDriveButton("Use ISO Bracketing", .isoBracket)
                 useDriveButton("Use White Balance Bracketing", .whiteBalanceBracket)
-                Text("These create three developments of one exposure, not three different sensor ISO settings. WB shifts use Filmy's normalized temperature control.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                FujiHint(short: "Three developments of one exposure, not three sensor ISOs.",
+                         long: "These create three developments of one exposure, not three different sensor ISO settings. WB shifts use Filmy's normalized temperature control.",
+                         topic: "ISO and WB bracketing", identifier: "fuji-hint-bracketing")
             }
             Section("Dynamic Range BKT · three exposures") {
                 useDriveButton("Use DR100 / DR200 / DR400 Bracketing", .dynamicRangeBracket)
