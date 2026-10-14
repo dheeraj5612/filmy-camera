@@ -1,10 +1,37 @@
 import SwiftUI
 
+/// Where the Pro sheet opens. `.top` (default) keeps today's sheet.
+enum ProControlsSection: String, CaseIterable, Sendable {
+    case top, exposure, whiteBalance, focus, format
+
+    static let lensAnchor = "pro-anchor-lens"
+    static let manualAnchor = "pro-anchor-manual"
+    static let formatAnchor = "pro-anchor-format"
+
+    /// Raw value of the manual tab to select; nil keeps Exposure.
+    var manualTabID: String? {
+        switch self {
+        case .exposure, .whiteBalance, .focus: return rawValue
+        case .top, .format: return nil
+        }
+    }
+
+    /// Scroll id to bring to the top edge. The lens pick stays first when required.
+    func openingScrollAnchor(lensFirst: Bool) -> String? {
+        switch self {
+        case .top: return nil
+        case .format: return Self.formatAnchor
+        case .exposure, .whiteBalance, .focus: return lensFirst ? Self.lensAnchor : Self.manualAnchor
+        }
+    }
+}
+
 /// A compact, camera-first surface for sensor controls. Slider drags stay local
 /// until the gesture ends so AVFoundation receives one bounded request instead
 /// of a request for every touch sample.
 struct ManualCameraControlsView: View {
     @ObservedObject var camera: CameraService
+    let initialSection: ProControlsSection
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -22,6 +49,14 @@ struct ManualCameraControlsView: View {
     @State private var editingTint = false
     @State private var editingFocus = false
     @State private var selectedSection: ControlSection = .exposure
+    @State private var didApplyOpeningSection = false
+
+    init(camera: CameraService, initialSection: ProControlsSection = .top) {
+        _camera = ObservedObject(wrappedValue: camera)
+        self.initialSection = initialSection
+        let tab = initialSection.manualTabID.flatMap(ControlSection.init(rawValue:)) ?? .exposure
+        _selectedSection = State(initialValue: tab)
+    }
 
     private enum ControlSection: String, CaseIterable, Identifiable {
         case exposure
@@ -64,35 +99,14 @@ struct ManualCameraControlsView: View {
     var body: some View {
         VStack(spacing: 0) {
             sheetHeader
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    if dynamicTypeSize.isAccessibilitySize { cameraMessage }
-                    if camera.sceneAuto.isEnabled {
-                        Text("Changing a control here turns Scene Auto off.")
-                            .font(.footnote)
-                            .foregroundStyle(FilmyTheme.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    if controls.requiresPhysicalLensSelection { cameraAndLens }
-
-                    if hasManualCapability {
-                        sectionPicker
-                        selectedSectionView
-                    } else {
-                        unavailableCard
-                    }
-
-                    resetButton
-                    if !controls.requiresPhysicalLensSelection { cameraAndLens }
-                    ProCaptureControlsView(camera: camera)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    scrollContent
                 }
-                .frame(maxWidth: 720, alignment: .leading)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.horizontal, horizontalSizeClass == .regular ? 28 : 20)
-                .padding(.vertical, 20)
+                .background(FilmyTheme.background.ignoresSafeArea())
+                .accessibilityIdentifier("manual-controls-scroll")
+                .onAppear { scrollToOpeningSection(proxy) }
             }
-            .background(FilmyTheme.background.ignoresSafeArea())
-            .accessibilityIdentifier("manual-controls-scroll")
         }
         .background(FilmyTheme.background.ignoresSafeArea())
         .accessibilityElement(children: .contain)
@@ -103,6 +117,53 @@ struct ManualCameraControlsView: View {
         }
         .onChange(of: controls) { _, _ in syncDraftsIfIdle() }
         .onChange(of: controls.activeDeviceID) { _, _ in syncDrafts() }
+    }
+
+    private var scrollContent: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            if dynamicTypeSize.isAccessibilitySize { cameraMessage }
+            if camera.sceneAuto.isEnabled {
+                Text("Changing a control here turns Scene Auto off.")
+                    .font(.footnote)
+                    .foregroundStyle(FilmyTheme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if controls.requiresPhysicalLensSelection {
+                // One container, so the scroll anchor names a single view.
+                VStack(alignment: .leading, spacing: 20) { cameraAndLens }
+                    .id(ProControlsSection.lensAnchor)
+            }
+
+            if hasManualCapability {
+                sectionPicker
+                selectedSectionView.id(ProControlsSection.manualAnchor)
+            } else {
+                unavailableCard
+            }
+
+            resetButton
+            if !controls.requiresPhysicalLensSelection { cameraAndLens }
+            ProCaptureControlsView(camera: camera)
+        }
+        .frame(maxWidth: 720, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.horizontal, horizontalSizeClass == .regular ? 28 : 20)
+        .padding(.vertical, 20)
+    }
+
+    private func scrollToOpeningSection(_ proxy: ScrollViewProxy) {
+        guard !didApplyOpeningSection, initialSection != .top else { return }
+        didApplyOpeningSection = true
+        Task { @MainActor in
+            scrollToOpeningAnchor(proxy)          // after first layout
+            try? await Task.sleep(for: .milliseconds(350))
+            scrollToOpeningAnchor(proxy)          // after the detent settles and refreshManualControls publishes
+        }
+    }
+
+    private func scrollToOpeningAnchor(_ proxy: ScrollViewProxy) {
+        guard let anchor = initialSection.openingScrollAnchor(lensFirst: controls.requiresPhysicalLensSelection) else { return }
+        proxy.scrollTo(anchor, anchor: .top)
     }
 
     private var sheetHeader: some View {
@@ -620,10 +681,7 @@ struct ManualCameraControlsView: View {
     }
 
     private func unsupportedText(_ text: String) -> some View {
-        Text(text)
-            .font(.system(.caption, design: .rounded).weight(.medium))
-            .foregroundStyle(FilmyTheme.secondary)
-            .fixedSize(horizontal: false, vertical: true)
+        ProReasonLine(text: text, permanent: true)
     }
 
     private func syncDraftsIfIdle() {

@@ -189,4 +189,19 @@ final class ProCapturePolicyTests: XCTestCase {
             XCTAssertTrue(CGRect(x: 0, y: 0, width: 1, height: 1).contains(box))
         }
     }
+
+    func testProSheetOpensAtNamedSection() {
+        XCTAssertEqual(ProControlsSection.allCases.map(\.rawValue), ["top", "exposure", "whiteBalance", "focus", "format"])
+        XCTAssertNil(ProControlsSection.top.manualTabID)
+        XCTAssertNil(ProControlsSection.format.manualTabID)
+        for section in [ProControlsSection.exposure, .whiteBalance, .focus] {
+            XCTAssertEqual(section.manualTabID, section.rawValue)
+            XCTAssertEqual(section.openingScrollAnchor(lensFirst: false), ProControlsSection.manualAnchor)
+            XCTAssertEqual(section.openingScrollAnchor(lensFirst: true), ProControlsSection.lensAnchor)
+        }
+        for lensFirst in [false, true] {
+            XCTAssertNil(ProControlsSection.top.openingScrollAnchor(lensFirst: lensFirst))
+            XCTAssertEqual(ProControlsSection.format.openingScrollAnchor(lensFirst: lensFirst), ProControlsSection.formatAnchor)
+        }
+    }
 }

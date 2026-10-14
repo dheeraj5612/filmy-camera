@@ -141,7 +141,7 @@ struct ProCaptureControlsView: View {
     }
 
     @ViewBuilder private var formatGroup: some View {
-        groupHeading("Capture format")
+        groupHeading("Capture format").id(ProControlsSection.formatAnchor)
         VStack(alignment: .leading, spacing: 6) {
             Text("Resolution")
                 .font(.subheadline.weight(.semibold))
@@ -203,7 +203,7 @@ struct ProCaptureControlsView: View {
                 .accessibilityIdentifier("pro-live-photo")
                 .frame(minHeight: FilmyTheme.minimumHitTarget)
             if livePhotoDisabled {
-                reasonLine(livePhotoReason)
+                reasonLine(livePhotoReason, permanent: !capabilities.livePhotoSupported)
             } else {
                 captionLine("Your look is applied to the still and the movie.")
             }
@@ -214,12 +214,12 @@ struct ProCaptureControlsView: View {
                 .frame(minHeight: FilmyTheme.minimumHitTarget)
         }
         if let reason = capabilities.unavailableReason(for: settings) {
-            Text(reason).font(.caption).foregroundStyle(.orange).accessibilityIdentifier("pro-capture-unavailable")
+            ProReasonLine(text: reason).accessibilityIdentifier("pro-capture-unavailable")
         }
     }
 
     private var livePhotoReason: String {
-        capabilities.livePhotoSupported ? "Needs 12 MP, no RAW, and HDR off." : "Live Photo is not available on this camera."
+        capabilities.livePhotoSupported ? "Needs 12 MP, no RAW, and HDR off." : "Live Photo is unavailable on this camera."
     }
 
     @ViewBuilder private var resolutionLine: some View {
@@ -236,9 +236,8 @@ struct ProCaptureControlsView: View {
         Text(text).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
     }
 
-    private func reasonLine(_ text: String) -> some View {
-        Label(text, systemImage: "exclamationmark.circle")
-            .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+    private func reasonLine(_ text: String, permanent: Bool = false) -> some View {
+        ProReasonLine(text: text, permanent: permanent)
     }
 
     private func groupHeading(_ text: String) -> some View {
@@ -324,6 +323,19 @@ private struct ProChoiceRow<Control: View>: View {
             .foregroundStyle(FilmyTheme.primary)
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityHidden(true)
+    }
+}
+
+/// Reason an option is off: icon plus words. Permanent = this camera cannot do it.
+struct ProReasonLine: View {
+    let text: String
+    var permanent = false
+
+    var body: some View {
+        Label(text, systemImage: permanent ? "info.circle" : "exclamationmark.circle")
+            .font(.caption)
+            .foregroundStyle(permanent ? FilmyTheme.secondary : Color.orange)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 
