@@ -327,7 +327,11 @@ final class NormalRollManagementTests: XCTestCase {
                 !app.descendants(matching: .any)["recipe-drawer"].exists
             }, "Closing the look picker must leave the camera controls available")
         }
-        app.buttons["import-photo"].tap()
+        // Import lives in Roll; picking a photo returns to the camera for review.
+        if !app.buttons["roll-import-photo"].exists { app.buttons["roll-tab"].tap() }
+        let rollImport = app.buttons["roll-import-photo"]
+        XCTAssertTrue(rollImport.waitForExistence(timeout: 10))
+        rollImport.tap()
         let photos = app.images.matching(NSPredicate(format: "identifier == 'PXGGridLayout-Info'"))
         XCTAssertTrue(waitUntil(timeout: 30) {
             if photos.count > newerSavedFrameCount { return true }
@@ -429,8 +433,10 @@ final class NormalRollManagementTests: XCTestCase {
     private func verifyPhotosLibraryCountAfterDeletion() throws {
         let expected = try XCTUnwrap(sourceLibraryCount)
         XCTAssertGreaterThan(expected, 0, "The public source must remain in Photos")
-        returnToCamera()
-        app.buttons["import-photo"].tap()
+        if !app.buttons["roll-import-photo"].exists { app.buttons["roll-tab"].tap() }
+        let rollImport = app.buttons["roll-import-photo"]
+        XCTAssertTrue(rollImport.waitForExistence(timeout: 10))
+        rollImport.tap()
         let photos = app.images.matching(NSPredicate(format: "identifier == 'PXGGridLayout-Info'"))
         XCTAssertTrue(waitUntil(timeout: 30) { photos.count == expected },
                       "The system PhotosPicker must return to its pre-save item count; hiding a Roll tile is insufficient")
@@ -443,7 +449,7 @@ final class NormalRollManagementTests: XCTestCase {
         let cancel = app.buttons["Cancel"].firstMatch
         XCTAssertTrue(cancel.waitForExistence(timeout: 5) && cancel.isHittable)
         cancel.tap()
-        XCTAssertTrue(app.buttons["import-photo"].waitForExistence(timeout: 10))
+        XCTAssertTrue(rollImport.waitForExistence(timeout: 10), "Cancelling the picker stays in Roll")
     }
 
     private func openSettings() {
