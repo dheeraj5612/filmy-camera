@@ -436,6 +436,23 @@ final class FilmyCameraUITests: XCTestCase {
         assertMinimumHitTarget(pro, named: "Pro controls")
         assertMinimumHitTarget(timer, named: "Self-timer")
         let proOrigin: CGPoint = pro.frame.origin
+        let dateStamp = compactApp.buttons["g7x-date-stamp-control"]
+        assertMinimumHitTarget(dateStamp, named: "G7 X date stamp control")
+        XCTAssertTrue(compactApp.windows.firstMatch.frame.contains(dateStamp.frame))
+        XCTAssertFalse(captureControls.frame.intersects(compactApp.descendants(matching: .any)["zoom-control"].frame),
+                       "The strip never overlaps the zoom row")
+        let dateStampNotice = compactApp.descendants(matching: .any)["g7x-date-stamp-notice"]
+        XCTAssertEqual(dateStamp.value as? String, "Off")
+        dateStamp.tap()
+        XCTAssertTrue(dateStampNotice.waitForExistence(timeout: 3), "Turning the date stamp on shows a notice")
+        XCTAssertEqual(dateStamp.value as? String, "On")
+        XCTAssertEqual(pro.frame.minX, proOrigin.x, accuracy: 1)
+        XCTAssertEqual(pro.frame.minY, proOrigin.y, accuracy: 1, "The date stamp notice never moves the strip")
+        attachScreenshot(named: "g7x-date-stamp-on")
+        dateStamp.tap()
+        XCTAssertEqual(dateStamp.value as? String, "Off", "Restore the shared setting to Off")
+        XCTAssertEqual(pro.frame.minX, proOrigin.x, accuracy: 1)
+        XCTAssertEqual(pro.frame.minY, proOrigin.y, accuracy: 1)
         let setup = compactApp.buttons["capture-setup-open"]
         XCTAssertEqual(timer.value as? String, "Off")
         for (spoken, summary) in [("3 seconds", "Timer 3s, "), ("5 seconds", "Timer 5s, "),
@@ -476,6 +493,35 @@ final class FilmyCameraUITests: XCTestCase {
 
         XCTAssertFalse(compactApp.descendants(matching: .any)["recipe-picker"].exists)
         attachScreenshot(named: "g7x-quick-capture-controls")
+
+        // Largest text: the strip scrolls and the date control stays reachable by swiping the rail.
+        compactApp.terminate()
+        let largeTextApp = MainActor.assumeIsolated {
+            let largeTextApp = makeApplication()
+            largeTextApp.launchArguments = [
+                "-ui-testing",
+                "-ui-testing-viewfinder-chrome",
+                "-selectedRecipeID",
+                "g7x-compact",
+                "-UIPreferredContentSizeCategoryName",
+                "UICTContentSizeCategoryAccessibilityXXXL"
+            ]
+            largeTextApp.launch()
+            return largeTextApp
+        }
+        defer { largeTextApp.terminate() }
+        let largeTextToggle = largeTextApp.buttons["camera-chrome-toggle"]
+        assertMinimumHitTarget(largeTextToggle, named: "Camera controls at the largest text size")
+        largeTextToggle.tap()
+        let largeTextControls = largeTextApp.descendants(matching: .any)["g7x-capture-controls"]
+        XCTAssertTrue(largeTextControls.waitForExistence(timeout: 5))
+        let largeTextDate = largeTextApp.buttons["g7x-date-stamp-control"]
+        let largeTextGrid = largeTextApp.buttons["g7x-grid-control"]
+        for _ in 0..<4 where !largeTextDate.exists || !largeTextDate.isHittable {
+            if largeTextGrid.exists { largeTextGrid.swipeLeft() } else { largeTextControls.swipeLeft() }
+        }
+        assertMinimumHitTarget(largeTextDate, named: "G7 X date stamp control at the largest text size")
+        attachScreenshot(named: "g7x-date-stamp-largest-text")
     }
 
     func testRecipeEditorBackDiscardsDraftChanges() throws {
@@ -1668,6 +1714,8 @@ final class FilmyCameraUITests: XCTestCase {
         controlsToggle.tap()
         let rail = previewApp.descendants(matching: .any)["camera-utility-rail"]
         XCTAssertTrue(rail.waitForExistence(timeout: 5))
+        XCTAssertFalse(previewApp.descendants(matching: .any)["g7x-date-stamp-control"].exists,
+                       "Film looks never show the date stamp control")
         XCTAssertTrue(previewApp.buttons["pro-controls-button"].isHittable, "Film strip shows Pro without swiping")
         XCTAssertTrue(previewApp.buttons["timer-control"].isHittable, "Film strip shows the timer without swiping")
         // Measured on the 375x667 simulator; a 375x812 mini fits one row with a single lens.
@@ -1717,6 +1765,14 @@ final class FilmyCameraUITests: XCTestCase {
         let proDone = formatApp.buttons["manual-controls-done"]
         XCTAssertTrue(proDone.waitForExistence(timeout: 8))
         XCTAssertTrue(formatApp.descendants(matching: .any)["pro-format"].exists)
+        // The chip opens Pro at Capture format, so the resolution row is on screen without scrolling.
+        let proResolution = formatApp.descendants(matching: .any)["pro-resolution"]
+        let resolutionVisible = NSPredicate(format: "exists == true AND isHittable == true")
+        let resolutionWait = XCTWaiter.wait(
+            for: [XCTNSPredicateExpectation(predicate: resolutionVisible, object: proResolution)],
+            timeout: 3
+        )
+        XCTAssertEqual(resolutionWait, .completed, "Format chip must open Pro at Capture format")
         proDone.tap()
         XCTAssertTrue(formatChip.waitForExistence(timeout: 5))
     }

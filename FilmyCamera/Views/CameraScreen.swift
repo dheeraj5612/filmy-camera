@@ -283,6 +283,10 @@ struct CameraScreen: View {
     @State private var recipeForDetail: FilmRecipe?
     @State private var isShowingTools: Bool
     @State private var isShowingManualControls = false
+    @State private var proControlsOpeningSection: ProControlsSection = .top
+    @AppStorage(G7DateStampPreferences.enabledKey) private var dateStampEnabled = false
+    @State private var dateStampNotice: String?
+    @State private var dateStampNoticeTask: Task<Void, Never>?
     @State private var isShowingLiveAdjustments = false
     @State private var isShowingLookDrawer = false
     @State private var isShowingPendingOriginals = false
@@ -693,7 +697,7 @@ struct CameraScreen: View {
             .presentationCornerRadius(30)
         }
         .sheet(isPresented: $isShowingManualControls) {
-            PremiumFeatureGate(feature: .manualControls) { ManualCameraControlsView(camera: camera) }
+            PremiumFeatureGate(feature: .manualControls) { ManualCameraControlsView(camera: camera, initialSection: proControlsOpeningSection) }
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(FilmyTheme.background)
@@ -721,6 +725,9 @@ struct CameraScreen: View {
             countdown.cancel()
             assists.stop()
             smartRecipes.stop()
+            dateStampNoticeTask?.cancel()
+            dateStampNoticeTask = nil
+            dateStampNotice = nil
             camera.stop(after: CameraActivityPolicy.inactiveGracePeriod)
             UIApplication.shared.isIdleTimerDisabled = false
         }
@@ -1619,6 +1626,7 @@ struct CameraScreen: View {
             }
             if isShowingTools && !isShowingLiveAdjustments && !isShowingLookDrawer && !hidesToolsForRecoveryPlaceholder {
                 toolStrip(minWidth: width - 24)
+                    .overlay(alignment: .top) { dateStampNoticeOverlay }
             }
 
             // Keep the zoom row mounted while the session stops/restarts.
@@ -1777,7 +1785,7 @@ struct CameraScreen: View {
         if isActiveAdjustmentsChipVisible {
             Button {
                 if camera.manualControls.isAnyManualModeEnabled {
-                    isShowingManualControls = true
+                    openProControls(at: manualChipSection)
                     return
                 }
                 withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.82)) {
@@ -1810,8 +1818,36 @@ struct CameraScreen: View {
             .accessibilityIdentifier("camera-active-adjustments")
             .accessibilityLabel("Active camera adjustments")
             .accessibilityValue(activeCaptureIndicatorValue)
-            .accessibilityHint("Shows the camera controls")
+            .accessibilityHint(activeAdjustmentsChipHint)
         }
+    }
+
+    private var manualChipSection: ProControlsSection {
+        let controls: CameraManualControls = camera.manualControls
+        if controls.exposureMode == .manual {
+            return .exposure
+        } else if controls.whiteBalanceMode == .manual {
+            return .whiteBalance
+        } else if controls.focusMode == .manual {
+            return .focus
+        } else {
+            return .top
+        }
+    }
+
+    private var activeAdjustmentsChipHint: String {
+        guard camera.manualControls.isAnyManualModeEnabled else { return "Shows the camera controls" }
+        switch manualChipSection {
+        case .exposure: return "Opens Pro controls at exposure"
+        case .whiteBalance: return "Opens Pro controls at white balance"
+        case .focus: return "Opens Pro controls at focus"
+        case .top, .format: return "Opens Pro controls"
+        }
+    }
+
+    private func openProControls(at section: ProControlsSection) {
+        proControlsOpeningSection = section
+        isShowingManualControls = true
     }
 
     private var activeCaptureIndicatorLines: some View {
@@ -1842,7 +1878,7 @@ struct CameraScreen: View {
         if let token = captureFormatToken, !isActiveAdjustmentsChipVisible || dynamicTypeSize.isAccessibilitySize {
             Button {
                 HapticFeedback.play(.selection)
-                isShowingManualControls = true
+                openProControls(at: .format)
             } label: {
                 formatTokenLabel(token)
                     .font(.system(.caption2, design: .rounded).weight(.bold))
@@ -1861,7 +1897,7 @@ struct CameraScreen: View {
             .accessibilityIdentifier("camera-capture-format")
             .accessibilityLabel("Capture format")
             .accessibilityValue(captureFormatSpokenValue)
-            .accessibilityHint("Opens Pro controls")
+            .accessibilityHint("Opens Pro controls at Capture format")
         }
     }
 
@@ -3053,7 +3089,80 @@ struct CameraScreen: View {
                 ? "g7x-grid-control"
                 : "grid-control"
         )
+        #if !G7_APP
+        if isCompactDigitalMode {
+            dateStampToggle
+        }
+        #endif
     }
+
+    #if !G7_APP
+    /// One-tap Date stamp for the G7 X strip. Writes the same key as the Settings row.
+    private var dateStampToggle: some View {
+        Button {
+            toggleDateStamp()
+        } label: {
+            Image(systemName: dateStampEnabled ? "calendar.badge.checkmark" : "calendar")
+                .font(.system(.subheadline, design: .rounded).weight(.bold))
+                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+                .foregroundStyle(dateStampEnabled ? FilmyTheme.background : .white)
+                .frame(width: FilmyTheme.toolControlHeight, height: FilmyTheme.toolControlHeight)
+                .background {
+                    if dateStampEnabled {
+                        Circle().fill(FilmyTheme.accent)
+                    } else {
+                        ChromeShapeBackground(shape: Circle())
+                    }
+                }
+                .contentShape(Circle())
+        }
+        .buttonStyle(.pressable)
+        .accessibilityShowsLargeContentViewer { Label("Date stamp", systemImage: "calendar") }
+        .accessibilityIdentifier("g7x-date-stamp-control")
+        .accessibilityLabel("Date stamp")
+        .accessibilityValue(dateStampEnabled ? "On" : "Off")
+        .accessibilityHint("Prints the capture date on saved photos. The viewfinder does not show it.")
+    }
+
+    private var dateStampNoticeAnimation: Animation? {
+        reduceMotion ? nil : .easeInOut(duration: 0.2)
+    }
+
+    private func toggleDateStamp() {
+        HapticFeedback.play(.selection)
+        let enabled: Bool = !dateStampEnabled
+        dateStampEnabled = enabled
+        let message: String = enabled ? "Date stamp on, saved photos only" : "Date stamp off"
+        dateStampNoticeTask?.cancel()
+        withAnimation(dateStampNoticeAnimation) { dateStampNotice = message }
+        dateStampNoticeTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            if Task.isCancelled { return }
+            withAnimation(dateStampNoticeAnimation) { dateStampNotice = nil }
+        }
+        UIAccessibility.post(notification: .announcement, argument: message)
+    }
+
+    /// Floats above the strip without moving it and never takes touches.
+    @ViewBuilder
+    private var dateStampNoticeOverlay: some View {
+        if isCompactDigitalMode, let message = dateStampNotice {
+            Text(message)
+                .font(.caption.weight(.semibold))
+                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background { ChromeShapeBackground(shape: Capsule()) }
+                .alignmentGuide(.top) { (dimensions: ViewDimensions) -> CGFloat in dimensions[.bottom] + 6 }
+                .allowsHitTesting(false)
+                .transition(.opacity)
+                .accessibilityIdentifier("g7x-date-stamp-notice")
+        }
+    }
+    #else
+    private var dateStampNoticeOverlay: some View { EmptyView() }
+    #endif
 
     @ViewBuilder
     private var toolStripTrailingGroup: some View {
@@ -3075,7 +3184,7 @@ struct CameraScreen: View {
     private var proControlsButton: some View {
         Button {
             HapticFeedback.play(.selection)
-            isShowingManualControls = true
+            openProControls(at: .top)
         } label: {
             Label("Pro", systemImage: "slider.horizontal.3")
                 .font(.system(.caption2, design: .rounded).weight(.bold))
