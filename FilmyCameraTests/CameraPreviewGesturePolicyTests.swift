@@ -77,22 +77,63 @@ final class CameraPreviewGesturePolicyTests: XCTestCase {
         XCTAssertNil(CameraPreviewGesturePolicy.dragAxis(translation: CGSize(width: CGFloat.infinity, height: 20)))
     }
 
-    func testVerticalDragWaitsForTapFocusBeforeClaimingExposureAxis() {
-        XCTAssertNil(CameraPreviewGesturePolicy.eligibleDragAxis(
-            translation: CGSize(width: 3, height: -30),
-            hasFocusPoint: false,
-            canAdjustExposure: true
-        ))
-        XCTAssertNil(CameraPreviewGesturePolicy.eligibleDragAxis(
-            translation: CGSize(width: 3, height: -30),
-            hasFocusPoint: true,
-            canAdjustExposure: false
-        ))
-        XCTAssertEqual(CameraPreviewGesturePolicy.eligibleDragAxis(
-            translation: CGSize(width: 3, height: -30),
-            hasFocusPoint: true,
-            canAdjustExposure: true
-        ), .exposure)
+    func testVerticalDragClaimsExposureWithoutAFocusPoint() {
+        XCTAssertEqual(CameraPreviewGesturePolicy.dragAxis(translation: CGSize(width: 3, height: -30)), .exposure)
+        XCTAssertEqual(CameraPreviewGesturePolicy.dragAxis(translation: CGSize(width: -4, height: 40)), .exposure)
+        XCTAssertEqual(CameraPreviewGesturePolicy.dragAxis(translation: CGSize(width: 0, height: 24)), .exposure)
+        XCTAssertNil(CameraPreviewGesturePolicy.dragAxis(translation: CGSize(width: 0, height: 20)))
+        XCTAssertNil(CameraPreviewGesturePolicy.dragAxis(translation: CGSize(width: 6, height: -14)))
+        XCTAssertNil(direction(x: 3, y: -200))
+    }
+
+    func testPreviewAccessibilityHintNeverOffersDoubleTap() {
+        let hint = CameraPreviewGesturePolicy.previewAccessibilityHint
+        XCTAssertFalse(hint.localizedCaseInsensitiveContains("double tap"))
+        XCTAssertTrue(hint.hasPrefix("Tap to focus."))
+        XCTAssertTrue(hint.contains("Slide up to brighten or down to darken"))
+    }
+
+    func testArcingLookSwipeIsReclaimedUntilExposureCommits() {
+        typealias Policy = CameraPreviewGesturePolicy
+        XCTAssertNil(Policy.resolvedDragAxis(current: nil, translation: CGSize(width: 6, height: -14), exposureCommitted: false))
+        XCTAssertEqual(Policy.resolvedDragAxis(current: nil, translation: CGSize(width: 4, height: -30),
+                                               exposureCommitted: false), .exposure)
+        XCTAssertEqual(Policy.resolvedDragAxis(current: .exposure, translation: CGSize(width: -70, height: -32),
+                                               exposureCommitted: false), .look)
+        XCTAssertEqual(Policy.resolvedDragAxis(current: .exposure, translation: CGSize(width: -70, height: -80),
+                                               exposureCommitted: true), .exposure)
+        XCTAssertEqual(Policy.resolvedDragAxis(current: .look, translation: CGSize(width: 0, height: -200),
+                                               exposureCommitted: false), .look)
+        XCTAssertFalse(Policy.exposureDragReachesCommit(start: 0, target: 0.2))
+        XCTAssertTrue(Policy.exposureDragReachesCommit(start: 0, target: 1.0 / 3))
+        XCTAssertFalse(Policy.exposureDragReachesCommit(start: 0.5, target: 0.2))
+        XCTAssertTrue(Policy.exposureDragReachesCommit(start: 0, target: -0.34))
+        XCTAssertFalse(Policy.exposureDragReachesCommit(start: .nan, target: 1))
+    }
+
+    func testExposureDetentTicksEachThirdAndMarksZero() {
+        typealias Policy = CameraPreviewGesturePolicy
+        XCTAssertEqual(Policy.exposureDetent(from: 0, to: 0.34), .step)
+        XCTAssertEqual(Policy.exposureDetent(from: 1.0 / 3, to: 0), .zero)
+        XCTAssertEqual(Policy.exposureDetent(from: -1.0 / 3, to: 0.0001), .zero)
+        XCTAssertNil(Policy.exposureDetent(from: 0.30, to: 0.36))
+        XCTAssertNil(Policy.exposureDetent(from: 1, to: 1))
+        XCTAssertNil(Policy.exposureDetent(from: .nan, to: 1))
+        XCTAssertNil(Policy.exposureDetent(from: 0, to: 1e30))
+        XCTAssertEqual(Policy.exposureDragHaptic(from: 0, to: 1.0 / 3, sent: 1.0 / 3), .step)
+        XCTAssertNil(Policy.exposureDragHaptic(from: 1.0 / 3, to: -1, sent: 2.0 / 3))
+        XCTAssertEqual(Policy.exposureDragHaptic(from: 5.0 / 3, to: 2, sent: 7.0 / 3), .step)
+        XCTAssertNil(Policy.exposureDragHaptic(from: 0, to: 1.0 / 3, sent: nil))
+    }
+
+    func testExposureReadoutCopy() {
+        typealias Policy = CameraPreviewGesturePolicy
+        XCTAssertEqual(Policy.exposureReadout(bias: 2.0 / 3, isManualExposure: false), "+0.7 EV")
+        XCTAssertEqual(Policy.exposureReadout(bias: -1.0 / 3, isManualExposure: false), "\u{2212}0.3 EV")
+        XCTAssertEqual(Policy.exposureReadout(bias: 0, isManualExposure: false), "+0.0 EV")
+        XCTAssertEqual(Policy.exposureReadout(bias: -0.01, isManualExposure: false), "+0.0 EV")
+        XCTAssertEqual(Policy.exposureReadout(bias: .nan, isManualExposure: false), "+0.0 EV")
+        XCTAssertEqual(Policy.exposureReadout(bias: 1, isManualExposure: true), "Manual exposure on")
     }
 
     func testExposureDragUsesStartingBiasAndScalesForViewport() throws {

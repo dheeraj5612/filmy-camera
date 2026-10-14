@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 
 enum CameraLookDirection: Equatable {
     case previous
@@ -10,25 +11,77 @@ enum CameraPreviewDragAxis {
     case exposure
 }
 
+enum CameraExposureDetent: Equatable {
+    case step
+    case zero
+}
+
 enum CameraPreviewGesturePolicy {
-    /// Lock the first deliberate axis for the entire drag, including curved drags.
+    /// Spoken to VoiceOver on the live preview. Camera flip is not offered here:
+    /// it lives on the flip button and the "Switch camera" accessibility action.
+    static let previewAccessibilityHint = "Tap to focus. Slide up to brighten or down to darken. Press and hold to compare the original. Swipe left or right to change looks, or pinch to zoom. These controls are also available as accessibility actions."
+
+    /// Travel before a vertical drag provisionally claims exposure.
+    static let exposureClaimDistance: CGFloat = 24
+
+    /// How long the exposure readout stays after the finger lifts.
+    static let exposureReadoutLinger: Duration = .milliseconds(1500)
+
+    /// One meaning per gesture. A lift before 12 pt is a tap and focuses at once.
+    /// Horizontal (x >= 12 and x > 1.5y) claims a look swipe. Vertical (y >= 24 and
+    /// y > 1.5x) claims exposure provisionally: nothing is sent and no readout
+    /// shows until the target is a full 1/3 stop from the baseline, and a later
+    /// horizontal-dominant sample still reclaims the drag as a look swipe. Once
+    /// committed, the drag stays exposure for its whole length. Diagonals stay
+    /// undecided until one rule fires.
     static func dragAxis(translation: CGSize) -> CameraPreviewDragAxis? {
         guard translation.width.isFinite, translation.height.isFinite else { return nil }
         let x = abs(translation.width), y = abs(translation.height)
         if x >= 12, x > y * 1.5 { return .look }
-        if y >= 12, y > x * 1.5 { return .exposure }
+        if y >= exposureClaimDistance, y > x * 1.5 { return .exposure }
         return nil
     }
 
-    /// Do not claim a vertical drag until tap-to-focus has made exposure
-    /// adjustment available. Returning nil keeps the axis undecided so a
-    /// focus state update that lands during the first drag events can still
-    /// start the exposure gesture.
-    static func eligibleDragAxis(translation: CGSize, hasFocusPoint: Bool,
-                                 canAdjustExposure: Bool) -> CameraPreviewDragAxis? {
-        guard let axis = dragAxis(translation: translation) else { return nil }
-        guard axis != .exposure || (hasFocusPoint && canAdjustExposure) else { return nil }
-        return axis
+    /// Keeps the axis decided so far, except that a provisional exposure claim
+    /// becomes a look swipe when the drag turns horizontal before it commits.
+    static func resolvedDragAxis(current: CameraPreviewDragAxis?, translation: CGSize,
+                                 exposureCommitted: Bool) -> CameraPreviewDragAxis? {
+        if current == .look { return .look }
+        if current == .exposure, exposureCommitted { return .exposure }
+        let fresh = dragAxis(translation: translation)
+        if current == .exposure { return fresh == .look ? .look : .exposure }
+        return fresh
+    }
+
+    /// A provisional exposure drag commits once its target is a full 1/3 stop from the baseline.
+    static func exposureDragReachesCommit(start: Float, target: Float) -> Bool {
+        start.isFinite && target.isFinite && abs(target - start) >= 1.0 / 3 - 0.0001
+    }
+
+    /// Whole thirds of a stop, rounded like CameraService.quantizedExposureBias.
+    static func exposureThird(_ bias: Float) -> Int? {
+        guard bias.isFinite, abs(bias) <= 64 else { return nil }
+        return Int((bias * 3).rounded())
+    }
+
+    static func exposureDetent(from old: Float, to new: Float) -> CameraExposureDetent? {
+        guard let oldThird = exposureThird(old), let newThird = exposureThird(new),
+              oldThird != newThird else { return nil }
+        return newThird == 0 ? .zero : .step
+    }
+
+    /// Ticks only when the published value is within a third of what the drag sent,
+    /// so a Scene Auto saved-bias restore does not tick but a clamp one third short does.
+    static func exposureDragHaptic(from old: Float, to new: Float, sent: Float?) -> CameraExposureDetent? {
+        guard let sent, let sentThird = exposureThird(sent), let newThird = exposureThird(new),
+              abs(newThird - sentThird) <= 1 else { return nil }
+        return exposureDetent(from: old, to: new)
+    }
+
+    static func exposureReadout(bias: Float, isManualExposure: Bool) -> String {
+        if isManualExposure { return "Manual exposure on" }
+        let rounded: Float = bias.isFinite ? (bias * 10).rounded() / 10 : 0
+        return String(format: "%@%.1f EV", rounded >= 0 ? "+" : "\u{2212}", Double(abs(rounded)))
     }
 
     /// One stop per quarter-viewfinder, with a minimum travel for small previews.

@@ -199,6 +199,9 @@ struct CameraScreen: View {
     @State private var previewDragMaySelectLook: Bool?
     @State private var previewDragAxis: CameraPreviewDragAxis?
     @State private var exposureDragStart: Float?
+    @State private var isShowingExposureReadout = false
+    @State private var exposureDragCommitted = false
+    @State private var exposureDragSentBias: Float?
     @State private var focusFeedbackRevision = 0
     @State private var suppressLookSwipeUntil = Date.distantPast
     @State private var viewfinderChromeHeights: [ViewfinderChromeEdge: CGFloat] = [:]
@@ -440,10 +443,16 @@ struct CameraScreen: View {
                 isPinching = false
                 previewDragMaySelectLook = nil
                 previewDragAxis = nil
+                isShowingExposureReadout = false
                 // A cancelled exposure drag must still let the reticle time out.
                 if exposureDragStart != nil { focusFeedbackRevision += 1 }
                 exposureDragStart = nil
+                exposureDragCommitted = false
+                exposureDragSentBias = nil
             }
+        }
+        .onChange(of: camera.isRunning) { _, running in
+            if !running { isShowingExposureReadout = false }
         }
         // Re-enter through current SwiftUI state after the system callback,
         // avoiding a retained callback snapshot with stale scene values.
@@ -815,8 +824,9 @@ struct CameraScreen: View {
                 // next focus tap.
                 FocusReticle()
                     .overlay(alignment: .bottom) {
-                        if camera.manualControls.exposureMode != .manual {
-                            Label(String(format: "%+.1f EV", camera.exposureBias), systemImage: "sun.max.fill")
+                        if camera.manualControls.exposureMode != .manual && !isShowingExposureReadout {
+                            Label(CameraPreviewGesturePolicy.exposureReadout(bias: camera.exposureBias, isManualExposure: false),
+                                  systemImage: "sun.max.fill")
                                 .font(.caption2.monospacedDigit())
                                 .foregroundStyle(FilmyTheme.accent)
                                 .padding(4)
@@ -835,6 +845,9 @@ struct CameraScreen: View {
                             self.focusPoint = nil
                         }
                     }
+            }
+            if isShowingExposureReadout && camera.isRunning && !isReviewing {
+                exposureDragReadout
             }
 
             // The shutter blink: the frame goes dark for an instant on
@@ -893,7 +906,7 @@ struct CameraScreen: View {
                     .allowsHitTesting(false)
 
                 if !shouldShowCameraEmptyState {
-                    FujiViewfinderOverlay(controller: shooting, camera: camera)
+                    FujiViewfinderOverlay(controller: shooting, camera: camera, selectedRecipe: viewModel.selectedRecipe)
                     livePreviewControls(in: proxy.size)
                 }
             }
@@ -903,6 +916,9 @@ struct CameraScreen: View {
                 previewDragMaySelectLook = nil
                 previewDragAxis = nil
                 exposureDragStart = nil
+                exposureDragCommitted = false
+                exposureDragSentBias = nil
+                isShowingExposureReadout = false
                 camera.updateOrientation(for: size)
             }
         }
@@ -915,7 +931,7 @@ struct CameraScreen: View {
             .accessibilityLabel("Live camera preview")
             .accessibilityValue(isShowingOriginalPreview || isHoldingOriginalPreview
                 ? "Showing original preview" : "Showing the \(viewModel.selectedRecipe.name) look")
-            .accessibilityHint("Tap to focus, press and hold to compare the original, then slide up to brighten or down to darken. Swipe left or right to change looks, double tap to switch cameras, or pinch to zoom. These controls are also available as accessibility actions.")
+            .accessibilityHint(CameraPreviewGesturePolicy.previewAccessibilityHint)
             .accessibilityAction(named: "Focus and expose at center") {
                 focusPreview(at: CGPoint(x: size.width / 2, y: size.height / 2), in: size)
             }
@@ -928,18 +944,7 @@ struct CameraScreen: View {
             }
             .accessibilityAction(named: "Switch camera", switchCameraFromPreview)
             .accessibilityIdentifier("camera-preview")
-            .gesture(
-                SpatialTapGesture(count: 2)
-                    .exclusively(before: SpatialTapGesture())
-                    .onEnded { value in
-                        switch value {
-                        case .first:
-                            switchCameraFromPreview()
-                        case .second(let tap):
-                            focusPreview(at: tap.location, in: size)
-                        }
-                    }
-            )
+            .gesture(SpatialTapGesture().onEnded { tap in focusPreview(at: tap.location, in: size) })
             .simultaneousGesture(previewLookSwipe(in: size))
             .simultaneousGesture(
                 LongPressGesture(minimumDuration: 0.25)
@@ -954,6 +959,7 @@ struct CameraScreen: View {
                         guard canTriggerShutter, !shooting.settings.lockPrimeLens, !shooting.isComposing else { return }
                         if previewDragMaySelectLook != nil { previewDragMaySelectLook = false }
                         if !isPinching {
+                            isShowingExposureReadout = false
                             isPinching = true
                             pinchStartZoom = camera.zoomFactor
                             dismissGestureHint()
@@ -1018,35 +1024,95 @@ struct CameraScreen: View {
         focusFeedbackRevision += 1
     }
 
+    private func updatePreviewDragAxis(for translation: CGSize) {
+        let axis = CameraPreviewGesturePolicy.resolvedDragAxis(
+            current: previewDragAxis, translation: translation, exposureCommitted: exposureDragCommitted)
+        if axis == .exposure && previewDragAxis != .exposure { exposureDragStart = camera.exposureBias }
+        if axis != .exposure { exposureDragStart = nil }
+        previewDragAxis = axis
+    }
+
+    private func applyPreviewExposureDrag(_ translation: CGSize, in size: CGSize) {
+        guard previewDragAxis == .exposure, let start = exposureDragStart,
+              let bias = CameraPreviewGesturePolicy.exposureBias(
+                start: start, translation: translation, viewportHeight: size.height) else { return }
+        if !exposureDragCommitted {
+            guard CameraPreviewGesturePolicy.exposureDragReachesCommit(start: start, target: bias) else { return }
+            exposureDragCommitted = true
+            isShowingExposureReadout = true
+        }
+        guard canAdjustPreviewExposure,
+              CameraPreviewGesturePolicy.exposureDetent(from: camera.exposureBias, to: bias) != nil else { return }
+        exposureDragSentBias = bias
+        camera.setExposureBias(bias)
+        focusFeedbackRevision += 1
+    }
+
+    private var exposureDragReadout: some View {
+        let isManual: Bool = camera.manualControls.exposureMode == .manual
+        let text: String = CameraPreviewGesturePolicy.exposureReadout(bias: camera.exposureBias, isManualExposure: isManual)
+        return exposureDragCapsule(text: text)
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .allowsHitTesting(false)
+            .transition(.opacity)
+            .onChange(of: camera.exposureBias) { (old: Float, new: Float) in
+                playExposureDragHaptic(from: old, to: new)
+            }
+            .task(id: previewDragAxis == .exposure) { await lingerExposureReadout() }
+    }
+
+    private func exposureDragCapsule(text: String) -> some View {
+        Label(text, systemImage: "sun.max.fill")
+            .font(.system(.title3, design: .rounded).weight(.semibold).monospacedDigit())
+            .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .foregroundStyle(FilmyTheme.primary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(Color.black.opacity(0.5), in: Capsule())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(text)
+            .accessibilityAddTraits(.updatesFrequently)
+            .accessibilityIdentifier("camera-exposure-drag-readout")
+    }
+
+    private func playExposureDragHaptic(from old: Float, to new: Float) {
+        guard previewDragAxis == .exposure,
+              let detent = CameraPreviewGesturePolicy.exposureDragHaptic(from: old, to: new, sent: exposureDragSentBias)
+        else { return }
+        HapticFeedback.play(detent == .zero ? .focus : .controlStep)
+    }
+
+    private func lingerExposureReadout() async {
+        guard previewDragAxis != .exposure else { return }
+        try? await Task.sleep(for: CameraPreviewGesturePolicy.exposureReadoutLinger)
+        guard !Task.isCancelled else { return }
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) { isShowingExposureReadout = false }
+    }
+
     private func previewLookSwipe(in size: CGSize) -> some Gesture {
         DragGesture(minimumDistance: 12)
             .onChanged { value in
                 let enabled = canTriggerShutter && !isPinching && Date() >= suppressLookSwipeUntil
-                if previewDragMaySelectLook == nil { previewDragMaySelectLook = enabled }
+                if previewDragMaySelectLook == nil {
+                    previewDragMaySelectLook = enabled
+                    exposureDragCommitted = false
+                    exposureDragSentBias = nil
+                }
                 if !enabled { previewDragMaySelectLook = false }
                 guard previewDragMaySelectLook == true else { return }
-                if previewDragAxis == nil {
-                    previewDragAxis = CameraPreviewGesturePolicy.eligibleDragAxis(
-                        translation: value.translation,
-                        hasFocusPoint: focusPoint != nil,
-                        canAdjustExposure: canAdjustPreviewExposure
-                    )
-                    if previewDragAxis == .exposure {
-                        exposureDragStart = camera.exposureBias
-                    }
-                }
-                guard previewDragAxis == .exposure, canAdjustPreviewExposure,
-                      let start = exposureDragStart,
-                      let bias = CameraPreviewGesturePolicy.exposureBias(start: start,
-                          translation: value.translation, viewportHeight: size.height) else { return }
-                camera.setExposureBias(bias)
-                focusFeedbackRevision += 1
+                updatePreviewDragAxis(for: value.translation)
+                applyPreviewExposureDrag(value.translation, in: size)
             }
             .onEnded { value in
                 defer {
                     previewDragMaySelectLook = nil
                     previewDragAxis = nil
                     exposureDragStart = nil
+                    exposureDragCommitted = false
+                    exposureDragSentBias = nil
                     focusFeedbackRevision += 1
                 }
                 guard previewDragAxis == .look,

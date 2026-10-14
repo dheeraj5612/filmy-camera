@@ -3,6 +3,8 @@ import SwiftUI
 struct FujiViewfinderOverlay: View {
     @ObservedObject var controller: FujiShootingController
     @ObservedObject var camera: CameraService
+    /// Value input so SwiftUI re-evaluates the bank chip when the look or its live tuning changes; bankIsDirty reads the same recipe through the controller.
+    let selectedRecipe: FilmRecipe
     private var viewfinderState: FujiViewfinderState? {
         let preferences = controller.preferences
         var bank: Int?

@@ -72,6 +72,8 @@ final class HistogramInteractionTests: XCTestCase {
         XCTAssertTrue(preview.frame.insetBy(dx: -1, dy: -1).contains(histogram.frame))
         XCTAssertEqual(app.buttons["recipe-menu"].label, initialLook,
                        "Dragging the histogram must not swipe to another recipe")
+        XCTAssertFalse(app.descendants(matching: .any)["camera-exposure-drag-readout"].exists,
+                       "Dragging the histogram must not start an exposure drag")
 
         // A passive composition layer covering the entire finder would swallow
         // this tap. The focus-lock affordance appears only after a focus tap.
@@ -146,7 +148,7 @@ final class HistogramInteractionTests: XCTestCase {
         attachScreenshot("histogram-reset")
     }
 
-    func testPreviewSwipesReverseDoubleTapSwitchesCameraAndSingleTapFocuses() throws {
+    func testPreviewSwipesReverseSingleTapFocusesAndDoubleTapKeepsCamera() throws {
         XCTAssertTrue(waitForLivePreview())
         let preview = app.descendants(matching: .any)["camera-preview"]
         let recipe = app.buttons["recipe-menu"]
@@ -163,19 +165,86 @@ final class HistogramInteractionTests: XCTestCase {
         let cameraSwitch = app.buttons["camera-switch-control"]
         let initialCamera = cameraSwitch.value as? String
         XCTAssertNotNil(initialCamera)
-        preview.doubleTap()
-        XCTAssertTrue(waitUntil { cameraSwitch.value as? String != initialCamera }, "Double tapping must switch cameras")
+        cameraSwitch.tap()
+        XCTAssertTrue(waitUntil { cameraSwitch.value as? String != initialCamera },
+                      "The switch control must still flip cameras")
         XCTAssertTrue(waitForLivePreview())
-        XCTAssertFalse(app.buttons["Lock focus and exposure"].exists,
-                       "The exclusive double tap must not also focus the old camera")
-        preview.doubleTap()
+        cameraSwitch.tap()
         XCTAssertTrue(waitUntil { cameraSwitch.value as? String == initialCamera })
         XCTAssertTrue(waitForLivePreview())
+        // Switching cameras clears the focus point, so the launch tap's point is gone here.
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.45)).tap()
         XCTAssertTrue(app.buttons["Lock focus and exposure"].waitForExistence(timeout: 2),
-                      "Single tap focus must still work after the double-tap recognizer is added")
+                      "A single tap must focus")
+        // The lock button needs a focus point, which clears 5 s after the last focus tap.
+        // The double tap re-focuses and the wait below is 2 s, so the assertion sits inside that window.
+        preview.doubleTap()
+        XCTAssertFalse(waitUntil(timeout: 2) { cameraSwitch.value as? String != initialCamera },
+                       "Double tapping the preview must never switch cameras")
+        XCTAssertTrue(app.buttons["Lock focus and exposure"].exists, "A double tap is two focus taps")
         XCTAssertEqual(recipe.label, initialLook)
-        attachScreenshot("preview-swipe-double-tap-single-focus")
+        attachScreenshot("preview-single-tap-focus-double-tap-keeps-camera")
+    }
+
+    func testVerticalPreviewDragSetsExposureWithoutFocusAndShowsReadout() throws {
+        XCTAssertTrue(waitForLivePreview())
+        showCameraTools()
+        let preview = app.descendants(matching: .any)["camera-preview"]
+        let exposure = app.descendants(matching: .any)["exposure-control"]
+        XCTAssertTrue(exposure.waitForExistence(timeout: 5))
+        let initialEV = exposure.value as? String
+        let initialLook = app.buttons["recipe-menu"].label
+        let readout = app.descendants(matching: .any)["camera-exposure-drag-readout"]
+        let lock = app.buttons["Lock focus and exposure"]
+        // setUp's app.tap() focuses; its focus point clears after 5 s.
+        XCTAssertTrue(waitUntil(timeout: 8) { !lock.exists },
+                      "The launch tap's focus point must clear before the drag")
+
+        dragPreviewUp(preview)
+        // The readout lingers 1.5 s after lift: resolve it before any slow query.
+        XCTAssertTrue(readout.waitForExistence(timeout: 1), "A vertical drag must show the EV readout")
+        let readoutLabel = readout.label
+        let readoutFrame = readout.frame
+        attachScreenshot("exposure-drag-readout", settle: 0)
+        XCTAssertTrue(readoutLabel.hasSuffix(" EV"))
+        XCTAssertTrue(preview.frame.contains(readoutFrame))
+        XCTAssertLessThanOrEqual(readoutFrame.width, preview.frame.width - 32,
+                                 "The readout element is the capsule, not the finder")
+
+        XCTAssertTrue(waitUntil(timeout: 5) {
+            (exposure.value as? String).map { $0 != initialEV && $0.hasPrefix("plus") } ?? false
+        }, "A vertical drag with no prior tap must raise exposure")
+        XCTAssertEqual(app.buttons["recipe-menu"].label, initialLook)
+        XCTAssertFalse(lock.exists, "A drag must not focus")
+        XCTAssertTrue(waitUntil(timeout: 5) { !readout.exists }, "The readout must clear after the drag")
+
+        let raised = exposure.value as? String
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.45))
+            .press(forDuration: 0.05, thenDragTo: preview.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.45)))
+        XCTAssertTrue(waitUntil { self.app.buttons["recipe-menu"].label != initialLook })
+        XCTAssertEqual(exposure.value as? String, raised, "A look swipe must never change exposure")
+
+        // The inner exposure-reset button is hidden by the combined element, so tap its centre.
+        exposure.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(waitUntil { exposure.value as? String == "plus 0.0 EV" })
+
+        app.terminate()
+        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        XCTAssertTrue(waitForLivePreview())
+        let largePreview = app.descendants(matching: .any)["camera-preview"]
+        dragPreviewUp(largePreview)
+        XCTAssertTrue(readout.waitForExistence(timeout: 1))
+        let largeReadoutFrame = readout.frame
+        attachScreenshot("exposure-drag-readout-largest-text", settle: 0)
+        XCTAssertTrue(largePreview.frame.contains(largeReadoutFrame),
+                      "The readout must fit the finder at the largest text size")
+        XCTAssertLessThanOrEqual(largeReadoutFrame.width, largePreview.frame.width - 32)
+    }
+
+    private func dragPreviewUp(_ preview: XCUIElement) {
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
+            .press(forDuration: 0.05, thenDragTo: preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)))
     }
 
     private func openSetup() {
@@ -312,9 +381,9 @@ final class HistogramInteractionTests: XCTestCase {
         }
     }
 
-    private func attachScreenshot(_ name: String) {
+    private func attachScreenshot(_ name: String, settle: TimeInterval = 0.7) {
         // Geometry updates before UIKit's rotation animation finishes.
-        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.7))
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: settle))
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = name
         attachment.lifetime = .keepAlways
