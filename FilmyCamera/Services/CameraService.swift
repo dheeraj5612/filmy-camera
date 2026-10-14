@@ -10,6 +10,16 @@ import os
 /// Device-measurement signposts for the preview frame path (static names only).
 private let previewSignposter = OSSignposter(subsystem: Bundle.main.bundleIdentifier ?? "FilmyCamera", category: "preview")
 
+/// Focus loupe image and tracked-subject rectangle, held apart from `CameraService`
+/// so their frequent updates re-render only the views that observe this object.
+/// Written inside `CameraService.publishOnMain`, like the service's own published state.
+public final class FocusAssistState: ObservableObject {
+    @Published public internal(set) var focusLoupeImage: CGImage?
+    @Published public internal(set) var trackedSubjectRectangle: CGRect?
+
+    public init() {}
+}
+
 /// Owns the AVFoundation session and provides CIImage frames to the preview.
 ///
 /// Session configuration and capture callbacks stay on a private serial queue.
@@ -17,6 +27,9 @@ private let previewSignposter = OSSignposter(subsystem: Bundle.main.bundleIdenti
 /// callers do not need to coordinate AVFoundation's worker threads.
 public final class CameraService: NSObject, ObservableObject, @unchecked Sendable {
     public typealias FrameHandler = (CIImage) -> Void
+
+    /// Loupe image and tracked rectangle; not part of this object's publisher.
+    public let focusAssistState = FocusAssistState()
 
     /// The physical direction used by the active capture device. The service
     /// keeps this separate from AVFoundation's enum so the UI and view model
@@ -396,8 +409,6 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
     @Published public private(set) var exposureProgram: CameraExposureProgram = .automatic
     @Published public private(set) var focusLoupeEnabled = false
     @Published public private(set) var subjectTrackingEnabled = false
-    @Published public private(set) var focusLoupeImage: CGImage?
-    @Published public private(set) var trackedSubjectRectangle: CGRect?
     @Published public private(set) var subjectTrackingStatus = "Tap a subject to track"
     @Published public private(set) var manualControls: CameraManualControls = .unavailable
     @Published public private(set) var sceneAuto = SceneAutoState()
@@ -5262,7 +5273,7 @@ extension CameraService {
     }
 
     public func setFocusLoupeEnabled(_ enabled: Bool) {
-        publishOnMain { [weak self] in self?.focusLoupeEnabled = enabled; if !enabled { self?.focusLoupeImage = nil } }
+        publishOnMain { [weak self] in self?.focusLoupeEnabled = enabled; if !enabled { self?.focusAssistState.focusLoupeImage = nil } }
         videoQueue.async { [weak self] in self?.videoLoupeEnabled = enabled }
     }
 
@@ -5276,7 +5287,7 @@ extension CameraService {
         configureSubjectTrackingOnQueue()
         publishOnMain { [weak self] in
             self?.subjectTrackingEnabled = enabled
-            self?.trackedSubjectRectangle = nil
+            self?.focusAssistState.trackedSubjectRectangle = nil
             self?.subjectTrackingStatus = enabled ? "Tap a subject to track" : "Tracking off"
         }
     }
@@ -5353,7 +5364,7 @@ extension CameraService {
                     let status = update.state == .lost ? "Subject lost. Tap to reacquire." : "Tracking subject"
                     self.publishOnMain { [weak self] in
                         guard let self else { return }
-                        if self.trackedSubjectRectangle != update.rectangle { self.trackedSubjectRectangle = update.rectangle }
+                        if self.focusAssistState.trackedSubjectRectangle != update.rectangle { self.focusAssistState.trackedSubjectRectangle = update.rectangle }
                         if self.subjectTrackingStatus != status { self.subjectTrackingStatus = status }
                     }
                 }
@@ -5378,7 +5389,7 @@ extension CameraService {
             let cgImage = FilmRenderer.sharedContext.createCGImage(loupe, from: loupe.extent)
             publishOnMain { [weak self] in
                 guard let self, self.focusLoupeEnabled else { return }
-                self.focusLoupeImage = cgImage
+                self.focusAssistState.focusLoupeImage = cgImage
             }
         }
     }

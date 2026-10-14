@@ -1,3 +1,4 @@
+import Combine
 import CoreGraphics
 import CoreImage
 import Foundation
@@ -123,6 +124,25 @@ final class ProCaptureTests: XCTestCase {
         XCTAssertFalse(SubjectFocusTracker.isUsable(rectangle: .infinite, confidence: 1))
         let elsewhere = SubjectFocusTracker.seedRectangle(near: CGPoint(x: 0.9, y: 0.9), candidates: [face])
         XCTAssertTrue(elsewhere.contains(CGPoint(x: 0.9, y: 0.9)))
+    }
+
+    func testLoupeUpdatesPublishOnFocusAssistStateNotOnCameraService() throws {
+        let camera = CameraService()
+        let context = try XCTUnwrap(CGContext(data: nil, width: 2, height: 2, bitsPerComponent: 8, bytesPerRow: 0,
+                                              space: CGColorSpaceCreateDeviceRGB(),
+                                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        let image = try XCTUnwrap(context.makeImage())
+        var cameraSends = 0
+        var stateSends = 0
+        let cameraSink = camera.objectWillChange.sink { _ in cameraSends += 1 }
+        let stateSink = camera.focusAssistState.objectWillChange.sink { _ in stateSends += 1 }
+
+        for _ in 0..<20 { camera.focusAssistState.focusLoupeImage = image }
+
+        XCTAssertEqual(cameraSends, 0)
+        XCTAssertEqual(stateSends, 20)
+        cameraSink.cancel()
+        stateSink.cancel()
     }
 
     func testPersistentOriginalsSurviveReloadAndVersionChanges() async throws {

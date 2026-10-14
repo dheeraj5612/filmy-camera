@@ -334,25 +334,9 @@ struct FocusAssistOverlay: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            if let rect = camera.trackedSubjectRectangle,
-               let frame = Self.displayRect(rect, source: camera.previewFrameSize, viewport: size) {
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(.yellow, lineWidth: 2)
-                    .frame(width: frame.width, height: frame.height)
-                    .position(x: frame.midX, y: frame.midY)
-            }
+            TrackedSubjectBox(state: camera.focusAssistState, previewFrameSize: camera.previewFrameSize, viewport: size)
             VStack(alignment: .trailing, spacing: 6) {
-                if camera.focusLoupeEnabled, let image = camera.focusLoupeImage {
-                    VStack(spacing: 4) {
-                        Image(decorative: image, scale: 1).resizable().interpolation(.none).scaledToFit()
-                            .frame(width: min(144, size.width * 0.38), height: min(144, size.width * 0.38))
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                        Text("4× focus preview").font(.caption2.weight(.semibold))
-                    }
-                    .padding(6).background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 14))
-                    .accessibilityLabel("Four times magnified focus preview")
-                    .accessibilityIdentifier("focus-loupe-preview")
-                }
+                FocusLoupePreview(state: camera.focusAssistState, enabled: camera.focusLoupeEnabled, size: size)
                 if camera.subjectTrackingEnabled {
                     Text(camera.subjectTrackingStatus).font(.caption.weight(.semibold))
                         .padding(8).background(.black.opacity(0.7), in: Capsule())
@@ -372,5 +356,43 @@ struct FocusAssistOverlay: View {
         return CGRect(x: offset.x + rect.minX * source.width * scale,
                       y: offset.y + (1 - rect.maxY) * source.height * scale,
                       width: rect.width * source.width * scale, height: rect.height * source.height * scale)
+    }
+}
+
+/// Observes only the tracked-subject rectangle so its ticks do not re-render the whole overlay.
+private struct TrackedSubjectBox: View {
+    @ObservedObject var state: FocusAssistState
+    let previewFrameSize: CGSize
+    let viewport: CGSize
+
+    var body: some View {
+        if let rect = state.trackedSubjectRectangle,
+           let frame = FocusAssistOverlay.displayRect(rect, source: previewFrameSize, viewport: viewport) {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(.yellow, lineWidth: 2)
+                .frame(width: frame.width, height: frame.height)
+                .position(x: frame.midX, y: frame.midY)
+        }
+    }
+}
+
+/// Observes only the loupe image so its ticks do not re-render the whole overlay.
+private struct FocusLoupePreview: View {
+    @ObservedObject var state: FocusAssistState
+    let enabled: Bool
+    let size: CGSize
+
+    var body: some View {
+        if enabled, let image = state.focusLoupeImage {
+            VStack(spacing: 4) {
+                Image(decorative: image, scale: 1).resizable().interpolation(.none).scaledToFit()
+                    .frame(width: min(144, size.width * 0.38), height: min(144, size.width * 0.38))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                Text("4× focus preview").font(.caption2.weight(.semibold))
+            }
+            .padding(6).background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 14))
+            .accessibilityLabel("Four times magnified focus preview")
+            .accessibilityIdentifier("focus-loupe-preview")
+        }
     }
 }
