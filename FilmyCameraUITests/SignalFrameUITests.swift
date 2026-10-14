@@ -324,6 +324,27 @@ final class SignalFrameUITests: XCTestCase {
         XCTAssertFalse(app.descendants(matching: .any)["capture-modes-unavailable-note"].exists)
 
         assertReachable(app.buttons["capture-modes-reopen-mode"], in: app)
+
+        // No card without a shot in this session; the last-capture slot, when seeded, is a full-size target.
+        XCTAssertFalse(app.descendants(matching: .any)["capture-modes-saved-card"].exists, "No card without a shot in this session")
+        let last = app.buttons["capture-modes-last-capture"]
+        if last.exists {
+            XCTAssertGreaterThanOrEqual(last.frame.width, 44)
+            XCTAssertGreaterThanOrEqual(last.frame.height, 44)
+        }
+        app.buttons["open-mode-captures"].tap()
+        let capturesBar = app.navigationBars["Filmy Captures"]
+        XCTAssertTrue(capturesBar.waitForExistence(timeout: 5))
+        // Descendants, not staticTexts: a NavigationLink row may merge its texts into one button label.
+        let list = app.collectionViews.firstMatch
+        let originalsRow = list.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] 'originals'")).firstMatch
+        let noCaptures = app.descendants(matching: .any)["No captures yet"]
+        XCTAssertTrue(noCaptures.waitForExistence(timeout: 5) || originalsRow.exists)
+        snapshot("capture-modes-captures-sheet")
+        capturesBar.buttons["Done"].tap()
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: capturesBar)
+        XCTAssertEqual(XCTWaiter.wait(for: [gone], timeout: 5), .completed)
+
         snapshot("capture-modes-no-camera")
 
         checkEssentials(app)

@@ -10,6 +10,7 @@ struct CaptureModesScreen: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var releasedLegacyCamera = false
     @State private var showingCaptures = false
+    @State private var libraryOpenID: UUID?
     @State private var showingReferencePicker = false
     @State private var showingFilmPicker = false
     @State private var showingModeInfo = false
@@ -62,7 +63,9 @@ struct CaptureModesScreen: View {
             .safeAreaInset(edge: .bottom, spacing: 0) { shutterBar }
             .photosPicker(isPresented: $showingReferencePicker, selection: $referenceItem, matching: .images,
                           preferredItemEncoding: .current)
-            .sheet(isPresented: $showingCaptures) { CaptureModesLibrary(model: model) }
+            .sheet(isPresented: $showingCaptures, onDismiss: { libraryOpenID = nil }) {
+                CaptureModesLibrary(model: model, initialCaptureID: libraryOpenID)
+            }
             .sheet(isPresented: $showingFilmPicker) {
                 CaptureFilmPicker(recipes: model.recipes, currentName: model.state.recipeName, canSelect: model.canConfigure) { index in
                     model.engine.selectRecipe(index)
@@ -149,7 +152,11 @@ struct CaptureModesScreen: View {
         let fixedHeight: CGFloat = max(240, geometry.size.height * 0.53)
         let minHeight: CGFloat = pageScrolls ? fixedHeight : 200
         let maxHeight: CGFloat = pageScrolls ? fixedHeight : .infinity
-        return viewfinder.frame(maxWidth: .infinity, minHeight: minHeight, maxHeight: maxHeight)
+        return viewfinder
+            .frame(maxWidth: .infinity, minHeight: minHeight, maxHeight: maxHeight)
+            .overlay(alignment: .bottom) {
+                CaptureSavedCard(model: model, canOpen: !capturesDisabled, open: { (id: UUID) in openCaptures(at: id) })
+            }
     }
 
     private var statusBlock: some View {
@@ -213,6 +220,13 @@ struct CaptureModesScreen: View {
     }
 
     private var capturesDisabled: Bool { model.state.phase.isBusy || model.requestingPermission }
+
+    /// Opens Captures straight on one capture's detail. `libraryOpenID` clears again when the sheet is dismissed.
+    private func openCaptures(at id: UUID) {
+        libraryOpenID = id
+        model.refresh()
+        showingCaptures = true
+    }
 
     private var capturesButton: some View {
         Button { model.refresh(); showingCaptures = true } label: {
@@ -721,6 +735,7 @@ struct CaptureModesScreen: View {
                         .accessibilityLabel("Frames captured")
                         .accessibilityValue("\(model.state.frameCount)")
                 }
+                else if let newest = model.captures.first { lastCaptureSlot(newest) }
                 else { Text(model.state.mode.title).lineLimit(2) }
             }.font(.caption.monospacedDigit()).frame(maxWidth: .infinity)
             CaptureModesShutter(enabled: model.canShoot,
@@ -759,6 +774,25 @@ struct CaptureModesScreen: View {
                 }
             }.frame(maxWidth: .infinity, minHeight: 44).dynamicTypeSize(...DynamicTypeSize.accessibility1)
         }.padding(.horizontal, 16).padding(.vertical, 10).background(.black)
+    }
+
+    /// The newest capture beside the shutter: opens it in Captures. The caption keeps the open mode named in words.
+    private func lastCaptureSlot(_ capture: CaptureMedia) -> some View {
+        VStack(spacing: 2) {
+            Button { openCaptures(at: capture.id) } label: {
+                CaptureThumbnail(capture: capture, side: 56)
+                    .overlay(RoundedRectangle(cornerRadius: FilmyTheme.controlRadius).stroke(FilmyTheme.chromeStroke, lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .disabled(capturesDisabled)
+            .accessibilityLabel("Last capture")
+            .accessibilityValue("\(capture.mode.title), \(capture.createdAt.formatted(.dateTime.month().day().hour().minute()))")
+            .accessibilityHint("Opens it in Captures")
+            .accessibilityIdentifier("capture-modes-last-capture")
+            Text(model.state.mode.title).font(.caption2).lineLimit(1).minimumScaleFactor(0.8)
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+        }
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
     }
 
     private var cameraDenied: Bool {
@@ -959,5 +993,200 @@ private struct CaptureFilmPicker: View {
         .disabled(!canSelect)
         .accessibilityIdentifier("capture-film-\(recipe.id)")
         .accessibilityAddTraits(isCurrent ? .isSelected : [])
+    }
+}
+
+/// After-shot card over the lower viewfinder: says where the shot went and offers View, Export to Photos and Close.
+/// It lives outside `viewfinder` so the `capture-modes-viewfinder` container id does not swallow its buttons.
+private struct CaptureSavedCard: View {
+    @ObservedObject var model: CaptureModesModel
+    let canOpen: Bool
+    let open: (UUID) -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
+    @Environment(\.accessibilitySwitchControlEnabled) private var switchControlEnabled
+    @State private var openedAt = Date()
+    @State private var knownAtShot: Set<UUID>?
+    @State private var shownID: UUID?
+
+    private var shown: CaptureMedia? { model.captures.first { $0.id == shownID } }
+
+    private var autoDismissID: UUID? {
+        guard shown?.isExported == true, !voiceOverEnabled, !switchControlEnabled else { return nil }
+        return shownID
+    }
+
+    private var cardTransition: AnyTransition {
+        reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity)
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            Color.clear.allowsHitTesting(false).accessibilityHidden(true)
+            if let capture = shown {
+                card(capture).transition(cardTransition)
+            }
+        }
+        .onChange(of: model.state.phase) { old, new in
+            guard CaptureModesPolicy.startsShot(from: old, to: new, scanning: model.state.scanning) else { return }
+            knownAtShot = Set(model.captures.map(\.id))
+            setShown(nil)
+        }
+        .onChange(of: model.requestedMode) { _, _ in
+            knownAtShot = nil
+            setShown(nil)
+        }
+        .onChange(of: model.captures.map(\.id)) { _, _ in
+            guard let known = knownAtShot,
+                  let found = CaptureModesPolicy.finishedCapture(in: model.captures, known: known, openedAt: openedAt) else { return }
+            knownAtShot = nil
+            setShown(found.id)
+        }
+        .task(id: autoDismissID) {
+            guard autoDismissID != nil else { return }
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            setShown(nil)
+        }
+    }
+
+    private func setShown(_ id: UUID?) {
+        withAnimation(.easeOut(duration: 0.2)) { shownID = id }
+    }
+
+    private func card(_ capture: CaptureMedia) -> some View {
+        ViewThatFits(in: .horizontal) {
+            wide(capture, thumbnail: true)
+            wide(capture, thumbnail: false)
+            compact(capture)
+        }
+        .padding(10)
+        .background(FilmyTheme.chromeFill, in: RoundedRectangle(cornerRadius: FilmyTheme.controlRadius))
+        .overlay(RoundedRectangle(cornerRadius: FilmyTheme.controlRadius).stroke(FilmyTheme.chromeStroke, lineWidth: 1))
+        .padding(8)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func wide(_ capture: CaptureMedia, thumbnail: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                savedText
+                statusLabel(capture)
+            }
+            HStack(spacing: 8) {
+                if thumbnail { CaptureThumbnail(capture: capture, side: FilmyTheme.minimumHitTarget) }
+                viewButton(capture, iconOnly: false)
+                exportSlot(capture, iconOnly: false)
+                Spacer(minLength: 0)
+                closeButton
+            }
+        }
+    }
+
+    private func compact(_ capture: CaptureMedia) -> some View {
+        HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 2) {
+                ViewThatFits(in: .horizontal) {
+                    savedText
+                    Text("Saved").font(.caption.weight(.semibold)).accessibilityIdentifier("capture-modes-saved-card")
+                }
+                statusLabel(capture)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            viewButton(capture, iconOnly: true)
+            exportSlot(capture, iconOnly: true)
+            closeButton
+        }
+    }
+
+    private var savedText: some View {
+        Text("Saved in Captures").font(.caption.weight(.semibold)).accessibilityIdentifier("capture-modes-saved-card")
+    }
+
+    private func statusLabel(_ capture: CaptureMedia) -> some View {
+        let status = CaptureModesPolicy.savedCardStatus(capture)
+        return Label(status.text, systemImage: status.symbol)
+            .font(.caption)
+            .foregroundStyle(FilmyTheme.secondary)
+            .accessibilityIdentifier("capture-modes-card-status")
+    }
+
+    private func viewButton(_ capture: CaptureMedia, iconOnly: Bool) -> some View {
+        Button { open(capture.id) } label: {
+            if iconOnly { viewIconLabel } else { viewTextLabel }
+        }
+        .buttonStyle(.plain)
+        .disabled(!canOpen)
+        .accessibilityLabel("View")
+        .accessibilityHint("Opens this capture in Captures")
+        .accessibilityIdentifier("capture-modes-card-view")
+    }
+
+    private var viewIconLabel: some View {
+        Image(systemName: "rectangle.stack")
+            .font(.subheadline.weight(.bold))
+            .foregroundStyle(FilmyTheme.primary)
+            .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+            .contentShape(Rectangle())
+    }
+
+    private var viewTextLabel: some View {
+        Text("View").modifier(CaptureModesCapsuleStyle())
+    }
+
+    @ViewBuilder
+    private func exportSlot(_ capture: CaptureMedia, iconOnly: Bool) -> some View {
+        if !capture.outputs.isEmpty && !capture.isExported {
+            exportButton(capture, iconOnly: iconOnly)
+        }
+    }
+
+    private func exportButton(_ capture: CaptureMedia, iconOnly: Bool) -> some View {
+        let value: String = model.exporting ? "Exporting" : ""
+        let disabled: Bool = model.exporting || model.state.phase.isBusy || model.requestingPermission
+        return Button { model.export(capture) } label: {
+            if iconOnly { exportIconLabel } else { exportTextLabel }
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .accessibilityLabel("Export to Photos")
+        .accessibilityValue(value)
+        .accessibilityIdentifier("capture-modes-card-export")
+    }
+
+    private var exportIconLabel: some View {
+        Image(systemName: "square.and.arrow.down")
+            .font(.subheadline.weight(.bold))
+            .foregroundStyle(.black)
+            .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+            .background(FilmyTheme.primary, in: Circle())
+            .contentShape(Circle())
+    }
+
+    private var exportTextLabel: some View {
+        Text("Export to Photos")
+            .font(.subheadline.weight(.bold))
+            .foregroundStyle(.black)
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, 14)
+            .frame(minHeight: FilmyTheme.minimumHitTarget)
+            .background(FilmyTheme.primary, in: Capsule())
+            .contentShape(Capsule())
+    }
+
+    private var closeButton: some View {
+        Button { setShown(nil) } label: {
+            Image(systemName: "xmark")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(FilmyTheme.primary)
+                .frame(width: FilmyTheme.minimumHitTarget, height: FilmyTheme.minimumHitTarget)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Close")
+        .accessibilityIdentifier("capture-modes-card-close")
     }
 }
