@@ -8,7 +8,7 @@ Reviewed indexed descriptions of YouTube tutorials [HowTech: Focus Control](http
 
 ## Implemented interaction
 
-Tap to focus; while the focus feedback is visible, drag vertically anywhere on the preview. Up increases exposure; down decreases it. The sun badge shows the service's applied EV. Feedback remains during adjustment and for five seconds afterwards. Each drag takes a fixed starting bias; one stop requires one quarter of the preview height (minimum 100 points). Hardware clamping/quantization stays in CameraService. Manual exposure/applying controls, disabled camera interaction and pinching block exposure adjustment. Horizontal look swipes and vertical exposure drags lock their initial deliberate axis; diagonal motion waits for intent. VoiceOver has Brighten/Darken actions. The existing AE/AF button remains the lock interaction.
+Drag vertically anywhere on the preview, with or without a focus point (camera2a). Up increases exposure; down decreases it. The sun badge shows the service's applied EV. Feedback remains during adjustment and for five seconds afterwards. Each drag takes a fixed starting bias; one stop requires one quarter of the preview height (minimum 100 points). Hardware clamping/quantization stays in CameraService. Manual exposure/applying controls, disabled camera interaction and pinching block exposure adjustment. Horizontal look swipes and vertical exposure drags lock their initial deliberate axis; diagonal motion waits for intent. VoiceOver has Brighten/Darken actions. The existing AE/AF button remains the lock interaction.
 
 This adjusts sensor exposure compensation, not display brightness. It shares the existing exposure setting; it does not add Apple's separate per-shot and persistent compensation layers.
 
