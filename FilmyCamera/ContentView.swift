@@ -360,7 +360,11 @@ struct ContentView: View {
     }
 
     private func requestImport() {
-        guard !isCameraBusy, MembershipStore.shared.require(.photoImport) else { return }
+        guard !isCameraBusy else {
+            cameraViewModel.noteBusyNavigation()
+            return
+        }
+        guard MembershipStore.shared.require(.photoImport) else { return }
         isShowingImporter = true
     }
 
@@ -370,7 +374,11 @@ struct ContentView: View {
     }
 
     private func open(_ destination: Tab) {
-        guard !isCameraBusy, selectedTab != destination else { return }
+        guard !isCameraBusy else {
+            cameraViewModel.noteBusyNavigation()
+            return
+        }
+        guard selectedTab != destination else { return }
         withAnimation(reduceMotion ? nil : .snappy(duration: 0.24)) { selectedTab = destination }
     }
 }

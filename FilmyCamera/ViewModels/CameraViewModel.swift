@@ -1324,6 +1324,16 @@ final class CameraViewModel: ObservableObject {
         style == .error ? .seconds(7) : .seconds(2.4)
     }
 
+    /// Explains a Settings, Roll or Import tap that arrives while a capture is
+    /// in flight. Repeated taps do not re-announce or restart the toast.
+    func noteBusyNavigation() {
+        guard isCapturing || isSaving else { return }
+        let message = "Finishing your photo. Try again in a moment."
+        if toastMessage != nil, toastStyle == .error { return }
+        if toastMessage == message, toastStyle == .info { return }
+        showToast(message, style: .info)
+    }
+
     private func showToast(_ message: String, style: ToastStyle = .success) {
         toastTask?.cancel()
         toastMessage = message

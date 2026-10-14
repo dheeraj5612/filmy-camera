@@ -282,6 +282,10 @@ struct CameraScreen: View {
                             .padding(12)
                             .viewfinderChrome(Capsule())
                             .accessibilityIdentifier("capture-saving")
+                        if let toastMessage = viewModel.toastMessage, viewModel.toastStyle == .info {
+                            ToastView(message: toastMessage, style: viewModel.toastStyle)
+                                .transition(.opacity)
+                        }
                     } else if let toastMessage = viewModel.toastMessage {
                         ToastView(message: toastMessage, style: viewModel.toastStyle)
                             .transition(.opacity)
@@ -661,7 +665,7 @@ struct CameraScreen: View {
                 .padding(.horizontal, 12)
                 .padding(.top, 2)
                 .frame(minHeight: 50)
-                .disabled(isChromeDisabled)
+                .disabled(isNavigationChromeDisabled)
 
             viewfinderStage(isLandscape: false, overlaysTopBar: false)
                 .padding(.top, 4)
@@ -670,7 +674,7 @@ struct CameraScreen: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
                 .padding(.bottom, 2)
-                .disabled(isChromeDisabled)
+                .disabled(isNavigationChromeDisabled)
         }
         .overlay(alignment: .bottom) {
             #if !G7_APP
@@ -704,7 +708,7 @@ struct CameraScreen: View {
             if railOnLeading {
                 edgeControlColumn
                     .frame(width: railWidth)
-                    .disabled(isChromeDisabled)
+                    .disabled(isNavigationChromeDisabled)
             }
 
             viewfinderStage(isLandscape: isLandscape, overlaysTopBar: true)
@@ -712,7 +716,7 @@ struct CameraScreen: View {
             if !railOnLeading {
                 edgeControlColumn
                     .frame(width: railWidth)
-                    .disabled(isChromeDisabled)
+                    .disabled(isNavigationChromeDisabled)
             }
         }
         .padding(.horizontal, isPad ? 20 : 12)
@@ -744,8 +748,22 @@ struct CameraScreen: View {
         // (including Simulator), but it does not make local navigation unsafe.
         // Keep the broader Fuji transaction locks in place while allowing the
         // looks drawer to open during that setup-only phase.
-        viewModel.isCapturing || viewModel.isSaving || viewModel.hasPendingCapture || isImporting
-            || shooting.isBusy || shooting.isComposing
+        isCaptureLocked || isNavigationChromeDisabled
+    }
+
+    /// Capture, save and recovery state. Settings, Roll and Import stay enabled
+    /// while a capture is in flight so their tap can explain the wait.
+    private var isCaptureLocked: Bool {
+        viewModel.isCapturing || viewModel.isSaving || viewModel.hasPendingCapture
+    }
+
+    private var isNavigationChromeDisabled: Bool {
+        isImporting || shooting.isBusy || shooting.isComposing
+    }
+
+    /// A failed save shows the recovery banner; leaving the camera is blocked there.
+    private var isNavigationRecoveryLocked: Bool {
+        viewModel.hasPendingCapture && !viewModel.isSaving
     }
 
     private var isShowingOriginalPreview: Bool {
@@ -862,7 +880,7 @@ struct CameraScreen: View {
                 topBar
                     .padding(.horizontal, 10)
                     .padding(.top, 8)
-                    .disabled(isChromeDisabled)
+                    .disabled(isNavigationChromeDisabled)
                     .background {
                         GeometryReader { proxy in
                             Color.clear.preference(key: ViewfinderChromeHeightKey.self,
@@ -1194,6 +1212,7 @@ struct CameraScreen: View {
                 flashControl
                     .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
                     .fixedSize(horizontal: true, vertical: false)
+                    .disabled(isCaptureLocked)
 
                 importButton
 
@@ -1209,7 +1228,9 @@ struct CameraScreen: View {
                 Spacer(minLength: 0)
 
                 fujiMenuButton
+                    .disabled(isCaptureLocked)
                 captureSetupButton
+                    .disabled(isCaptureLocked)
                 settingsButton
 
             }
@@ -1232,6 +1253,7 @@ struct CameraScreen: View {
                     .layoutPriority(2)
                 }
             }
+            .disabled(isCaptureLocked)
         }
     }
 
@@ -1525,6 +1547,10 @@ struct CameraScreen: View {
 
     private var settingsButton: some View {
         Button {
+            if viewModel.isCapturing || viewModel.isSaving {
+                onOpenSettings()
+                return
+            }
             HapticFeedback.play(.selection)
             closeControlDrawers()
             onOpenSettings()
@@ -1537,6 +1563,7 @@ struct CameraScreen: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.pressable)
+        .disabled(isNavigationRecoveryLocked)
         .accessibilityIdentifier("settings-tab")
         .accessibilityLabel("Open camera settings")
         .accessibilityHint("Shows camera preferences")
@@ -1596,11 +1623,13 @@ struct CameraScreen: View {
                 primaryLookRow(showsCaption: true)
                 primaryLookRow(showsCaption: false)
             }
+            .disabled(isCaptureLocked)
 
             HStack(alignment: .center, spacing: 0) {
                 rollButton.frame(width: 76)
                 Spacer(minLength: 0)
                 captureControl
+                    .disabled(isCaptureLocked)
                 Spacer(minLength: 0)
                 VStack(spacing: 2) {
                     cameraSwitchButton
@@ -1614,6 +1643,7 @@ struct CameraScreen: View {
                         .accessibilityHidden(true)
                 }
                 .frame(width: 76)
+                .disabled(isCaptureLocked)
             }
             .frame(minHeight: 80)
         }
@@ -1668,21 +1698,25 @@ struct CameraScreen: View {
                 captureControl
             }
             .padding(.vertical, 4)
+            .disabled(isCaptureLocked)
 
             VStack(spacing: 8) {
                 HStack(spacing: 8) {
                     rollButton
                     cameraSwitchButton
                         .disabled(camera.availableCameraPositions.count < 2)
+                        .disabled(isCaptureLocked)
                 }
                 HStack(spacing: 8) {
                     favoriteCurrentLookButton
                     toolsToggle()
                         .disabled(!camera.isRunning && !isViewfinderChromePreview)
                 }
+                .disabled(isCaptureLocked)
             }
 
             cameraGripToggle
+                .disabled(isCaptureLocked)
 
             Spacer(minLength: 0)
         }
@@ -2048,6 +2082,10 @@ struct CameraScreen: View {
 
     private var rollButton: some View {
         Button {
+            if viewModel.isCapturing || viewModel.isSaving {
+                onOpenGallery()
+                return
+            }
             closeControlDrawers()
             onOpenGallery()
         } label: {
@@ -2064,6 +2102,7 @@ struct CameraScreen: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.pressable)
+        .disabled(isNavigationRecoveryLocked)
         .accessibilityIdentifier("roll-tab")
         .accessibilityLabel("Open roll")
         .accessibilityHint("Shows the frames you have kept")
@@ -2071,6 +2110,10 @@ struct CameraScreen: View {
 
     private var importButton: some View {
         Button {
+            if viewModel.isCapturing || viewModel.isSaving {
+                onImportPhoto()
+                return
+            }
             HapticFeedback.play(.selection)
             closeControlDrawers()
             onImportPhoto()
@@ -2096,7 +2139,7 @@ struct CameraScreen: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.pressable)
-        .disabled(isImporting)
+        .disabled(isImporting || isNavigationRecoveryLocked)
         .accessibilityLabel(isImporting ? "Importing photo" : "Import photo")
         .accessibilityHint("Choose a photo and apply the current film recipe")
         .accessibilityIdentifier("import-photo")
