@@ -33,11 +33,68 @@ final class NormalRollManagementTests: XCTestCase {
         returnToCamera()
         try saveCafeFixture(newerSavedFrameCount: countBefore)
         XCTAssertEqual(try openAuthorizedRoll(), countBefore + 1)
+
+        // The header folds Select and the layout toggle into one row, so the
+        // first thumbnail row starts high and entering select mode moves nothing.
+        let select = app.buttons["roll-select-toggle"]
+        let layout = app.buttons["roll-grid-layout"]
+        let originals = app.descendants(matching: .any)["roll-filmy-originals"]
+        let first = savedFrameButton()
+        XCTAssertTrue(select.exists && select.isHittable && layout.exists && originals.exists)
+        XCTAssertGreaterThanOrEqual(select.frame.height, 44)
+        // The same-row check only holds for the short "Photos" source label; a longer
+        // label may legitimately stack Select under the layout toggle. Assumes lookFilter == nil.
+        if app.staticTexts["Photos"].exists {
+            XCTAssertLessThan(abs(select.frame.midY - layout.frame.midY), 8, "Select and the layout toggle must share one header row")
+        }
+        XCTAssertFalse(app.staticTexts["LIBRARY"].exists)
+        XCTAssertLessThan(first.frame.minY, 440, "The first thumbnail row must start within 440 pt of the top")
+        XCTAssertLessThanOrEqual(first.frame.maxY, app.frame.maxY, "The first thumbnail row must be fully on screen")
+        screenshot("roll-header-one-row")
+        let selectFrame = select.frame
+        let firstTop = first.frame.minY
+        select.tap()
+        XCTAssertTrue(app.buttons["roll-select-all"].waitForExistence(timeout: 5))
+        XCTAssertEqual(select.label, "Done")
+        XCTAssertTrue(waitUntil { select.frame.contains(CGPoint(x: selectFrame.midX, y: selectFrame.midY)) }, "Done must sit under the finger that tapped Select")
+        XCTAssertTrue(waitUntil { abs(first.frame.minY - firstTop) < 8 }, "Entering select mode must not move the grid")
+        XCTAssertEqual(app.staticTexts["roll-count-summary"].label, "0 selected")
+        screenshot("roll-select-mode")
+        select.tap()
+        XCTAssertTrue(waitUntil { !self.app.buttons["roll-select-all"].exists && originals.exists })
+
         try openNewestSavedFrame(expectedCount: countBefore + 1)
+
+        // One tap hides the viewer controls, a second brings them back, and a
+        // double tap zooms in without toggling them. Each check waits because
+        // the single tap waits out the double-tap window.
+        let photo = app.images["Photo"]
+        let close = app.buttons["Close frame"]
+        let photoFrame = photo.frame
+        photo.tap()
+        XCTAssertTrue(waitUntil { !close.exists }, "One tap must hide the viewer controls")
+        XCTAssertTrue(waitUntil { !app.descendants(matching: .any)["gallery-frame-metadata"].exists }, "Hidden controls must hide the frame metadata")
+        XCTAssertEqual(photo.frame, photoFrame, "Hiding the controls must not move or resize the photo")
+        screenshot("frame-chrome-hidden")
+        photo.tap()
+        XCTAssertTrue(waitUntil { close.exists && close.isHittable }, "A second tap must bring the controls back")
+        XCTAssertTrue(waitUntil { app.descendants(matching: .any)["gallery-frame-metadata"].exists }, "A second tap must bring the frame metadata back")
+        photo.doubleTap()
+        XCTAssertTrue(waitUntil { (photo.value as? String) == "Zoomed 200 percent" }, "Double tap from fit must zoom in")
+        XCTAssertTrue(close.exists, "Double tap must not toggle the controls")
+        screenshot("frame-double-tap-zoom")
+        photo.doubleTap()
+        XCTAssertTrue(waitUntil { (photo.value as? String) == "Fit to screen" })
+
         let metadataBefore = app.descendants(matching: .any)["gallery-frame-metadata"].label
+        XCTAssertFalse(metadataBefore.contains("Local copy"), "A Photos frame must not carry the cached-frame note")
 
         app.buttons["Delete frame"].tap()
         XCTAssertTrue(app.buttons["Delete Frame"].waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Photos may ask you to confirm once more")).firstMatch.waitForExistence(timeout: 5),
+            "The delete prompt must say Photos will ask again"
+        )
         screenshot("owned-frame-delete-confirmation")
         app.buttons["Cancel"].tap()
         XCTAssertTrue(waitUntil { !self.app.buttons["Delete Frame"].exists })
@@ -142,10 +199,20 @@ final class NormalRollManagementTests: XCTestCase {
         XCTAssertTrue(app.images["Photo"].waitForExistence(timeout: 20),
                       "Read denial must still allow the owned cached frame to load")
         XCTAssertTrue(app.descendants(matching: .any)["gallery-frame-metadata"].label.contains(recipeName))
+        XCTAssertTrue(app.descendants(matching: .any)["gallery-frame-metadata"].label.contains("Local copy kept in Filmy"),
+                      "A cached frame must say it is Filmy's local copy")
         XCTAssertFalse(app.buttons["Delete frame"].exists,
                        "A cache-only frame must not offer a Photos deletion operation")
         XCTAssertTrue(app.buttons["Share frame"].isEnabled)
         screenshot("photos-denied-cached-frame-without-delete")
+        app.buttons["gallery-info-frame"].tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Storage")).firstMatch.waitForExistence(timeout: 5),
+            "Frame info must carry the local-copy note"
+        )
+        screenshot("photos-denied-cached-frame-info")
+        app.buttons["gallery-info-done"].tap()
+        XCTAssertTrue(waitUntil { !self.app.buttons["gallery-info-done"].exists })
         app.buttons["frame-back-to-camera"].tap()
 
         try clearCacheThroughSettings()
@@ -155,6 +222,12 @@ final class NormalRollManagementTests: XCTestCase {
                        "A denied library with the local cache cleared must not retain a stale tile")
         let settingsAction = app.buttons["Open Settings"]
         XCTAssertTrue(settingsAction.exists && settingsAction.isHittable)
+        let start = app.buttons["roll-start-shooting"]
+        let originals = app.descendants(matching: .any)["roll-filmy-originals"]
+        XCTAssertTrue(start.exists && originals.exists)
+        XCTAssertLessThanOrEqual(settingsAction.frame.maxY, start.frame.minY, "The access fix must sit above the camera route")
+        XCTAssertLessThanOrEqual(start.frame.maxY, originals.frame.minY, "Originals must sit below both actions while access is off")
+        screenshot("photos-denied-empty-roll-one-primary")
         settingsAction.tap()
         let settings = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
         XCTAssertTrue(settings.wait(for: .runningForeground, timeout: 10),
