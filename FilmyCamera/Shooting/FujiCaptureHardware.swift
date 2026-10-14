@@ -1,6 +1,36 @@
 @preconcurrency import AVFoundation
+import CoreLocation
 import Foundation
 import ImageIO
+
+/// A value copy of the shutter-time CLLocation, safe to store and to send across
+/// actors. AVCapturePhoto data carries no GPS, so Fuji stills take this instead.
+struct FujiCaptureLocation: Codable, Sendable, Equatable, Hashable {
+    let latitude: Double
+    let longitude: Double
+    let altitude: Double
+    let horizontalAccuracy: Double
+    let verticalAccuracy: Double
+    let timestamp: Date
+
+    init(_ location: CLLocation) {
+        latitude = location.coordinate.latitude
+        longitude = location.coordinate.longitude
+        // JSONEncoder throws on non-finite doubles, which would lose the retained original.
+        let altitudeIsFinite = location.altitude.isFinite && location.verticalAccuracy.isFinite
+        altitude = altitudeIsFinite ? location.altitude : 0
+        horizontalAccuracy = location.horizontalAccuracy.isFinite ? location.horizontalAccuracy : -1
+        verticalAccuracy = altitudeIsFinite ? location.verticalAccuracy : -1
+        timestamp = location.timestamp
+    }
+
+    /// Keeps the accuracy values so PhotoOutputEncoder writes altitude only when verticalAccuracy >= 0.
+    var clLocation: CLLocation {
+        CLLocation(coordinate: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
+                   altitude: altitude, horizontalAccuracy: horizontalAccuracy,
+                   verticalAccuracy: verticalAccuracy, timestamp: timestamp)
+    }
+}
 
 struct FujiCapturedFrame: Sendable {
     let processedData: Data
@@ -8,6 +38,7 @@ struct FujiCapturedFrame: Sendable {
     let capturedAt: Date
     let exposure: FujiExposure
     let lensPosition: Double
+    var location: FujiCaptureLocation? = nil
 }
 
 /// Every native completion, timeout, cancellation and interruption races through
@@ -67,8 +98,11 @@ final class FujiPhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate, @uncheck
     private var exposure: FujiExposure
     private let lensPosition: Double
     private let gate: FujiCompletionGate<FujiCapturedFrame>
+    private let location: FujiCaptureLocation?
 
-    init(requiresRAW: Bool, exposure: FujiExposure, lensPosition: Double, gate: FujiCompletionGate<FujiCapturedFrame>) {
+    init(requiresRAW: Bool, exposure: FujiExposure, lensPosition: Double, gate: FujiCompletionGate<FujiCapturedFrame>,
+         location: FujiCaptureLocation? = nil) {
+        self.location = location
         self.requiresRAW = requiresRAW
         self.capturedAt = Date()
         self.exposure = exposure
@@ -102,7 +136,8 @@ final class FujiPhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate, @uncheck
         guard let processed, !requiresRAW || raw != nil else {
             gate.finish(.failure(FujiShootingError.processingFailed)); return
         }
-        gate.finish(.success(FujiCapturedFrame(processedData: processed, rawData: raw, capturedAt: capturedAt, exposure: exposure, lensPosition: lensPosition)))
+        gate.finish(.success(FujiCapturedFrame(processedData: processed, rawData: raw, capturedAt: capturedAt, exposure: exposure, lensPosition: lensPosition,
+                                                  location: location)))
     }
 }
 

@@ -94,6 +94,8 @@ struct FujiOriginalRecord: Codable, Identifiable, Equatable, Hashable, Sendable 
     let viewportHeight: Double
     let label: String
     var version = 1
+    /// Shutter-time location, nil when tagging was off or unavailable. Absent in older records.
+    var location: FujiCaptureLocation? = nil
     static let rawExtensions: Set<String> = ["dng", "raf", "cr2", "cr3", "nef", "nrw", "arw", "orf", "rw2", "pef", "srw", "raw"]
     var hasSafeSourceFilename: Bool {
         isRAW ? Self.rawExtensions.contains(String(sourceFilename.dropFirst(7))) && sourceFilename.hasPrefix("source.")

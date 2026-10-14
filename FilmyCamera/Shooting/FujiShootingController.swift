@@ -65,6 +65,7 @@ final class FujiShootingController: ObservableObject {
     private var multipleRequest: FujiSequenceRequest?
     private var multipleDeviceID: String?
     private var multipleCapturedAt: Date?
+    private var multipleLocation: FujiCaptureLocation?
     /// Non-RAW layer sources of a multiple exposure; removed only after the composite is exported.
     private var multipleLayerIDs: [UUID] = []
     private var appliedProfile: FujiAutoISOProfile?
@@ -342,7 +343,7 @@ final class FujiShootingController: ObservableObject {
                     : "\(settings.drive.title) \(index + 1)/\(plan.steps.count)"
                 let record = originalRecord(dataIsRAW: frame.rawData != nil, request: request, recipe: request.recipe,
                     capturedAt: frame.capturedAt, step: step, exposure: frame.exposure, label: label,
-                    stillData: frame.processedData)
+                    stillData: frame.processedData, location: frame.location)
                 try await library.retainOriginal(data, record: record)
                 try Task.checkCancellation()
                 if let expected = exposures[index], step.dynamicRange != .dr100 || settings.drive == .aeBracket {
@@ -381,6 +382,7 @@ final class FujiShootingController: ObservableObject {
         if settings.drive.isComposite && multipleRequest == nil { await worker.reset() }
         var lastData = Data()
         var lastDate = Date()
+        var firstLocation: FujiCaptureLocation?
         // A failed frame must not stop later frames from reaching the retry outbox.
         var deferredError: Error? = captureError
         for (index, record) in captured.enumerated() {
@@ -394,6 +396,7 @@ final class FujiShootingController: ObservableObject {
                 continue
             }
             lastData = data; lastDate = record.capturedAt
+            if firstLocation == nil { firstLocation = record.location }
             if settings.drive.isComposite {
                 let thumbnail = try await worker.append(data: data, record: record, focusStack: settings.drive == .focusStack,
                     blendMode: settings.drive == .computationalND ? .average : settings.blendMode)
@@ -401,6 +404,7 @@ final class FujiShootingController: ObservableObject {
                 if settings.drive == .multipleExposure {
                     multipleRequest = request; multipleDeviceID = sensor.deviceID
                     if multipleCapturedAt == nil { multipleCapturedAt = record.capturedAt }
+                    if multipleLocation == nil { multipleLocation = record.location }
                     multipleCount += 1; ghostImage = UIImage(cgImage: thumbnail.image)
                     if !record.isRAW { multipleLayerIDs.append(record.id) }
                 }
@@ -440,6 +444,7 @@ final class FujiShootingController: ObservableObject {
             if settings.drive != .multipleExposure || multipleCount >= settings.multipleExposureCount {
                 let capturedAt = multipleCapturedAt ?? lastDate
                 let result = try await worker.finish(recipe: request.recipe, sourceData: lastData, capturedAt: capturedAt,
+                                                     location: multipleLocation ?? firstLocation,
                                                      finish: request.finish, grainSeed: request.grainSeed)
                 do {
                     try await export(result.data, recipe: request.recipe, capturedAt: capturedAt,
@@ -460,7 +465,8 @@ final class FujiShootingController: ObservableObject {
             do {
                 let data = try await Task.detached(priority: .utility) { try FujiFrameSampler.jpeg(frame) }.value
                 let record = originalRecord(dataIsRAW: false, request: request, recipe: request.recipe,
-                    capturedAt: frame.capturedAt, step: .init(), exposure: nil, label: "Pre-shot \(index + 1) · preview resolution")
+                    capturedAt: frame.capturedAt, step: .init(), exposure: nil, label: "Pre-shot \(index + 1) · preview resolution",
+                    location: firstLocation)
                 let result = try await worker.develop(data: data, record: record, finish: request.finish, grainSeed: request.grainSeed)
                 try await export(result.data, recipe: request.recipe, capturedAt: frame.capturedAt,
                                  label: record.label, photoLibrary: photoLibrary)
@@ -509,7 +515,7 @@ final class FujiShootingController: ObservableObject {
 
     private func originalRecord(dataIsRAW: Bool, request: FujiSequenceRequest, recipe: FilmRecipe, capturedAt: Date,
                                 step: FujiCaptureStep, exposure: FujiExposure?, label: String,
-                                stillData: Data? = nil) -> FujiOriginalRecord {
+                                stillData: Data? = nil, location: FujiCaptureLocation? = nil) -> FujiOriginalRecord {
         // Live frames are cropped in the still's axes; pre-shot frames (no stillData) stay preview-shaped.
         let viewport: CGSize = stillData.map {
             CameraFrameLayout.stillViewport(request.viewport,
@@ -521,7 +527,8 @@ final class FujiShootingController: ObservableObject {
             captureExposure: exposure.map { FujiExposureRecord(iso: $0.iso, seconds: $0.seconds, bracketOffset: step.exposureOffset,
                                                                protectedStops: step.dynamicRange.protectionStops) },
             recipe: recipe, adjustment: .init(), cropFactor: request.settings.digitalCrop,
-            viewportWidth: viewport.width, viewportHeight: viewport.height, label: label)
+            viewportWidth: viewport.width, viewportHeight: viewport.height, label: label,
+            location: location)
     }
 
     func export(_ data: Data, recipe: FilmRecipe, capturedAt: Date, label: String, photoLibrary: any PhotoSaving,
@@ -600,7 +607,7 @@ final class FujiShootingController: ObservableObject {
     }
 
     private func clearMultiple() {
-        multipleRequest = nil; multipleDeviceID = nil; multipleCapturedAt = nil
+        multipleRequest = nil; multipleDeviceID = nil; multipleCapturedAt = nil; multipleLocation = nil
         multipleCount = 0; ghostImage = nil; multipleLayerIDs = []
     }
 

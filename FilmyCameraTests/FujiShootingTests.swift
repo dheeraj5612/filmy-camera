@@ -1,5 +1,7 @@
 import Combine
 import CoreImage
+import CoreLocation
+import ImageIO
 import UIKit
 import XCTest
 @testable import FilmyCamera
@@ -323,6 +325,28 @@ final class FujiShootingTests: XCTestCase {
         XCTAssertTrue(remaining.isEmpty)
     }
 
+    func testDevelopedFujiStillCarriesRecordLocationAndLegacyRecordsDecode() async throws {
+        let worker = FujiDevelopmentWorker()
+        let source = jpeg()
+        var record = original()
+        let untagged = try await worker.develop(data: source, record: record)
+        XCTAssertNil(gpsDictionary(in: untagged.data))
+        let fix = CLLocation(coordinate: CLLocationCoordinate2D(latitude: 37.5, longitude: -122.25), altitude: 12,
+                             horizontalAccuracy: 5, verticalAccuracy: 5, timestamp: Date())
+        record.location = FujiCaptureLocation(fix)
+        let tagged = try await worker.develop(data: source, record: record)
+        let gps = try XCTUnwrap(gpsDictionary(in: tagged.data))
+        XCTAssertEqual(gps[kCGImagePropertyGPSLatitude as String] as? Double ?? 0, 37.5, accuracy: 0.0001)
+        XCTAssertEqual(gps[kCGImagePropertyGPSLatitudeRef as String] as? String, "N")
+        XCTAssertEqual(gps[kCGImagePropertyGPSLongitude as String] as? Double ?? 0, 122.25, accuracy: 0.0001)
+        XCTAssertEqual(gps[kCGImagePropertyGPSLongitudeRef as String] as? String, "W")
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
+        object.removeValue(forKey: "location")
+        let legacy = try JSONDecoder().decode(FujiOriginalRecord.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertNil(legacy.location)
+        XCTAssertEqual(legacy.id, record.id)
+    }
+
     func testOriginalFilenameCannotEscapeLibraryDirectory() {
         let record = FujiOriginalRecord(id: UUID(), capturedAt: Date(), isRAW: true, sourceFilename: "../../outside.dng",
             sequenceID: UUID(), dynamicRange: .dr100, captureExposure: nil, recipe: recipe, adjustment: .init(),
@@ -597,6 +621,11 @@ final class FujiShootingTests: XCTestCase {
         .init(id: UUID(), capturedAt: Date(), isRAW: false, sourceFilename: "source.jpg", sequenceID: UUID(),
               dynamicRange: .dr100, captureExposure: nil, recipe: recipe, adjustment: .init(), cropFactor: 1,
               viewportWidth: 0, viewportHeight: 0, label: "Test original")
+    }
+    private func gpsDictionary(in data: Data) -> [String: Any]? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any] else { return nil }
+        return properties[kCGImagePropertyGPSDictionary as String] as? [String: Any]
     }
     private func temporaryRoot() -> URL { FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString) }
     private func jpeg() -> Data {

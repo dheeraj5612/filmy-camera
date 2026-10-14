@@ -5565,7 +5565,11 @@ extension CameraService {
     }
 
     func captureFujiFrame(transactionID: UUID, requiresRAW: Bool) async throws -> FujiCapturedFrame {
-        try await withCheckedThrowingContinuation { continuation in
+        // Same cached, tagging-gated snapshot as capturePhoto; no location request is made here.
+        let locationAtShutter: FujiCaptureLocation? = await MainActor.run {
+            self.captureLocationProvider.captureLocation().map { FujiCaptureLocation($0) }
+        }
+        return try await withCheckedThrowingContinuation { continuation in
             sessionQueue.async { [weak self] in
                 guard let self, let lease = self.fujiLease, lease.snapshot.transactionID == transactionID,
                       !lease.restoring, self.session.isRunning, lease.operationID == nil,
@@ -5609,7 +5613,8 @@ extension CameraService {
                     settings.maxPhotoDimensions = self.configuredPhotoDimensions
                 }
                 let exposure = FujiExposure(iso: Double(lease.device.iso), seconds: CMTimeGetSeconds(lease.device.exposureDuration))
-                let delegate = FujiPhotoDelegate(requiresRAW: requiresRAW, exposure: exposure, lensPosition: Double(lease.device.lensPosition), gate: gate)
+                let delegate = FujiPhotoDelegate(requiresRAW: requiresRAW, exposure: exposure, lensPosition: Double(lease.device.lensPosition), gate: gate,
+                                                location: locationAtShutter)
                 lease.operationID = operationID
                 lease.delegate = delegate
                 lease.cancelOperation = { gate.finish(.failure(FujiShootingError.cancelled)) }

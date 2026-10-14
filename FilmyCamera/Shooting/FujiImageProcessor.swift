@@ -173,13 +173,13 @@ enum FujiImageProcessor {
     }
 
     static func jpeg(_ image: CIImage, recipe: FilmRecipe, originalData: Data, capturedAt: Date,
-                     finish: PhotoFinish, grainSeed: UInt32) throws -> FujiRenderedImage {
+                     location: CLLocation?, finish: PhotoFinish, grainSeed: UInt32) throws -> FujiRenderedImage {
         let filtered = FilmRenderer.render(image, recipe: recipe, quality: .photo, grainSeed: grainSeed)
         guard let composed = PhotoPrintCompositor.composedImage(filtered, finish: finish),
               let cg = FilmRenderer.outputCGImage(composed, from: composed.extent),
               let data = PhotoOutputEncoder.jpegData(
                 for: cg, sourceData: originalData, capturedAt: capturedAt, recipe: recipe,
-                location: PhotoLibraryService.location(from: originalData)
+                location: location ?? PhotoLibraryService.location(from: originalData)
               ) else {
             throw FujiShootingError.processingFailed
         }
@@ -246,7 +246,7 @@ actor FujiDevelopmentWorker {
                                                viewport: CGSize(width: record.viewportWidth, height: record.viewportHeight))
             try Task.checkCancellation()
             return try FujiImageProcessor.jpeg(image, recipe: record.recipe, originalData: data, capturedAt: record.capturedAt,
-                                               finish: finish, grainSeed: grainSeed)
+                                               location: record.location?.clLocation, finish: finish, grainSeed: grainSeed)
         }
     }
 
@@ -310,13 +310,14 @@ actor FujiDevelopmentWorker {
         return moved.clampedToExtent().cropped(to: extent)
     }
 
-    func finish(recipe: FilmRecipe, sourceData: Data, capturedAt: Date, finish: PhotoFinish, grainSeed: UInt32) throws -> FujiRenderedImage {
+    func finish(recipe: FilmRecipe, sourceData: Data, capturedAt: Date, location: FujiCaptureLocation?,
+                finish: PhotoFinish, grainSeed: UInt32) throws -> FujiRenderedImage {
         try autoreleasepool {
             guard let composite else { throw FujiShootingError.processingFailed }
             let extent = validExtent ?? composite.extent
             let image = composite.cropped(to: extent).transformed(by: CGAffineTransform(translationX: -extent.minX, y: -extent.minY))
             return try FujiImageProcessor.jpeg(image, recipe: recipe, originalData: sourceData, capturedAt: capturedAt,
-                                               finish: finish, grainSeed: grainSeed)
+                                               location: location?.clLocation, finish: finish, grainSeed: grainSeed)
         }
     }
 }
