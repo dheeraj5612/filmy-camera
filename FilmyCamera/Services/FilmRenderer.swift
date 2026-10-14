@@ -1798,7 +1798,7 @@ public final class FilmRenderer {
         ]).cropped(to: extent)
     }
 
-    private static func makeCubeData(
+    static func makeCubeData(
         dimension: Int,
         recipe: FilmRecipe
     ) -> Data {

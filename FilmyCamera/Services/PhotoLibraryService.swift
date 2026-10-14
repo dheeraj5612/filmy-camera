@@ -2013,8 +2013,8 @@ final class PhotoLibraryService: ObservableObject {
         }
     }
 
-    private static func loadMetadata(forKey key: String) -> [String: SavedFrameMetadata] {
-        guard let data = UserDefaults.standard.data(forKey: key),
+    static func loadMetadata(forKey key: String, defaults: UserDefaults = .standard) -> [String: SavedFrameMetadata] {
+        guard let data = defaults.data(forKey: key),
               let entries = try? JSONDecoder().decode([String: LossySavedFrameMetadata].self, from: data) else {
             return [:]
         }
