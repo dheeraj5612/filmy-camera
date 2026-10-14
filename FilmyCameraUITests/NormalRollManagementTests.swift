@@ -50,6 +50,10 @@ final class NormalRollManagementTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["LIBRARY"].exists)
         XCTAssertLessThan(first.frame.minY, 440, "The first thumbnail row must start within 440 pt of the top")
         XCTAssertLessThanOrEqual(first.frame.maxY, app.frame.maxY, "The first thumbnail row must be fully on screen")
+        let rollImport = app.buttons["roll-import-photo"]
+        XCTAssertTrue(rollImport.exists && rollImport.isHittable)
+        XCTAssertEqual(rollImport.label, "Import photo")
+        XCTAssertLessThan(abs(rollImport.frame.midY - app.buttons["roll-back-to-camera"].frame.midY), 8)
         screenshot("roll-header-one-row")
         let selectFrame = select.frame
         let firstTop = first.frame.minY
@@ -108,12 +112,20 @@ final class NormalRollManagementTests: XCTestCase {
         // exercises the one-row fit check and its two-row fallback.
         let categories = [
             "UICTContentSizeCategoryAccessibilityXXXL",
-            "UICTContentSizeCategoryExtraExtraExtraLarge"
+            "UICTContentSizeCategoryXXXL"
         ]
         for category in categories {
             app.terminate()
             launchNormalApp(contentSizeCategory: category)
             XCTAssertEqual(try openAuthorizedRoll(), countBefore + 1)
+            let rollImport = app.buttons["roll-import-photo"]
+            XCTAssertTrue(rollImport.exists && rollImport.isHittable)
+            XCTAssertEqual(rollImport.label, "Import photo")
+            if category.contains("Accessibility") {
+                XCTAssertGreaterThan(rollImport.frame.minY, app.buttons["roll-back-to-camera"].frame.maxY)
+            } else {
+                XCTAssertLessThan(abs(rollImport.frame.midY - app.buttons["roll-back-to-camera"].frame.midY), 8)
+            }
             try openNewestSavedFrame(expectedCount: countBefore + 1, scrollingToTile: true)
             let toolbarButtons = [
                 app.buttons["Close frame"],

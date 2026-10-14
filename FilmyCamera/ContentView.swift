@@ -349,17 +349,19 @@ struct ContentView: View {
                 isCameraTabActive: selectedTab == .camera,
                 onOpenGallery: { open(.gallery) },
                 onOpenSettings: { open(.settings) },
-                onImportPhoto: {
-                    guard !isCameraBusy, MembershipStore.shared.require(.photoImport) else { return }
-                    isShowingImporter = true
-                },
+                onImportPhoto: requestImport,
                 isImportInProgress: isImportInProgress || isShowingImporter
             )
         case .gallery:
-            GalleryScreen(photoLibrary: photoLibrary, onBackToCamera: returnToCamera)
+            GalleryScreen(photoLibrary: photoLibrary, onBackToCamera: returnToCamera, onImportPhoto: requestImport)
         case .settings:
             SettingsView(camera: camera, photoLibrary: photoLibrary, onBackToCamera: returnToCamera)
         }
+    }
+
+    private func requestImport() {
+        guard !isCameraBusy, MembershipStore.shared.require(.photoImport) else { return }
+        isShowingImporter = true
     }
 
     private func returnToCamera() {

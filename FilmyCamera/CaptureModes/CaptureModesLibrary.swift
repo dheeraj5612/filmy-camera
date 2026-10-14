@@ -3,10 +3,14 @@ import SwiftUI
 
 struct CaptureModesLibrary: View {
     @ObservedObject var model: CaptureModesModel
+    var readOnly = false
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         NavigationStack {
             List {
+                if readOnly {
+                    Text("Photos, videos and panoramas saved from Capture modes.").font(.footnote).foregroundStyle(.secondary)
+                }
                 if let error = model.errorMessage {
                     Section("Action needed") { Text(error).foregroundStyle(.orange).textSelection(.enabled) }
                 }
@@ -15,14 +19,14 @@ struct CaptureModesLibrary: View {
                 }
                 ForEach(model.captures) { capture in
                     NavigationLink {
-                        CaptureModesDetail(model: model, initial: capture)
+                        CaptureModesDetail(model: model, initial: capture, readOnly: readOnly)
                     } label: {
                         VStack(alignment: .leading, spacing: 5) {
                             Label(capture.mode.title, systemImage: capture.mode.symbol).font(.headline)
                             Text(capture.createdAt, format: .dateTime.month().day().hour().minute()).font(.caption)
                             Text("\(capture.originals.count) originals · \(capture.outputs.count) developed · \(capture.recipeName)")
                                 .font(.caption).foregroundStyle(.secondary)
-                            if capture.status == .originalsOnly { Text("Originals retained. Processing can be retried.").font(.caption).foregroundStyle(.orange) }
+                            if capture.status == .originalsOnly { Text(readOnly ? "Originals retained." : "Originals retained. Processing can be retried.").font(.caption).foregroundStyle(.orange) }
                         }
                     }
                 }
@@ -38,6 +42,7 @@ struct CaptureModesLibrary: View {
 private struct CaptureModesDetail: View {
     @ObservedObject var model: CaptureModesModel
     let initial: CaptureMedia
+    var readOnly = false
     @Environment(\.dismiss) private var dismiss
     @State private var originals: [URL] = []
     @State private var outputs: [URL] = []
@@ -76,8 +81,12 @@ private struct CaptureModesDetail: View {
                 Button(media.isExported ? "Exported to Photos" : "Export developed files to Photos") { model.export(media) }
                     .disabled(media.outputs.isEmpty || media.isExported || model.exporting || model.state.phase.isBusy)
                 if media.status == .originalsOnly {
-                    Button("Retry processing from originals") { model.errorMessage = nil; model.engine.retry(media) }
-                        .disabled(model.exporting || model.state.phase.isBusy)
+                    if readOnly {
+                        Text("To retry processing, open Capture modes, then Captures.").font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Button("Retry processing from originals") { model.errorMessage = nil; model.engine.retry(media) }
+                            .disabled(model.exporting || model.state.phase.isBusy)
+                    }
                 }
             }
             Section("Untouched originals") {

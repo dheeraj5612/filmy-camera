@@ -1180,6 +1180,28 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertTrue(accessibilityApp.staticTexts["Recipe controls"].waitForExistence(timeout: 5))
         assertMinimumHitTarget(accessibilityApp.buttons["Done editing Muted Color"], named: "Done editing")
         attachScreenshot(named: "accessibility-large-text-editor")
+
+        // The Roll: at accessibility sizes Import leaves the pinned bar and sits in the page.
+        MainActor.assumeIsolated {
+            accessibilityApp.terminate()
+            accessibilityApp.launch()
+        }
+        let rollTab = accessibilityApp.buttons["roll-tab"]
+        XCTAssertTrue(rollTab.waitForExistence(timeout: 8))
+        rollTab.tap()
+        let rollImport = accessibilityApp.buttons["roll-import-photo"]
+        XCTAssertTrue(rollImport.waitForExistence(timeout: 5))
+        for _ in 0..<6 where !rollImport.isHittable {
+            accessibilityApp.swipeUp()
+        }
+        assertMinimumHitTarget(rollImport, named: "Accessibility-size Roll import")
+        XCTAssertEqual(rollImport.label, "Import photo")
+        XCTAssertGreaterThan(
+            rollImport.frame.minY,
+            accessibilityApp.buttons["roll-back-to-camera"].frame.maxY,
+            "At accessibility sizes Import leaves the pinned bar"
+        )
+        attachScreenshot(named: "accessibility-roll-import")
     }
 
     func testImportReviewGivesThePhotoRoomAndHoldPeeksOriginal() throws {
@@ -1599,6 +1621,19 @@ final class FilmyCameraUITests: XCTestCase {
                 || galleryUnavailable.waitForExistence(timeout: 3),
             "Roll must show a deterministic access, empty, or unavailable state"
         )
+        let rollImport = app.buttons["roll-import-photo"]
+        assertMinimumHitTarget(rollImport, named: "Roll import")
+        XCTAssertEqual(rollImport.label, "Import photo")
+        XCTAssertLessThan(
+            abs(rollImport.frame.midY - app.buttons["roll-back-to-camera"].frame.midY),
+            8,
+            "Import shares the pinned bar with Camera"
+        )
+        // Captures only exist after a real Capture modes capture, so the row is checked when present.
+        let rollCaptures = app.buttons["roll-open-captures"]
+        if rollCaptures.exists {
+            assertMinimumHitTarget(rollCaptures, named: "Roll captures")
+        }
         attachScreenshot(named: "gallery-empty-state")
 
         returnToMainCamera(using: app.buttons["roll-back-to-camera"], named: "Roll back to camera")

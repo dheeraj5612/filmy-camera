@@ -9,6 +9,7 @@ import UIKit
 struct GalleryScreen: View {
     @ObservedObject var photoLibrary: PhotoLibraryService
     let onBackToCamera: () -> Void
+    var onImportPhoto: (() -> Void)? = nil
 
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -28,6 +29,10 @@ struct GalleryScreen: View {
     @State private var isShowingBatchShare = false
     @State private var shareNote: String?
     @State private var batchMessage: String?
+    // Read-only count and list of Capture modes results. The engine is lazy and
+    // this read-only library never touches it.
+    @StateObject private var capturesModel = CaptureModesModel(recipe: FilmRecipe.builtIns[0], recipes: [], mode: .photo)
+    @State private var isShowingCaptures = false
 
     /// Three columns on iPhone; iPad widths flow as many ~200pt squares as
     /// fit so the contact sheet does not become three enormous tiles.
@@ -96,6 +101,7 @@ struct GalleryScreen: View {
                 // access. It displays frames created by Filmy Camera and its
                 // private local fallback cache.
                 photoLibrary.refresh()
+                capturesModel.refresh()
                 rebuildModel()
             }
             .onAppear { rebuildModel() }
@@ -108,6 +114,7 @@ struct GalleryScreen: View {
             .onChange(of: scenePhase) { _, phase in
                 guard phase == .active else { return }
                 photoLibrary.refresh()
+                capturesModel.refresh()
                 clearSelectionIfUnavailable()
             }
             .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged).receive(on: RunLoop.main)) { _ in
@@ -137,6 +144,14 @@ struct GalleryScreen: View {
                         rollHeading
                             .padding(.horizontal, FilmyTheme.pageMargin)
 
+                        if captureCount > 0 {
+                            rollCapturesRow
+                        }
+
+                        if usesStackedImport && !photoLibrary.galleryAssets.isEmpty {
+                            stackedImportButton
+                        }
+
                         if !photoLibrary.galleryAssets.isEmpty {
                             rollHeaderRows
                         }
@@ -148,6 +163,9 @@ struct GalleryScreen: View {
                                 .padding(.horizontal, FilmyTheme.pageMargin)
                                 .accessibilityIdentifier("roll-start-shooting")
                                 .accessibilityHint("Returns to the camera without changing Photos permissions")
+                            if usesStackedImport {
+                                stackedImportButton
+                            }
                             originalsLink
                         }
                     }
@@ -156,7 +174,7 @@ struct GalleryScreen: View {
                 }
             }
             .safeAreaInset(edge: .top, spacing: 0) {
-                CameraReturnBar(accessibilityIdentifier: "roll-back-to-camera", action: onBackToCamera)
+                rollTopBar
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if isSelecting {
@@ -169,6 +187,118 @@ struct GalleryScreen: View {
                 await photoLibrary.refreshAndWait()
             }
         }
+        .sheet(isPresented: $isShowingCaptures, onDismiss: { capturesModel.refresh() }) {
+            CaptureModesLibrary(model: capturesModel, readOnly: true)
+        }
+    }
+
+    private var captureCount: Int { capturesModel.captures.count }
+
+    private var usesStackedImport: Bool {
+        dynamicTypeSize.isAccessibilitySize && onImportPhoto != nil
+    }
+
+    /// Camera and Import share the pinned bar. Accessibility sizes keep the
+    /// plain Camera bar and move Import into the page (stackedImportButton).
+    @ViewBuilder
+    private var rollTopBar: some View {
+        if dynamicTypeSize.isAccessibilitySize || onImportPhoto == nil {
+            CameraReturnBar(accessibilityIdentifier: "roll-back-to-camera", action: onBackToCamera)
+        } else {
+            ViewThatFits(in: .horizontal) {
+                rollBarRow(iconOnlyImport: false)
+                rollBarRow(iconOnlyImport: true)
+            }
+            .padding(.horizontal, FilmyTheme.pageMargin)
+            .padding(.vertical, 6)
+            .background(FilmyTheme.background)
+        }
+    }
+
+    private func rollBarRow(iconOnlyImport: Bool) -> some View {
+        HStack(spacing: 8) {
+            BackToCameraButton(accessibilityIdentifier: "roll-back-to-camera", action: onBackToCamera)
+            Spacer(minLength: 8)
+            importCapsule(iconOnly: iconOnlyImport)
+        }
+    }
+
+    private func importCapsule(iconOnly: Bool) -> some View {
+        Button {
+            HapticFeedback.play(.selection)
+            onImportPhoto?()
+        } label: {
+            importCapsuleLabel(iconOnly: iconOnly)
+                .font(.system(.subheadline, design: .rounded).weight(.bold))
+                .foregroundStyle(FilmyTheme.primary)
+                .padding(.horizontal, 12)
+                .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.toolControlHeight)
+                .background(FilmyTheme.panel.opacity(0.94), in: Capsule())
+                .overlay {
+                    Capsule().stroke(FilmyTheme.lineStrong, lineWidth: 1)
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Import photo")
+        .accessibilityInputLabels(["Import", "Import photo"])
+        .accessibilityHint("Choose a photo and apply the current film recipe")
+        .accessibilityIdentifier("roll-import-photo")
+    }
+
+    @ViewBuilder
+    private func importCapsuleLabel(iconOnly: Bool) -> some View {
+        if iconOnly {
+            Image(systemName: "photo.badge.plus")
+        } else {
+            Label("Import", systemImage: "photo.badge.plus")
+        }
+    }
+
+    private var stackedImportButton: some View {
+        Button {
+            HapticFeedback.play(.selection)
+            onImportPhoto?()
+        } label: {
+            Label("Import photo", systemImage: "photo.badge.plus")
+        }
+        .buttonStyle(.filmySecondary)
+        .accessibilityLabel("Import photo")
+        .accessibilityInputLabels(["Import", "Import photo"])
+        .accessibilityHint("Choose a photo and apply the current film recipe")
+        .accessibilityIdentifier("roll-import-photo")
+        .padding(.horizontal, FilmyTheme.pageMargin)
+    }
+
+    private var rollCapturesRow: some View {
+        Button {
+            HapticFeedback.play(.selection)
+            isShowingCaptures = true
+        } label: {
+            HStack(spacing: 6) {
+                if !dynamicTypeSize.isAccessibilitySize {
+                    Image(systemName: "square.stack")
+                        .accessibilityHidden(true)
+                }
+                Text("Captures")
+                Text("\(captureCount)")
+                    .monospacedDigit()
+                    .foregroundStyle(FilmyTheme.accent)
+            }
+            .font(.system(.subheadline, design: .rounded).weight(.semibold))
+            .foregroundStyle(FilmyTheme.primary)
+            .padding(.horizontal, 12)
+            .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
+            .background(FilmyTheme.panel, in: Capsule())
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Captures")
+        .accessibilityValue(captureCount == 1 ? "1 item" : "\(captureCount) items")
+        .accessibilityHint("Photos, videos and panoramas saved from Capture modes")
+        .accessibilityIdentifier("roll-open-captures")
+        .padding(.horizontal, FilmyTheme.pageMargin)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var rollSummary: some View {
