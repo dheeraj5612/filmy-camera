@@ -2402,40 +2402,50 @@ struct CameraScreen: View {
         .padding(.vertical, -12)
     }
 
+    private func toolStripUsesTwoRows(_ minWidth: CGFloat) -> Bool {
+        isCompactDigitalMode && minWidth < 300
+    }
+
     private func toolStrip(minWidth: CGFloat) -> some View {
+        Group {
+            if toolStripUsesTwoRows(minWidth) {
+                toolStripTwoRows(minWidth: minWidth)
+            } else {
+                toolStripScroller(minWidth: minWidth) {
+                    toolStripExposureGroup(compactFocusLock: false)
+                    toolStripButtonGroup
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(
+            isCompactDigitalMode ? "g7x-capture-controls" : "camera-utility-rail"
+        )
+        .accessibilityLabel(isCompactDigitalMode ? "Compact camera controls" : "Camera controls")
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    private func toolStripTwoRows(minWidth: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                toolStripExposureGroup(compactFocusLock: true)
+            }
+            .padding(4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            toolStripScroller(minWidth: minWidth) {
+                toolStripButtonGroup
+            }
+        }
+    }
+
+    private func toolStripScroller<Content: View>(
+        minWidth: CGFloat,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ExposureControl(value: camera.exposureBias, onReset: {
-                    camera.setExposureBias(0)
-                }) { direction in
-                    let delta: Float = direction == .increment ? (1.0 / 3.0) : -(1.0 / 3.0)
-                    camera.setExposureBias(camera.exposureBias + delta)
-                }
-                .opacity(camera.manualControls.exposureMode == .manual ? 0.45 : 1)
-                .disabled(camera.manualControls.exposureMode == .manual || camera.manualControls.isApplying)
-
-                if (focusPoint != nil || camera.isFocusExposureLocked),
-                   let focusNormalizedPoint,
-                   camera.manualControls.exposureMode != .manual,
-                   camera.manualControls.focusMode != .manual {
-                    FocusLockControl(isLocked: camera.isFocusExposureLocked) {
-                        camera.toggleFocusExposureLock(at: focusNormalizedPoint)
-                    }
-                }
-
-                gridToggle(
-                    accessibilityIdentifier: isCompactDigitalMode
-                        ? "g7x-grid-control"
-                        : "grid-control"
-                )
-
-                if camera.availableLenses.count > 1 {
-                    CameraLensMenu(camera: camera)
-                }
-
-                proControlsButton
-
-                timerControl
+                content()
             }
             .padding(.horizontal, 4)
             .padding(.vertical, 4)
@@ -2444,12 +2454,44 @@ struct CameraScreen: View {
         }
         .scrollClipDisabled()
         .mask { toolStripFadeMask }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier(
-            isCompactDigitalMode ? "g7x-capture-controls" : "camera-utility-rail"
+    }
+
+    @ViewBuilder
+    private func toolStripExposureGroup(compactFocusLock: Bool) -> some View {
+        ExposureControl(value: camera.exposureBias, onReset: {
+            camera.setExposureBias(0)
+        }) { direction in
+            let delta: Float = direction == .increment ? (1.0 / 3.0) : -(1.0 / 3.0)
+            camera.setExposureBias(camera.exposureBias + delta)
+        }
+        .opacity(camera.manualControls.exposureMode == .manual ? 0.45 : 1)
+        .disabled(camera.manualControls.exposureMode == .manual || camera.manualControls.isApplying)
+
+        if (focusPoint != nil || camera.isFocusExposureLocked),
+           let focusNormalizedPoint,
+           camera.manualControls.exposureMode != .manual,
+           camera.manualControls.focusMode != .manual {
+            FocusLockControl(isLocked: camera.isFocusExposureLocked, showsTitle: !compactFocusLock) {
+                camera.toggleFocusExposureLock(at: focusNormalizedPoint)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var toolStripButtonGroup: some View {
+        gridToggle(
+            accessibilityIdentifier: isCompactDigitalMode
+                ? "g7x-grid-control"
+                : "grid-control"
         )
-        .accessibilityLabel(isCompactDigitalMode ? "Compact camera controls" : "Camera controls")
-        .transition(.move(edge: .bottom).combined(with: .opacity))
+
+        if camera.availableLenses.count > 1 {
+            CameraLensMenu(camera: camera)
+        }
+
+        proControlsButton
+
+        timerControl
     }
 
     private var proControlsButton: some View {

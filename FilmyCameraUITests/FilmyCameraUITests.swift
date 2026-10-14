@@ -404,6 +404,15 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertNotEqual(grid.value as? String, initialGridValue)
 
         let pro = compactApp.buttons["pro-controls-button"]
+        // Strip width equals the minWidth passed to toolStrip; keep 300 in sync with toolStripUsesTwoRows.
+        let stripUsesTwoRows = captureControls.frame.width < 300
+        if stripUsesTwoRows {
+            XCTAssertGreaterThan(captureControls.frame.height, 80, "Narrow G7 X strip uses two rows")
+            XCTAssertTrue(pro.isHittable, "Pro must be reachable without swiping")
+            XCTAssertTrue(compactApp.buttons["timer-control"].isHittable)
+            XCTAssertTrue(compactApp.windows.firstMatch.frame.contains(pro.frame))
+            XCTAssertFalse(pro.frame.intersects(compactApp.descendants(matching: .any)["zoom-control"].frame))
+        }
         for _ in 0..<3 where !pro.exists || !pro.isHittable { captureControls.swipeLeft() }
         assertMinimumHitTarget(pro, named: "Pro controls")
         let timer = compactApp.buttons["timer-control"]
@@ -417,6 +426,21 @@ final class FilmyCameraUITests: XCTestCase {
             XCTAssertEqual(timer.value as? String, spoken)
             XCTAssertTrue((setup.value as? String)?.hasPrefix(summary) == true)
             if spoken == "3 seconds" { attachScreenshot(named: "g7x-timer-control-armed") }
+        }
+
+        // The simulator shows the camera placeholder, not the live preview, so
+        // focus cannot engage there: tap only when the preview is mounted.
+        let preview = compactApp.descendants(matching: .any)["camera-preview"]
+        if preview.waitForExistence(timeout: 2) {
+            preview.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.45)).tap()
+            let lock = compactApp.buttons["Lock focus and exposure"]
+            if lock.waitForExistence(timeout: 2) {
+                if stripUsesTwoRows {
+                    XCTAssertTrue(pro.isHittable)
+                    XCTAssertLessThanOrEqual(lock.frame.width, 52)
+                }
+                attachScreenshot(named: "g7x-focus-lock-controls")
+            }
         }
 
         XCTAssertFalse(compactApp.descendants(matching: .any)["recipe-picker"].exists)

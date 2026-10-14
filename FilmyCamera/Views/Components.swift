@@ -922,34 +922,49 @@ struct ExposureControl: View {
 
 struct FocusLockControl: View {
     let isLocked: Bool
+    var showsTitle = true
     let action: () -> Void
+
+    private var title: String { isLocked ? "AE/AF Locked" : "AE/AF Lock" }
+    private var iconName: String { isLocked ? "lock.fill" : "lock.open" }
 
     var body: some View {
         Button {
             HapticFeedback.play(.selection)
             action()
         } label: {
-            Label(
-                isLocked ? "AE/AF Locked" : "AE/AF Lock",
-                systemImage: isLocked ? "lock.fill" : "lock.open"
-            )
-            .font(.system(size: 12, weight: .bold, design: .rounded))
-            .foregroundStyle(isLocked ? FilmyTheme.background : .white)
-            .padding(.horizontal, 12)
-            .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.toolControlHeight)
-            .background {
-                if isLocked {
-                    Capsule().fill(FilmyTheme.accent)
-                } else {
-                    ChromeShapeBackground(shape: Capsule())
+            labelContent
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(isLocked ? FilmyTheme.background : .white)
+                .padding(.horizontal, 12)
+                .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.toolControlHeight)
+                .background {
+                    if isLocked {
+                        Capsule().fill(FilmyTheme.accent)
+                    } else {
+                        ChromeShapeBackground(shape: Capsule())
+                    }
                 }
-            }
         }
         .buttonStyle(.pressable)
+        // The 12 pt label does not scale with Dynamic Type, titled or icon-only.
+        .accessibilityShowsLargeContentViewer {
+            Label(title, systemImage: iconName)
+        }
         .accessibilityLabel(isLocked ? "Unlock focus and exposure" : "Lock focus and exposure")
         .accessibilityValue(isLocked ? "Locked" : "Unlocked")
         .accessibilityAddTraits(isLocked ? .isSelected : [])
         .accessibilityHint(isLocked ? "Releases the focus and exposure lock" : "Keeps focus and exposure at the selected point")
+    }
+
+    @ViewBuilder
+    private var labelContent: some View {
+        if showsTitle {
+            Label(title, systemImage: iconName)
+        } else {
+            Label(title, systemImage: iconName)
+                .labelStyle(.iconOnly)
+        }
     }
 }
 
