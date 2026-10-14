@@ -626,6 +626,7 @@ public final class CameraService: NSObject, ObservableObject, @unchecked Sendabl
         ]
         videoOutput.setSampleBufferDelegate(self, queue: videoQueue)
         installSessionObservers()
+        scheduleStaleLiveTemporarySweep()
     }
 
     deinit {
@@ -5419,6 +5420,85 @@ extension CameraService {
 
     static var livePhotoTemporaryDirectory: URL {
         FileManager.default.temporaryDirectory.appendingPathComponent("FilmyLiveCapture", isDirectory: true)
+    }
+
+    /// Real process start time from the kernel (`kp_proc.p_un.__p_starttime`),
+    /// falling back to first access when sysctl fails. Every file this process
+    /// writes is newer than it, and every file a previous process left behind
+    /// is older, so the sweep can never touch a file this process still needs,
+    /// even when a file is written before the first `CameraService` exists. No
+    /// persisted record names a path in the Live temporary directory (the store
+    /// copies the movie, then the copy is used).
+    static let processStart: Date = {
+        let fallback = Date()
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+        guard sysctl(&mib, UInt32(mib.count), &info, &size, nil, 0) == 0 else { return fallback }
+        let started = info.kp_proc.p_un.__p_starttime
+        guard started.tv_sec > 0 else { return fallback }
+        let date = Date(timeIntervalSince1970: TimeInterval(started.tv_sec) + TimeInterval(started.tv_usec) / 1_000_000)
+        return min(date, fallback)
+    }()
+
+    private final class LiveSweepClaim: @unchecked Sendable {
+        private let lock = NSLock()
+        private var claimed = false
+        func claim() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            if claimed { return false }
+            claimed = true
+            return true
+        }
+    }
+
+    private static let liveSweepClaim = LiveSweepClaim()
+
+    /// Files older than `processStart` and not held by an in-flight capture.
+    /// Files with an unknown modified date are kept.
+    static func staleLiveTemporaryFiles(
+        _ files: [(url: URL, modified: Date?)], processStart: Date, inFlight: Set<URL>
+    ) -> [URL] {
+        let held = Set(inFlight.map { $0.standardizedFileURL })
+        return files.compactMap { file -> URL? in
+            guard let modified = file.modified, modified < processStart,
+                  !held.contains(file.url.standardizedFileURL) else { return nil }
+            return file.url
+        }
+    }
+
+    /// Once per process, on the session queue that owns Live temp files. The
+    /// queue is serial and every capture is enqueued on it later, so the sweep
+    /// runs before any Live movie of this process exists.
+    private func scheduleStaleLiveTemporarySweep() {
+        let start = Self.processStart
+        sessionQueue.async {
+            guard Self.liveSweepClaim.claim() else { return }
+            var inFlight = Set<URL>()
+            if let url = self.pendingMovieDestination { inFlight.insert(url) }
+            if let url = self.photoAssembly?.liveMovieURL { inFlight.insert(url) }
+            Self.sweepStaleLiveTemporaryFiles(processStart: start, inFlight: inFlight)
+        }
+    }
+
+    private static func sweepStaleLiveTemporaryFiles(processStart: Date, inFlight: Set<URL>) {
+        let directory = livePhotoTemporaryDirectory
+        let keys: [URLResourceKey] = [.isRegularFileKey, .isSymbolicLinkKey, .contentModificationDateKey]
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]
+        ) else { return }
+        var files: [(url: URL, modified: Date?)] = []
+        for url in urls {
+            // Only names this file writes (<UUID>.mov), the same rule as removeOwnedTemporaryMovie.
+            guard url.pathExtension == "mov",
+                  UUID(uuidString: url.deletingPathExtension().lastPathComponent) != nil else { continue }
+            guard let values = try? url.resourceValues(forKeys: Set(keys)),
+                  values.isSymbolicLink != true, values.isRegularFile == true else { continue }
+            files.append((url: url, modified: values.contentModificationDate))
+        }
+        let stale = staleLiveTemporaryFiles(files, processStart: processStart, inFlight: inFlight)
+        for url in stale { try? FileManager.default.removeItem(at: url) }
     }
 
     static func removeOwnedTemporaryMovie(_ url: URL) {

@@ -1206,4 +1206,25 @@ final class CameraServiceAvailabilityTests: XCTestCase {
         XCTAssertEqual(returned.wait(timeout: .now() + 10), .success)
         withExtendedLifetime(provider) {}
     }
+
+    func testStaleLiveTemporaryFilesSelectsOnlyOlderUnheldFiles() {
+        let start = Date(timeIntervalSince1970: 1_000_000)
+        let dir = URL(fileURLWithPath: "/tmp/FilmyLiveCapture", isDirectory: true)
+        let old = dir.appendingPathComponent("old.mov")
+        let held = dir.appendingPathComponent("held.mov")
+        let fresh = dir.appendingPathComponent("fresh.mov")
+        let unknown = dir.appendingPathComponent("unknown.mov")
+        let files: [(url: URL, modified: Date?)] = [
+            (url: old, modified: start.addingTimeInterval(-60)),
+            (url: held, modified: start.addingTimeInterval(-60)),
+            (url: fresh, modified: start.addingTimeInterval(60)),
+            (url: unknown, modified: nil)
+        ]
+        let stale = CameraService.staleLiveTemporaryFiles(files, processStart: start, inFlight: [held])
+        XCTAssertEqual(stale, [old])
+        XCTAssertEqual(
+            CameraService.staleLiveTemporaryFiles([(url: fresh, modified: start)], processStart: start, inFlight: []),
+            []
+        )
+    }
 }
