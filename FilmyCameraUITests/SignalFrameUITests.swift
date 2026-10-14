@@ -395,7 +395,16 @@ final class SignalFrameUITests: XCTestCase {
             XCTAssertGreaterThanOrEqual(last.frame.width, 44)
             XCTAssertGreaterThanOrEqual(last.frame.height, 44)
         }
-        app.buttons["open-mode-captures"].tap()
+        // VoiceOver reads the name; the library count is the value, so a seeded library has one.
+        let capturesButton = app.buttons["open-mode-captures"]
+        XCTAssertEqual(capturesButton.label, "Captures")
+        if last.exists {
+            let counted = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                (Int(capturesButton.value as? String ?? "") ?? 0) > 0
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter().wait(for: [counted], timeout: 5), .completed, "A seeded library reads its count as the value")
+        }
+        capturesButton.tap()
         let capturesBar = app.navigationBars["Filmy Captures"]
         XCTAssertTrue(capturesBar.waitForExistence(timeout: 5))
         // Descendants, not staticTexts: a NavigationLink row may merge its texts into one button label.
@@ -448,6 +457,7 @@ final class SignalFrameUITests: XCTestCase {
         XCTAssertTrue(app.frame.contains(app.descendants(matching: .any)["capture-modes-shutter"].frame),
                       "The shutter must stay on screen at the largest text size")
         XCTAssertTrue(filmChip(in: app).exists)
+        assertReachable(app.buttons["open-mode-captures"], in: app)
         snapshot("capture-modes-no-camera-largest-text")
         let pageScroll = app.scrollViews["capture-modes-scroll"]
         XCTAssertTrue(pageScroll.exists, "The page must scroll when text is large")
