@@ -189,6 +189,12 @@ struct ContentView: View {
             // Release hardware even when the camera screen is not mounted.
             .onChange(of: scenePhase) { _, phase in
                 if phase != .active { camera.stop() }
+                cameraViewModel.sceneDidChange(phase)
+            }
+            // Cold launch: list captures that still owe a Photos export.
+            .task { await cameraViewModel.reconcilePendingPhotosExports() }
+            .onChange(of: selectedTab) { _, tab in
+                if tab == .camera { reconcileOwedExports() }
             }
             .overlay {
                 if isImportInProgress { importProgressOverlay }
@@ -225,6 +231,11 @@ struct ContentView: View {
                 startImport(item)
             }
             .onDisappear { cancelImport() }
+    }
+
+    /// A save or delete in Filmy originals is reflected when the camera tab returns.
+    private func reconcileOwedExports() {
+        Task { await cameraViewModel.reconcilePendingPhotosExports() }
     }
 
     private func startImport(_ item: PhotosPickerItem) {

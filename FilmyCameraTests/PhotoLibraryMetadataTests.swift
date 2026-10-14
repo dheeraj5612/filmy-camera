@@ -441,6 +441,14 @@ final class PhotoLibraryMetadataTests: XCTestCase {
         XCTAssertFalse(PhotoLibraryAuthorizationPolicy.canRead(.restricted))
     }
 
+    func testPhotosAccessRefusedOnlyForDeniedOrRestricted() {
+        XCTAssertTrue(PhotoLibraryAuthorizationPolicy.isRefused(.denied))
+        XCTAssertTrue(PhotoLibraryAuthorizationPolicy.isRefused(.restricted))
+        XCTAssertFalse(PhotoLibraryAuthorizationPolicy.isRefused(.notDetermined))
+        XCTAssertFalse(PhotoLibraryAuthorizationPolicy.isRefused(.authorized))
+        XCTAssertFalse(PhotoLibraryAuthorizationPolicy.isRefused(.limited))
+    }
+
     func testAddOnlyAuthorizationIsDistinctFromLimitedReadAccess() {
         XCTAssertTrue(PhotoLibraryAuthorizationPolicy.canAdd(.authorized))
         XCTAssertFalse(PhotoLibraryAuthorizationPolicy.canAdd(.limited))

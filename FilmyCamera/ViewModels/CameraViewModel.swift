@@ -317,14 +317,18 @@ final class CameraViewModel: ObservableObject {
             HapticFeedback.play(.selection)
         }
     }
-    @Published private(set) var isCapturing = false
+    @Published private(set) var isCapturing = false {
+        didSet { endCaptureLeaseIfIdle() }
+    }
     /// Mirrors the camera screen's Fuji Drive/BKT controller so the workspace switch can wait for it.
     @Published var isFujiBusy = false
     @Published private(set) var isDecodingImport = false
     /// True while the picker is still loading the selection (for example an iCloud download).
     @Published private(set) var isLoadingImport = false
     var isImporting: Bool { isLoadingImport || isDecodingImport }
-    @Published private(set) var isSaving = false
+    @Published private(set) var isSaving = false {
+        didSet { endCaptureLeaseIfIdle() }
+    }
     @Published private(set) var saveErrorMessage: String?
     @Published private(set) var saveErrorRequiresSettings = false
     @Published private(set) var toastMessage: String?
@@ -350,6 +354,36 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var pendingReviewRecipeID: String?
     @Published private var recipeOverrides: [String: FilmRecipe] = [:]
     private var captureOriginalPersisted = false
+    /// Raw list of captures that still owe a Photos export, from the store or
+    /// inserted in session. Views read `pendingPhotosExportIDs`.
+    @Published private(set) var owedPhotosExportIDs: [UUID] = []
+    /// The capture between `create` and the end of develop; never offered as owed.
+    private var developingDocumentID: UUID?
+    private var reconcileGeneration: UInt64 = 0
+    /// Bumped by in-session inserts and removals; a reconcile that read before one reads again.
+    private var owedMutationCount: UInt64 = 0
+    /// True while the notice's Save loop runs.
+    @Published private(set) var isSavingPendingExports = false
+    /// Session only, never persisted: Later hides the notice until the next cold launch.
+    @Published private(set) var pendingExportsNoticeDismissed = false
+    /// Owed Live Photos that Photos refused for lack of full access this session.
+    @Published private(set) var fullAccessBlockedIDs: Set<UUID> = []
+    private var hasAnnouncedPendingExports = false
+    /// Background time from the shutter through the Photos save. Ended only
+    /// when `isCapturing` and `isSaving` are both false.
+    private let captureLease = BackgroundTaskLease()
+    /// Background time for an explicit save of owed exports.
+    private let exportLease = BackgroundTaskLease()
+    private(set) var backgroundEntryCount = 0
+    private var isSceneInBackground = false
+    private var activeWaiters: [CheckedContinuation<Void, Never>] = []
+    /// Test hook replacing the UIKit app-state probe; nil in production.
+    var isApplicationBackgroundedForTesting: (() -> Bool)?
+    /// Test hook run on the main actor after each capture render; nil in production.
+    var afterCaptureRenderForTesting: (@MainActor () -> Void)?
+    /// Test hook awaited once, after a reconcile read the store and before it
+    /// publishes; nil in production. It lets a test start a newer reconcile.
+    var afterOwedReadForTesting: (@MainActor () async -> Void)?
     private var preservedUnknownOverrides: [String: FilmRecipe] = [:]
     private var queuedReviewRequest: (recipe: FilmRecipe, finish: PhotoFinish)?
     @Published var libraryPreferences = RecipeLibraryPreferences() {
@@ -426,6 +460,13 @@ final class CameraViewModel: ObservableObject {
 
         if decoded.shouldRewrite || migratedRecipes.merging(preservedUnknownOverrides, uniquingKeysWith: { current, _ in current }) != decoded.recipes {
             persistRecipeOverrides()
+        }
+        // Counted here as well as in `sceneDidChange`: ContentView is unmounted
+        // while Capture modes shows, so its scenePhase never reports that trip.
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.backgroundEntryCount += 1 }
         }
         #if DEBUG
         openReviewFixtureForUITestsIfRequested()
@@ -676,6 +717,357 @@ final class CameraViewModel: ObservableObject {
     var isReviewingImport: Bool { reviewSource == .photoLibrary && reviewImage != nil }
     var hasPendingCapture: Bool { reviewSource == .camera && reviewImage != nil }
 
+    // MARK: Owed Photos exports
+
+    /// Owed captures the camera may offer: never the capture still developing
+    /// or the one in camera review, even when a reconcile lands mid capture.
+    var pendingPhotosExportIDs: [UUID] {
+        excludingInFlightCapture(owedPhotosExportIDs)
+    }
+
+    private func excludingInFlightCapture(_ ids: [UUID]) -> [UUID] {
+        let reviewID: UUID? = reviewSource == .camera ? reviewDocumentID : nil
+        let developingID = developingDocumentID
+        return ids.filter { $0 != developingID && $0 != reviewID }
+    }
+
+    /// Reads the durable markers. A result is dropped when a newer reconcile
+    /// started while it was being read; an in-session insert or removal makes
+    /// it read once more instead of losing the older owed captures.
+    func reconcilePendingPhotosExports() async {
+        reconcileGeneration &+= 1
+        let generation = reconcileGeneration
+        for _ in 0..<2 {
+            let mutations = owedMutationCount
+            let ids = await photoStore.photosExportsOwed()
+            if let hook = afterOwedReadForTesting {
+                afterOwedReadForTesting = nil
+                await hook()
+            }
+            guard generation == reconcileGeneration else { return }
+            if mutations == owedMutationCount {
+                publishOwed(ids)
+                return
+            }
+        }
+    }
+
+#if DEBUG
+    private static let uiTestingPendingExportIDs: [UUID] = [
+        "00000000-0000-4000-8000-0000000000A1",
+        "00000000-0000-4000-8000-0000000000A2"
+    ].compactMap { UUID(uuidString: $0) }
+#endif
+
+    /// The only writer of `owedPhotosExportIDs`.
+    private func publishOwed(_ ids: [UUID]) {
+#if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("-ui-testing-pending-exports") {
+            owedPhotosExportIDs = Self.uiTestingPendingExportIDs
+            return
+        }
+        if arguments.contains(where: { $0.hasPrefix("-ui-testing") }) {
+            owedPhotosExportIDs = []
+            return
+        }
+#endif
+        owedPhotosExportIDs = ids
+    }
+
+    private func insertOwedPhotosExport(_ id: UUID) {
+        owedMutationCount &+= 1
+        guard !owedPhotosExportIDs.contains(id) else { return }
+        publishOwed(owedPhotosExportIDs + [id])
+    }
+
+    private func removeOwedPhotosExport(_ id: UUID) {
+        owedMutationCount &+= 1
+        publishOwed(owedPhotosExportIDs.filter { $0 != id })
+    }
+
+    // MARK: Owed Photos exports: notice state
+
+    var showsPendingPhotosExportsNotice: Bool {
+        !pendingPhotosExportIDs.isEmpty && !pendingExportsNoticeDismissed
+            && !isCapturing && !isSaving && !hasPendingCapture
+    }
+
+    /// True when every visible owed photo is waiting on full Photos access,
+    /// so Save would only be refused again.
+    var pendingExportsAwaitFullAccessOnly: Bool {
+        let ids = pendingPhotosExportIDs
+        return !ids.isEmpty && ids.allSatisfy { fullAccessBlockedIDs.contains($0) }
+    }
+
+    func dismissPendingPhotosExportsNotice() {
+        pendingExportsNoticeDismissed = true
+    }
+
+    /// Posts the VoiceOver announcement once per session.
+    func announcePendingPhotosExportsOnce() {
+        let count = pendingPhotosExportIDs.count
+        guard !hasAnnouncedPendingExports, count > 0 else { return }
+        hasAnnouncedPendingExports = true
+        UIAccessibility.post(notification: .announcement, argument: Self.pendingExportsTitle(count: count))
+    }
+
+    static func pendingExportsTitle(count: Int) -> String {
+        count == 1 ? "1 photo is not in Photos yet" : "\(count) photos are not in Photos yet"
+    }
+
+    /// Mirrors the exporter: an unlinked Live Photo asks for read-write access,
+    /// a still only needs add-only access.
+    static func pendingExportNeedsFullAccess(_ document: FilmyPhotoDocument) -> Bool {
+        document.hasLivePhoto
+    }
+
+    /// One toast for a finished Save run; nil when nothing was attempted.
+    static func pendingExportsSummary(
+        saved: Int, failed: Int, needsFullAccess: Int, stoppedForAccess: Bool
+    ) -> (message: String, isError: Bool)? {
+        if stoppedForAccess {
+            return ("Photo access is needed to save these photos. Allow it in Settings.", true)
+        }
+        if needsFullAccess > 0 {
+            let message = needsFullAccess == 1
+                ? "1 Live Photo needs full Photos access. Allow it in Settings."
+                : "\(needsFullAccess) Live Photos need full Photos access. Allow it in Settings."
+            return (message, true)
+        }
+        if failed > 0 {
+            let message = failed == 1
+                ? "1 photo could not be saved. It stays in Filmy originals."
+                : "\(failed) photos could not be saved. They stay in Filmy originals."
+            return (message, true)
+        }
+        if saved > 0 {
+            let message = saved == 1 ? "Saved 1 photo to Photos" : "Saved \(saved) photos to Photos"
+            return (message, false)
+        }
+        return nil
+    }
+
+    private enum RecoveryDevelopOutcome {
+        case developed, failed, interrupted
+    }
+
+    /// Saves every owed photo to Photos, one at a time. Runs only from the
+    /// user's tap. Captures killed before their render finished are developed
+    /// first from the stored original and inputs. Add-only refusal stops the
+    /// run; a Live Photo that needs full access is skipped and counted.
+    func savePendingPhotosExports(
+        photoLibrary: PhotoLibraryService?,
+        export: (@MainActor (UUID) async throws -> String)? = nil
+    ) async {
+        guard !isSavingPendingExports else { return }
+        isSavingPendingExports = true
+        exportLease.begin(Self.exportLeaseName)
+        defer {
+            isSavingPendingExports = false
+            exportLease.end()
+        }
+        let store = photoStore
+        let exportOne: @MainActor (UUID) async throws -> String = export ?? { id in
+            try await FilmyPhotosExporter.save(id, store: store)
+        }
+        let ids = excludingInFlightCapture(await photoStore.photosExportsOwed())
+        var saved = 0
+        var failed = 0
+        var needsFullAccess = 0
+        var stoppedForAccess = false
+        idLoop: for id in ids {
+            if excludingInFlightCapture([id]).isEmpty { continue }
+            guard await photoStore.isPhotosExportOwed(id) else { continue }
+            guard let document = try? await photoStore.loadDocument(id) else {
+                failed += 1
+                continue
+            }
+            if document.currentRevision?.renditionFilename == nil {
+                switch await developOwedDocument(document) {
+                case .developed: break
+                case .failed:
+                    failed += 1
+                    continue idLoop
+                case .interrupted: break idLoop
+                }
+            }
+            do {
+                let identifier = try await exportOne(id)
+                await registerPendingExport(identifier, id: id, photoLibrary: photoLibrary)
+                fullAccessBlockedIDs.remove(id)
+                saved += 1
+            } catch FilmyPhotosExporter.ExportError.accessDenied {
+                if Self.pendingExportNeedsFullAccess(document) {
+                    fullAccessBlockedIDs.insert(id)
+                    needsFullAccess += 1
+                } else {
+                    stoppedForAccess = true
+                    photoLibrary?.refreshAuthorizationStatuses()
+                    break idLoop
+                }
+            } catch {
+                failed += 1
+            }
+        }
+        await reconcilePendingPhotosExports()
+        if let summary = Self.pendingExportsSummary(
+            saved: saved, failed: failed, needsFullAccess: needsFullAccess, stoppedForAccess: stoppedForAccess
+        ) {
+            showToast(summary.message, style: summary.isError ? .error : .success)
+        }
+    }
+
+    private static let exportLeaseName = "Filmy save to Photos"
+
+    private func registerPendingExport(_ identifier: String, id: UUID, photoLibrary: PhotoLibraryService?) async {
+        guard let photoLibrary,
+              let latest = try? await photoStore.loadDocument(id),
+              let revision = latest.currentRevision else { return }
+        let thumbnailData = try? await photoStore.thumbnailData(id)
+        let thumbnail = thumbnailData.flatMap { UIImage(data: $0) }
+        await photoLibrary.registerDocumentExport(
+            identifier, recipe: revision.recipe, capturedAt: latest.capturedAt,
+            thumbnailData: thumbnailData, thumbnail: thumbnail
+        )
+    }
+
+    /// Renders an owed capture whose render never finished, exactly as Filmy
+    /// originals does (stored inputs, no location). A render that overlapped
+    /// the background is dropped and ends the run: the photo stays owed.
+    private func developOwedDocument(_ document: FilmyPhotoDocument) async -> RecoveryDevelopOutcome {
+        guard let current = document.currentRevision else { return .failed }
+        // Do not overlap a capture render.
+        var waitedTicks = 0
+        while isCapturing || isSaving {
+            // Bounded (60 s) so a stuck save cannot hold the run forever.
+            if Task.isCancelled || waitedTicks >= 300 { return .interrupted }
+            waitedTicks += 1
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+        let entry = backgroundEntryCount
+        let data: Data
+        do { data = try await photoStore.originalData(document.id) } catch { return .failed }
+        let geometry = document.geometry
+        let recipe = current.recipe
+        let finish = current.finish
+        let output = current.output
+        let capturedAt = document.capturedAt
+        let rendered = await Task.detached(priority: .userInitiated) { () -> RenderedPhoto? in
+            autoreleasepool {
+                Self.render(
+                    sourceData: data, recipe: recipe,
+                    viewportSize: CGSize(width: geometry.viewportWidth, height: geometry.viewportHeight),
+                    previewDrawableSize: CGSize(width: geometry.previewWidth, height: geometry.previewHeight),
+                    capturedAt: capturedAt, flashFired: geometry.flashFired,
+                    grainSeed: geometry.grainSeed, finish: finish, outputSettings: output,
+                    dateStampEnabled: geometry.dateStampText != nil,
+                    dateStampText: geometry.dateStampText
+                )
+            }
+        }.value
+        if renderMayHaveBeenRefused(since: entry) { return .interrupted }
+        guard let rendered else { return .failed }
+        do {
+            try await photoStore.addRevision(
+                document.id, expectedRevisionID: current.id, recipe: recipe, finish: finish,
+                settings: output, renderedData: rendered.data
+            )
+            return .developed
+        } catch {
+            return .failed
+        }
+    }
+
+    // MARK: Scene phase and background time
+
+    func sceneDidChange(_ phase: ScenePhase) {
+        switch phase {
+        case .background:
+            backgroundEntryCount += 1
+            isSceneInBackground = true
+        case .active:
+            if isSceneInBackground { fullAccessBlockedIDs = [] }
+            isSceneInBackground = false
+            let waiters = activeWaiters
+            activeWaiters = []
+            for waiter in waiters { waiter.resume() }
+            Task { [weak self] in await self?.reconcilePendingPhotosExports() }
+        default:
+            // GPU work is still allowed while inactive.
+            break
+        }
+    }
+
+    /// Returns at once unless the scene is in the background.
+    private func waitUntilSceneActive() async {
+        // UIKit can report the background before SwiftUI's scenePhase does.
+        if isApplicationBackgrounded { isSceneInBackground = true }
+        guard isSceneInBackground else { return }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            activeWaiters.append(continuation)
+        }
+    }
+
+    /// iOS may refuse GPU work from a backgrounded app, so a render that
+    /// overlapped a trip to the background is never trusted.
+    private func renderMayHaveBeenRefused(since count: Int) -> Bool {
+        backgroundEntryCount != count || isApplicationBackgrounded
+    }
+
+    private var isApplicationBackgrounded: Bool {
+        isApplicationBackgroundedForTesting?() ?? (UIApplication.shared.applicationState == .background)
+    }
+
+    var pendingSceneWaiterCountForTesting: Int { activeWaiters.count }
+
+    private func endCaptureLeaseIfIdle() {
+        guard !isCapturing, !isSaving else { return }
+        captureLease.end()
+    }
+
+    var holdsCaptureBackgroundTimeForTesting: Bool { captureLease.isHeld }
+
+    private static let captureLeaseName = "Filmy capture"
+    private static let maximumCaptureRenderRedos = 2
+
+    /// One UIKit background task at a time. The expiration handler holds its
+    /// own token, never the lease, so it always ends its own task and a stale
+    /// token can never end a newer one.
+    @MainActor
+    private final class BackgroundTaskLease {
+        @MainActor
+        final class Token {
+            var id = UIBackgroundTaskIdentifier.invalid
+        }
+
+        private var current: Token?
+
+        nonisolated init() {}
+
+        var isHeld: Bool { (current?.id ?? .invalid) != .invalid }
+
+        func begin(_ name: String) {
+            if let current, current.id != .invalid { return }
+            let token = Token()
+            token.id = UIApplication.shared.beginBackgroundTask(withName: name) {
+                MainActor.assumeIsolated { BackgroundTaskLease.finish(token) }
+            }
+            current = token
+        }
+
+        static func finish(_ token: Token) {
+            let id = token.id
+            token.id = .invalid
+            if id != .invalid { UIApplication.shared.endBackgroundTask(id) }
+        }
+
+        func end() {
+            if let token = current { Self.finish(token) }
+            current = nil
+        }
+    }
+
     func capture(camera: CameraService, photoLibrary: any PhotoSaving) {
         guard !isCapturing, !isImporting, !isSaving, reviewImage == nil else { return }
         let captureStartedAt = ContinuousClock.now
@@ -744,6 +1136,8 @@ final class CameraViewModel: ObservableObject {
         if ProcessInfo.processInfo.arguments.contains("-ui-testing") { captureTimingStatus = "requested" }
 #endif
 
+        // isCapturing is already true here, so its didSet ends this lease.
+        captureLease.begin(Self.captureLeaseName)
         camera.capturePhoto { [weak self] capturedPhoto in
             // Read the status now: later main-queue status blocks ("Camera is
             // ready") can run before the Task below does.
@@ -848,12 +1242,15 @@ final class CameraViewModel: ObservableObject {
         photoLibrary: any PhotoSaving,
         renderOverride: (@Sendable () -> RenderedPhoto?)? = nil
     ) async -> Bool {
+        // Idempotent: covers the retention retry and the test entry point.
+        captureLease.begin(Self.captureLeaseName)
         let recipe = work.recipe
         let finish = work.finish
         let grainSeed = work.grainSeed
         let document: FilmyPhotoDocument
-        // The render only needs the captured bytes, so it overlaps the original write.
-        let renderTask = Task.detached(priority: .userInitiated) { () -> RenderedPhoto? in
+        var entry = backgroundEntryCount
+        // The first render and any redo are the same call on the same inputs.
+        let renderOnce: @Sendable () -> RenderedPhoto? = {
             // Test-only seam: an override never falls through to the real render.
             if let renderOverride { return renderOverride() }
             return autoreleasepool {
@@ -867,6 +1264,10 @@ final class CameraViewModel: ObservableObject {
                 )
             }
         }
+        // The render only needs the captured bytes, so it overlaps the original write.
+        let renderTask = Task.detached(priority: .userInitiated) { () -> RenderedPhoto? in
+            renderOnce()
+        }
         do {
             document = try await photoStore.create(
                 processed: work.photo.fileData, raw: work.photo.rawFileData,
@@ -875,10 +1276,12 @@ final class CameraViewModel: ObservableObject {
                                 previewWidth: work.drawable.width, previewHeight: work.drawable.height,
                                 grainSeed: grainSeed, flashFired: work.photo.flashFired,
                                 dateStampText: work.dateStampEnabled ? work.dateStampText : nil),
-                recipe: recipe, finish: finish, settings: work.photo.outputSettings
+                recipe: recipe, finish: finish, settings: work.photo.outputSettings,
+                owesPhotosExport: true
             )
             pendingOriginalRetention = nil
             captureOriginalPersisted = true
+            developingDocumentID = document.id
             if let movie = work.photo.livePhotoMovieURL { CameraService.removeOwnedTemporaryMovie(movie) }
         } catch {
             // Keep the captured bytes and owned Live movie for an explicit
@@ -891,8 +1294,27 @@ final class CameraViewModel: ObservableObject {
             showToast("Original not saved. Free storage, then tap the shutter to retry. Keep Filmy open.", style: .error)
             return false
         }
-        let rendered = await renderTask.value
+        var rendered = await renderTask.value
+        afterCaptureRenderForTesting?()
+        // Never keep a render that overlapped a trip to the background: redo
+        // it in the foreground from the in-memory capture, at most twice.
+        var redos = 0
+        while renderMayHaveBeenRefused(since: entry) {
+            rendered = nil
+            guard redos < Self.maximumCaptureRenderRedos else { break }
+            redos += 1
+            captureLease.end()
+            await waitUntilSceneActive()
+            captureLease.begin(Self.captureLeaseName)
+            entry = backgroundEntryCount
+            rendered = await Task.detached(priority: .userInitiated) { () -> RenderedPhoto? in
+                renderOnce()
+            }.value
+            afterCaptureRenderForTesting?()
+        }
         guard var renderedPhoto = rendered, let firstRevision = document.currentRevision else {
+            developingDocumentID = nil
+            insertOwedPhotosExport(document.id)
             isCapturing = false
             showToast("Original retained in Filmy originals. Open it there to retry developing this look.", style: .error)
             return false
@@ -903,6 +1325,8 @@ final class CameraViewModel: ObservableObject {
                 settings: work.photo.outputSettings, renderedData: renderedPhoto.data
             )
         } catch {
+            developingDocumentID = nil
+            insertOwedPhotosExport(document.id)
             isCapturing = false
             showToast("Original retained. Filmy could not save the developed version; retry from Filmy originals.", style: .error)
             return false
@@ -946,6 +1370,13 @@ final class CameraViewModel: ObservableObject {
                 }
 #endif
         saveCapturedPhoto(renderedPhoto, recipe: recipe, finish: finish, photoLibrary: photoLibrary)
+        developingDocumentID = nil
+        // The save guard returned without taking this capture: it stays owed.
+        // A save that already succeeded removed the marker, so it is not listed.
+        if reviewDocumentID != document.id,
+           FileManager.default.fileExists(atPath: photoStore.photosExportOwedURL(for: document.id).path) {
+            insertOwedPhotosExport(document.id)
+        }
         isCapturing = false
         // A rendered photo counts once even if Photos saving must be retried.
         // Retry/discard never recaptures or charges again.
@@ -1212,6 +1643,7 @@ final class CameraViewModel: ObservableObject {
         guard !isSaving, !isRenderingReview, !isPreparingReviewOriginal else { return }
 
         isSaving = true
+        if reviewSource == .camera { captureLease.begin(Self.captureLeaseName) }
         queuedReviewRequest = nil
         saveErrorMessage = nil
         saveErrorRequiresSettings = false
@@ -1320,6 +1752,11 @@ final class CameraViewModel: ObservableObject {
             case .success:
                 let savedFromLibrary = self.reviewSource == .photoLibrary
                 self.lastCaptureDate = capturedAt
+                // Linking already cleared it in production; this also covers savers that do not link.
+                if self.reviewSource == .camera, let id = self.reviewDocumentID {
+                    self.photoStore.clearPhotosExportOwed(id)
+                    self.removeOwedPhotosExport(id)
+                }
                 self.clearReviewState()
                 self.showToast(
                     "Saved with \(recipe.name)",
@@ -1360,6 +1797,11 @@ final class CameraViewModel: ObservableObject {
 
     func discardReview() {
         guard !isSaving else { return }
+        // Synchronous, so a kill right after discard cannot leave the marker.
+        if reviewSource == .camera, let id = reviewDocumentID {
+            photoStore.clearPhotosExportOwed(id)
+            removeOwedPhotosExport(id)
+        }
         clearReviewState()
     }
 

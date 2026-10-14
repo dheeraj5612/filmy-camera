@@ -2,6 +2,7 @@ import CoreMedia
 import CoreImage
 import CoreLocation
 import ImageIO
+import SwiftUI
 import UIKit
 import XCTest
 @testable import FilmyCamera
@@ -632,6 +633,499 @@ final class CameraReviewSaveTests: XCTestCase {
         saver.completeLast(with: .success(()))
     }
 
+    // MARK: Owed Photos exports
+
+    private func tempStoreRoot() -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    }
+
+    private func markerExists(_ store: FilmyPhotoStore, _ id: UUID) -> Bool {
+        FileManager.default.fileExists(atPath: store.photosExportOwedURL(for: id).path)
+    }
+
+    /// An owed document made straight in the store, as a killed capture leaves it.
+    private func createOwedDocument(
+        _ store: FilmyPhotoStore, offset: TimeInterval, live: Bool = false,
+        developed: Bool = true, owing: Bool = true
+    ) async throws -> FilmyPhotoDocument {
+        var settings = ProCaptureSettings.legacy
+        var movie: URL?
+        if live {
+            settings = ProCaptureSettings()
+            settings.livePhoto = true
+            settings.format = .heif
+            settings.resolution = .mp12
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mov")
+            try Data([1, 2, 3]).write(to: url)
+            movie = url
+        }
+        defer { if let movie { try? FileManager.default.removeItem(at: movie) } }
+        let source = try captureSourcePhoto()
+        let geometry = FilmyRenderGeometry(
+            viewportWidth: 100, viewportHeight: 100, previewWidth: 100, previewHeight: 100,
+            grainSeed: 1, flashFired: false
+        )
+        let created = try await store.create(
+            processed: source.fileData, raw: nil, liveMovieURL: movie,
+            capturedAt: Date(timeIntervalSince1970: 1_800_000_000 + offset),
+            geometry: geometry, recipe: FilmRecipe.builtIns[0], finish: .photo, settings: settings,
+            owesPhotosExport: owing
+        )
+        guard developed else { return created }
+        let first = try XCTUnwrap(created.currentRevision)
+        return try await store.addRevision(
+            created.id, expectedRevisionID: first.id, recipe: FilmRecipe.builtIns[0], finish: .photo,
+            settings: settings, renderedData: try capturedPhoto().data
+        )
+    }
+
+    func testDevelopedCaptureOwesPhotosExportUntilDiscarded() async throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let root = tempStoreRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = FilmyPhotoStore(root: root)
+        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let saver = ControlledPhotoSaver()
+
+        let result = await model.developCapturedPhotoForTesting(
+            try captureSourcePhoto(), recipe: model.selectedRecipe, camera: CameraService(), photoLibrary: saver
+        )
+        XCTAssertTrue(result)
+        XCTAssertTrue(model.isSaving)
+        let owed = await store.photosExportsOwed()
+        let id = try XCTUnwrap(owed.first)
+        XCTAssertEqual(owed.count, 1)
+        XCTAssertTrue(markerExists(store, id))
+        XCTAssertTrue(model.pendingPhotosExportIDs.isEmpty, "The capture in review is never offered as owed")
+
+        saver.completeLast(with: .failure(.writeFailed))
+        XCTAssertTrue(model.hasPendingCapture)
+        XCTAssertTrue(markerExists(store, id), "A failed save keeps the export owed")
+
+        model.discardReview()
+        XCTAssertFalse(markerExists(store, id), "Discard clears the marker with no await")
+        XCTAssertFalse(model.hasPendingCapture)
+        let afterDiscard = await store.photosExportsOwed()
+        XCTAssertTrue(afterDiscard.isEmpty)
+        _ = try await store.loadDocument(id)
+        await model.reconcilePendingPhotosExports()
+        XCTAssertTrue(model.pendingPhotosExportIDs.isEmpty)
+    }
+
+    func testSuccessfulCaptureSaveClearsOwedMarker() async throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let root = tempStoreRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = FilmyPhotoStore(root: root)
+        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let saver = ControlledPhotoSaver()
+
+        let result = await model.developCapturedPhotoForTesting(
+            try captureSourcePhoto(), recipe: model.selectedRecipe, camera: CameraService(), photoLibrary: saver
+        )
+        XCTAssertTrue(result)
+        let owed = await store.photosExportsOwed()
+        let id = try XCTUnwrap(owed.first)
+        XCTAssertTrue(markerExists(store, id))
+
+        saver.completeLast(with: .success(()))
+        XCTAssertFalse(model.isSaving)
+        XCTAssertFalse(model.hasPendingCapture)
+        XCTAssertFalse(markerExists(store, id))
+        await model.reconcilePendingPhotosExports()
+        XCTAssertTrue(model.owedPhotosExportIDs.isEmpty)
+        XCTAssertTrue(model.pendingPhotosExportIDs.isEmpty)
+        XCTAssertFalse(model.showsPendingPhotosExportsNotice)
+    }
+
+    func testUndevelopableCaptureStillOwesPhotosExport() async throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let root = tempStoreRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = FilmyPhotoStore(root: root)
+        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let saver = ControlledPhotoSaver()
+
+        // Render returns nothing: the original is kept and the export stays owed.
+        let result = await model.developCapturedPhotoForTesting(
+            try captureSourcePhoto(), recipe: model.selectedRecipe, camera: CameraService(), photoLibrary: saver,
+            renderOverride: { nil }
+        )
+        XCTAssertFalse(result)
+        XCTAssertFalse(model.isCapturing)
+        XCTAssertEqual(model.toastStyle, .error)
+        XCTAssertEqual(
+            model.toastMessage,
+            "Original retained in Filmy originals. Open it there to retry developing this look."
+        )
+        XCTAssertTrue(saver.requests.isEmpty)
+        let owed = await store.photosExportsOwed()
+        let id = try XCTUnwrap(owed.first)
+        XCTAssertTrue(markerExists(store, id))
+        // No reconcile call: the id was inserted in session.
+        XCTAssertEqual(model.pendingPhotosExportIDs, [id])
+        XCTAssertTrue(model.showsPendingPhotosExportsNotice)
+
+        // The developed version cannot be stored: same outcome.
+        let otherRoot = tempStoreRoot()
+        defer { try? FileManager.default.removeItem(at: otherRoot) }
+        let otherStore = FilmyPhotoStore(root: otherRoot)
+        let otherModel = CameraViewModel(defaults: defaults, photoStore: otherStore)
+        let source = try captureSourcePhoto()
+        let unusable = CameraViewModel.RenderedPhoto(image: UIImage(), data: Data([0]), capturedAt: source.capturedAt)
+        let second = await otherModel.developCapturedPhotoForTesting(
+            source, recipe: otherModel.selectedRecipe, camera: CameraService(), photoLibrary: saver,
+            renderOverride: { unusable }
+        )
+        XCTAssertFalse(second)
+        let otherOwed = await otherStore.photosExportsOwed()
+        XCTAssertEqual(otherModel.pendingPhotosExportIDs, otherOwed)
+        XCTAssertEqual(otherOwed.count, 1)
+        otherModel.dismissToast()
+        XCTAssertTrue(otherModel.showsPendingPhotosExportsNotice)
+    }
+
+    func testReconcileExcludesTheCaptureStillInReview() async throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let root = tempStoreRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = FilmyPhotoStore(root: root)
+        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let saver = ControlledPhotoSaver()
+        let older = try await createOwedDocument(store, offset: -100)
+
+        let result = await model.developCapturedPhotoForTesting(
+            try captureSourcePhoto(), recipe: model.selectedRecipe, camera: CameraService(), photoLibrary: saver
+        )
+        XCTAssertTrue(result)
+        let owed = await store.photosExportsOwed()
+        XCTAssertEqual(owed.count, 2)
+        let reviewed = try XCTUnwrap(owed.first(where: { $0 != older.id }))
+
+        await model.reconcilePendingPhotosExports()
+        XCTAssertTrue(model.owedPhotosExportIDs.contains(reviewed), "The raw list holds the capture in review")
+        XCTAssertEqual(model.pendingPhotosExportIDs, [older.id], "The view never sees the capture in review")
+        XCTAssertFalse(model.showsPendingPhotosExportsNotice, "No notice while a save is running")
+
+        saver.completeLast(with: .success(()))
+        await model.reconcilePendingPhotosExports()
+        XCTAssertEqual(model.pendingPhotosExportIDs, [older.id])
+        XCTAssertTrue(model.showsPendingPhotosExportsNotice)
+    }
+
+    func testStaleReconcileResultIsDropped() async throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let root = tempStoreRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = FilmyPhotoStore(root: root)
+        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let document = try await createOwedDocument(store, offset: 0)
+
+        // The first reconcile reads [document]. Before it publishes, the
+        // document is linked and a newer reconcile publishes []. The older
+        // result must then be dropped, not published over the newer one.
+        model.afterOwedReadForTesting = { [unowned model] in
+            try? await store.linkPhotosAsset("A/L0/stale", to: document.id)
+            await model.reconcilePendingPhotosExports()
+        }
+        await model.reconcilePendingPhotosExports()
+
+        XCTAssertNil(model.afterOwedReadForTesting)
+        XCTAssertTrue(model.owedPhotosExportIDs.isEmpty)
+        XCTAssertTrue(model.pendingPhotosExportIDs.isEmpty)
+    }
+
+    func testSavePendingPhotosExportsExportsEachOnceAndNeverDiscardedOrLegacy() async throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let root = tempStoreRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = FilmyPhotoStore(root: root)
+        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let undeveloped = try await createOwedDocument(store, offset: 1, developed: false)
+        let developed = try await createOwedDocument(store, offset: 2)
+        let discarded = try await createOwedDocument(store, offset: 3)
+        store.clearPhotosExportOwed(discarded.id)
+        let legacy = try await createOwedDocument(store, offset: 4, owing: false)
+        XCTAssertNil(undeveloped.currentRevision?.renditionFilename)
+        let stub = PendingExportStub(store: store)
+
+        await model.savePendingPhotosExports(photoLibrary: nil, export: { id in try await stub.export(id) })
+
+        XCTAssertEqual(stub.calls, [undeveloped.id, developed.id])
+        XCTAssertFalse(stub.calls.contains(discarded.id))
+        XCTAssertFalse(stub.calls.contains(legacy.id))
+        let gained = try await store.loadDocument(undeveloped.id)
+        XCTAssertNotNil(gained.currentRevision?.renditionFilename, "An undeveloped capture is developed before export")
+        XCTAssertFalse(gained.photosAssetIdentifier?.isEmpty ?? true)
+        XCTAssertFalse(model.isSavingPendingExports)
+        XCTAssertEqual(model.toastStyle, .success)
+        XCTAssertEqual(model.toastMessage, "Saved 2 photos to Photos")
+        XCTAssertTrue(model.pendingPhotosExportIDs.isEmpty)
+
+        await model.savePendingPhotosExports(photoLibrary: nil, export: { id in try await stub.export(id) })
+        XCTAssertEqual(stub.calls.count, 2, "A second run makes no export calls")
+    }
+
+    func testSavePendingSkipsIdsNoLongerOwed() async throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let root = tempStoreRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = FilmyPhotoStore(root: root)
+        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let first = try await createOwedDocument(store, offset: 1)
+        let linkedLater = try await createOwedDocument(store, offset: 2)
+        let deletedLater = try await createOwedDocument(store, offset: 3)
+        let stub = PendingExportStub(store: store)
+        // While the first export runs, the other two leave the owed list.
+        stub.afterFirstExport = {
+            try? await store.linkPhotosAsset("A/L0/elsewhere", to: linkedLater.id)
+            try? await store.delete(deletedLater.id)
+        }
+
+        await model.savePendingPhotosExports(photoLibrary: nil, export: { id in try await stub.export(id) })
+
+        XCTAssertEqual(stub.calls, [first.id])
+        XCTAssertEqual(model.toastStyle, .success)
+        XCTAssertEqual(model.toastMessage, "Saved 1 photo to Photos", "A stale id is skipped, never counted failed")
+        XCTAssertTrue(model.pendingPhotosExportIDs.isEmpty)
+    }
+
+    func testSavePendingSkipsLiveNeedingFullAccessAndExportsStills() async throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let root = tempStoreRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = FilmyPhotoStore(root: root)
+        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let live = try await createOwedDocument(store, offset: 1, live: true)
+        let stillOne = try await createOwedDocument(store, offset: 2)
+        let stillTwo = try await createOwedDocument(store, offset: 3)
+        XCTAssertTrue(live.hasLivePhoto)
+        let stub = PendingExportStub(store: store)
+        stub.accessDenied = [live.id]
+
+        await model.savePendingPhotosExports(photoLibrary: nil, export: { id in try await stub.export(id) })
+
+        XCTAssertEqual(stub.calls, [live.id, stillOne.id, stillTwo.id])
+        XCTAssertEqual(model.fullAccessBlockedIDs, [live.id])
+        XCTAssertEqual(model.pendingPhotosExportIDs, [live.id])
+        XCTAssertTrue(model.pendingExportsAwaitFullAccessOnly)
+        XCTAssertFalse(model.isSavingPendingExports)
+        XCTAssertEqual(model.toastStyle, .error)
+        XCTAssertEqual(model.toastMessage, "1 Live Photo needs full Photos access. Allow it in Settings.")
+        for id in [stillOne.id, stillTwo.id] {
+            let document = try await store.loadDocument(id)
+            XCTAssertFalse(document.photosAssetIdentifier?.isEmpty ?? true)
+        }
+    }
+
+    func testSavePendingStopsWhenAddOnlyAccessIsRefused() async throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let root = tempStoreRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = FilmyPhotoStore(root: root)
+        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let first = try await createOwedDocument(store, offset: 1)
+        let second = try await createOwedDocument(store, offset: 2)
+        let third = try await createOwedDocument(store, offset: 3)
+        let stub = PendingExportStub(store: store)
+        stub.accessDenied = [first.id]
+
+        await model.savePendingPhotosExports(photoLibrary: nil, export: { id in try await stub.export(id) })
+
+        XCTAssertEqual(stub.calls, [first.id], "A refused still stops the run")
+        XCTAssertFalse(model.isSavingPendingExports)
+        XCTAssertTrue(model.fullAccessBlockedIDs.isEmpty)
+        XCTAssertEqual(model.toastStyle, .error)
+        XCTAssertEqual(model.toastMessage, "Photo access is needed to save these photos. Allow it in Settings.")
+        XCTAssertEqual(model.pendingPhotosExportIDs, [first.id, second.id, third.id])
+    }
+
+    func testPendingExportsSummaryWordsEachOutcome() {
+        func summary(
+            saved: Int = 0, failed: Int = 0, live: Int = 0, stopped: Bool = false
+        ) -> (message: String, isError: Bool)? {
+            CameraViewModel.pendingExportsSummary(
+                saved: saved, failed: failed, needsFullAccess: live, stoppedForAccess: stopped
+            )
+        }
+        XCTAssertNil(summary())
+        XCTAssertEqual(summary(saved: 1)?.message, "Saved 1 photo to Photos")
+        XCTAssertEqual(summary(saved: 3)?.message, "Saved 3 photos to Photos")
+        XCTAssertEqual(summary(saved: 3)?.isError, false)
+        XCTAssertEqual(summary(failed: 1)?.message, "1 photo could not be saved. It stays in Filmy originals.")
+        XCTAssertEqual(summary(saved: 2, failed: 2)?.message, "2 photos could not be saved. They stay in Filmy originals.")
+        XCTAssertEqual(summary(failed: 1)?.isError, true)
+        XCTAssertEqual(summary(live: 1)?.message, "1 Live Photo needs full Photos access. Allow it in Settings.")
+        XCTAssertEqual(summary(live: 2)?.message, "2 Live Photos need full Photos access. Allow it in Settings.")
+        XCTAssertEqual(summary(failed: 1, live: 2)?.message, "2 Live Photos need full Photos access. Allow it in Settings.")
+        XCTAssertEqual(summary(live: 1)?.isError, true)
+        XCTAssertEqual(
+            summary(saved: 1, failed: 1, live: 1, stopped: true)?.message,
+            "Photo access is needed to save these photos. Allow it in Settings."
+        )
+        XCTAssertEqual(summary(stopped: true)?.isError, true)
+        XCTAssertEqual(CameraViewModel.pendingExportsTitle(count: 1), "1 photo is not in Photos yet")
+        XCTAssertEqual(CameraViewModel.pendingExportsTitle(count: 2), "2 photos are not in Photos yet")
+
+        let messages: [String] = [
+            summary(saved: 1), summary(saved: 3), summary(failed: 1), summary(failed: 2), summary(live: 1),
+            summary(live: 2), summary(stopped: true)
+        ].compactMap { $0?.message } + [
+            CameraViewModel.pendingExportsTitle(count: 1), CameraViewModel.pendingExportsTitle(count: 2)
+        ]
+        XCTAssertEqual(messages.count, 9)
+        for message in messages {
+            let lowered = message.lowercased()
+            for word in ["button", "tap", "show", "later"] {
+                XCTAssertFalse(lowered.contains(word), "\(message) names \(word)")
+            }
+        }
+    }
+
+    func testPendingExportsNoticeLaterHidesForSessionOnly() async throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let root = tempStoreRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = FilmyPhotoStore(root: root)
+        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        _ = try await createOwedDocument(store, offset: 1)
+
+        XCTAssertFalse(model.showsPendingPhotosExportsNotice, "Nothing is read until a reconcile")
+        await model.reconcilePendingPhotosExports()
+        XCTAssertTrue(model.showsPendingPhotosExportsNotice)
+        XCTAssertFalse(model.pendingExportsNoticeDismissed)
+
+        model.dismissPendingPhotosExportsNotice()
+        XCTAssertTrue(model.pendingExportsNoticeDismissed)
+        XCTAssertFalse(model.showsPendingPhotosExportsNotice)
+        await model.reconcilePendingPhotosExports()
+        XCTAssertFalse(model.showsPendingPhotosExportsNotice, "Later holds for the rest of the session")
+        XCTAssertEqual(model.pendingPhotosExportIDs.count, 1, "The photo is still owed")
+
+        // A cold launch reads the same durable marker and shows the notice again.
+        let relaunched = CameraViewModel(defaults: defaults, photoStore: store)
+        await relaunched.reconcilePendingPhotosExports()
+        XCTAssertFalse(relaunched.pendingExportsNoticeDismissed)
+        XCTAssertTrue(relaunched.showsPendingPhotosExportsNotice)
+    }
+
+    func testCaptureHoldsBackgroundTimeUntilSaveCompletes() async throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let root = tempStoreRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = FilmyPhotoStore(root: root)
+        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let saver = ControlledPhotoSaver()
+        let camera = CameraService()
+        XCTAssertFalse(model.holdsCaptureBackgroundTimeForTesting)
+
+        let first = await model.developCapturedPhotoForTesting(
+            try captureSourcePhoto(), recipe: model.selectedRecipe, camera: camera, photoLibrary: saver
+        )
+        XCTAssertTrue(first)
+        XCTAssertTrue(model.isSaving)
+        XCTAssertTrue(model.holdsCaptureBackgroundTimeForTesting, "Held while the Photos save is pending")
+        saver.completeLast(with: .success(()))
+        XCTAssertFalse(model.isSaving)
+        XCTAssertFalse(model.holdsCaptureBackgroundTimeForTesting)
+
+        let second = await model.developCapturedPhotoForTesting(
+            try captureSourcePhoto(), recipe: model.selectedRecipe, camera: camera, photoLibrary: saver
+        )
+        XCTAssertTrue(second)
+        XCTAssertTrue(model.holdsCaptureBackgroundTimeForTesting)
+        saver.completeLast(with: .failure(.writeFailed))
+        XCTAssertFalse(model.isSaving)
+        XCTAssertFalse(model.holdsCaptureBackgroundTimeForTesting, "A failed save releases it; the recovery card keeps the copy")
+        model.discardReview()
+        XCTAssertFalse(model.holdsCaptureBackgroundTimeForTesting)
+    }
+
+    func testCaptureRenderInterruptedByBackgroundIsRedoneInForeground() async throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let root = tempStoreRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = FilmyPhotoStore(root: root)
+        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        let saver = ControlledPhotoSaver()
+        let renders = PendingRenderCounter()
+        let hookCalls = PendingRenderCounter()
+        let rendered = try capturedPhoto()
+        // The first render ends with a trip to the background and back.
+        model.afterCaptureRenderForTesting = { [unowned model] in
+            hookCalls.increment()
+            if hookCalls.count == 1 {
+                model.sceneDidChange(.background)
+                model.sceneDidChange(.active)
+            }
+        }
+
+        let result = await model.developCapturedPhotoForTesting(
+            try captureSourcePhoto(), recipe: model.selectedRecipe, camera: CameraService(), photoLibrary: saver,
+            renderOverride: { renders.increment(); return rendered }
+        )
+
+        XCTAssertTrue(result)
+        XCTAssertEqual(renders.count, 2, "The suspect render is discarded and rerun in the foreground")
+        XCTAssertEqual(hookCalls.count, 2)
+        XCTAssertEqual(model.backgroundEntryCount, 1)
+        XCTAssertEqual(saver.requests.count, 1, "Exactly one save is attempted")
+        let owed = await store.photosExportsOwed()
+        let id = try XCTUnwrap(owed.first)
+        XCTAssertTrue(markerExists(store, id), "Owed until the save succeeds")
+        saver.completeLast(with: .success(()))
+        XCTAssertFalse(markerExists(store, id))
+    }
+
+    func testCaptureRedoWaitsForSceneToBecomeActive() async throws {
+        let (defaults, suiteName) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let root = tempStoreRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = FilmyPhotoStore(root: root)
+        let model = CameraViewModel(defaults: defaults, photoStore: store)
+        model.isApplicationBackgroundedForTesting = { false }
+        let saver = ControlledPhotoSaver()
+        let renders = PendingRenderCounter()
+        let rendersWhenActive = PendingRenderCounter()
+        let hookCalls = PendingRenderCounter()
+        let rendered = try capturedPhoto()
+        // The scene goes to the background and only comes back later.
+        model.afterCaptureRenderForTesting = { [unowned model] in
+            hookCalls.increment()
+            guard hookCalls.count == 1 else { return }
+            model.sceneDidChange(.background)
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(100))
+                for _ in 0..<renders.count { rendersWhenActive.increment() }
+                model.sceneDidChange(.active)
+            }
+        }
+
+        let result = await model.developCapturedPhotoForTesting(
+            try captureSourcePhoto(), recipe: model.selectedRecipe, camera: CameraService(), photoLibrary: saver,
+            renderOverride: { renders.increment(); return rendered }
+        )
+
+        XCTAssertTrue(result)
+        XCTAssertEqual(rendersWhenActive.count, 1, "The redo waited for the scene to become active")
+        XCTAssertEqual(renders.count, 2)
+        XCTAssertEqual(model.pendingSceneWaiterCountForTesting, 0)
+        XCTAssertEqual(saver.requests.count, 1)
+    }
+
     private func capturedPhoto() throws -> CameraViewModel.RenderedPhoto {
         let image = UIGraphicsImageRenderer(size: CGSize(width: 12, height: 16)).image { context in
             UIColor.orange.setFill()
@@ -673,6 +1167,39 @@ final class CameraReviewSaveTests: XCTestCase {
         defaults.removePersistentDomain(forName: suiteName)
         return (defaults, suiteName)
     }
+}
+
+/// Stands in for the Photos exporter: records calls and links like production.
+@MainActor
+final class PendingExportStub {
+    private let store: FilmyPhotoStore
+    private(set) var calls: [UUID] = []
+    var accessDenied: Set<UUID> = []
+    /// Runs once, inside the first export call, after it linked its document.
+    var afterFirstExport: (@MainActor () async -> Void)?
+
+    init(store: FilmyPhotoStore) {
+        self.store = store
+    }
+
+    func export(_ id: UUID) async throws -> String {
+        calls.append(id)
+        if accessDenied.contains(id) { throw FilmyPhotosExporter.ExportError.accessDenied }
+        let identifier = "A/L0/\(calls.count)"
+        try await store.linkPhotosAsset(identifier, to: id)
+        if let hook = afterFirstExport {
+            afterFirstExport = nil
+            await hook()
+        }
+        return identifier
+    }
+}
+
+final class PendingRenderCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+    func increment() { lock.lock(); value += 1; lock.unlock() }
+    var count: Int { lock.lock(); defer { lock.unlock() }; return value }
 }
 
 @MainActor

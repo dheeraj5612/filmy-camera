@@ -85,6 +85,11 @@ enum PhotoLibraryAuthorizationPolicy {
     static func canManageCollections(_ status: PHAuthorizationStatus) -> Bool {
         status == .authorized
     }
+
+    /// The user (or a profile) has refused access; a prompt cannot change it.
+    static func isRefused(_ status: PHAuthorizationStatus) -> Bool {
+        status == .denied || status == .restricted
+    }
 }
 
 struct PhotoLibraryImageRequestKey: Hashable, Sendable {

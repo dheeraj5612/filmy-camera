@@ -113,7 +113,7 @@ final class FilmyPhotoStoreTests: XCTestCase {
         XCTAssertTrue(files.fileExists(atPath: kept.path))
         XCTAssertFalse(files.fileExists(atPath: removed.path))
     }
-    private func createDocument(_ store: FilmyPhotoStore) async throws -> FilmyPhotoDocument {
+    private func createDocument(_ store: FilmyPhotoStore, owing: Bool = false) async throws -> FilmyPhotoDocument {
         var settings = ProCaptureSettings()
         settings.format = .jpeg
         settings.colorGamut = .sRGB
@@ -122,7 +122,8 @@ final class FilmyPhotoStoreTests: XCTestCase {
             geometry: FilmyRenderGeometry(viewportWidth: 4, viewportHeight: 3,
                                           previewWidth: 400, previewHeight: 300,
                                           grainSeed: 1, flashFired: false),
-            recipe: FilmRecipe.builtIns[0], finish: .photo, settings: settings
+            recipe: FilmRecipe.builtIns[0], finish: .photo, settings: settings,
+            owesPhotosExport: owing
         )
     }
     func testStaleSweepPromotesCompletePendingCaptureAndLeavesMismatchedOne() async throws {
@@ -293,6 +294,92 @@ final class FilmyPhotoStoreTests: XCTestCase {
         // The manifest has no receipt field, so older documents decode unchanged.
         let document = try await store.loadDocument(created.id)
         XCTAssertNil(document.photosAssetIdentifier)
+    }
+
+    func testCreateOwingPhotosExportWritesMarkerAndLinkClearsIt() async throws {
+        let location = root()
+        defer { try? FileManager.default.removeItem(at: location) }
+        let store = FilmyPhotoStore(root: location)
+        let document = try await createDocument(store, owing: true)
+        let marker = store.photosExportOwedURL(for: document.id)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: marker.path))
+        let isOwed = await store.isPhotosExportOwed(document.id)
+        let owed = await store.photosExportsOwed()
+        let owedIDs = await store.photosExportOwedIDs()
+        XCTAssertTrue(isOwed)
+        XCTAssertEqual(owed, [document.id])
+        XCTAssertEqual(owedIDs, [document.id])
+        try await store.linkPhotosAsset("A/L0/001", to: document.id)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
+        let afterLink = await store.photosExportsOwed()
+        XCTAssertTrue(afterLink.isEmpty)
+    }
+
+    func testCreateWithoutOwingAndLegacyDocumentsAreNeverOwed() async throws {
+        let location = root()
+        defer { try? FileManager.default.removeItem(at: location) }
+        let store = FilmyPhotoStore(root: location)
+        let plain = try await createDocument(store)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.photosExportOwedURL(for: plain.id).path))
+        // A record made before this change: a document with no marker at all.
+        let legacy = try await createDocument(store, owing: true)
+        store.clearPhotosExportOwed(legacy.id)
+        let owed = await store.photosExportsOwed()
+        let owedIDs = await store.photosExportOwedIDs()
+        let plainOwed = await store.isPhotosExportOwed(plain.id)
+        XCTAssertTrue(owed.isEmpty)
+        XCTAssertTrue(owedIDs.isEmpty)
+        XCTAssertFalse(plainOwed)
+    }
+
+    func testOwedReconcileDropsLinkedAndDeletedAndKeepsUnreadable() async throws {
+        let location = root()
+        defer { try? FileManager.default.removeItem(at: location) }
+        let files = FileManager.default
+        let store = FilmyPhotoStore(root: location)
+        let linked = try await createDocument(store, owing: true)
+        let deleted = try await createDocument(store, owing: true)
+        let corrupt = try await createDocument(store, owing: true)
+        let live = try await createDocument(store, owing: true)
+        // A manifest written by another path leaves the marker behind.
+        try await store.linkPhotosAsset("A/L0/002", to: linked.id)
+        try Data().write(to: store.photosExportOwedURL(for: linked.id))
+        try await store.delete(deleted.id)
+        try Data("not json".utf8).write(to: location.appendingPathComponent(corrupt.id.uuidString)
+            .appendingPathComponent("document.json"))
+        let owed = await store.photosExportsOwed()
+        XCTAssertEqual(owed, [live.id])
+        XCTAssertFalse(files.fileExists(atPath: store.photosExportOwedURL(for: linked.id).path))
+        XCTAssertFalse(files.fileExists(atPath: store.photosExportOwedURL(for: deleted.id).path))
+        XCTAssertTrue(files.fileExists(atPath: store.photosExportOwedURL(for: corrupt.id).path))
+    }
+
+    func testClearPhotosExportOwedIsSynchronousAndIdempotent() async throws {
+        let location = root()
+        defer { try? FileManager.default.removeItem(at: location) }
+        let store = FilmyPhotoStore(root: location)
+        let document = try await createDocument(store, owing: true)
+        store.clearPhotosExportOwed(document.id)
+        store.clearPhotosExportOwed(document.id)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.photosExportOwedURL(for: document.id).path))
+        let isOwed = await store.isPhotosExportOwed(document.id)
+        XCTAssertFalse(isOwed)
+        _ = try await store.loadDocument(document.id)
+    }
+
+    func testPromotedCompletePendingKeepsItsExportMarker() async throws {
+        let location = root()
+        defer { try? FileManager.default.removeItem(at: location) }
+        let files = FileManager.default
+        let store = FilmyPhotoStore(root: location)
+        let document = try await createDocument(store, owing: true)
+        let pending = location.appendingPathComponent(".\(document.id.uuidString).pending")
+        try files.moveItem(at: location.appendingPathComponent(document.id.uuidString), to: pending)
+        try files.setAttributes([.modificationDate: Date().addingTimeInterval(-7200)], ofItemAtPath: pending.path)
+        let owed = await store.photosExportsOwed()
+        XCTAssertEqual(owed, [document.id])
+        XCTAssertFalse(files.fileExists(atPath: pending.path))
+        XCTAssertTrue(files.fileExists(atPath: store.photosExportOwedURL(for: document.id).path))
     }
 
     func testFujiLibraryReportsUnreadableRecordsAndKeepsFiles() async throws {

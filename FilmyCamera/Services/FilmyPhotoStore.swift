@@ -108,6 +108,9 @@ actor FilmyPhotoStore {
         let image: CGImage
     }
 
+    /// Empty file in a document directory: the capture still owes a Photos export.
+    static let photosExportOwedMarkerName = "photos-export-owed"
+
     let root: URL
     private let files = FileManager.default
     private var exporting: Set<UUID> = []
@@ -127,7 +130,8 @@ actor FilmyPhotoStore {
         geometry: FilmyRenderGeometry,
         recipe: FilmRecipe,
         finish: PhotoFinish,
-        settings: ProCaptureSettings
+        settings: ProCaptureSettings,
+        owesPhotosExport: Bool = false
     ) throws -> FilmyPhotoDocument {
         guard !processed.isEmpty,
               let originalExtension = Self.imageExtension(processed),
@@ -175,6 +179,11 @@ actor FilmyPhotoStore {
                 revisions: [revision],
                 photosAssetIdentifier: nil
             )
+            if owesPhotosExport {
+                // Durable intent: written before the manifest, so a complete
+                // capture never lacks it. Linking the Photos asset clears it.
+                try write(Data(), to: stage.appendingPathComponent(Self.photosExportOwedMarkerName))
+            }
             try writeManifest(document, in: stage)
             try files.moveItem(at: stage, to: destination)
             return document
@@ -378,6 +387,66 @@ actor FilmyPhotoStore {
         var document = try loadDocument(id)
         document.photosAssetIdentifier = assetIdentifier
         try writeManifest(document, in: directory(id))
+        clearPhotosExportOwed(id)
+    }
+
+    nonisolated func photosExportOwedURL(for id: UUID) -> URL {
+        root.appendingPathComponent(id.uuidString, isDirectory: true)
+            .appendingPathComponent(Self.photosExportOwedMarkerName)
+    }
+
+    /// Synchronous and idempotent so the main actor can clear it without a Task hop.
+    nonisolated func clearPhotosExportOwed(_ id: UUID) {
+        try? FileManager.default.removeItem(at: photosExportOwedURL(for: id))
+    }
+
+    /// True while the marker exists and the document is readable and not yet linked.
+    func isPhotosExportOwed(_ id: UUID) -> Bool {
+        guard files.fileExists(atPath: photosExportOwedURL(for: id).path),
+              let document = try? loadDocument(id) else { return false }
+        return document.photosAssetIdentifier?.isEmpty ?? true
+    }
+
+    /// Documents that still owe a Photos export, oldest capture first. A linked
+    /// document has its stale marker cleared; an unreadable one is skipped and
+    /// keeps its marker.
+    func photosExportsOwed() -> [UUID] {
+        guard files.fileExists(atPath: root.path) else { return [] }
+        sweepStaleStaging()
+        guard let children = try? files.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: .skipsHiddenFiles
+        ) else { return [] }
+        var owed: [FilmyPhotoDocument] = []
+        for url in children {
+            guard let id = UUID(uuidString: url.lastPathComponent),
+                  files.fileExists(atPath: photosExportOwedURL(for: id).path),
+                  let document = try? loadDocument(id) else { continue }
+            if document.photosAssetIdentifier?.isEmpty ?? true {
+                owed.append(document)
+            } else {
+                clearPhotosExportOwed(id)
+            }
+        }
+        return owed.sorted { $0.capturedAt < $1.capturedAt }.map(\.id)
+    }
+
+    /// Marker presence only, no manifest reads.
+    func photosExportOwedIDs() -> Set<UUID> {
+        guard let children = try? files.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: nil,
+            options: .skipsHiddenFiles
+        ) else { return [] }
+        var ids: Set<UUID> = []
+        for url in children {
+            if let id = UUID(uuidString: url.lastPathComponent),
+               files.fileExists(atPath: photosExportOwedURL(for: id).path) {
+                ids.insert(id)
+            }
+        }
+        return ids
     }
 
     // MARK: Persistent original projects
