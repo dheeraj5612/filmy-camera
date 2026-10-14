@@ -257,4 +257,12 @@ final class CaptureModesPolicyTests: XCTestCase {
             XCTAssertFalse(CaptureModesPolicy.allowsModeInfo(phase: busy), busy.rawValue)
         }
     }
+
+    func testUnavailableSummaryNamesEachMissingMode() {
+        XCTAssertNil(CaptureModesPolicy.unavailableSummary([]))
+        XCTAssertEqual(CaptureModesPolicy.unavailableSummary([.portrait]),
+                       "Not on this device: Portrait needs a dual, triple or depth camera.")
+        XCTAssertEqual(CaptureModesPolicy.unavailableSummary([.macro, .portrait, .spatialVideo]),
+                       "Not on this device: Macro, Portrait, Spatial video. About this mode lists why.")
+    }
 }

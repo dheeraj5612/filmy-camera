@@ -13,6 +13,9 @@ struct CaptureModesScreen: View {
     @State private var showingReferencePicker = false
     @State private var showingFilmPicker = false
     @State private var showingModeInfo = false
+    @State private var showingReferenceTray = false
+    @State private var returnsFocusToReferenceChip = false
+    @AccessibilityFocusState private var referenceFocus: ReferenceFocus?
     @State private var adjusting: Adjuster?
     @State private var referenceItem: PhotosPickerItem?
     @State private var referenceImage: UIImage?
@@ -28,6 +31,7 @@ struct CaptureModesScreen: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private enum Adjuster { case zoom, exposure }
+    private enum ReferenceFocus: Hashable { case header, chip }
 
     init(camera: CameraService, recipe: FilmRecipe, recipes: [FilmRecipe], mode: CaptureMode, onClose: @escaping () -> Void) {
         self.camera = camera
@@ -127,9 +131,12 @@ struct CaptureModesScreen: View {
         VStack(spacing: 12) {
             sizedViewfinder(geometry)
             statusBlock
-            modePicker
-            essentials
-            referenceOptions
+            if showingReferenceTray {
+                referenceTray(geometry)
+            } else {
+                modePicker
+                essentials
+            }
         }
         .padding(.horizontal, 16)
         .padding(.top, 4)
@@ -149,7 +156,7 @@ struct CaptureModesScreen: View {
         VStack(alignment: .leading, spacing: 5) {
             Text(model.state.message).font(.subheadline)
             if let warning = model.state.warning { Text(warning).font(.caption).foregroundStyle(.orange) }
-            if let note = filmLookNote {
+            if let note = filmLookNote, !showingReferenceTray {
                 Text(note).font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("capture-modes-film-note")
             }
         }
@@ -199,6 +206,7 @@ struct CaptureModesScreen: View {
         }
         .buttonStyle(.plain)
         .disabled(backDisabled)
+        .opacity(backDisabled ? 0.5 : 1)
         .accessibilityLabel("Back")
         .accessibilityHint(releasedLegacyCamera ? "" : "Getting the camera ready")
         .accessibilityIdentifier("capture-modes-back")
@@ -213,6 +221,7 @@ struct CaptureModesScreen: View {
         }
         .buttonStyle(.plain)
         .disabled(capturesDisabled)
+        .opacity(capturesDisabled ? 0.5 : 1)
         .accessibilityIdentifier("open-mode-captures")
     }
 
@@ -322,19 +331,21 @@ struct CaptureModesScreen: View {
 
     @ViewBuilder private var unavailableModesNote: some View {
         let modes = unavailableModes
-        if !modes.isEmpty {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Not on this device").font(.footnote.weight(.semibold))
-                ForEach(modes) { mode in
-                    Text(CaptureModesPolicy.unavailableReason(for: mode) ?? "").font(.footnote)
-                }
-            }
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityElement(children: .combine)
-            .accessibilityIdentifier("capture-modes-unavailable-note")
+        if let summary = CaptureModesPolicy.unavailableSummary(modes) {
+            Text(summary)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityLabel(unavailableNoteLabel(modes))
+                .accessibilityIdentifier("capture-modes-unavailable-note")
         }
+    }
+
+    /// The summary is one line; VoiceOver still hears every reason.
+    private func unavailableNoteLabel(_ modes: [CaptureMode]) -> String {
+        let reasons: [String] = modes.compactMap { CaptureModesPolicy.unavailableReason(for: $0) }
+        return "Not on this device. " + reasons.joined(separator: " ")
     }
 
     private var essentialItems: [CaptureEssential] {
@@ -369,6 +380,15 @@ struct CaptureModesScreen: View {
 
     private func setAdjusting(_ value: Adjuster?) {
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { adjusting = value }
+    }
+
+    /// Opening swaps the mode chips and essentials for the tray; Reduce Motion swaps without animation.
+    private func setReferenceTray(_ open: Bool) {
+        if open { referenceFocus = nil } else { returnsFocusToReferenceChip = true }
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
+            if open { adjusting = nil }
+            showingReferenceTray = open
+        }
     }
 
     private var filmPickerButton: some View {
@@ -411,6 +431,7 @@ struct CaptureModesScreen: View {
         if items.contains(.zoom) { zoomChip(compact: compact) }
         if items.contains(.exposure) { exposureChip(compact: compact) }
         if items.contains(.microphone) { microphoneChip(compact: compact) }
+        referenceChip(compact: compact)
         aboutChip
     }
 
@@ -475,12 +496,54 @@ struct CaptureModesScreen: View {
         .accessibilityIdentifier("capture-modes-mic-chip")
     }
 
+    private func referenceChip(compact: Bool) -> some View {
+        let loaded = referenceImage != nil
+        return Button { setReferenceTray(true) } label: {
+            Group {
+                if compact { referenceIcon(loaded: loaded) } else { referenceTitle(loaded: loaded) }
+            }
+            .modifier(CaptureModesCapsuleStyle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Reference image")
+        .accessibilityValue(loaded ? "Loaded" : "None")
+        .accessibilityInputLabels(["Reference image", "Reference"])
+        .accessibilityHint("Opens the reference image tools")
+        .accessibilityFocused($referenceFocus, equals: .chip)
+        .onAppear {
+            guard returnsFocusToReferenceChip else { return }
+            returnsFocusToReferenceChip = false
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(100))
+                guard !showingReferenceTray else { return }
+                referenceFocus = .chip
+            }
+        }
+        .accessibilityIdentifier("capture-modes-reference-chip")
+    }
+
+    /// A loaded reference is shown by the badge shape, not by colour.
+    private func referenceTitle(loaded: Bool) -> some View {
+        HStack(spacing: 6) {
+            Label("Reference", systemImage: "square.on.square.dashed")
+            if loaded { Image(systemName: "checkmark.circle.fill") }
+        }
+    }
+
+    private func referenceIcon(loaded: Bool) -> some View {
+        Image(systemName: "square.on.square.dashed")
+            .overlay(alignment: .topTrailing) {
+                if loaded { Image(systemName: "checkmark.circle.fill").font(.caption2).offset(x: 9, y: -7) }
+            }
+    }
+
     private var aboutChip: some View {
         Button { showingModeInfo = true } label: {
             Image(systemName: "info.circle").modifier(CaptureModesCapsuleStyle())
         }
         .buttonStyle(.plain)
         .disabled(!CaptureModesPolicy.allowsModeInfo(phase: model.state.phase))
+        .opacity(CaptureModesPolicy.allowsModeInfo(phase: model.state.phase) ? 1 : 0.5)
         .accessibilityLabel("About this mode")
         .accessibilityIdentifier("capture-modes-about-open")
     }
@@ -529,39 +592,90 @@ struct CaptureModesScreen: View {
             unavailable: unavailableModes.compactMap { CaptureModesPolicy.unavailableReason(for: $0) })
     }
 
-    private var referenceOptions: some View {
-        DisclosureGroup("Reference image") {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Use an onion-skin overlay or compare side by side. Filmy uses the reference locally and never burns it into photos or movies.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Button(referenceImage == nil ? "Choose a reference" : "Replace reference") { showingReferencePicker = true }
-                    .disabled(!model.canConfigure || referenceBusy)
-                    .accessibilityIdentifier("choose-reference-image")
-                if referenceBusy {
-                    HStack { ProgressView(); Button("Cancel import") { cancelReference() } }
-                }
-                if referenceImage != nil {
-                    Toggle("Side-by-side comparison", isOn: $referenceSplit)
-                    Toggle("Mirror reference", isOn: $referenceMirror)
-                    if !referenceSplit {
-                        Text("Overlay opacity")
-                        Slider(value: $referenceOpacity, in: 0...1).accessibilityLabel("Reference opacity")
-                            .accessibilityValue("\(Int((referenceOpacity * 100).rounded())) percent")
-                        Text("Reference scale")
-                        Slider(value: $referenceScale, in: 0.5...2).accessibilityLabel("Reference scale")
-                            .accessibilityValue("\(Int((referenceScale * 100).rounded())) percent")
-                    }
-                    Button("Remove reference", role: .destructive) {
-                        cancelReference()
-                        do {
-                            let url = try CaptureReference.url()
-                            if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
-                            referenceImage = nil
-                        } catch { model.errorMessage = error.localizedDescription }
-                    }
-                }
-            }.padding(.top, 12)
-        }.tint(.white)
+    private func referenceTray(_ geometry: GeometryProxy) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            referenceTrayHeader
+            referenceTrayBody(geometry)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .opacity(model.state.controlsExpanded ? 0 : 1)
+        .allowsHitTesting(!model.state.controlsExpanded)
+        .accessibilityHidden(model.state.controlsExpanded)
+    }
+
+    private var referenceTrayHeader: some View {
+        HStack(spacing: 8) {
+            Text("Reference image")
+                .font(.headline)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityFocused($referenceFocus, equals: .header)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button { setReferenceTray(false) } label: {
+                Image(systemName: "checkmark").modifier(CaptureModesCapsuleStyle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Done with reference")
+            .accessibilityIdentifier("capture-modes-reference-done")
+        }
+        .onAppear {
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(100))
+                guard showingReferenceTray else { return }
+                referenceFocus = .header
+            }
+        }
+    }
+
+    /// Scrolls inside a capped height so the viewfinder keeps its floor; at accessibility sizes the page scrolls instead.
+    @ViewBuilder private func referenceTrayBody(_ geometry: GeometryProxy) -> some View {
+        if pageScrolls {
+            referenceControls
+        } else {
+            ScrollView {
+                referenceControls
+            }
+            .frame(maxHeight: geometry.size.height * 0.28)
+            .accessibilityIdentifier("capture-modes-reference-scroll")
+        }
+    }
+
+    private var referenceControls: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Use an onion-skin overlay or compare side by side. Filmy uses the reference locally and never burns it into photos or movies.")
+                .font(.caption).foregroundStyle(.secondary)
+            Button(referenceImage == nil ? "Choose a reference" : "Replace reference") { showingReferencePicker = true }
+                .disabled(!model.canConfigure || referenceBusy)
+                .accessibilityIdentifier("choose-reference-image")
+            if referenceBusy {
+                HStack { ProgressView(); Button("Cancel import") { cancelReference() } }
+            }
+            if referenceImage != nil { loadedReferenceControls }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .tint(.white)
+    }
+
+    @ViewBuilder private var loadedReferenceControls: some View {
+        Toggle("Side-by-side comparison", isOn: $referenceSplit)
+        Toggle("Mirror reference", isOn: $referenceMirror)
+        if !referenceSplit {
+            Text("Overlay opacity")
+            Slider(value: $referenceOpacity, in: 0...1).accessibilityLabel("Reference opacity")
+                .accessibilityValue("\(Int((referenceOpacity * 100).rounded())) percent")
+            Text("Reference scale")
+            Slider(value: $referenceScale, in: 0.5...2).accessibilityLabel("Reference scale")
+                .accessibilityValue("\(Int((referenceScale * 100).rounded())) percent")
+        }
+        Button("Remove reference", role: .destructive) { removeReference() }
+    }
+
+    private func removeReference() {
+        cancelReference()
+        do {
+            let url = try CaptureReference.url()
+            if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+            referenceImage = nil
+        } catch { model.errorMessage = error.localizedDescription }
     }
 
     private var stoppable: Bool {

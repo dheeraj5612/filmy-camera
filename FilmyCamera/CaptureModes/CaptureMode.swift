@@ -271,6 +271,15 @@ enum CaptureModesPolicy {
         }
     }
 
+    /// One line for the main screen: the reason when one mode is missing, the titles plus a pointer to About when several are.
+    static func unavailableSummary(_ modes: [CaptureMode]) -> String? {
+        let missing = modes.filter { unavailableReason(for: $0) != nil }
+        guard let first = missing.first else { return nil }
+        if missing.count == 1, let reason = unavailableReason(for: first) { return "Not on this device: " + reason }
+        let titles = missing.map(\.title).joined(separator: ", ")
+        return "Not on this device: " + titles + ". About this mode lists why."
+    }
+
     static func acceptableNightTranslation(x: Double, y: Double, width: Double, height: Double) -> Bool {
         [x, y, width, height].allSatisfy(\.isFinite) && width > 0 && height > 0
             && abs(x) <= width * 0.08 && abs(y) <= height * 0.08

@@ -104,9 +104,9 @@ final class SignalFrameUITests: XCTestCase {
         XCTAssertEqual(result, .completed, "Onboarding must apply Muted Color; found: \(menu.label)")
     }
 
-    private func revealInPage(_ control: XCUIElement, in app: XCUIApplication) {
+    private func revealInPage(_ control: XCUIElement, in app: XCUIApplication, scroll explicitScroll: XCUIElement? = nil) {
         let settingsScroll = app.scrollViews["settings-scroll"]
-        let scroll = settingsScroll.exists ? settingsScroll : app.scrollViews.firstMatch
+        let scroll = explicitScroll ?? (settingsScroll.exists ? settingsScroll : app.scrollViews.firstMatch)
         XCTAssertTrue(scroll.waitForExistence(timeout: 5))
         for _ in 0..<24 {
             let viewport = scroll.frame.intersection(app.frame).insetBy(dx: 0, dy: 8)
@@ -309,7 +309,7 @@ final class SignalFrameUITests: XCTestCase {
             XCTAssertTrue(app.buttons["capture-mode-\(mode)"].exists, mode)
         }
         XCTAssertTrue(app.buttons["open-mode-captures"].exists)
-        XCTAssertTrue(app.buttons["Back"].exists)
+        XCTAssertTrue(app.buttons["capture-modes-back"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["capture-modes-shutter"].exists)
         assertReachable(app.buttons["capture-mode-photo"], in: app)
 
@@ -325,6 +325,10 @@ final class SignalFrameUITests: XCTestCase {
 
         assertReachable(app.buttons["capture-modes-reopen-mode"], in: app)
         snapshot("capture-modes-no-camera")
+
+        checkEssentials(app)
+        checkReferenceTray(app)
+        checkMicrophoneChipInFilmVideo(app)
 
         // The film list is searchable and marks the current film.
         let open = openFilmPicker(app)
@@ -361,6 +365,12 @@ final class SignalFrameUITests: XCTestCase {
                       "The shutter must stay on screen at the largest text size")
         XCTAssertTrue(filmChip(in: app).exists)
         snapshot("capture-modes-no-camera-largest-text")
+        let pageScroll = app.scrollViews["capture-modes-scroll"]
+        XCTAssertTrue(pageScroll.exists, "The page must scroll when text is large")
+        let largestExposure = app.buttons["capture-modes-exposure-chip"]
+        revealInPage(largestExposure, in: app, scroll: pageScroll)
+        assertReachable(largestExposure, in: app)
+        snapshot("capture-modes-essentials-largest-text")
         openFilmPicker(app).tap()
         XCTAssertTrue(app.navigationBars["Choose film"].waitForExistence(timeout: 5))
         let done = app.buttons["capture-film-picker-done"]
@@ -374,9 +384,115 @@ final class SignalFrameUITests: XCTestCase {
     /// Returns the reachable film list button of the essentials row.
     private func openFilmPicker(_ app: XCUIApplication) -> XCUIElement {
         let open = app.buttons["capture-modes-film-picker-open"]
-        revealInPage(open, in: app)
+        revealInPage(open, in: app, scroll: app.scrollViews["capture-modes-scroll"])
         assertReachable(open, in: app)
         return open
+    }
+
+    /// The default-size essentials sit above the shutter without scrolling; adjusting swaps only the chip row.
+    private func checkEssentials(_ app: XCUIApplication) {
+        XCTAssertFalse(app.buttons["Camera and film"].exists, "The old section header is gone")
+        let shutter = app.descendants(matching: .any)["capture-modes-shutter"]
+        let film = app.buttons["capture-modes-film-picker-open"]
+        let exposure = app.buttons["capture-modes-exposure-chip"]
+        let about = app.buttons["capture-modes-about-open"]
+        for chip in [exposure, about] {
+            assertReachable(chip, in: app)
+            XCTAssertLessThanOrEqual(chip.frame.maxY, shutter.frame.minY, "\(chip.identifier) must sit above the shutter")
+        }
+        let filmFrame = film.frame
+        exposure.tap()
+        XCTAssertTrue(app.sliders["Exposure compensation"].waitForExistence(timeout: 5))
+        assertReachable(app.buttons["capture-modes-adjust-done"], in: app)
+        XCTAssertEqual(film.frame.minY, filmFrame.minY, accuracy: 0.5, "Adjusting must not move the film button")
+        XCTAssertEqual(film.frame.height, filmFrame.height, accuracy: 0.5, "Adjusting must not resize the film button")
+        snapshot("capture-modes-exposure-adjusting")
+        app.buttons["capture-modes-adjust-done"].tap()
+        XCTAssertTrue(exposure.waitForExistence(timeout: 5))
+        about.tap()
+        let note = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'On-screen controls remain available'")).firstMatch
+        XCTAssertTrue(note.waitForExistence(timeout: 5))
+        snapshot("capture-modes-about")
+        let aboutDone = app.buttons["capture-modes-about-done"]
+        XCTAssertTrue(aboutDone.waitForExistence(timeout: 5))
+        aboutDone.tap()
+        XCTAssertTrue(exposure.waitForExistence(timeout: 5))
+    }
+
+    /// The tray replaces the mode chips and keeps the viewfinder at its floor.
+    private func checkReferenceTray(_ app: XCUIApplication) {
+        let finder = app.otherElements["capture-modes-viewfinder"]
+        let chip = app.buttons["capture-modes-reference-chip"]
+        assertReachable(chip, in: app)
+        XCTAssertEqual(chip.label, "Reference image")
+        chip.tap()
+        XCTAssertTrue(app.buttons["choose-reference-image"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'never burns'")).firstMatch.exists)
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.buttons["capture-mode-photo"])
+        XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 5), .completed, "The tray replaces the mode chips")
+        XCTAssertTrue(app.buttons["capture-modes-back"].isHittable)
+        XCTAssertGreaterThanOrEqual(finder.frame.height, 200, "The viewfinder keeps its floor with the tray open")
+        snapshot("capture-modes-reference-tools")
+        let done = app.buttons["capture-modes-reference-done"]
+        assertReachable(done, in: app)
+        done.tap()
+        XCTAssertTrue(app.buttons["capture-mode-photo"].waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(finder.frame.height, 200)
+    }
+
+    /// Film video adds the microphone chip; every chip stays above the shutter. Returns to Photo afterwards.
+    private func checkMicrophoneChipInFilmVideo(_ app: XCUIApplication) {
+        selectCaptureMode("filmVideo", in: app)
+        let shutter = app.descendants(matching: .any)["capture-modes-shutter"]
+        let mic = app.buttons["capture-modes-mic-chip"]
+        XCTAssertTrue(mic.waitForExistence(timeout: 5))
+        XCTAssertEqual(mic.label, "Record microphone audio")
+        for id in ["capture-modes-mic-chip", "capture-modes-exposure-chip", "capture-modes-reference-chip", "capture-modes-about-open"] {
+            let chip = app.buttons[id]
+            assertReachable(chip, in: app)
+            XCTAssertLessThanOrEqual(chip.frame.maxY, shutter.frame.minY, "\(id) must sit above the shutter")
+        }
+        snapshot("capture-modes-video-essentials")
+        selectCaptureMode("photo", in: app)
+        let micGone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: mic)
+        XCTAssertEqual(XCTWaiter().wait(for: [micGone], timeout: 10), .completed, "Back in Photo the microphone chip is gone")
+        assertReachable(app.buttons["capture-mode-photo"], in: app)
+    }
+
+    /// Taps a mode chip, answers the system microphone prompt and the in-app alert a simulator can raise, and returns
+    /// once no alert has shown for two samples in a row and the chip is hittable. Retries the tap while it is disabled.
+    private func selectCaptureMode(_ mode: String, in app: XCUIApplication) {
+        let chip = app.buttons["capture-mode-\(mode)"]
+        XCTAssertTrue(chip.waitForExistence(timeout: 5), mode)
+        chip.tap()
+        var quietSamples = 0
+        var tappedAgain = false
+        let deadline = Date(timeIntervalSinceNow: 20)
+        while Date() < deadline {
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.25))
+            let prompt = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch
+            if prompt.exists {
+                if prompt.buttons["Allow"].exists { prompt.buttons["Allow"].tap() }
+                else if prompt.buttons["OK"].exists { prompt.buttons["OK"].tap() }
+                quietSamples = 0
+                continue
+            }
+            let alert = app.alerts["Capture modes"]
+            if alert.exists {
+                if alert.buttons["OK"].exists { alert.buttons["OK"].tap() }
+                quietSamples = 0
+                continue
+            }
+            if !chip.isSelected && chip.isEnabled && chip.isHittable && !tappedAgain {
+                chip.tap()
+                tappedAgain = true
+                quietSamples = 0
+                continue
+            }
+            quietSamples = chip.isHittable && chip.isSelected ? quietSamples + 1 : 0
+            if quietSamples >= 2 { return }
+        }
+        XCTFail("Capture mode \(mode) was not selected within 20 s")
     }
 
     /// The container's `capture-modes-viewfinder` identifier wins over the chip's own, so find the chip by its text.
