@@ -19,6 +19,15 @@ This is an implementation toward camera-feature parity, not a claim of complete 
 | Siri / scene assistance | App Shortcuts open photo/Night/video/macro, general mode intent, explicit on-device Vision OCR/barcodes/image labels, confirmation before opening HTTP(S) codes | No private Apple Visual Intelligence service, general LLM, silent capture, or automatic code execution |
 | Reference image | Bounded Photos Picker import, persistent onion-skin or split comparison, opacity/mirror/scale/replace/remove | Composition guide only, never burned into output. Filmy does not upload references; OS backup settings still apply |
 
+## Workspace layout
+
+- Top bar: **Back** (`capture-modes-back`) returns to the camera; **Captures** (`open-mode-captures`) opens the library. The navigation bar is hidden.
+- Mode chips (`capture-mode-<mode>`) sit under the viewfinder. Modes this device cannot run collapse into one line: "Not on this device: <reason>" for one mode, or "Not on this device: <titles>. About this mode lists why." for several.
+- The essentials sit above the shutter: the film picker button, then a chip row in this order: zoom (when the lens range is wider than one step), Exposure, microphone (video modes), Reference image, About this mode. Spatial video has no film, zoom or exposure control. Zoom and Exposure swap the chip row for an inline slider; the film button does not move.
+- **Reference image** replaces the mode chips and the essentials row with a tray: choose, onion-skin or split, opacity, mirror, scale, replace, remove. Done returns to the chips. The viewfinder keeps at least 200 pt while the tray is open.
+- At accessibility text sizes the page scrolls (`capture-modes-scroll`) and the shutter stays on screen.
+- **Captures** rows show a 64 pt thumbnail (the developed file, else the first original; frame 0 for movies), the mode, the date, file counts and one Photos status in words: In Photos, Partly in Photos (an interrupted export), or Not in Photos. At accessibility sizes the thumbnail stacks above the text. Detail share rows are numbered ("Share photo 1", "Share video 1", "Share original 1"), not named by file.
+
 ## Storage, privacy, and recovery
 
 `Application Support/FilmyCaptures/<UUID>/` contains original encoded captures, a recipe snapshot, a capture manifest, and developed output. Originals and metadata are saved before processing. Sequences allow only one photo in flight and have hard frame limits. Night and panorama materialize accumulators between frames instead of retaining an unbounded Core Image graph.
