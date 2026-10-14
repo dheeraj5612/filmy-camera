@@ -122,7 +122,25 @@ final class CaptureModesPolicyTests: XCTestCase {
         XCTAssertEqual(CaptureModesPolicy.filmLookNote(mode: .filmVideo, showingGuidance: false),
                        "Film look is added after you stop recording. Originals are kept.")
         XCTAssertNil(CaptureModesPolicy.filmLookNote(mode: .spatialVideo, showingGuidance: true))
-        XCTAssertNil(CaptureModesPolicy.filmLookNote(mode: .spatialVideo, showingGuidance: false))
+        XCTAssertEqual(CaptureModesPolicy.filmLookNote(mode: .spatialVideo, showingGuidance: false),
+                       "Spatial video is saved as shot. No film look is added.")
+    }
+
+    func testCapturesBadgeHidesZeroAndCapsAtNinetyNine() {
+        XCTAssertNil(CaptureModesPolicy.capturesBadge(count: 0))
+        XCTAssertNil(CaptureModesPolicy.capturesBadge(count: -1))
+        XCTAssertEqual(CaptureModesPolicy.capturesBadge(count: 1), "1")
+        XCTAssertEqual(CaptureModesPolicy.capturesBadge(count: 99), "99")
+        XCTAssertEqual(CaptureModesPolicy.capturesBadge(count: 100), "99+")
+        XCTAssertEqual(CaptureModesPolicy.capturesBadge(count: 5000), "99+")
+    }
+
+    func testProcessingMessageSaysSpatialVideoGetsNoFilmLook() {
+        XCTAssertEqual(CaptureModesPolicy.processingMessage(mode: .photo), "Developing Photo. Originals are safe.")
+        XCTAssertEqual(CaptureModesPolicy.processingMessage(mode: .filmVideo), "Rendering the film look. The original is safe.")
+        let spatial = CaptureModesPolicy.processingMessage(mode: .spatialVideo)
+        XCTAssertEqual(spatial, "Saving the spatial video as shot.")
+        XCTAssertFalse(spatial.contains("Rendering"))
     }
 
     func testFilmPickerListsOnlyMatchesWithTheCurrentFilmFirst() {
@@ -236,6 +254,7 @@ final class CaptureModesPolicyTests: XCTestCase {
 
     func testModeNotesKeepEveryCaption() {
         let video = "Up to three minutes per clip. Keep Filmy open while developing the film look."
+        let spatial = "Up to three minutes per clip. Keep Filmy open while the video is saved."
         let portrait = "Depth-based center-subject bokeh at f/4. The original depth-bearing HEIC is always retained."
         let supported = "Camera Control: shutter, zoom, exposure, mode, film, and focus where supported."
         let unsupported = "On-screen controls remain available without Camera Control hardware."
@@ -244,7 +263,7 @@ final class CaptureModesPolicyTests: XCTestCase {
         XCTAssertEqual(CaptureModesPolicy.modeNotes(requestedMode: .filmVideo, configuredMode: .filmVideo, controlsSupported: false),
                        [video, unsupported])
         XCTAssertEqual(CaptureModesPolicy.modeNotes(requestedMode: .spatialVideo, configuredMode: .spatialVideo, controlsSupported: true),
-                       [video, supported])
+                       [spatial, supported])
         XCTAssertEqual(CaptureModesPolicy.modeNotes(requestedMode: .portrait, configuredMode: .portrait, controlsSupported: true),
                        [portrait, supported])
     }

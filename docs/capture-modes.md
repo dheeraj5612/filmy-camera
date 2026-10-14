@@ -21,9 +21,9 @@ This is an implementation toward camera-feature parity, not a claim of complete 
 
 ## Workspace layout
 
-- Top bar: **Back** (`capture-modes-back`) returns to the camera; **Captures** (`open-mode-captures`) opens the library. The navigation bar is hidden.
+- Top bar: **Back** (`capture-modes-back`) returns to the camera; **Captures** (`open-mode-captures`) opens the library. The navigation bar is hidden. Captures shows how many captures the library holds, including ones still processing or failed (hidden at zero, capped at 99+; VoiceOver reads "Captures" and the exact count).
 - Mode chips (`capture-mode-<mode>`) sit under the viewfinder. Modes this device cannot run collapse into one line: `Not on this device: <reason>` for one mode, or `Not on this device: <titles>. About this mode lists why.` for several.
-- The essentials sit above the shutter: the film picker button, then a chip row in this order: zoom (when the lens range is wider than one step), Exposure, microphone (video modes), Reference image, About this mode. Spatial video has no film, zoom or exposure control. Zoom and Exposure swap the chip row for an inline slider; the film button does not move.
+- The essentials sit above the shutter: the film picker button, then a chip row in this order: zoom (when the lens range is wider than one step), Exposure, microphone (video modes), Reference image, About this mode. Spatial video has no film, zoom or exposure control; the line under the viewfinder says it is saved as shot with no film look, and its processing status reads "Saving the spatial video as shot." Zoom and Exposure swap the chip row for an inline slider; the film button does not move.
 - **Reference image** replaces the mode chips and the essentials row with a tray: choose, onion-skin or split, opacity, mirror, scale, replace, remove. Done returns to the chips. The viewfinder keeps at least 200 pt while the tray is open.
 - At accessibility text sizes the page scrolls (`capture-modes-scroll`) and the shutter stays on screen.
 - Left of the shutter, the last-capture slot (`capture-modes-last-capture`) shows the newest capture as a 56 pt thumbnail and opens it in Captures. While recording or capturing a sequence, the slot shows the clock or the frame count instead.

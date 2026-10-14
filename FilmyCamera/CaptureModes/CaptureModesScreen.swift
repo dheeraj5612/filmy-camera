@@ -177,11 +177,16 @@ struct CaptureModesScreen: View {
             HStack(spacing: 8) {
                 backButton
                 Spacer(minLength: 8)
-                capturesButton
+                capturesButton(showsCount: true)
+            }
+            HStack(spacing: 8) {
+                backButton
+                Spacer(minLength: 8)
+                capturesButton(showsCount: false)
             }
             VStack(alignment: .leading, spacing: 8) {
                 backButton
-                capturesButton
+                capturesButton(showsCount: false)
             }
         }
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
@@ -228,14 +233,29 @@ struct CaptureModesScreen: View {
         showingCaptures = true
     }
 
-    private var capturesButton: some View {
+    private func capturesButtonTitle(showsCount: Bool) -> some View {
+        HStack(spacing: 6) {
+            Text("Captures")
+            if showsCount, let badge = CaptureModesPolicy.capturesBadge(count: model.captures.count) {
+                Text(badge).monospacedDigit().foregroundStyle(FilmyTheme.secondary)
+            }
+        }
+    }
+
+    private func capturesButton(showsCount: Bool) -> some View {
         Button { model.refresh(); showingCaptures = true } label: {
-            Label("Captures", systemImage: "photo.on.rectangle")
-                .modifier(CaptureModesCapsuleStyle())
+            Label {
+                capturesButtonTitle(showsCount: showsCount)
+            } icon: {
+                Image(systemName: "photo.on.rectangle")
+            }
+            .modifier(CaptureModesCapsuleStyle())
         }
         .buttonStyle(.plain)
         .disabled(capturesDisabled)
         .opacity(capturesDisabled ? 0.5 : 1)
+        .accessibilityLabel("Captures")
+        .accessibilityValue(model.captures.isEmpty ? "" : "\(model.captures.count)")
         .accessibilityIdentifier("open-mode-captures")
     }
 

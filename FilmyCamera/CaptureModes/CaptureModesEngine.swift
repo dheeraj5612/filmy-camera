@@ -522,7 +522,7 @@ final class CaptureModesEngine: NSObject, @unchecked Sendable {
     private func process(_ record: CaptureMedia, using storedRecipe: FilmRecipe? = nil) {
         media = record
         state.phase = .processing
-        state.message = record.mode.isVideo ? "Rendering the film look. The original is safe." : "Developing \(record.mode.title). Originals are safe."
+        state.message = CaptureModesPolicy.processingMessage(mode: record.mode)
         publish()
         let snapshot = storedRecipe ?? recipe
         processing = Task.detached(priority: .userInitiated) { [weak self] in

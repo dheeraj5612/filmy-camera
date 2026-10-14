@@ -189,12 +189,27 @@ enum CaptureModesPolicy {
     }
 
     /// Line under the viewfinder. The preview is always optical: this says when the film look reaches the picture.
-    /// Nil for Spatial video (no film look) and while Film video shows its guidance, which already says it.
+    /// Nil while Film video or Spatial video shows its guidance, which already says it. Spatial video says it adds no film look.
     static func filmLookNote(mode: CaptureMode, showingGuidance: Bool) -> String? {
         switch mode {
-        case .spatialVideo: return nil
+        case .spatialVideo: return showingGuidance ? nil : "Spatial video is saved as shot. No film look is added."
         case .filmVideo: return showingGuidance ? nil : "Film look is added after you stop recording. Originals are kept."
         case .photo, .burst, .macro, .portrait, .night, .panorama: return "Film look is added after you shoot. Originals are kept."
+        }
+    }
+
+    /// The number on the Captures button: hidden at zero, capped at "99+" so the top bar keeps its width.
+    static func capturesBadge(count: Int) -> String? {
+        guard count > 0 else { return nil }
+        return count > 99 ? "99+" : "\(count)"
+    }
+
+    /// Status line while a finished capture is processed. Spatial video is stored as shot, so it never claims a film look.
+    static func processingMessage(mode: CaptureMode) -> String {
+        switch mode {
+        case .spatialVideo: return "Saving the spatial video as shot."
+        case .filmVideo: return "Rendering the film look. The original is safe."
+        case .photo, .burst, .macro, .portrait, .night, .panorama: return "Developing \(mode.title). Originals are safe."
         }
     }
 
@@ -242,7 +257,9 @@ enum CaptureModesPolicy {
     /// Captions for the About sheet, in display order: video length, portrait depth, Camera Control.
     static func modeNotes(requestedMode: CaptureMode, configuredMode: CaptureMode, controlsSupported: Bool) -> [String] {
         var notes: [String] = []
-        if requestedMode.isVideo {
+        if requestedMode == .spatialVideo {
+            notes.append("Up to three minutes per clip. Keep Filmy open while the video is saved.")
+        } else if requestedMode.isVideo {
             notes.append("Up to three minutes per clip. Keep Filmy open while developing the film look.")
         }
         if configuredMode == .portrait {
