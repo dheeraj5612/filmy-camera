@@ -516,11 +516,11 @@ final class NormalPhotoFlowTests: XCTestCase {
         } else {
             openRoll()
             newerFrames = try waitForRollFrameCount()
-            returnToCameraFromRoll()
         }
-        let importPhoto = app.buttons["import-photo"]
-        XCTAssertTrue(importPhoto.waitForExistence(timeout: 10))
-        importPhoto.tap()
+        if !app.buttons["roll-import-photo"].exists { app.buttons["roll-tab"].tap() }
+        let rollImport = app.buttons["roll-import-photo"]
+        XCTAssertTrue(rollImport.waitForExistence(timeout: 10))
+        rollImport.tap()
 
         let photos = app.images.matching(
             NSPredicate(format: "identifier == 'PXGGridLayout-Info'")

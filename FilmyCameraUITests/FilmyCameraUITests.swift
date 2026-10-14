@@ -208,7 +208,16 @@ final class FilmyCameraUITests: XCTestCase {
         attachScreenshot(named: "camera-portrait-live")
         #endif
         assertMinimumHitTarget(app.buttons["recipe-menu"], named: "Current look")
-        assertMinimumHitTarget(app.buttons["import-photo"], named: "Import photo")
+        let q = app.buttons["fuji-q-menu"]
+        assertMinimumHitTarget(q, named: "Q menu")
+        XCTAssertEqual(q.label, "Q menu, shooting settings")
+        let qStates = ["Standard", "Drive, bracket or bank active", "Multiple exposure in progress"]
+        XCTAssertTrue(qStates.contains(q.value as? String ?? ""), "Q reports its shooting state")
+        XCTAssertFalse(app.buttons["import-photo"].exists, "Import lives in Roll")
+        XCTAssertTrue(app.buttons["capture-setup-open"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["settings-tab"].waitForExistence(timeout: 8))
+        XCTAssertEqual(app.buttons["capture-setup-open"].frame.midY, q.frame.midY, accuracy: 2)
+        XCTAssertEqual(app.buttons["settings-tab"].frame.midY, q.frame.midY, accuracy: 2)
         XCTAssertTrue(app.buttons["roll-tab"].waitForExistence(timeout: 8))
         XCTAssertFalse(app.buttons["camera-tab"].exists, "The camera should have one control area")
         XCTAssertFalse(app.descendants(matching: .any)["recipe-picker"].exists)
@@ -683,8 +692,8 @@ final class FilmyCameraUITests: XCTestCase {
         }
         let currentLook = app.buttons["recipe-menu"]
         let roll = app.buttons["roll-tab"]
-        let importPhoto = app.buttons["import-photo"]
-        for (element, name) in [(currentLook, "Current look"), (roll, "Roll"), (importPhoto, "Import")] {
+        let settings = app.buttons["settings-tab"]
+        for (element, name) in [(currentLook, "Current look"), (roll, "Roll"), (settings, "Settings")] {
             let stable = waitForStableHittableFrame(element, timeout: 10, within: visibleWindow)
             if !stable {
                 let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
@@ -720,9 +729,11 @@ final class FilmyCameraUITests: XCTestCase {
     /// runs only against an explicitly provisioned library.
     func testPhysicalImportAppliesCurrentRecipeAndSaves() throws {
         try skipUnlessPhotosWritesAreAllowed()
-        let importPhoto = app.buttons["import-photo"]
-        assertMinimumHitTarget(importPhoto, named: "Import photo")
-        importPhoto.tap()
+        if !app.buttons["roll-import-photo"].exists { app.buttons["roll-tab"].tap() }
+        let rollImport = app.buttons["roll-import-photo"]
+        XCTAssertTrue(rollImport.waitForExistence(timeout: 10))
+        assertMinimumHitTarget(rollImport, named: "Roll import")
+        rollImport.tap()
 
         let firstPhoto = app.images.matching(
             NSPredicate(format: "identifier == 'PXGGridLayout-Info'")
@@ -1183,13 +1194,13 @@ final class FilmyCameraUITests: XCTestCase {
 
         let roll = accessibilityApp.buttons["roll-tab"]
         let currentLook = accessibilityApp.buttons["recipe-menu"]
-        let importPhoto = accessibilityApp.buttons["import-photo"]
-        for (element, name) in [(roll, "Roll"), (currentLook, "Current look"), (importPhoto, "Import")] {
+        let settingsButton = accessibilityApp.buttons["settings-tab"]
+        for (element, name) in [(roll, "Roll"), (currentLook, "Current look"), (settingsButton, "Settings")] {
             assertMinimumHitTarget(element, named: "Accessibility-size " + name)
             assertContained(element, in: accessibilityApp, named: name)
         }
         XCTAssertFalse(roll.frame.intersects(currentLook.frame))
-        XCTAssertFalse(currentLook.frame.intersects(importPhoto.frame))
+        XCTAssertFalse(currentLook.frame.intersects(settingsButton.frame))
         XCTAssertFalse(accessibilityApp.descendants(matching: .any)["recipe-picker"].exists)
         let accessibilityRail = accessibilityApp.descendants(matching: .any)["camera-utility-rail"]
         XCTAssertTrue(accessibilityRail.waitForExistence(timeout: 8))

@@ -840,7 +840,7 @@ struct CameraScreen: View {
         isCaptureLocked || isNavigationChromeDisabled
     }
 
-    /// Capture, save and recovery state. Settings, Roll and Import stay enabled
+    /// Capture, save and recovery state. Settings and Roll stay enabled
     /// while a capture is in flight so their tap can explain the wait.
     private var isCaptureLocked: Bool {
         viewModel.isCapturing || viewModel.isSaving || viewModel.hasPendingCapture
@@ -1532,17 +1532,6 @@ struct CameraScreen: View {
                     .fixedSize(horizontal: true, vertical: false)
                     .disabled(isCaptureLocked)
 
-                importButton
-
-                Spacer(minLength: 0)
-
-                ViewThatFits(in: .horizontal) {
-                    FilmyWordmark(compact: true)
-                        .accessibilityHidden(true)
-                    Color.clear.frame(width: 0, height: 0)
-                }
-                .layoutPriority(-1)
-
                 Spacer(minLength: 0)
 
                 fujiMenuButton
@@ -1885,6 +1874,9 @@ struct CameraScreen: View {
         .accessibilityIdentifier("settings-tab")
         .accessibilityLabel("Open camera settings")
         .accessibilityHint("Shows camera preferences")
+        .accessibilityShowsLargeContentViewer {
+            Label("Settings", systemImage: "gearshape.fill")
+        }
     }
 
     /// What the toggle reports: the rail is suppressed over a recovery placeholder.
@@ -2617,43 +2609,6 @@ struct CameraScreen: View {
         .accessibilityHint("Shows the frames you have kept")
     }
 
-    private var importButton: some View {
-        Button {
-            if viewModel.isCapturing || viewModel.isSaving {
-                onImportPhoto()
-                return
-            }
-            HapticFeedback.play(.selection)
-            closeControlDrawers()
-            onImportPhoto()
-        } label: {
-            ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.black.opacity(0.72))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(Color.white.opacity(0.14), lineWidth: 1)
-                    }
-
-                if isImporting {
-                    ProgressView()
-                        .tint(FilmyTheme.accent)
-                } else {
-                    Image(systemName: "photo.badge.plus")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(FilmyTheme.primary)
-                }
-            }
-            .frame(width: cameraHitTarget, height: cameraHitTarget)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.pressable)
-        .disabled(isImporting || isNavigationRecoveryLocked)
-        .accessibilityLabel(isImporting ? "Importing photo" : "Import photo")
-        .accessibilityHint("Choose a photo and apply the current film recipe")
-        .accessibilityIdentifier("import-photo")
-    }
-
     // MARK: - Tool strips
 
     private static let toolStripFadeWidth: CGFloat = 16
@@ -3147,11 +3102,33 @@ struct CameraScreen: View {
                 .foregroundStyle(shooting.needsCoordinator ? FilmyTheme.filmAccent : .white)
                 .frame(width: cameraHitTarget, height: cameraHitTarget)
                 .background { ChromeShapeBackground(shape: Circle()) }
+                .overlay(alignment: .bottom) { fujiMenuActiveDot }
                 .contentShape(Circle())
         }
         .buttonStyle(.pressable)
-        .accessibilityLabel("Open Q shooting menu")
+        .accessibilityLabel("Q menu, shooting settings")
+        .accessibilityValue(fujiMenuAccessibilityValue)
+        .accessibilityHint("Drive, bracketing, shooting banks and other quick controls")
+        .accessibilityInputLabels(["Q", "Q menu", "Shooting settings"])
+        .accessibilityShowsLargeContentViewer { Text("Q menu") }
         .accessibilityIdentifier("fuji-q-menu")
+    }
+
+    /// Non-colour cue that the Q menu holds an active drive, bracket, bank or multiple exposure.
+    @ViewBuilder
+    private var fujiMenuActiveDot: some View {
+        if shooting.needsCoordinator {
+            Circle()
+                .fill(FilmyTheme.filmAccent)
+                .frame(width: 5, height: 5)
+                .padding(.bottom, 5)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private var fujiMenuAccessibilityValue: String {
+        if shooting.isComposing { return "Multiple exposure in progress" }
+        return shooting.needsCoordinator ? "Drive, bracket or bank active" : "Standard"
     }
 
     private func closeControlDrawers() {
@@ -3694,6 +3671,9 @@ extension CameraScreen {
         .accessibilityLabel("Capture setup")
         .accessibilityValue("Timer \(captureDelay.title), \(captureAspect.title)")
         .accessibilityHint("Choose a timer, aspect ratio, grid, histogram, zebras, focus peaking, or level")
+        .accessibilityShowsLargeContentViewer {
+            Label("Capture setup", systemImage: captureDelay == .off ? "viewfinder" : "timer")
+        }
     }
     private var countdownOverlay: some View {
         ZStack {

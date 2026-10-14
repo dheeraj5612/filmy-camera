@@ -108,13 +108,12 @@ final class PhysicalReviewFlowTests: XCTestCase {
             "The saved camera frame must open in Roll detail"
         )
         app.buttons["Close frame"].tap()
-        XCTAssertTrue(app.buttons["roll-back-to-camera"].waitForExistence(timeout: 10))
-        app.buttons["roll-back-to-camera"].tap()
-        XCTAssertTrue(app.buttons["import-photo"].waitForExistence(timeout: 15))
 
         // Import one real library photo through the system picker. The picker is the
         // user's existing library; there is no fixture or synthetic image in this test.
-        app.buttons["import-photo"].tap()
+        let rollImport = app.buttons["roll-import-photo"]
+        XCTAssertTrue(rollImport.waitForExistence(timeout: 15))
+        rollImport.tap()
         let firstPhoto = app.images.matching(
             NSPredicate(format: "identifier == 'PXGGridLayout-Info'")
         ).firstMatch

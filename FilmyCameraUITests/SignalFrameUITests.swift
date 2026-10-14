@@ -46,9 +46,16 @@ final class SignalFrameUITests: XCTestCase {
         app.launch()
         defer { app.terminate() }
         XCTAssertTrue(app.buttons["recipe-menu"].waitForExistence(timeout: 15))
-        for id in ["recipe-menu", "camera-favorite-look", "import-photo", "camera-chrome-toggle"] {
+        for id in ["recipe-menu", "camera-favorite-look", "fuji-q-menu", "capture-setup-open", "settings-tab", "camera-chrome-toggle"] {
             assertReachable(app.buttons[id], in: app)
         }
+        XCTAssertFalse(app.buttons["import-photo"].exists)
+        XCTAssertEqual(
+            app.buttons["settings-tab"].frame.midY,
+            app.buttons["fuji-q-menu"].frame.midY,
+            accuracy: 2,
+            "Top bar stays one row at AX5"
+        )
         let modes = app.buttons["open-capture-modes"]
         XCTAssertTrue(modes.waitForExistence(timeout: 5))
         XCTAssertLessThanOrEqual(modes.frame.height, 52, "Capture modes bar stays one line")

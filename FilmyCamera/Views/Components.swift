@@ -651,6 +651,9 @@ struct FlashControl: View {
         // screen omits this control entirely for unsupported hardware.
         .disabled(availability == .unsupported)
         .opacity(isTemporarilyUnavailable ? 0.58 : 1)
+        .accessibilityShowsLargeContentViewer {
+            Label(mode.title, systemImage: mode.systemImageName)
+        }
         .accessibilityIdentifier("flash-control")
         .accessibilityLabel(isTemporarilyUnavailable ? "Flash temporarily unavailable" : "Flash")
         .accessibilityValue(mode.title)
@@ -1493,7 +1496,7 @@ struct PreviewPlaceholder: View {
                     Text(actionTitle == nil ? "Connecting camera" : "Camera unavailable")
                         .font(.title3.weight(.bold))
                         .foregroundStyle(FilmyTheme.primary)
-                    Text(message ?? "Allow camera access in Settings. You can still import a photo from the top bar.")
+                    Text(message ?? "Allow camera access in Settings. You can still import a photo from Roll.")
                         .font(.subheadline)
                         .foregroundStyle(FilmyTheme.secondary)
                         .multilineTextAlignment(.center)
