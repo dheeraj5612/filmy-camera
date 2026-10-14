@@ -455,12 +455,16 @@ final class PhysicalCaptureFeatureTests: XCTestCase {
     private func assertCaptureModeRow(_ title: String) throws {
         app.buttons["open-mode-captures"].tap()
         XCTAssertTrue(app.staticTexts["Filmy Captures"].waitForExistence(timeout: 10))
-        let row = app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", title)).firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 20), "Saved (title) capture must retain its mode record")
-        XCTAssertTrue(
-            app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'originals'" )).firstMatch.exists,
-            "Saved (title) capture must expose retained original sources"
-        )
+        // Scope to the list rows so the mode bar behind the sheet or the save
+        // toast cannot satisfy the query. A row may expose its texts as
+        // children or as one combined label on the cell, so check both.
+        func rowsContain(_ text: String) -> Bool {
+            let predicate = NSPredicate(format: "label CONTAINS[c] %@", text)
+            return app.cells.matching(predicate).firstMatch.exists
+                || app.cells.descendants(matching: .any).matching(predicate).firstMatch.exists
+        }
+        XCTAssertTrue(waitUntil(timeout: 20) { rowsContain(title) }, "Saved \(title) capture must retain its mode record")
+        XCTAssertTrue(rowsContain("originals"), "Saved \(title) capture must expose retained original sources")
         let done = app.buttons["Done"]
         XCTAssertTrue(done.exists)
         done.tap()

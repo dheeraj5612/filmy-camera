@@ -122,7 +122,7 @@ final class SignalFrameUITests: XCTestCase {
         let settingsScroll = app.scrollViews["settings-scroll"]
         let scroll = explicitScroll ?? (settingsScroll.exists ? settingsScroll : app.scrollViews.firstMatch)
         XCTAssertTrue(scroll.waitForExistence(timeout: 5))
-        for _ in 0..<24 {
+        for _ in 0..<32 {
             let viewport = scroll.frame.intersection(app.frame).insetBy(dx: 0, dy: 8)
             if control.exists && viewport.contains(control.frame) { return }
             let laidOut = control.exists && !control.frame.isEmpty && control.frame.height > 0
