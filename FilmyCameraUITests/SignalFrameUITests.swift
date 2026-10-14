@@ -49,6 +49,17 @@ final class SignalFrameUITests: XCTestCase {
         for id in ["recipe-menu", "camera-favorite-look", "import-photo", "camera-chrome-toggle"] {
             assertReachable(app.buttons[id], in: app)
         }
+        let modes = app.buttons["open-capture-modes"]
+        XCTAssertTrue(modes.waitForExistence(timeout: 5))
+        XCTAssertLessThanOrEqual(modes.frame.height, 52, "Capture modes bar stays one line")
+        #if targetEnvironment(simulator)
+        // The Sample pill only renders on the simulator.
+        let demo = app.staticTexts["camera-demo-label"]
+        let cameraCompare = app.buttons["camera-original-preview-toggle"]
+        XCTAssertTrue(cameraCompare.waitForExistence(timeout: 5), "Compare must be present in the viewfinder chrome")
+        XCTAssertTrue(demo.waitForExistence(timeout: 5), "Sample pill must be present on the simulator")
+        XCTAssertFalse(demo.frame.intersects(cameraCompare.frame), "Sample pill must not sit under Compare")
+        #endif
         snapshot("signal-frame-camera-largest-text")
         app.buttons["recipe-menu"].tap()
         for id in ["recipe-drawer-close", "camera-looks-favorites", "camera-looks-all"] {
@@ -59,8 +70,10 @@ final class SignalFrameUITests: XCTestCase {
 
         // Secondary destinations must honor the full text size, rather than
         // inheriting the camera shell's intentionally bounded chrome scale.
+        // The back pill is the one exception: it caps at AX2 with a Large Content Viewer.
         app.buttons["settings-tab"].tap()
         assertReachable(app.buttons["settings-back-to-camera"], in: app)
+        XCTAssertLessThanOrEqual(app.buttons["settings-back-to-camera"].frame.height, 60, "Back pill must stay one line at the largest text")
         let clearCache = app.buttons["clear-local-cache"]
         revealInPage(clearCache, in: app)
         XCTAssertGreaterThan(clearCache.frame.width, 180)

@@ -1564,6 +1564,13 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(capture.frame.width, 44)
         XCTAssertGreaterThanOrEqual(capture.frame.height, 44)
 
+        let demo = previewApp.staticTexts["camera-demo-label"]
+        let compare = previewApp.buttons["camera-original-preview-toggle"]
+        XCTAssertTrue(compare.waitForExistence(timeout: 5), "Compare must be present in the viewfinder chrome")
+        XCTAssertTrue(demo.waitForExistence(timeout: 5), "Sample pill must be present on the simulator")
+        XCTAssertEqual(demo.label, "Sample · not a live camera")
+        XCTAssertFalse(demo.frame.intersects(compare.frame), "Sample pill must not sit under Compare")
+
         let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         screenshot.name = "viewfinder-first-chrome-preview"
         screenshot.lifetime = .keepAlways

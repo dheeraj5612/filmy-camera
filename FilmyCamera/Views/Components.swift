@@ -188,6 +188,11 @@ struct BackToCameraButton: View {
             action()
         } label: {
             Label("Camera", systemImage: "chevron.left")
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                // The one exception to "secondary destinations honor the full
+                // text size": the back pill caps at AX2 and offers a Large Content Viewer.
+                .dynamicTypeSize(...DynamicTypeSize.accessibility2)
                 .font(.system(.subheadline, design: .rounded).weight(.bold))
                 .foregroundStyle(FilmyTheme.primary)
                 .padding(.horizontal, 12)
@@ -201,6 +206,9 @@ struct BackToCameraButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityShowsLargeContentViewer {
+            Label("Camera", systemImage: "chevron.left")
+        }
         .accessibilityLabel("Back to camera")
         .accessibilityHint("Returns to the main camera")
         .accessibilityIdentifier(accessibilityIdentifier)
@@ -215,8 +223,10 @@ struct CameraReturnBar: View {
     var body: some View {
         HStack {
             BackToCameraButton(accessibilityIdentifier: accessibilityIdentifier, action: action)
+                .layoutPriority(1)
             Spacer(minLength: 12)
             FilmyWordmark(compact: true)
+                .dynamicTypeSize(...DynamicTypeSize.accessibility2)
                 .accessibilityHidden(true)
         }
         .padding(.horizontal, FilmyTheme.pageMargin)
@@ -1426,6 +1436,23 @@ struct PreviewPlaceholder: View {
     var actionTitle: String?
     var action: (() -> Void)?
 
+    // One source for the spoken text: the short pill variant keeps this label.
+    private static let demoFullText = "Sample · not a live camera"
+
+    private func demoLabel(_ text: String) -> some View {
+        Label(text, systemImage: "photo")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(FilmyTheme.primary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.black, in: Capsule())
+            .accessibilityHidden(false)
+            .accessibilityLabel(Self.demoFullText)
+            .accessibilityIdentifier("camera-demo-label")
+    }
+
     var body: some View {
         GeometryReader { proxy in
             if isSimulator {
@@ -1433,15 +1460,13 @@ struct PreviewPlaceholder: View {
                     .frame(width: proxy.size.width, height: proxy.size.height)
                     .accessibilityHidden(true)
                     .overlay(alignment: .topLeading) {
-                        Label("Sample · not a live camera", systemImage: "photo")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(FilmyTheme.primary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Color.black, in: Capsule())
-                            .padding(12)
-                            .accessibilityHidden(false)
-                            .accessibilityIdentifier("camera-demo-label")
+                        // Leave room for the Compare control at top trailing.
+                        ViewThatFits(in: .horizontal) {
+                            demoLabel(Self.demoFullText)
+                            demoLabel("Sample")
+                        }
+                        .frame(maxWidth: max(0, proxy.size.width - 96), alignment: .leading)
+                        .padding(12)
                     }
             } else {
                 FilmyTheme.background
