@@ -2583,6 +2583,25 @@ final class FilmyCameraUITests: XCTestCase {
         }
         func openNDDetail(in target: XCUIApplication) -> Bool { openDetail("fuji-q-nd", in: target) }
 
+        // Fuji screens that mount without a camera, default text size.
+        guard openDetail("fuji-q-banks", in: app) else {
+            XCTFail("Q menu and its banks tile must be reachable: fuji-q-menu is always in the top bar and fuji-q-banks is in the default quick controls")
+            return
+        }
+        XCTAssertTrue(app.navigationBars["C1–C7 Shooting Banks"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Save a setup, then recall it in one tap."].exists)
+        XCTAssertEqual(app.buttons["fuji-hint-banks"].value as? String, "Collapsed")
+        assertMinimumHitTarget(app.buttons["fuji-bank-save-1"], named: "Save C1 on an empty bank")
+        XCTAssertFalse(app.buttons["fuji-bank-recall-1"].exists, "A fresh suite has no saved C1")
+        attachScreenshot(named: "fuji-banks-empty")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        // RAW library check (UX2-22) goes here.
+        let qHint = app.buttons["fuji-hint-q"]
+        XCTAssertTrue(swipeUntilHittable(qHint, in: app), "The Q footer hint must scroll into reach")
+        XCTAssertEqual(qHint.value as? String, "Collapsed")
+        attachScreenshot(named: "fuji-q-footer-hint")
+        app.buttons["Done"].tap()
+
         guard openNDDetail(in: app) else {
             XCTFail("Q menu and its ND tile must be reachable: fuji-q-menu is always in the top bar and fuji-q-nd is in the default quick controls")
             return
@@ -2595,6 +2614,17 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertTrue(waitUntil(timeout: 5) { use.value as? String == "In use" })
         XCTAssertEqual(use.value as? String, "In use")
         attachScreenshot(named: "fuji-use-drive-in-use")
+
+        let ndHint = app.buttons["fuji-hint-nd"]
+        XCTAssertTrue(swipeUntilHittable(ndHint, in: app))
+        assertMinimumHitTarget(ndHint, named: "More about Computational ND")
+        XCTAssertEqual(ndHint.label, "More about Computational ND")
+        XCTAssertEqual(ndHint.value as? String, "Collapsed")
+        XCTAssertFalse(app.staticTexts["fuji-hint-nd-text"].exists)
+        ndHint.tap()
+        XCTAssertTrue(waitUntil(timeout: 3) { ndHint.value as? String == "Expanded" })
+        XCTAssertTrue(app.staticTexts["fuji-hint-nd-text"].exists)
+        attachScreenshot(named: "fuji-hint-nd-expanded")
 
         #if !targetEnvironment(simulator)
         app.navigationBars.buttons.element(boundBy: 0).tap()
@@ -2653,5 +2683,33 @@ final class FilmyCameraUITests: XCTestCase {
         largeTextApp.navigationBars.buttons.element(boundBy: 0).tap()
         XCTAssertTrue(openDetail("fuji-q-focusStack", in: largeTextApp, menuIsOpen: true), "Focus stack detail must open")
         assertLongRow(label: "Use Focus Bracketing · separate files", shot: "fuji-use-row-focus-bracket-largest-text")
+        largeTextApp.navigationBars.buttons.element(boundBy: 0).tap()
+        // Reopen the Q menu so its scroll resets to the top; far-off lazy tiles may not be realized.
+        largeTextApp.buttons["Done"].tap()
+        XCTAssertTrue(openDetail("fuji-q-drive", in: largeTextApp), "Drive detail must open")
+        let driveHint = largeTextApp.buttons["fuji-hint-drive"]
+        XCTAssertTrue(swipeUntilHittable(driveHint, in: largeTextApp))
+        assertMinimumHitTarget(driveHint, named: "More about Drive at the largest text size")
+        driveHint.tap()
+        XCTAssertTrue(waitUntil(timeout: 3) { driveHint.value as? String == "Expanded" })
+        attachScreenshot(named: "fuji-hint-drive-expanded-largest-text")
+        largeTextApp.navigationBars.buttons.element(boundBy: 0).tap()
+        // Reopen the Q menu so its scroll resets to the top; far-off lazy tiles may not be realized.
+        largeTextApp.buttons["Done"].tap()
+        XCTAssertTrue(openDetail("fuji-q-banks", in: largeTextApp), "Banks must open")
+        let largeSave = largeTextApp.buttons["fuji-bank-save-1"]
+        XCTAssertTrue(swipeUntilHittable(largeSave, in: largeTextApp))
+        assertMinimumHitTarget(largeSave, named: "Save C1 at the largest text size")
+        XCTAssertLessThanOrEqual(largeSave.frame.maxX, largeTextApp.windows.firstMatch.frame.maxX)
+        largeSave.tap()
+        if largeTextApp.buttons["Replace bank"].waitForExistence(timeout: 2) { largeTextApp.buttons["Replace bank"].tap() }
+        let saved = largeTextApp.staticTexts["fuji-bank-saved-1"]
+        XCTAssertTrue(saved.waitForExistence(timeout: 5), "Saving C1 must confirm on screen")
+        XCTAssertEqual(saved.label, "Saved to C1")
+        XCTAssertTrue(saved.isHittable, "The confirmation appears in place, where the user tapped")
+        let recall = largeTextApp.buttons["fuji-bank-recall-1"]
+        XCTAssertTrue(swipeUntilHittable(recall, in: largeTextApp))
+        assertMinimumHitTarget(recall, named: "Recall C1 at the largest text size")
+        attachScreenshot(named: "fuji-banks-saved-largest-text")
     }
 }

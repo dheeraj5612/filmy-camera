@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct FujiQuickMenuView: View {
     @ObservedObject var controller: FujiShootingController
@@ -61,8 +62,9 @@ struct FujiQuickMenuView: View {
                         List(FujiQuickControl.allCases) { control in NavigationLink(control.title) { destination(control) } }
                             .navigationTitle("Shooting controls")
                     }.frame(minHeight: 44)
-                    Text("OVF-style, focus aids and temporal ND are digital interpretations. RAW, custom exposure and manual focus depend on the selected lens.")
-                        .font(.footnote).foregroundStyle(.secondary)
+                    FujiHint(short: "Some effects are approximations; support depends on the lens.",
+                             long: "OVF-style, focus aids and temporal ND are digital interpretations. RAW, custom exposure and manual focus depend on the selected lens.",
+                             topic: "the Q menu", identifier: "fuji-hint-q")
                 }
                 .padding(20).frame(maxWidth: 680).frame(maxWidth: .infinity)
             }
@@ -132,41 +134,66 @@ private struct FujiQEditor: View {
     }
 }
 
+/// One plain line always visible; the full explanation one tap away. Expansion is not stored.
+private struct FujiHint: View {
+    let short: String
+    let long: String
+    let topic: String
+    let identifier: String
+    @State private var expanded = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(short).font(.footnote).foregroundStyle(.secondary)
+            if isEnabled { toggle }
+            if expanded || !isEnabled {
+                Text(long).font(.footnote).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier(identifier + "-text")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var toggle: some View {
+        Button {
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) { expanded.toggle() }
+        } label: {
+            HStack(spacing: 6) {
+                Text("More about this")
+                Image(systemName: expanded ? "chevron.up" : "chevron.down").accessibilityHidden(true)
+            }
+            .font(.footnote.weight(.semibold))
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("More about \(topic)")
+        .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+        .accessibilityIdentifier(identifier)
+    }
+}
+
 private struct FujiBanksView: View {
     @ObservedObject var controller: FujiShootingController
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var names: [Int: String] = [:]
     @State private var pendingOverwrite: Int?
+    @State private var savedIndex: Int?
+
     var body: some View {
         Form {
             if let message = controller.errorMessage {
                 Section { Text(message).font(.footnote).foregroundStyle(.orange) }
             }
             Section {
-                Text("Each bank saves the complete recipe, shooting setup, device, manual controls, crop, framing, timer and finish. Recall does not automatically overwrite a bank.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                FujiHint(short: "Save a setup, then recall it in one tap.",
+                         long: "Each bank saves the complete recipe, shooting setup, device, manual controls, crop, framing, timer and finish. Recall does not automatically overwrite a bank.",
+                         topic: "banks", identifier: "fuji-hint-banks")
             }
-            ForEach(1...7, id: \.self) { index in
-                let bank = controller.preferences.banks.first { $0.id == index }
-                Section {
-                    TextField("Name", text: Binding(get: { names[index] ?? bank?.name ?? "Custom \(index)" },
-                                                    set: { names[index] = String($0.prefix(32)) }))
-                    if let bank {
-                        Text(bank.recipe.name).font(.footnote).foregroundStyle(.secondary)
-                        HStack {
-                            Button("Recall C\(index)") { controller.recallBank(bank) }
-                                .accessibilityIdentifier("fuji-bank-recall-\(index)")
-                            Spacer()
-                            if controller.preferences.selectedBank == index {
-                                Text(controller.bankIsDirty(bank) ? "Edited" : "Active").font(.caption.weight(.semibold))
-                            }
-                        }.frame(minHeight: 44)
-                    }
-                    Button(bank == nil ? "Save current setup" : "Replace with current setup") {
-                        if bank == nil { save(index) } else { pendingOverwrite = index }
-                    }
-                    .frame(minHeight: 44).accessibilityIdentifier("fuji-bank-save-\(index)")
-                } header: { Text("C\(index)") }
-            }
+            ForEach(1...7, id: \.self) { index in bankSection(index) }
         }
         .navigationTitle("C1–C7 Shooting Banks")
         .disabled(controller.settingsLocked)
@@ -176,8 +203,92 @@ private struct FujiBanksView: View {
             Button("Cancel", role: .cancel) { pendingOverwrite = nil }
         }
     }
+
+    private var rowLayout: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 12))
+    }
+
+    private func nameBinding(_ index: Int, _ bank: FujiShootingBank?) -> Binding<String> {
+        Binding<String>(get: { names[index] ?? bank?.name ?? "" },
+                        set: { names[index] = String($0.prefix(32)) })
+    }
+
+    @ViewBuilder private func bankSection(_ index: Int) -> some View {
+        let bank: FujiShootingBank? = controller.preferences.banks.first { $0.id == index }
+        if let bank {
+            savedSection(index, bank)
+        } else {
+            emptySection(index)
+        }
+    }
+
+    private func emptySection(_ index: Int) -> some View {
+        Section {
+            rowLayout {
+                Text("C\(index)").font(.headline.monospaced()).accessibilityAddTraits(.isHeader)
+                TextField("Name", text: nameBinding(index, nil), prompt: Text("Custom \(index)"))
+                    .accessibilityLabel("C\(index) name")
+                Button(action: { save(index) }, label: {
+                    Text("Save")
+                        .font(.body.weight(.semibold))
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
+                })
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Save current setup to C\(index)")
+                    .accessibilityInputLabels(["Save", "Save C\(index)"])
+                    .accessibilityIdentifier("fuji-bank-save-\(index)")
+            }
+        }
+    }
+
+    private func savedSection(_ index: Int, _ bank: FujiShootingBank) -> some View {
+        Section {
+            if savedIndex == index {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark").accessibilityHidden(true)
+                    Text("Saved to C\(index)").accessibilityIdentifier("fuji-bank-saved-\(index)")
+                }.font(.footnote)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text("C\(index)").font(.headline).accessibilityAddTraits(.isHeader)
+                Text(bank.recipe.name).font(.footnote).foregroundStyle(.secondary)
+            }
+            recallRow(index, bank)
+            TextField("Name", text: nameBinding(index, bank), prompt: Text("Custom \(index)"))
+                .accessibilityLabel("C\(index) name")
+            Button("Replace with current setup") { pendingOverwrite = index }
+                .frame(minHeight: 44)
+                .accessibilityLabel("Replace C\(index) with current setup")
+                .accessibilityIdentifier("fuji-bank-save-\(index)")
+        }
+    }
+
+    private func recallRow(_ index: Int, _ bank: FujiShootingBank) -> some View {
+        rowLayout {
+            Button("Recall C\(index)") { savedIndex = nil; controller.recallBank(bank) }
+                .buttonStyle(.filmySecondary)
+                .accessibilityIdentifier("fuji-bank-recall-\(index)")
+            if controller.preferences.selectedBank == index {
+                let dirty: Bool = controller.bankIsDirty(bank)
+                HStack(spacing: 4) {
+                    Image(systemName: dirty ? "pencil.circle" : "checkmark.circle.fill").accessibilityHidden(true)
+                    Text(dirty ? "Edited" : "Active")
+                }.font(.caption.weight(.semibold))
+            }
+        }
+    }
+
     private func save(_ index: Int) {
+        let before: Date? = controller.preferences.banks.first(where: { $0.id == index })?.savedAt
         controller.saveBank(index, name: names[index] ?? controller.preferences.banks.first(where: { $0.id == index })?.name ?? "Custom \(index)")
+        let after: Date? = controller.preferences.banks.first(where: { $0.id == index })?.savedAt
+        if after != nil && after != before {
+            savedIndex = index
+            UIAccessibility.post(notification: .announcement, argument: "Saved to C\(index)")
+        }
     }
 }
 
@@ -221,16 +332,18 @@ private struct FujiControlDetail: View {
             Section("Still-photo drive") {
                 Picker("Mode", selection: bind(\.drive)) { ForEach(FujiDrive.allCases) { Text($0.title).tag($0) } }
                 Stepper("Continuous frames: \(controller.settings.burstCount)", value: bind(\.burstCount), in: 2...20)
-                Text("Low targets at least 0.3 seconds between starts. High starts the next capture as soon as the camera and local storage are ready. Actual rate depends on the lens, RAW, light and device load. Flash is off for this shooting system.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                FujiHint(short: "Low and High set how quickly continuous frames follow.",
+                         long: "Low targets at least 0.3 seconds between starts. High starts the next capture as soon as the camera and local storage are ready. Actual rate depends on the lens, RAW, light and device load. Flash is off for this shooting system.",
+                         topic: "Drive", identifier: "fuji-hint-drive")
             }
         case .autoISO: autoISO
         case .dynamicRange:
             Section("Sensor highlight protection") {
                 Picker("Capture DR", selection: bind(\.dynamicRange)) { ForEach(FujiDynamicRange.allCases) { Text($0.title).tag($0) } }
                 Toggle("Keep RAW + developed JPEG", isOn: bind(\.captureRAW))
-                Text("DR200 captures one stop below the metered exposure; DR400 captures two stops below it. A retained RAW is developed with middle-gray compensation and a highlight shoulder. This is separate from a recipe's tone setting. Unsupported exposure ranges are rejected, not simulated on a JPEG.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                FujiHint(short: "DR200 and DR400 expose 1 or 2 stops darker to protect highlights.",
+                         long: "DR200 captures one stop below the metered exposure; DR400 captures two stops below it. A retained RAW is developed with middle-gray compensation and a highlight shoulder. This is separate from a recipe's tone setting. Unsupported exposure ranges are rejected, not simulated on a JPEG.",
+                         topic: "Capture DR", identifier: "fuji-hint-dynamicRange")
                 rawAvailability
             }
         case .teleconverter:
@@ -272,8 +385,9 @@ private struct FujiControlDetail: View {
                 Stepper("ND \(controller.settings.ndStops) · \(1 << controller.settings.ndStops) frames", value: bind(\.ndStops), in: 1...5)
                 Toggle("Keep component originals", isOn: bind(\.keepCompositeSources))
                 useDriveButton("Use Computational ND", .computationalND)
-                Text("Average 2–32 equal-exposure stills in linear light for moving-water and motion-trail effects. Output is bounded to 6 MP. Use a tripod. This is sampled temporal integration, not a physical ND filter: it cannot prevent clipping within a source exposure and gaps may break motion trails.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                FujiHint(short: "Blends 2–32 frames into one long-exposure look; use a tripod.",
+                         long: "Average 2–32 equal-exposure stills in linear light for moving-water and motion-trail effects. Output is bounded to 6 MP. Use a tripod. This is sampled temporal integration, not a physical ND filter: it cannot prevent clipping within a source exposure and gaps may break motion trails.",
+                         topic: "Computational ND", identifier: "fuji-hint-nd")
             }
         case .multipleExposure:
             Section("Layered capture") {
@@ -281,16 +395,18 @@ private struct FujiControlDetail: View {
                 Picker("Blend", selection: bind(\.blendMode)) { ForEach(FujiBlendMode.allCases) { Text($0.title).tag($0) } }
                 Toggle("Keep component originals", isOn: bind(\.keepCompositeSources))
                 useDriveButton("Use Multiple Exposure", .multipleExposure)
-                Text("Press the shutter for each layer. A translucent previous-layer guide helps you compose. Recipe, crop and blend are fixed from the first layer. The final composite is saved automatically at the chosen count; output is bounded to 6 MP.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                FujiHint(short: "Press once per layer; the photo saves after the last one.",
+                         long: "Press the shutter for each layer. A translucent previous-layer guide helps you compose. Recipe, crop and blend are fixed from the first layer. The final composite is saved automatically at the chosen count; output is bounded to 6 MP.",
+                         topic: "Multiple exposure", identifier: "fuji-hint-multipleExposure")
             }
         case .preShot:
             Section("Before the shutter") {
                 Picker("Buffer", selection: bind(\.preShotSeconds)) {
                     Text("Off").tag(0.0); Text("0.5 seconds").tag(0.5); Text("1 second").tag(1.0); Text("1.5 seconds").tag(1.5)
                 }
-                Text("Keeps up to 10 preview-resolution frames per second before the shutter, followed by the normal still. Buffered images are capped at 768 px and 32 MB total. Single-frame drive only, with RAW and DR protection off. Changing lens, framing or recipe clears the buffer. Backgrounding clears it too.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                FujiHint(short: "Keeps frames from just before you press.",
+                         long: "Keeps up to 10 preview-resolution frames per second before the shutter, followed by the normal still. Buffered images are capped at 768 px and 32 MB total. Single-frame drive only, with RAW and DR protection off. Changing lens, framing or recipe clears the buffer. Backgrounding clears it too.",
+                         topic: "Pre-shot", identifier: "fuji-hint-preShot")
                 Text("Ready: \(controller.bufferedCount) frames").font(.footnote.monospaced())
             }
         case .bracketing: bracketing
