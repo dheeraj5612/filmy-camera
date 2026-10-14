@@ -3,7 +3,7 @@
 ## Using the feature
 
 Frame the scene normally. The Smart looks pill in the camera's reserved status row always
-reads "Smart looks"; once two observations agree, a **Use <name>** button beside it offers the
+reads "Smart looks"; once two observations agree, a **Use `<name>`** button beside it offers the
 recommended look. Tap that button to apply it, or tap **Smart looks** to compare three
 alternatives on the same frozen viewfinder frame. The Style picker (Natural, Vivid, Cinema,
 B&W) chooses an aesthetic direction. **Show the original frame** compares all three against

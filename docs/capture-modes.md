@@ -22,11 +22,13 @@ This is an implementation toward camera-feature parity, not a claim of complete 
 ## Workspace layout
 
 - Top bar: **Back** (`capture-modes-back`) returns to the camera; **Captures** (`open-mode-captures`) opens the library. The navigation bar is hidden.
-- Mode chips (`capture-mode-<mode>`) sit under the viewfinder. Modes this device cannot run collapse into one line: "Not on this device: <reason>" for one mode, or "Not on this device: <titles>. About this mode lists why." for several.
+- Mode chips (`capture-mode-<mode>`) sit under the viewfinder. Modes this device cannot run collapse into one line: `Not on this device: <reason>` for one mode, or `Not on this device: <titles>. About this mode lists why.` for several.
 - The essentials sit above the shutter: the film picker button, then a chip row in this order: zoom (when the lens range is wider than one step), Exposure, microphone (video modes), Reference image, About this mode. Spatial video has no film, zoom or exposure control. Zoom and Exposure swap the chip row for an inline slider; the film button does not move.
 - **Reference image** replaces the mode chips and the essentials row with a tray: choose, onion-skin or split, opacity, mirror, scale, replace, remove. Done returns to the chips. The viewfinder keeps at least 200 pt while the tray is open.
 - At accessibility text sizes the page scrolls (`capture-modes-scroll`) and the shutter stays on screen.
-- **Captures** rows show a 64 pt thumbnail (the developed file, else the first original; frame 0 for movies), the mode, the date, file counts and one Photos status in words: In Photos, Partly in Photos (an interrupted export), or Not in Photos. At accessibility sizes the thumbnail stacks above the text. Detail share rows are numbered ("Share photo 1", "Share video 1", "Share original 1"), not named by file.
+- Left of the shutter, the last-capture slot (`capture-modes-last-capture`) shows the newest capture as a 56 pt thumbnail and opens it in Captures. While recording or capturing a sequence, the slot shows the clock or the frame count instead.
+- After a shot, a card over the bottom of the viewfinder (`capture-modes-saved-card`) says "Saved in Captures" and offers View (opens that capture), Export to Photos and Close. A new shot or a mode change clears it. Once the capture is exported, the card dismisses itself after 4 s, unless VoiceOver or Switch Control is running.
+- **Captures** rows show a 64 pt thumbnail (the developed file, else the first original; frame 0 for movies), the mode, the date, file counts and one Photos status in words: In Photos, Partly in Photos (an interrupted export), or Not in Photos. At accessibility sizes the thumbnail stacks above the text. Detail share rows are numbered ("Share photo 1", "Share video 1", "Share original 1"), not named by file. Rows open their detail by capture id, so the card and the last-capture slot can open Captures on one capture; a capture deleted meanwhile shows "Capture not found".
 
 ## Storage, privacy, and recovery
 
