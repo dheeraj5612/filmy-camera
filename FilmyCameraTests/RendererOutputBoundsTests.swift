@@ -1411,6 +1411,55 @@ final class RendererOutputBoundsTests: XCTestCase {
             0.001,
             "Combined finishing should match halation followed by grain"
         )
+
+        let halationOnlyPixels = renderFloatPixels(
+            FilmRenderer.render(source, recipe: halationOnly, quality: .photo),
+            extent: extent,
+            context: context
+        )
+        XCTAssertGreaterThan(
+            meanAbsoluteRGBDifference(combinedPixels, halationOnlyPixels),
+            0.0002,
+            "Grain must change pixels, otherwise the order check proves nothing"
+        )
+
+        let grained = FilmRenderer.render(source, recipe: grainOnly, quality: .photo, grainSeed: 91)
+        let swappedPixels = renderFloatPixels(
+            FilmRenderer.render(grained, recipe: halationOnly, quality: .photo),
+            extent: extent,
+            context: context
+        )
+        XCTAssertLessThan(
+            meanAbsoluteRGBDifference(combinedPixels, sequentialPixels),
+            meanAbsoluteRGBDifference(combinedPixels, swappedPixels),
+            "Combined finishing should be closer to halation-then-grain than to grain-then-halation"
+        )
+    }
+
+    func testProFramedSourceKeepsEdgesOpaqueWhenDownscaled() {
+        let extent = CGRect(x: 0, y: 0, width: 4200, height: 3150)
+        let image = CIImage(color: CIColor(red: 0.6, green: 0.5, blue: 0.4, alpha: 1)).cropped(to: extent)
+        let framed = ProPhotoOutput.framedSource(
+            image, viewportSize: CGSize(width: 524, height: 393), resolution: .mp12
+        )
+        XCTAssertLessThan(framed.extent.width, extent.width)
+        let context = CIContext(options: FilmRenderer.testContextOptions)
+        let width = Int(framed.extent.width)
+        let height = Int(framed.extent.height)
+        let pixels = renderFloatPixels(framed, extent: framed.extent, context: context)
+        let centre = pixel(pixels, width: width, x: width / 2, y: height / 2)
+        let edges = [
+            pixel(pixels, width: width, x: 0, y: height / 2),
+            pixel(pixels, width: width, x: width - 1, y: height / 2),
+            pixel(pixels, width: width, x: width / 2, y: 0),
+            pixel(pixels, width: width, x: width / 2, y: height - 1)
+        ]
+        for edge in edges {
+            XCTAssertEqual(edge[3], 1, accuracy: 0.002)
+            for channel in 0..<3 {
+                XCTAssertEqual(edge[channel], centre[channel], accuracy: 0.002)
+            }
+        }
     }
 
     func testGrainSeedChangesSpatialPatternWithoutChangingRecipe() {

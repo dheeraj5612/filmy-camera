@@ -1680,10 +1680,18 @@ public final class FilmRenderer {
 
         guard let downscale = CIFilter(name: "CILanczosScaleTransform") else { return image }
         let scale = sensorLongEdge / longEdge
-        downscale.setValue(image, forKey: kCIInputImageKey)
+        // Clamp so edge samples do not blend with the transparent area outside
+        // the extent, then crop the (infinite) result back to the scaled rect.
+        downscale.setValue(image.clampedToExtent(), forKey: kCIInputImageKey)
         downscale.setValue(scale, forKey: kCIInputScaleKey)
         downscale.setValue(1.0, forKey: kCIInputAspectRatioKey)
-        guard let downsized = downscale.outputImage else { return image }
+        guard let scaled = downscale.outputImage else { return image }
+        let downsized = scaled.cropped(to: CGRect(
+            x: extent.minX * scale,
+            y: extent.minY * scale,
+            width: extent.width * scale,
+            height: extent.height * scale
+        ))
 
         let normalized = downsized.transformed(by: CGAffineTransform(
             translationX: -downsized.extent.minX,

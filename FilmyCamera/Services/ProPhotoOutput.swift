@@ -84,7 +84,15 @@ enum ProPhotoOutput {
         let scale = PhotoResolutionPolicy.outputScale(
             sourcePixels: Double(input.extent.width * input.extent.height), resolution: resolution
         )
-        let sized = scale < 1 ? input.applyingFilter("CILanczosScaleTransform", parameters: [kCIInputScaleKey: scale, kCIInputAspectRatioKey: 1]) : input
+        let sized: CIImage
+        if scale < 1 {
+            // Clamp so the outer row and column do not blend with transparency.
+            let p: [String: Any] = [kCIInputScaleKey: scale, kCIInputAspectRatioKey: 1]
+            let scaledExtent = input.applyingFilter("CILanczosScaleTransform", parameters: p).extent
+            sized = input.clampedToExtent().applyingFilter("CILanczosScaleTransform", parameters: p).cropped(to: scaledExtent)
+        } else {
+            sized = input
+        }
         let proposed = viewportSize.width > 0 && viewportSize.height > 0
             ? CameraFrameLayout.aspectFillCrop(sourceExtent: sized.extent, targetSize: viewportSize).intersection(sized.extent)
             : sized.extent

@@ -43,6 +43,34 @@ final class OGiPhoneLookTests: XCTestCase {
         XCTAssertEqual(output.extent, extent)
     }
 
+    func testOGiPhoneDownscaleKeepsEdgesOpaque() throws {
+        let recipe = try recipe()
+        let context = CIContext(options: FilmRenderer.testContextOptions)
+        for size in [CGSize(width: 1858, height: 4032), CGSize(width: 3024, height: 4032)] {
+            let extent = CGRect(origin: .zero, size: size)
+            let input = CIImage(color: CIColor(red: 0.4, green: 0.5, blue: 0.6, alpha: 1)).cropped(to: extent)
+            let output = FilmRenderer.render(input, recipe: recipe, quality: .export)
+            XCTAssertEqual(output.extent, extent)
+            // Read small strips at each edge and one centre pixel, not the
+            // whole frame (a full RGBAf readback is ~195 MB at 12 MP).
+            let midX = (size.width / 2).rounded(.down)
+            let midY = (size.height / 2).rounded(.down)
+            let probes = [
+                CGRect(x: 0, y: midY, width: 3, height: 1),
+                CGRect(x: size.width - 3, y: midY, width: 3, height: 1),
+                CGRect(x: midX, y: 0, width: 1, height: 3),
+                CGRect(x: midX, y: size.height - 3, width: 1, height: 3),
+                CGRect(x: midX, y: midY, width: 1, height: 1)
+            ]
+            for probe in probes {
+                let pixels = try Self.pixels(output, extent: probe, context: context)
+                for index in stride(from: 3, to: pixels.count, by: 4) {
+                    XCTAssertEqual(pixels[index], 1, accuracy: 0.002, "Alpha must stay opaque at \(probe) for \(size)")
+                }
+            }
+        }
+    }
+
     func testOGiPhoneHasLowerHighFrequencyDetailThanNeutralRecipe() throws {
         let ogIPhone = try recipe()
         let neutral = FilmRecipe(id: "neutral-detail-control", name: "Neutral", subtitle: "Test control", filmBase: .standard)
