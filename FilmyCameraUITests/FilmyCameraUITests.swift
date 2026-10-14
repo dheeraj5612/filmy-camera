@@ -2515,7 +2515,7 @@ final class FilmyCameraUITests: XCTestCase {
     }
 
     func testFujiUseDriveShowsInUseFeedback() throws {
-        // Opens Q, then the ND detail. False when either is not reachable here.
+        // Opens Q, then the ND detail. False when either is not reachable; the callers fail the test then.
         // Lazy lists create rows only near the viewport, so an element may not exist until it is scrolled to.
         func swipeUntilHittable(_ element: XCUIElement, in target: XCUIApplication) -> Bool {
             func reached() -> Bool { element.exists && element.isHittable }
@@ -2548,7 +2548,10 @@ final class FilmyCameraUITests: XCTestCase {
         }
         func openNDDetail(in target: XCUIApplication) -> Bool { openDetail("fuji-q-nd", in: target) }
 
-        guard openNDDetail(in: app) else { throw XCTSkip("Q menu is not reachable in this environment") }
+        guard openNDDetail(in: app) else {
+            XCTFail("Q menu and its ND tile must be reachable: fuji-q-menu is always in the top bar and fuji-q-nd is in the default quick controls")
+            return
+        }
         let use = app.buttons["Use Computational ND"]
         XCTAssertTrue(swipeUntilHittable(use, in: app), "Use Computational ND must scroll into reach")
         XCTAssertNotEqual(use.value as? String, "In use")
@@ -2581,7 +2584,10 @@ final class FilmyCameraUITests: XCTestCase {
         largeTextApp.launch()
         defer { largeTextApp.terminate() }
 
-        guard openNDDetail(in: largeTextApp) else { throw XCTSkip("Q menu is not reachable at the largest text size") }
+        guard openNDDetail(in: largeTextApp) else {
+            XCTFail("Q menu and its ND tile must be reachable at the largest text size")
+            return
+        }
         let largeUse = largeTextApp.buttons["Use Computational ND"]
         XCTAssertTrue(swipeUntilHittable(largeUse, in: largeTextApp), "Use Computational ND must scroll into reach at the largest text size")
         // The first phase may have persisted the drive; make this phase independent of that.

@@ -1681,27 +1681,20 @@ public final class FilmRenderer {
         guard let downscale = CIFilter(name: "CILanczosScaleTransform") else { return image }
         let scale = sensorLongEdge / longEdge
         // Clamp so edge samples do not blend with the transparent area outside
-        // the extent, then crop the (infinite) result back to the scaled rect.
+        // the extent. Keep the chain infinite until one final crop: cropping
+        // to the fractional scaled rect (extent * scale) left a partial-alpha
+        // last row or column that a later clamp replicated. Lanczos scales
+        // about the origin, so p -> p * scale -> p is exact and needs no
+        // translations.
         downscale.setValue(image.clampedToExtent(), forKey: kCIInputImageKey)
         downscale.setValue(scale, forKey: kCIInputScaleKey)
         downscale.setValue(1.0, forKey: kCIInputAspectRatioKey)
         guard let scaled = downscale.outputImage else { return image }
-        let downsized = scaled.cropped(to: CGRect(
-            x: extent.minX * scale,
-            y: extent.minY * scale,
-            width: extent.width * scale,
-            height: extent.height * scale
-        ))
 
-        let normalized = downsized.transformed(by: CGAffineTransform(
-            translationX: -downsized.extent.minX,
-            y: -downsized.extent.minY
-        ))
         let upscale = 1 / scale
-        let upsized = normalized
+        let upsized = scaled
             .transformed(by: CGAffineTransform(scaleX: upscale, y: upscale))
-            .transformed(by: CGAffineTransform(translationX: extent.minX, y: extent.minY))
-        return upsized.clampedToExtent().cropped(to: extent)
+        return upsized.cropped(to: extent)
     }
 
     /// Low-amplitude colored sensor noise, stronger in shadows, on top of the
