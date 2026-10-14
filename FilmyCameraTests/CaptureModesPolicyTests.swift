@@ -359,4 +359,13 @@ final class CaptureModesPolicyTests: XCTestCase {
             XCTAssertFalse(status.text.contains("Roll"))
         }
     }
+
+    func testSceneActionPausesOnlyInBackground() {
+        XCTAssertEqual(CaptureModesPolicy.sceneAction(active: true, background: false, releasedLegacyCamera: true), .resume)
+        XCTAssertEqual(CaptureModesPolicy.sceneAction(active: true, background: false, releasedLegacyCamera: false), .keep)
+        XCTAssertEqual(CaptureModesPolicy.sceneAction(active: false, background: false, releasedLegacyCamera: true), .keep)
+        XCTAssertEqual(CaptureModesPolicy.sceneAction(active: false, background: false, releasedLegacyCamera: false), .keep)
+        XCTAssertEqual(CaptureModesPolicy.sceneAction(active: false, background: true, releasedLegacyCamera: true), .pause)
+        XCTAssertEqual(CaptureModesPolicy.sceneAction(active: false, background: true, releasedLegacyCamera: false), .pause)
+    }
 }

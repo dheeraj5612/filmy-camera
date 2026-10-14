@@ -94,4 +94,10 @@ for fallback in [0.0, 90, 180, 270] {
         angle += 7.5
     }
 }
+check(CaptureModesPolicy.sceneAction(active: true, background: false, releasedLegacyCamera: true) == .resume, "scene active resumes after camera release")
+check(CaptureModesPolicy.sceneAction(active: true, background: false, releasedLegacyCamera: false) == .keep, "scene active waits for camera release")
+check(CaptureModesPolicy.sceneAction(active: false, background: false, releasedLegacyCamera: true) == .keep, "scene inactive keeps the session")
+check(CaptureModesPolicy.sceneAction(active: false, background: false, releasedLegacyCamera: false) == .keep, "scene inactive before release keeps the session")
+check(CaptureModesPolicy.sceneAction(active: false, background: true, releasedLegacyCamera: true) == .pause, "scene background pauses")
+check(CaptureModesPolicy.sceneAction(active: false, background: true, releasedLegacyCamera: false) == .pause, "scene background pauses before release")
 print("PASS: \(assertions) capture policy assertions")

@@ -44,6 +44,8 @@ final class CaptureModesModel: ObservableObject {
     var canClose: Bool { !requestingPermission && !state.phase.isBusy && !exporting }
 
     func activate() {
+        guard !foreground else { return }
+        // Returning from an inactive phase that never paused must not reopen or reconfigure the session.
         foreground = true
         engine.setControlsAllowed(interactionAllowed)
         refresh()

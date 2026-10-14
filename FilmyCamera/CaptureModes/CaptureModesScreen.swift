@@ -94,18 +94,23 @@ struct CaptureModesScreen: View {
                 importReference(item)
             }
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active, releasedLegacyCamera {
+                let action: CaptureModesPolicy.SceneAction = CaptureModesPolicy.sceneAction(
+                    active: phase == .active, background: phase == .background, releasedLegacyCamera: releasedLegacyCamera)
+                switch action {
+                case .resume:
                     model.activate(); consumeLaunch()
                     updateIdleTimer(sceneActive: true)
-                } else if phase != .active {
+                case .pause:
                     UIApplication.shared.isIdleTimerDisabled = false
                     model.deactivate(); cancelReference()
+                case .keep:
+                    break
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in model.updateOrientation() }
             .onReceive(NotificationCenter.default.publisher(for: CaptureModesLaunch.notification)) { _ in consumeLaunch() }
             .onChange(of: model.state.phase) { old, phase in
-                updateIdleTimer(sceneActive: scenePhase == .active)
+                updateIdleTimer(sceneActive: scenePhase != .background)
                 if phase == .ready { consumeLaunch() }
                 announcePhase(from: old, to: phase)
             }

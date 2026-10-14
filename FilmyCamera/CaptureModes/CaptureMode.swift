@@ -183,6 +183,16 @@ enum CaptureModesPolicy {
         return (false, shown)
     }
 
+    enum SceneAction: Equatable, Sendable { case resume, pause, keep }
+
+    /// Capture Modes pauses only in the background. An inactive scene (Control Center,
+    /// a system alert, the app switcher) keeps the session, a recording and processing running.
+    static func sceneAction(active: Bool, background: Bool, releasedLegacyCamera: Bool) -> SceneAction {
+        if active && releasedLegacyCamera { return .resume }
+        if background { return .pause }
+        return .keep
+    }
+
     /// The shutter offers Stop only for work the user can end: a recording or a frame sequence, not the one-shot scene read.
     static func isStoppable(phase: CaptureModesPhase, scanning: Bool) -> Bool {
         phase == .recording || (phase == .capturing && !scanning)
