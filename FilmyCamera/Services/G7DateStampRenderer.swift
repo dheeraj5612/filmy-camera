@@ -2,6 +2,7 @@ import CoreGraphics
 import CoreImage
 import CoreText
 import Foundation
+import ImageIO
 
 /// Namespaced opt-in preference for the compact-camera date stamp. Off by default.
 enum G7DateStampPreferences {
@@ -35,6 +36,31 @@ enum G7DateStampRenderer {
         formatter.timeZone = timeZone
         formatter.dateFormat = dateFormat
         return formatter.string(from: date)
+    }
+
+    /// Stamps an image stored in sensor orientation so the mark lands in the
+    /// displayed bottom-right corner and reads upright. The extent is unchanged.
+    static func applyingStamp(
+        to image: CIImage, text: String?, enabled: Bool, orientation: CGImagePropertyOrientation
+    ) -> CIImage {
+        guard enabled, let text, !text.isEmpty else { return image }
+        let extent = image.extent
+        guard extent.origin.x.isFinite, extent.origin.y.isFinite,
+              extent.width.isFinite, extent.height.isFinite else { return image }
+        let zeroed = image.transformed(by: CGAffineTransform(translationX: -extent.minX, y: -extent.minY))
+        let display = zeroed.oriented(orientation)
+        let stamped = applyingStamp(to: display, text: text, enabled: true)
+        let inverse: CGImagePropertyOrientation
+        switch orientation {
+        case .left: inverse = .right
+        case .right: inverse = .left
+        default: inverse = orientation
+        }
+        let restored = stamped.oriented(inverse)
+        return restored.transformed(by: CGAffineTransform(
+            translationX: extent.minX - restored.extent.minX,
+            y: extent.minY - restored.extent.minY
+        ))
     }
 
     /// Composites a small overlay after framing and grading, so the mark stays

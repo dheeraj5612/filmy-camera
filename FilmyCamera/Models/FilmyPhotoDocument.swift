@@ -8,6 +8,8 @@ struct FilmyRenderGeometry: Codable, Equatable, Sendable {
     var previewHeight: Double
     var grainSeed: UInt32
     var flashFired: Bool
+    /// Date stamp text frozen at shutter; nil when the stamp was off. Additive: older records decode as nil.
+    var dateStampText: String? = nil
 }
 
 struct FilmyPhotoRevision: Codable, Identifiable, Sendable {

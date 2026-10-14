@@ -277,13 +277,17 @@ enum FilmyPhotosExporter {
                             stillSize: source.extent.size
                         )
                     )
+                    let finished = G7DateStampRenderer.applyingStamp(
+                        to: filtered, text: geometry.dateStampText,
+                        enabled: geometry.dateStampText != nil, orientation: orientation
+                    )
                     // Materialize in Filmy's working color space rather than
                     // relying on Photos' unspecified CIContext color policy.
                     let colorSpaceName = revision.output.colorGamut == .displayP3
                         ? CGColorSpace.displayP3 : CGColorSpace.sRGB
                     guard let colorSpace = CGColorSpace(name: colorSpaceName),
                           let rendered = ProPhotoOutput.context.createCGImage(
-                            filtered, from: filtered.extent, format: .RGBA8, colorSpace: colorSpace
+                            finished, from: finished.extent, format: .RGBA8, colorSpace: colorSpace
                           ) else {
                         error?.pointee = ExportError.writeFailed as NSError
                         return nil

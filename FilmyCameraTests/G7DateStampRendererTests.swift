@@ -77,6 +77,128 @@ final class G7DateStampRendererTests: XCTestCase {
         XCTAssertGreaterThan(topmostVisibleY, height / 2)
     }
 
+    // MARK: Sensor-orientation stamp (re-render from stored original)
+
+    private func sensorFixture(extent: CGRect = CGRect(x: 0, y: 0, width: 400, height: 300)) -> CIImage {
+        CIImage(color: CIColor(red: 0.1, green: 0.1, blue: 0.1, alpha: 1)).cropped(to: extent)
+    }
+
+    private func bitmap(_ image: CIImage) -> (width: Int, height: Int, bytes: [UInt8]) {
+        let extent = image.extent
+        let width = Int(extent.width)
+        let height = Int(extent.height)
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let context = CIContext(options: [.workingColorSpace: NSNull()])
+        bytes.withUnsafeMutableBytes { buffer in
+            context.render(
+                image, toBitmap: buffer.baseAddress!, rowBytes: width * 4,
+                bounds: extent, format: .RGBA8, colorSpace: CGColorSpaceCreateDeviceRGB()
+            )
+        }
+        return (width, height, bytes)
+    }
+
+    /// Counts orange pixels (top-left origin rows) inside a pixel rect.
+    private func orangeCount(_ pixels: (width: Int, height: Int, bytes: [UInt8]), in rect: CGRect) -> Int {
+        var count = 0
+        let x0 = max(0, Int(rect.minX)), x1 = min(pixels.width, Int(rect.maxX))
+        let y0 = max(0, Int(rect.minY)), y1 = min(pixels.height, Int(rect.maxY))
+        guard x0 < x1, y0 < y1 else { return 0 }
+        for y in y0..<y1 {
+            for x in x0..<x1 {
+                let index = (y * pixels.width + x) * 4
+                if pixels.bytes[index] > 150, pixels.bytes[index + 2] < 100 { count += 1 }
+            }
+        }
+        return count
+    }
+
+    func testSensorOrientedStampLandsInDisplayBottomRight() {
+        let image = sensorFixture()
+        let stamped = G7DateStampRenderer.applyingStamp(
+            to: image, text: "24.01.31", enabled: true, orientation: .right
+        )
+        XCTAssertEqual(stamped.extent, image.extent)
+        let display = bitmap(stamped.oriented(.right))
+        XCTAssertEqual(display.width, 300)
+        XCTAssertEqual(display.height, 400)
+        let w = CGFloat(display.width), h = CGFloat(display.height)
+        let size: CGFloat = 110
+        XCTAssertGreaterThan(orangeCount(display, in: CGRect(x: w - size, y: h - size, width: size, height: size)), 5)
+        XCTAssertEqual(orangeCount(display, in: CGRect(x: 0, y: 0, width: size, height: size)), 0)
+        XCTAssertEqual(orangeCount(display, in: CGRect(x: w - size, y: 0, width: size, height: size)), 0)
+        XCTAssertEqual(orangeCount(display, in: CGRect(x: 0, y: h - size, width: size, height: size)), 0)
+    }
+
+    func testSensorOrientedStampLandsInDisplayBottomRightForAllOrientations() {
+        let orientations: [CGImagePropertyOrientation] = [
+            .up, .upMirrored, .down, .downMirrored, .leftMirrored, .right, .rightMirrored, .left
+        ]
+        let size: CGFloat = 110
+        for orientation in orientations {
+            let image = sensorFixture()
+            let stamped = G7DateStampRenderer.applyingStamp(
+                to: image, text: "24.01.31", enabled: true, orientation: orientation
+            )
+            XCTAssertEqual(stamped.extent, image.extent, "orientation \(orientation.rawValue)")
+            let display = bitmap(stamped.oriented(orientation))
+            let w = CGFloat(display.width), h = CGFloat(display.height)
+            let corner = CGRect(x: w - size, y: h - size, width: size, height: size)
+            XCTAssertGreaterThan(orangeCount(display, in: corner), 5, "orientation \(orientation.rawValue)")
+            let others: [CGRect] = [
+                CGRect(x: 0, y: 0, width: size, height: size),
+                CGRect(x: w - size, y: 0, width: size, height: size),
+                CGRect(x: 0, y: h - size, width: size, height: size)
+            ]
+            for rect in others {
+                XCTAssertEqual(orangeCount(display, in: rect), 0, "orientation \(orientation.rawValue)")
+            }
+        }
+    }
+
+    func testSensorOrientedStampIsNoOpWhenDisabledOrEmpty() {
+        let image = sensorFixture(extent: CGRect(x: 5, y: 7, width: 400, height: 300))
+        let reference = bitmap(image)
+        let disabled = G7DateStampRenderer.applyingStamp(
+            to: image, text: "24.01.31", enabled: false, orientation: .right
+        )
+        let noText = G7DateStampRenderer.applyingStamp(
+            to: image, text: nil, enabled: true, orientation: .right
+        )
+        for result in [disabled, noText] {
+            XCTAssertEqual(result.extent, image.extent)
+            XCTAssertEqual(bitmap(result).bytes, reference.bytes)
+        }
+    }
+
+    func testSensorOrientedStampMatchesDisplayStampForUpOrientation() {
+        let image = sensorFixture()
+        let direct = bitmap(G7DateStampRenderer.applyingStamp(to: image, text: "24.01.31", enabled: true))
+        let viaOrientation = bitmap(G7DateStampRenderer.applyingStamp(
+            to: image, text: "24.01.31", enabled: true, orientation: .up
+        ))
+        XCTAssertEqual(viaOrientation.width, direct.width)
+        XCTAssertEqual(viaOrientation.height, direct.height)
+        let region = CGRect(x: 290, y: 190, width: 110, height: 110)
+        XCTAssertGreaterThan(orangeCount(viaOrientation, in: region), 5)
+        XCTAssertEqual(viaOrientation.bytes, direct.bytes)
+    }
+
+    func testRenderGeometryDateStampTextIsAdditiveAndRoundTrips() throws {
+        let legacy = """
+        {"viewportWidth":4,"viewportHeight":3,"previewWidth":4,"previewHeight":3,"grainSeed":1,"flashFired":false}
+        """
+        let decoded = try JSONDecoder().decode(FilmyRenderGeometry.self, from: Data(legacy.utf8))
+        XCTAssertNil(decoded.dateStampText)
+
+        var stamped = decoded
+        stamped.dateStampText = "26.10.14"
+        let data = try JSONEncoder().encode(stamped)
+        let back = try JSONDecoder().decode(FilmyRenderGeometry.self, from: data)
+        XCTAssertEqual(back.dateStampText, "26.10.14")
+        XCTAssertEqual(back, stamped)
+    }
+
     // MARK: Saved still path
 
     private struct DecodedPixels {

@@ -305,7 +305,9 @@ struct FilmyPhotoEditorView: View {
                         viewportSize: CGSize(width: document.geometry.viewportWidth, height: document.geometry.viewportHeight),
                         previewDrawableSize: CGSize(width: document.geometry.previewWidth, height: document.geometry.previewHeight),
                         capturedAt: document.capturedAt, flashFired: document.geometry.flashFired,
-                        grainSeed: document.geometry.grainSeed, finish: selectedFinish, outputSettings: output
+                        grainSeed: document.geometry.grainSeed, finish: selectedFinish, outputSettings: output,
+                        dateStampEnabled: document.geometry.dateStampText != nil,
+                        dateStampText: document.geometry.dateStampText
                     )
                 }
             }.value

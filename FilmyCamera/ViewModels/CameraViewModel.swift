@@ -871,7 +871,8 @@ final class CameraViewModel: ObservableObject {
                 liveMovieURL: work.photo.livePhotoMovieURL, capturedAt: work.photo.capturedAt,
                 geometry: .init(viewportWidth: work.viewport.width, viewportHeight: work.viewport.height,
                                 previewWidth: work.drawable.width, previewHeight: work.drawable.height,
-                                grainSeed: grainSeed, flashFired: work.photo.flashFired),
+                                grainSeed: grainSeed, flashFired: work.photo.flashFired,
+                                dateStampText: work.dateStampEnabled ? work.dateStampText : nil),
                 recipe: recipe, finish: finish, settings: work.photo.outputSettings
             )
             pendingOriginalRetention = nil
