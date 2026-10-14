@@ -517,7 +517,7 @@ struct CameraScreen: View {
         }
     }
 
-    private var shootingStateView: some View {
+    private var shootingSessionStateView: some View {
         smartRecipeLifecycleView
         .onChange(of: isShootingSessionActive, initial: true) { _, active in
             shooting.attach(camera: camera, viewModel: viewModel, active: active)
@@ -548,7 +548,7 @@ struct CameraScreen: View {
             if !visible { countdown.cancel() }
             updateCompositionAssists()
         }
-        .onChange(of: isCameraVisibleForAssists && !countdown.state.isActive, initial: true) { _, active in
+        .onChange(of: isSceneAutoViewfinderActive, initial: true) { _, active in
             camera.setSceneAutoViewfinderActive(active)
         }
         .onChange(of: countdown.state.remaining) { old, new in
@@ -557,6 +557,11 @@ struct CameraScreen: View {
             UIAccessibility.post(notification: .announcement, argument: message)
         }
         .onChange(of: captureAspect) { _, _ in countdown.cancel(); assists.stop(); shooting.invalidatePreview(); updateCompositionAssists() }
+    }
+
+    /// Continues `shootingSessionStateView`: one chain of every observer is too long for the Xcode 26 type checker.
+    private var shootingStateView: some View {
+        shootingSessionStateView
         .onChange(of: canTriggerShutter) { _, enabled in
             if !enabled {
                 isPinching = false
@@ -3700,6 +3705,9 @@ extension CameraScreen {
             && !isShowingManualControls && !isShowingCaptureSetup
             && !isShowingFujiMenu
             && !isShowingSmartRecipes
+    }
+    private var isSceneAutoViewfinderActive: Bool {
+        isCameraVisibleForAssists && !countdown.state.isActive
     }
     private var canTriggerShutter: Bool {
         isCameraVisibleForAssists && viewModel.reviewImage == nil && !viewModel.isSaving && !camera.manualControls.isApplying
