@@ -21,13 +21,7 @@ struct CaptureModesLibrary: View {
                     NavigationLink {
                         CaptureModesDetail(model: model, initial: capture, readOnly: readOnly)
                     } label: {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Label(capture.mode.title, systemImage: capture.mode.symbol).font(.headline)
-                            Text(capture.createdAt, format: .dateTime.month().day().hour().minute()).font(.caption)
-                            Text("\(capture.originals.count) originals · \(capture.outputs.count) developed · \(capture.recipeName)")
-                                .font(.caption).foregroundStyle(.secondary)
-                            if capture.status == .originalsOnly { Text(readOnly ? "Originals retained." : "Originals retained. Processing can be retried.").font(.caption).foregroundStyle(.orange) }
-                        }
+                        CaptureLibraryRow(capture: capture, readOnly: readOnly)
                     }
                 }
             }
@@ -75,8 +69,10 @@ private struct CaptureModesDetail: View {
                     }.accessibilityElement(children: .combine)
                 }
                 if outputs.isEmpty { Text("No developed file yet. Your originals below are still available.").foregroundStyle(.secondary) }
-                ForEach(outputs, id: \.self) { url in
-                    ShareLink(item: url) { Label(url.lastPathComponent, systemImage: "square.and.arrow.up") }
+                ForEach(Array(outputs.enumerated()), id: \.element) { index, url in
+                    ShareLink(item: url) {
+                        Label(CaptureModesPolicy.shareLabel(original: false, isVideo: media.mode.isVideo, index: index), systemImage: "square.and.arrow.up")
+                    }
                 }
                 Button(media.isExported ? "Exported to Photos" : "Export developed files to Photos") { model.export(media) }
                     .disabled(media.outputs.isEmpty || media.isExported || model.exporting || model.state.phase.isBusy)
@@ -90,8 +86,10 @@ private struct CaptureModesDetail: View {
                 }
             }
             Section("Untouched originals") {
-                ForEach(originals, id: \.self) { url in
-                    ShareLink(item: url) { Label(url.lastPathComponent, systemImage: "doc") }
+                ForEach(Array(originals.enumerated()), id: \.element) { index, url in
+                    ShareLink(item: url) {
+                        Label(CaptureModesPolicy.shareLabel(original: true, isVideo: media.mode.isVideo, index: index), systemImage: "doc")
+                    }
                 }
                 Text("Sharing the original HEIC or spatial movie preserves its encoded depth or stereo metadata. Third-party apps may not retain it.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -109,6 +107,7 @@ private struct CaptureModesDetail: View {
                     do {
                         let id = media.id
                         try await Task.detached(priority: .utility) { try CaptureMediaStore.delete(id) }.value
+                        CaptureThumbnailCache.evict(media)
                         deleted = true
                         model.refresh()
                         dismiss()
@@ -143,6 +142,126 @@ private struct CaptureModesDetail: View {
                 image = UIImage(cgImage: preview.image)
             }
         } catch { if !Task.isCancelled, !deleted { model.errorMessage = error.localizedDescription } }
+    }
+}
+
+/// Bounded in-memory thumbnails for the Captures list. 160 px maximum, 64 entries: a few MB at most.
+@MainActor enum CaptureThumbnailCache {
+    static let images: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.countLimit = 64
+        return cache
+    }()
+
+    static func key(_ id: UUID, _ name: String) -> String { "\(id.uuidString)/\(name)" }
+
+    /// Drops the entries a deleted capture could have produced (developed file first, else original).
+    static func evict(_ media: CaptureMedia) {
+        for name in [media.outputs.first, media.originals.first].compactMap({ $0 }) {
+            images.removeObject(forKey: key(media.id, name) as NSString)
+        }
+    }
+
+    /// Reads an existing file only: never creates a capture folder, so a deleted capture stays deleted.
+    nonisolated static func decode(id: UUID, name: String, isVideo: Bool) async throws -> CaptureReferencePreview {
+        let url = try CaptureMediaStore.root()
+            .appendingPathComponent(id.uuidString, isDirectory: true)
+            .appendingPathComponent(name)
+        guard FileManager.default.fileExists(atPath: url.path) else { throw CaptureModesError.invalidImage }
+        let cg: CGImage
+        if isVideo {
+            let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+            generator.appliesPreferredTrackTransform = true
+            generator.maximumSize = CGSize(width: 160, height: 160)
+            cg = try await generator.image(at: .zero).image
+        } else {
+            cg = try CaptureImageProcessor.thumbnail(url, maximum: 160)
+        }
+        // A delete may have removed the folder while decoding: do not hand back a result for it.
+        guard FileManager.default.fileExists(atPath: url.path) else { throw CaptureModesError.invalidImage }
+        return CaptureReferencePreview(image: cg, jpeg: Data())
+    }
+}
+
+/// Square thumbnail of a capture: the developed file when there is one, else the first original, else the mode symbol.
+struct CaptureThumbnail: View {
+    let capture: CaptureMedia
+    let side: CGFloat
+    @State private var image: UIImage?
+
+    private var fileName: String? {
+        CaptureModesPolicy.thumbnailFile(outputs: capture.outputs, originals: capture.originals)
+    }
+    private var cacheKey: String { CaptureThumbnailCache.key(capture.id, fileName ?? "") }
+
+    var body: some View {
+        ZStack {
+            Rectangle().fill(FilmyTheme.panel)
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                Image(systemName: capture.mode.symbol).font(.title3).foregroundStyle(FilmyTheme.secondary)
+            }
+        }
+        .frame(width: side, height: side)
+        .clipShape(RoundedRectangle(cornerRadius: FilmyTheme.controlRadius))
+        .accessibilityHidden(true)
+        .task(id: cacheKey) { await load() }
+    }
+
+    @MainActor private func load() async {
+        let key = cacheKey
+        if let cached = CaptureThumbnailCache.images.object(forKey: key as NSString) {
+            image = cached
+            return
+        }
+        image = nil
+        guard let name = fileName, !Task.isCancelled else { return }
+        let id = capture.id
+        let isVideo = capture.mode.isVideo
+        let preview: CaptureReferencePreview? = try? await Task.detached(priority: .utility) {
+            try await CaptureThumbnailCache.decode(id: id, name: name, isVideo: isVideo)
+        }.value
+        guard let preview else { return }
+        let decoded = UIImage(cgImage: preview.image)
+        CaptureThumbnailCache.images.setObject(decoded, forKey: key as NSString)
+        guard !Task.isCancelled else { return }
+        image = decoded
+    }
+}
+
+private struct CaptureLibraryRow: View {
+    let capture: CaptureMedia
+    let readOnly: Bool
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var layout: AnyLayout {
+        if dynamicTypeSize.isAccessibilitySize { return AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) }
+        return AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+    }
+
+    var body: some View {
+        layout {
+            CaptureThumbnail(capture: capture, side: 64)
+            textColumn
+        }
+    }
+
+    private var textColumn: some View {
+        let status = CaptureModesPolicy.photosStatus(capture)
+        return VStack(alignment: .leading, spacing: 5) {
+            Label(capture.mode.title, systemImage: capture.mode.symbol).font(.headline)
+            Text(capture.createdAt, format: .dateTime.month().day().hour().minute()).font(.caption)
+            Text("\(capture.originals.count) originals · \(capture.outputs.count) developed · \(capture.recipeName)")
+                .font(.caption).foregroundStyle(.secondary)
+            Label(status.text, systemImage: status.symbol).font(.caption)
+            if capture.status == .originalsOnly { originalsNote }
+        }
+    }
+
+    private var originalsNote: some View {
+        Text(readOnly ? "Originals retained." : "Originals retained. Processing can be retried.")
+            .font(.caption).foregroundStyle(.orange)
     }
 }
 

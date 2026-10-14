@@ -306,4 +306,24 @@ enum CaptureModesPolicy {
         !name.isEmpty && name != "." && name != ".." && !name.contains("/") && !name.contains("\\")
             && !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
     }
+
+    /// File a Captures thumbnail is read from: the first developed file, else the first original. Nil when none or unsafe.
+    static func thumbnailFile(outputs: [String], originals: [String]) -> String? {
+        guard let name = outputs.first ?? originals.first, isSafeFilename(name) else { return nil }
+        return name
+    }
+
+    /// Where the developed files are, always as words plus a symbol. Export persists one output at a time, so an
+    /// interrupted export is partly in Photos.
+    static func photosStatus(_ media: CaptureMedia) -> (text: String, symbol: String) {
+        if media.isExported { return ("In Photos", "checkmark.circle") }
+        if media.outputs.contains(where: { media.photosIdentifiers[$0] != nil }) { return ("Partly in Photos", "circle.lefthalf.filled") }
+        return ("Not in Photos", "iphone")
+    }
+
+    /// Share rows are numbered by kind, never named by file. `index` is zero-based.
+    static func shareLabel(original: Bool, isVideo: Bool, index: Int) -> String {
+        if original { return "Share original \(index + 1)" }
+        return isVideo ? "Share video \(index + 1)" : "Share photo \(index + 1)"
+    }
 }

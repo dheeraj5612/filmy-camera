@@ -265,4 +265,38 @@ final class CaptureModesPolicyTests: XCTestCase {
         XCTAssertEqual(CaptureModesPolicy.unavailableSummary([.macro, .portrait, .spatialVideo]),
                        "Not on this device: Macro, Portrait, Spatial video. About this mode lists why.")
     }
+
+    func testThumbnailFilePrefersDevelopedThenOriginalAndRejectsUnsafeNames() {
+        XCTAssertEqual(CaptureModesPolicy.thumbnailFile(outputs: ["d.jpg"], originals: ["o.heic"]), "d.jpg")
+        XCTAssertEqual(CaptureModesPolicy.thumbnailFile(outputs: [], originals: ["o.heic"]), "o.heic")
+        XCTAssertNil(CaptureModesPolicy.thumbnailFile(outputs: [], originals: []))
+        XCTAssertNil(CaptureModesPolicy.thumbnailFile(outputs: ["../x"], originals: ["o.heic"]))
+    }
+
+    func testPhotosStatusIsWordsNotColour() {
+        var media = CaptureMedia(id: UUID(), mode: .burst, createdAt: Date(), recipeName: "Test")
+        media.outputs = ["a.jpg", "b.jpg", "c.jpg"]
+        let none = CaptureModesPolicy.photosStatus(media)
+        XCTAssertEqual(none.text, "Not in Photos")
+        XCTAssertEqual(none.symbol, "iphone")
+        media.photosIdentifiers = ["a.jpg": "x"]
+        let partly = CaptureModesPolicy.photosStatus(media)
+        XCTAssertEqual(partly.text, "Partly in Photos")
+        XCTAssertEqual(partly.symbol, "circle.lefthalf.filled")
+        media.photosIdentifiers = ["a.jpg": "x", "b.jpg": "y", "c.jpg": "z"]
+        let all = CaptureModesPolicy.photosStatus(media)
+        XCTAssertEqual(all.text, "In Photos")
+        XCTAssertEqual(all.symbol, "checkmark.circle")
+        for status in [none, partly, all] {
+            XCTAssertFalse(status.text.isEmpty)
+            XCTAssertFalse(status.symbol.isEmpty)
+            XCTAssertFalse(status.text.localizedCaseInsensitiveContains("originals"))
+        }
+    }
+
+    func testShareLabelsAreNumberedByKindNotFileName() {
+        XCTAssertEqual(CaptureModesPolicy.shareLabel(original: false, isVideo: false, index: 0), "Share photo 1")
+        XCTAssertEqual(CaptureModesPolicy.shareLabel(original: false, isVideo: true, index: 1), "Share video 2")
+        XCTAssertEqual(CaptureModesPolicy.shareLabel(original: true, isVideo: false, index: 0), "Share original 1")
+    }
 }
