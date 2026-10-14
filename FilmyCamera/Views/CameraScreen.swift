@@ -327,6 +327,12 @@ struct CameraScreen: View {
     private var showFocusPeaking: Bool { membership.hasFullAccess && storedShowFocusPeaking }
     @AppStorage("showHorizonLevel") private var storedShowHorizonLevel = false
     private var showHorizonLevel: Bool { membership.hasFullAccess && storedShowHorizonLevel }
+    @AppStorage(PreviewAnalysisMath.Tuning.zebraLevelKey) private var zebraLevelRaw = PreviewZebraLevel.standard.rawValue
+    @AppStorage(PreviewAnalysisMath.Tuning.peakingColorKey) private var peakingColorRaw = PreviewPeakingColor.red.rawValue
+    @AppStorage(PreviewAnalysisMath.Tuning.peakingStrengthKey) private var peakingStrengthRaw = PreviewPeakingStrength.medium.rawValue
+    private var previewTuning: PreviewAnalysisMath.Tuning {
+        PreviewAnalysisMath.Tuning(zebraRaw: zebraLevelRaw, colorRaw: peakingColorRaw, strengthRaw: peakingStrengthRaw)
+    }
     @State private var recipeForDetail: FilmRecipe?
     @State private var isShowingTools: Bool
     @State private var isShowingManualControls = false
@@ -4386,7 +4392,7 @@ extension CameraScreen {
         return abs(Double(viewport.width / viewport.height) - ratio) < 0.015
     }
     private var assistOptions: CompositionAssistStore.Options {
-        .init(histogram: showHistogram, zebras: showZebras, peaking: showFocusPeaking, level: showHorizonLevel, digitalCrop: shooting.settings.previewCrop)
+        .init(histogram: showHistogram, zebras: showZebras, peaking: showFocusPeaking, level: showHorizonLevel, digitalCrop: shooting.settings.previewCrop, tuning: previewTuning)
     }
     private func updateCompositionAssists() {
         assists.configure(camera: camera, options: assistOptions, active: isCameraVisibleForAssists)
@@ -4492,6 +4498,9 @@ struct CaptureSetupView: View {
     @AppStorage("showZebras") private var zebras = false
     @AppStorage("showFocusPeaking") private var peaking = false
     @AppStorage("showHorizonLevel") private var level = false
+    @AppStorage(PreviewAnalysisMath.Tuning.zebraLevelKey) private var zebraLevelRaw = PreviewZebraLevel.standard.rawValue
+    @AppStorage(PreviewAnalysisMath.Tuning.peakingColorKey) private var peakingColorRaw = PreviewPeakingColor.red.rawValue
+    @AppStorage(PreviewAnalysisMath.Tuning.peakingStrengthKey) private var peakingStrengthRaw = PreviewPeakingStrength.medium.rawValue
     @AppStorage(HistogramPlacement.horizontalPreferenceKey) private var histogramPositionX = 0.0
     @AppStorage(HistogramPlacement.verticalPreferenceKey) private var histogramPositionY = 0.0
 
@@ -4529,9 +4538,22 @@ struct CaptureSetupView: View {
                         .accessibilityIdentifier("capture-histogram-reset")
                     }
                     Toggle("Highlight zebras", isOn: $zebras).accessibilityIdentifier("capture-zebras-toggle")
+                    if zebras {
+                        Picker("Zebra warning", selection: $zebraLevelRaw) {
+                            ForEach(PreviewZebraLevel.allCases) { Text($0.title).tag($0.rawValue) }
+                        }.accessibilityIdentifier("capture-zebra-level")
+                    }
                     Toggle("Focus peaking", isOn: $peaking).accessibilityIdentifier("capture-peaking-toggle")
+                    if peaking {
+                        Picker("Edge color", selection: $peakingColorRaw) {
+                            ForEach(PreviewPeakingColor.allCases) { Text($0.title).tag($0.rawValue) }
+                        }.accessibilityIdentifier("capture-peaking-color")
+                        Picker("Sensitivity", selection: $peakingStrengthRaw) {
+                            ForEach(PreviewPeakingStrength.allCases) { Text($0.title).tag($0.rawValue) }
+                        }.accessibilityIdentifier("capture-peaking-strength")
+                    }
                 } header: { Text("Live preview aids") } footer: {
-                    Text("Analyzes the unfiltered camera preview, not RAW sensor data or the finished look. Red edges indicate local contrast, not guaranteed focus. All guides are preview-only and never appear in saved photos. Updates are limited to four per second.")
+                    Text("Analyzes the unfiltered camera preview, not RAW sensor data or the finished look. Peaking edges mark local contrast, not guaranteed focus. The Highlights percentage always counts near-white pixels at the Standard level. All guides are preview-only and never appear in saved photos. Updates are limited to four per second.")
                 }
                 Section {
                     Text("Use supported volume or Camera Control shutter events while the camera is active. These are disabled during review, imports, countdowns, and setup. Camera Control focus/zoom customization is not included.")
@@ -4593,6 +4615,17 @@ private struct CompositionAssistOverlay: View {
     @AppStorage(HistogramPlacement.horizontalPreferenceKey) private var histogramPositionX = 0.0
     @AppStorage(HistogramPlacement.verticalPreferenceKey) private var histogramPositionY = 0.0
     @GestureState private var dragTranslation = CGSize.zero
+    @State private var isLevelLatched = false
+
+    private func updateLevelLatch(_ degrees: Double?, hadReading: Bool) {
+        let wasLevel: Bool = isLevelLatched
+        let nowLevel: Bool = PreviewAnalysisMath.isLevel(degrees: degrees, wasLevel: wasLevel)
+        if nowLevel == wasLevel { return }
+        isLevelLatched = nowLevel
+        // The first reading after the level restarts (nil -> value) is not a
+        // crossing, so returning to a level camera stays silent.
+        if nowLevel && hadReading && showLevel { HapticFeedback.play(.selection) }
+    }
 
     private var savedPosition: CGPoint {
         HistogramPlacement.sanitized(CGPoint(x: histogramPositionX, y: histogramPositionY))
@@ -4607,14 +4640,21 @@ private struct CompositionAssistOverlay: View {
             if showLevel, let degrees = store.horizon {
                 HStack(spacing: 6) {
                     Rectangle().frame(width: 26, height: 2)
-                    Text(abs(degrees) < 1 ? "Level" : String(format: "%+.0f°", degrees))
+                    Text(isLevelLatched ? "Level" : String(format: "%+.0f°", degrees))
                         .font(.caption.monospacedDigit().weight(.semibold))
                     Rectangle().frame(width: 26, height: 2)
                 }
-                .foregroundStyle(abs(degrees) < 1 ? FilmyTheme.accent : .white)
+                .foregroundStyle(isLevelLatched ? FilmyTheme.accent : .white)
                 .padding(8).background(.black.opacity(0.55), in: Capsule())
                 .accessibilityLabel("Horizon \(String(format: "%.0f", degrees)) degrees")
+                .accessibilityValue(isLevelLatched ? "Level" : "Tilted")
             }
+        }
+        .onAppear {
+            isLevelLatched = PreviewAnalysisMath.isLevel(degrees: store.horizon, wasLevel: false)
+        }
+        .onChange(of: store.horizon) { oldValue, newValue in
+            updateLevelLatch(newValue, hadReading: oldValue != nil)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Zebras and the level must never consume tap-to-focus or pinch zoom.

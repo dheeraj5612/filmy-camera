@@ -52,6 +52,9 @@ struct SettingsView: View {
     @AppStorage("showHistogram") private var showHistogram = false
     @AppStorage("showZebras") private var showZebras = false
     @AppStorage("showFocusPeaking") private var showFocusPeaking = false
+    @AppStorage(PreviewAnalysisMath.Tuning.zebraLevelKey) private var zebraLevelRaw = PreviewZebraLevel.standard.rawValue
+    @AppStorage(PreviewAnalysisMath.Tuning.peakingColorKey) private var peakingColorRaw = PreviewPeakingColor.red.rawValue
+    @AppStorage(PreviewAnalysisMath.Tuning.peakingStrengthKey) private var peakingStrengthRaw = PreviewPeakingStrength.medium.rawValue
     @AppStorage("showHorizonLevel") private var showHorizonLevel = false
     @AppStorage(HistogramPlacement.horizontalPreferenceKey) private var histogramPositionX = 0.0
     @AppStorage(HistogramPlacement.verticalPreferenceKey) private var histogramPositionY = 0.0
@@ -994,6 +997,9 @@ struct SettingsView: View {
         showHistogram = false
         showZebras = false
         showFocusPeaking = false
+        zebraLevelRaw = PreviewZebraLevel.standard.rawValue
+        peakingColorRaw = PreviewPeakingColor.red.rawValue
+        peakingStrengthRaw = PreviewPeakingStrength.medium.rawValue
         showHorizonLevel = false
         histogramPositionX = 0
         histogramPositionY = 0

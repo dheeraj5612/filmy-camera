@@ -121,7 +121,7 @@ The deterministic suite does not inject every PhotoKit service-level interleavin
 `RecipeLibraryTests` and `RecipeLibraryPersistenceTests` belong to the unit lane;
 `RecipeLibraryUITests` belongs to e2e and the iPhone/iPad screenshot workflow.
 `RecipeControlEffectTests` includes source-camera MG-axis polarity across all
-render qualities. The catalog acceptance workflow requires 186 passed cases,
+render qualities. The catalog acceptance workflow requires 190 passed cases,
 including two cases that enumerate all 595 sourced looks and 20 camera foundations
 in addition to the 142 per-look cases (36 legacy plus 106 original ids). Counted tests and counted recipes
 are deliberately different. See `docs/recipe-library-and-fidelity.md`.

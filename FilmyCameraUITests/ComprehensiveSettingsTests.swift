@@ -120,6 +120,9 @@ final class ComprehensiveSettingsTests: XCTestCase {
         choose("capture-delay-picker", "5s", app)
         choose("capture-aspect-picker", "3:2", app)
         choose("capture-guide-picker", "Golden ratio", app)
+        choose("capture-zebra-level", "Early", app)
+        choose("capture-peaking-color", "Yellow", app)
+        choose("capture-peaking-strength", "High", app)
         closeSetup(app)
         app.terminate()
         app.launch()
@@ -129,6 +132,9 @@ final class ComprehensiveSettingsTests: XCTestCase {
         assertChoice(reveal(app.descendants(matching: .any)["capture-delay-picker"], app), "5s")
         assertChoice(reveal(app.descendants(matching: .any)["capture-aspect-picker"], app), "3:2")
         assertChoice(reveal(app.descendants(matching: .any)["capture-guide-picker"], app), "Golden ratio")
+        assertChoice(reveal(app.descendants(matching: .any)["capture-zebra-level"], app), "Early")
+        assertChoice(reveal(app.descendants(matching: .any)["capture-peaking-color"], app), "Yellow")
+        assertChoice(reveal(app.descendants(matching: .any)["capture-peaking-strength"], app), "High")
         for id in toggles { XCTAssertEqual(reveal(app.switches[id], app).value as? String, "1", id) }
         attach("every-capture-option-restored")
         closeSetup(app)
@@ -168,6 +174,10 @@ final class ComprehensiveSettingsTests: XCTestCase {
         choose("capture-aspect-picker", "3:2", app)
         choose("capture-finish-picker", "Instant Print", app)
         setToggle(reveal(app.switches["capture-zebras-toggle"], app), "1")
+        setToggle(reveal(app.switches["capture-peaking-toggle"], app), "1")
+        choose("capture-zebra-level", "Early", app)
+        choose("capture-peaking-color", "Yellow", app)
+        choose("capture-peaking-strength", "High", app)
         closeSetup(app)
         app.buttons["settings-tab"].tap()
         setToggle(reveal(app.switches["Framing grid"], app), "0")
@@ -191,6 +201,16 @@ final class ComprehensiveSettingsTests: XCTestCase {
         assertChoice(reveal(app.descendants(matching: .any)["capture-aspect-picker"], app), "Fit screen")
         assertChoice(reveal(app.descendants(matching: .any)["capture-finish-picker"], app), "Photo")
         XCTAssertEqual(reveal(app.switches["capture-zebras-toggle"], app).value as? String, "0")
+        XCTAssertEqual(reveal(app.switches["capture-peaking-toggle"], app).value as? String, "0")
+        // The tuning pickers are hidden while their toggle is off: re-enable,
+        // assert the restored defaults, then turn both aids off again.
+        setToggle(reveal(app.switches["capture-zebras-toggle"], app), "1")
+        setToggle(reveal(app.switches["capture-peaking-toggle"], app), "1")
+        assertChoice(reveal(app.descendants(matching: .any)["capture-zebra-level"], app), "Standard")
+        assertChoice(reveal(app.descendants(matching: .any)["capture-peaking-color"], app), "Red")
+        assertChoice(reveal(app.descendants(matching: .any)["capture-peaking-strength"], app), "Medium")
+        setToggle(reveal(app.switches["capture-zebras-toggle"], app), "0")
+        setToggle(reveal(app.switches["capture-peaking-toggle"], app), "0")
         closeSetup(app)
     }
 

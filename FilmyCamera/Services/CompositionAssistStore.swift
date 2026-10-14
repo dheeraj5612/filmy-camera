@@ -63,6 +63,7 @@ final class CompositionAssistStore: ObservableObject {
         var peaking = false
         var level = false
         var digitalCrop: Double = 1
+        var tuning: PreviewAnalysisMath.Tuning = .standard
         var usesFrames: Bool { histogram || zebras || peaking }
     }
     private struct Output: @unchecked Sendable {
@@ -148,7 +149,8 @@ final class CompositionAssistStore: ObservableObject {
                                           bounds: bounds, format: .RGBA8, colorSpace: colorSpace)
         guard !Task.isCancelled,
               let result = PreviewAnalysisMath.analyze(rgba: rgba, width: width, height: height,
-                                                       zebras: options.zebras, peaking: options.peaking) else { return nil }
+                                                       zebras: options.zebras, peaking: options.peaking,
+                                                       tuning: options.tuning) else { return nil }
         var overlay: CGImage?
         if options.zebras || options.peaking {
             let mask = CIImage(bitmapData: Data(result.overlayRGBA), bytesPerRow: width * 4,
