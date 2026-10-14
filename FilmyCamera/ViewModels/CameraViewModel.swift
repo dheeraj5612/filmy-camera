@@ -276,17 +276,27 @@ final class CameraViewModel: ObservableObject {
 
     private let defaults: UserDefaults
 
+    /// Set while the observer below assigns a corrected value, so that write
+    /// never re-enters it. Some toolchains re-run a property-wrapped
+    /// property's observer for assignments made inside it.
+    private var isRevertingRecipeSelection = false
+
     @Published var selectedRecipeID: String {
         didSet {
+            guard !isRevertingRecipeSelection else { return }
             guard selectedRecipeID != oldValue else { return }
             guard MembershipStore.shared.allowsRecipe(selectedRecipeID) else {
                 let requestedID = selectedRecipeID
+                isRevertingRecipeSelection = true
                 selectedRecipeID = oldValue
+                isRevertingRecipeSelection = false
                 _ = MembershipStore.shared.requireRecipe(requestedID)
                 return
             }
             guard Self.validRecipeIDs.contains(selectedRecipeID) else {
+                isRevertingRecipeSelection = true
                 selectedRecipeID = Self.fallbackRecipeID
+                isRevertingRecipeSelection = false
                 defaults.set(Self.fallbackRecipeID, forKey: Self.selectedRecipeIDKey)
                 return
             }
