@@ -668,12 +668,14 @@ final class RendererPerformanceTests: XCTestCase {
         }
 
         func start(scene: CIImage, recipe: FilmRecipe) {
+            // CIImage is not Sendable; the app's immutable-graph box carries it.
+            let frame = FujiImage(image: scene)
             group.enter()
             DispatchQueue.global(qos: .utility).async { [self] in
                 while !isStopped {
                     autoreleasepool {
-                        let out = FilmRenderer.render(scene, recipe: recipe, quality: .preview)
-                        _ = FilmRenderer.outputCGImage(out, from: scene.extent)
+                        let out = FilmRenderer.render(frame.image, recipe: recipe, quality: .preview)
+                        _ = FilmRenderer.outputCGImage(out, from: frame.image.extent)
                     }
                 }
                 group.leave()
