@@ -127,6 +127,18 @@ private struct ViewfinderChromeHeightKey: PreferenceKey {
     }
 }
 
+private enum SavedFrameAnchor: Hashable, Sendable { case viewfinder, rollThumbnail }
+
+private struct SavedFrameAnchorKey: PreferenceKey {
+    // Computed: Anchor is not guaranteed Sendable, and a stored static would trip Swift 6.
+    static var defaultValue: [SavedFrameAnchor: Anchor<CGRect>] { [:] }
+
+    static func reduce(value: inout [SavedFrameAnchor: Anchor<CGRect>],
+                       nextValue: () -> [SavedFrameAnchor: Anchor<CGRect>]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
 /// The look name shown briefly mid-viewfinder after a swipe or a drawer pick.
 private struct LookFlash: Equatable {
     let name: String
@@ -364,6 +376,9 @@ struct CameraScreen: View {
                 hardwareShutterDiagnostics
             }
 #endif
+        }
+        .overlayPreferenceValue(SavedFrameAnchorKey.self) { anchors in
+            SavedFrameLandingOverlay(anchors: anchors, notice: viewModel.savedFrameNotice)
         }
     }
 
@@ -813,6 +828,9 @@ struct CameraScreen: View {
     private func viewfinder(size: CGSize, overlaysTopBar: Bool) -> some View {
         ZStack(alignment: .top) {
             previewSurface(fujiTopChrome: overlaysTopBar ? viewfinderChromeHeights[.top] : nil)
+                .anchorPreference(key: SavedFrameAnchorKey.self, value: .bounds) { (bounds: Anchor<CGRect>) -> [SavedFrameAnchor: Anchor<CGRect>] in
+                    [.viewfinder: bounds]
+                }
 
             // The session is intentionally stopped while a frame is under
             // review. Keep the paused frame quiet behind the full-screen
@@ -1209,8 +1227,31 @@ struct CameraScreen: View {
             .accessibilityIdentifier("camera-toast-undo")
             .accessibilityLabel("Undo look reset")
         case .viewSavedFrame:
-            EmptyView()
+            Button { viewSavedFrameInRoll() } label: {
+                Text("View")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(FilmyTheme.accent)
+                    .padding(.horizontal, 14)
+                    .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
+                    .viewfinderChrome(Capsule())
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.pressable)
+            .disabled(isNavigationRecoveryLocked)
+            .accessibilityIdentifier("camera-toast-view")
+            .accessibilityLabel("View in Roll")
         }
+    }
+
+    /// Same sequence as rollButton, after the toast is dismissed.
+    private func viewSavedFrameInRoll() {
+        viewModel.dismissToast()
+        if viewModel.isCapturing || viewModel.isSaving {
+            onOpenGallery()
+            return
+        }
+        closeControlDrawers()
+        onOpenGallery()
     }
 
     private var canAdjustPreviewExposure: Bool {
@@ -2287,8 +2328,11 @@ struct CameraScreen: View {
             closeControlDrawers()
             onOpenGallery()
         } label: {
-            VStack(spacing: 3) {
+            VStack(spacing: 2) {
                 RollThumbnail(asset: photoLibrary.galleryAssets.first, photoLibrary: photoLibrary)
+                    .anchorPreference(key: SavedFrameAnchorKey.self, value: .bounds) { (bounds: Anchor<CGRect>) -> [SavedFrameAnchor: Anchor<CGRect>] in
+                        [.rollThumbnail: bounds]
+                    }
                 Text("Roll")
                     .font(.caption2.weight(.medium))
                     .dynamicTypeSize(...DynamicTypeSize.accessibility1)
@@ -2296,7 +2340,8 @@ struct CameraScreen: View {
                     .minimumScaleFactor(0.8)
                     .foregroundStyle(FilmyTheme.secondary)
             }
-            .frame(width: 64, height: 64)
+            .frame(width: 64)
+            .frame(minHeight: 64)
             .contentShape(Rectangle())
         }
         .buttonStyle(.pressable)
@@ -2953,6 +2998,8 @@ private struct RollThumbnail: View {
     @ObservedObject var photoLibrary: PhotoLibraryService
 
     @State private var image: UIImage?
+    /// Identifies the shown image so a replacement cross-fades instead of swapping.
+    @State private var imageKey: PhotoLibraryImageRequestKey?
 
     private var requestKey: PhotoLibraryImageRequestKey? {
         guard let asset else { return nil }
@@ -2969,6 +3016,8 @@ private struct RollThumbnail: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
+                    .id(imageKey)
+                    .transition(.opacity)
             } else {
                 ChromeShapeBackground(shape: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
@@ -2979,7 +3028,7 @@ private struct RollThumbnail: View {
         }
         // Constrain the aspect-fill image before clipping, so portrait and
         // landscape photos cannot draw over the Roll label below it.
-        .frame(width: 44, height: 44)
+        .frame(width: FilmyTheme.toolControlHeight, height: FilmyTheme.toolControlHeight)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -2987,12 +3036,15 @@ private struct RollThumbnail: View {
         }
         .accessibilityHidden(true)
         .task(id: requestKey) {
-            image = nil
+            // Keep the previous image while the new one loads; clear only when
+            // there is nothing to load.
             guard let asset,
                   PhotoLibraryGalleryImagePolicy.canLoad(
                       isPhotosAsset: asset.isPhotosAsset,
                       authorizationStatus: photoLibrary.authorizationStatus
                   ) else {
+                image = nil
+                imageKey = nil
                 return
             }
 
@@ -3001,8 +3053,122 @@ private struct RollThumbnail: View {
                 targetSize: CGSize(width: 180, height: 180)
             )
             guard !Task.isCancelled else { return }
-            image = loadedImage
+            withAnimation(.easeOut(duration: 0.18)) {
+                image = loadedImage
+                imageKey = requestKey
+            }
         }
+    }
+}
+
+/// Lands a just-saved frame at the Roll: a thumbnail flight from the viewfinder
+/// to the Roll thumbnail, then an accent pulse. Reduce Motion, a missing anchor
+/// or a missing thumbnail gets the pulse only. Never hit-testable or announced.
+private struct SavedFrameLandingOverlay: View {
+    let anchors: [SavedFrameAnchor: Anchor<CGRect>]
+    let notice: CameraViewModel.SavedFrameNotice?
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var flight: SavedFrameFlightPlan?
+    @State private var pulseToken = 0
+
+    var body: some View {
+        GeometryReader { (proxy: GeometryProxy) in
+            let rollRect: CGRect? = anchors[.rollThumbnail].map { proxy[$0] }
+            let viewfinderRect: CGRect? = anchors[.viewfinder].map { proxy[$0] }
+            ZStack(alignment: .topLeading) {
+                pulseLayer(rollRect: rollRect)
+                flightLayer
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .onChange(of: notice?.revision) { _, revision in
+                guard let revision else { return }
+                land(revision: revision, from: viewfinderRect, to: rollRect)
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private func pulseLayer(rollRect: CGRect?) -> some View {
+        if pulseToken > 0, let rollRect {
+            SavedFramePulse()
+                .id(pulseToken)
+                .frame(width: rollRect.width, height: rollRect.height)
+                .position(x: rollRect.midX, y: rollRect.midY)
+        }
+    }
+
+    @ViewBuilder
+    private var flightLayer: some View {
+        if let flight {
+            SavedFrameFlight(plan: flight, onFinished: { finishFlight(revision: flight.revision) })
+                .id(flight.revision)
+        }
+    }
+
+    private func land(revision: Int, from: CGRect?, to: CGRect?) {
+        guard !reduceMotion, let thumbnail = notice?.thumbnail, let from, let to else {
+            pulseToken += 1
+            return
+        }
+        flight = SavedFrameFlightPlan(revision: revision, image: thumbnail, from: from, to: to)
+    }
+
+    private func finishFlight(revision: Int) {
+        guard flight?.revision == revision else { return }
+        flight = nil
+        pulseToken += 1
+    }
+}
+
+private struct SavedFrameFlightPlan {
+    let revision: Int
+    let image: UIImage
+    let from: CGRect
+    let to: CGRect
+}
+
+private struct SavedFrameFlight: View {
+    let plan: SavedFrameFlightPlan
+    let onFinished: () -> Void
+
+    @State private var landed = false
+
+    var body: some View {
+        let rect: CGRect = landed ? plan.to : plan.from
+        Image(uiImage: plan.image)
+            .resizable()
+            .scaledToFill()
+            .frame(width: rect.width, height: rect.height)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .position(x: rect.midX, y: rect.midY)
+            .onAppear {
+                withAnimation(.easeIn(duration: 0.35), completionCriteria: .logicallyComplete) {
+                    landed = true
+                } completion: {
+                    onFinished()
+                }
+            }
+            .task {
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                onFinished()
+            }
+    }
+}
+
+/// A 2 pt accent outline that fades over 0.6 s. Opacity only, so it runs under Reduce Motion.
+private struct SavedFramePulse: View {
+    @State private var faded = false
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .stroke(FilmyTheme.accent, lineWidth: 2)
+            .opacity(faded ? 0 : 1)
+            .onAppear {
+                withAnimation(.easeOut(duration: 0.6)) { faded = true }
+            }
     }
 }
 

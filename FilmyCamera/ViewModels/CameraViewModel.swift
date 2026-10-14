@@ -148,6 +148,13 @@ final class CameraViewModel: ObservableObject {
         case viewSavedFrame
     }
 
+    /// Published once per successful save so the camera can land the frame at the Roll.
+    /// The thumbnail is the saved image downscaled for the flight; nil means pulse only.
+    struct SavedFrameNotice {
+        let revision: Int
+        let thumbnail: UIImage?
+    }
+
     enum ToastStyle: Equatable {
         case success
         case error
@@ -323,6 +330,8 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var toastMessage: String?
     @Published private(set) var toastStyle: ToastStyle = .success
     @Published private(set) var toastAction: ToastAction?
+    @Published private(set) var savedFrameNotice: SavedFrameNotice?
+    private var savedFrameRevision = 0
     /// Exact override removed by the last Live Adjust Reset; set only while its Undo toast shows.
     @Published private(set) var pendingLookUndo: CameraPreviewGesturePolicy.LookResetUndo?
     @Published private(set) var lastCaptureDate: Date?
@@ -1306,15 +1315,44 @@ final class CameraViewModel: ObservableObject {
             self.isSaving = false
             switch result {
             case .success:
+                let savedFromLibrary = self.reviewSource == .photoLibrary
                 self.lastCaptureDate = capturedAt
                 self.clearReviewState()
-                self.showToast("Saved with \(recipe.name)")
+                self.showToast(
+                    "Saved with \(recipe.name)",
+                    action: savedFromLibrary ? .viewSavedFrame : nil,
+                    duration: savedFromLibrary ? Self.actionToastDuration : nil
+                )
+                self.publishSavedFrameNotice(from: image)
             case .failure(let error):
                 self.saveErrorMessage = error.localizedDescription
                 self.saveErrorRequiresSettings = error == .accessDenied
                 HapticFeedback.play(.error)
             }
         }
+    }
+
+    /// Success branch only: a failed save never animates. The notice follows the thumbnail
+    /// so the flight has its image; a newer save supersedes a pending one.
+    private func publishSavedFrameNotice(from image: UIImage) {
+        savedFrameRevision += 1
+        let revision = savedFrameRevision
+        Task { [weak self] in
+            let thumbnail = await Self.flightThumbnail(of: image)
+            guard let self, self.savedFrameRevision == revision else { return }
+            self.savedFrameNotice = SavedFrameNotice(revision: revision, thumbnail: thumbnail)
+        }
+    }
+
+    nonisolated private static func flightThumbnail(of image: UIImage) async -> UIImage? {
+        let pixelWidth = image.size.width * image.scale
+        let pixelHeight = image.size.height * image.scale
+        let longEdge = max(pixelWidth, pixelHeight)
+        guard longEdge > 0 else { return nil }
+        let factor = min(1, 360 / longEdge)
+        let target = CGSize(width: max(1, (pixelWidth * factor).rounded()),
+                            height: max(1, (pixelHeight * factor).rounded()))
+        return await image.byPreparingThumbnail(ofSize: target)
     }
 
     func discardReview() {

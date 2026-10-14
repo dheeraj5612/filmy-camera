@@ -1618,6 +1618,8 @@ final class FilmyCameraUITests: XCTestCase {
     func testGalleryAndSettingsNavigation() throws {
         let gallery = app.buttons["roll-tab"]
         assertMinimumHitTarget(gallery, named: "Roll")
+        XCTAssertEqual(gallery.frame.width, 64, accuracy: 1, "Roll keeps a fixed 64pt width")
+        XCTAssertGreaterThanOrEqual(gallery.frame.height, 64, "Roll keeps at least a 64pt height")
         gallery.tap()
 
         let accessOff = app.staticTexts["Photo access is off"]
