@@ -1275,9 +1275,22 @@ final class FilmyCameraUITests: XCTestCase {
         }
         XCTAssertTrue(filterAppliedText(in: reviewApp).exists)
 
+        let lookSegment = reviewApp.buttons["review-compare-look"]
+        assertMinimumHitTarget(lookSegment, named: "Review Look comparison")
+        XCTAssertTrue(lookSegment.isSelected)
+        XCTAssertFalse(compare.isSelected)
+
         let phonePortrait = isPhonePortrait(reviewApp)
         let reviewHeight = reviewScreenHeight(in: reviewApp)
         if phonePortrait {
+            XCTAssertEqual(lookSegment.frame.midY, compare.frame.midY, accuracy: 1)
+            XCTAssertLessThanOrEqual(compare.frame.minX - lookSegment.frame.maxX, 1, "Look and Original share one track")
+            let track = reviewApp.descendants(matching: .any)["review-compare-picker"]
+            XCTAssertLessThanOrEqual(
+                track.frame.width,
+                200,
+                "Track leaves the note slot at least the 127 pt the finishNote comment promises on 375 pt"
+            )
             XCTAssertGreaterThanOrEqual(
                 photo.frame.height,
                 min(reviewHeight * 0.55, reviewHeight - 322) - 1,
@@ -1318,9 +1331,18 @@ final class FilmyCameraUITests: XCTestCase {
         XCTAssertTrue(photo.label.contains("Original"))
         assertFramesMatch(photo.frame, photoFrame, named: "Photo in Original")
         assertFramesMatch(lookPicker.frame, lookFrame, named: "Look picker in Original")
+        XCTAssertTrue(compare.isSelected)
+        XCTAssertFalse(lookSegment.isSelected)
         attachScreenshot(named: "review-peek-original-badge")
         compare.tap()
         XCTAssertTrue(waitUntil(timeout: 15) { compare.value as? String == "Look" })
+        compare.tap()
+        XCTAssertTrue(waitUntil(timeout: 15) { compare.value as? String == "Original" })
+        lookSegment.tap()
+        XCTAssertTrue(
+            waitUntil(timeout: 5) { compare.value as? String == "Look" && lookSegment.isSelected },
+            "Look returns from Original"
+        )
 
         printFinish.tap()
         XCTAssertTrue(waitUntil(timeout: 30) { photo.label.contains("Instant Print") && save.isEnabled })
@@ -1398,6 +1420,7 @@ final class FilmyCameraUITests: XCTestCase {
             assertContained(element, in: reviewApp, named: name)
         }
         XCTAssertFalse(save.frame.intersects(cancel.frame))
+        XCTAssertFalse(reviewApp.buttons["review-compare-look"].exists, "Accessibility sizes keep two compare pills")
         guard isPhonePortrait(reviewApp) else { return }
 
         XCTAssertLessThanOrEqual(abs(save.frame.midY - cancel.frame.midY), 2, "Save and Cancel share one row")

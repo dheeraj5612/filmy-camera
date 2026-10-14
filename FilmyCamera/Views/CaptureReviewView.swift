@@ -558,8 +558,9 @@ struct CaptureReviewView: View {
                     comparisonControls
                 }
             } else {
-                // Preserve readable names on small iPhones. Comparison has
-                // two explicit actions; it must not squeeze the active look.
+                // Preserve readable names on small iPhones. Comparison is one
+                // Look, Original, Split track; it must not squeeze the
+                // active look.
                 VStack(alignment: .leading, spacing: rowSpacing) {
                     lookPicker
                     if tight {
@@ -809,32 +810,114 @@ struct CaptureReviewView: View {
         comparisonControlGroup(stacked: false)
     }
 
+    @ViewBuilder
     private func comparisonControlGroup(stacked: Bool) -> some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            comparisonPills(stacked: stacked)
+        } else {
+            comparisonTrack
+        }
+    }
+
+    private func comparisonPills(stacked: Bool) -> some View {
         let layout = stacked
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
             : AnyLayout(HStackLayout(spacing: 8))
         return layout {
-            compareButton
+            compareButton(segmented: false)
             if supportsSplit {
-                Button {
-                    requestComparison(comparison.mode == .split ? .look : .split)
-                } label: {
-                    Label(comparison.mode == .split ? "Done" : "Split", systemImage: "rectangle.lefthalf.filled")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(comparison.mode == .split ? FilmyTheme.background : FilmyTheme.comparison)
-                        .padding(.horizontal, 12)
-                        .frame(minHeight: 48)
-                        .background(comparison.mode == .split ? FilmyTheme.comparison : FilmyTheme.panel, in: Capsule())
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(.pressable)
-                .disabled(isSaving || isRenderingReview || isPreparingReviewOriginal)
-                .accessibilityIdentifier("review-compare-split")
-                .accessibilityLabel("Split comparison")
-                .accessibilityValue(comparison.mode == .split ? "On" : "Off")
-                .accessibilityHint("Compare original and look at the same position. Drag the divider on the photo.")
+                splitButton(segmented: false)
             }
         }
+    }
+
+    private var comparisonTrack: some View {
+        HStack(spacing: 0) {
+            lookSegment
+            compareButton(segmented: true)
+            if supportsSplit {
+                splitButton(segmented: true)
+            }
+        }
+        .background(FilmyTheme.panel, in: Capsule())
+        .overlay { Capsule().strokeBorder(FilmyTheme.line, lineWidth: 1) }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("review-compare-picker")
+    }
+
+    private func trackSegmentLabel(_ title: String, isSelected: Bool, showsProgress: Bool = false) -> some View {
+        HStack(spacing: 6) {
+            if showsProgress {
+                ProgressView().tint(isSelected ? FilmyTheme.background : FilmyTheme.comparison)
+            }
+            Text(title)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .font(.caption.weight(.bold))
+        .foregroundStyle(isSelected ? FilmyTheme.background : FilmyTheme.primary)
+        .padding(.horizontal, 12)
+        .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: 48)
+        .background {
+            if isSelected {
+                Capsule().fill(FilmyTheme.comparison).padding(3)
+            }
+        }
+        .contentShape(Rectangle())
+    }
+
+    private func pillLabel(_ title: String, icon: String, isSelected: Bool, showsProgress: Bool = false) -> some View {
+        HStack(spacing: 7) {
+            if showsProgress {
+                ProgressView().tint(FilmyTheme.comparison)
+            } else {
+                Image(systemName: isSelected ? "checkmark" : icon)
+            }
+            Text(title)
+                .lineLimit(1)
+        }
+        .font(.caption.weight(.bold))
+        .foregroundStyle(isSelected ? FilmyTheme.background : FilmyTheme.comparison)
+        .padding(.horizontal, 12)
+        .frame(minHeight: 48)
+        .background(isSelected ? FilmyTheme.comparison : FilmyTheme.panel, in: Capsule())
+        .contentShape(Capsule())
+    }
+
+    private var lookSegment: some View {
+        Button {
+            guard comparison.mode != .look else { return }
+            requestComparison(.look)
+        } label: {
+            trackSegmentLabel("Look", isSelected: comparison.mode == .look)
+        }
+        .buttonStyle(.pressable)
+        .disabled(isSaving || isRenderingReview || isPreparingReviewOriginal)
+        .accessibilityIdentifier("review-compare-look")
+        .accessibilityLabel("Look")
+        .accessibilityInputLabels(["Look", "Show look"])
+        .accessibilityAddTraits(comparison.mode == .look ? .isSelected : [])
+        .accessibilityHint("Shows the photo with the applied look")
+    }
+
+    private func splitButton(segmented: Bool) -> some View {
+        Button {
+            requestComparison(comparison.mode == .split ? .look : .split)
+        } label: {
+            if segmented {
+                trackSegmentLabel("Split", isSelected: comparison.mode == .split)
+            } else {
+                pillLabel("Split", icon: "rectangle.lefthalf.filled", isSelected: comparison.mode == .split)
+            }
+        }
+        .buttonStyle(.pressable)
+        .disabled(isSaving || isRenderingReview || isPreparingReviewOriginal)
+        .accessibilityIdentifier("review-compare-split")
+        .accessibilityLabel("Split comparison")
+        .accessibilityValue(comparison.mode == .split ? "On" : "Off")
+        .accessibilityInputLabels(["Split", "Split comparison"])
+        .accessibilityAddTraits(comparison.mode == .split ? .isSelected : [])
+        .accessibilityHint("Compare original and look at the same position. Drag the divider on the photo.")
     }
 
     private func requestComparison(_ mode: ReviewComparisonState.Mode) {
@@ -845,31 +928,23 @@ struct CaptureReviewView: View {
         }
     }
 
-    private var compareButton: some View {
+    private func compareButton(segmented: Bool) -> some View {
         Button {
             requestComparison(isShowingOriginal ? .look : .original)
         } label: {
-            HStack(spacing: 7) {
-                if isPreparingReviewOriginal {
-                    ProgressView().tint(FilmyTheme.comparison)
-                } else {
-                    Image(systemName: "circle.lefthalf.filled")
-                }
-                Text(isShowingOriginal ? "Show look" : "Original")
-                    .lineLimit(1)
+            if segmented {
+                trackSegmentLabel("Original", isSelected: isShowingOriginal, showsProgress: isPreparingReviewOriginal)
+            } else {
+                pillLabel("Original", icon: "circle.lefthalf.filled", isSelected: isShowingOriginal, showsProgress: isPreparingReviewOriginal)
             }
-            .font(.caption.weight(.bold))
-            .foregroundStyle(isShowingOriginal ? FilmyTheme.background : FilmyTheme.comparison)
-            .padding(.horizontal, 12)
-            .frame(minHeight: 48)
-            .background(isShowingOriginal ? FilmyTheme.comparison : FilmyTheme.panel, in: Capsule())
-            .contentShape(Capsule())
         }
         .buttonStyle(.pressable)
         .disabled(isSaving || isRenderingReview || isPreparingReviewOriginal)
         .accessibilityIdentifier("review-compare-original")
         .accessibilityLabel("Compare with original")
         .accessibilityValue(isShowingOriginal ? "Original" : "Look")
+        .accessibilityInputLabels(["Original", "Compare with original"])
+        .accessibilityAddTraits(isShowingOriginal ? .isSelected : [])
         .accessibilityHint(
             reviewOriginalImage == nil
                 ? "Loads the original source photo for comparison"
