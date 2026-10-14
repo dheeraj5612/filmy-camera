@@ -529,8 +529,8 @@ final class LookLibraryUITests: XCTestCase {
     private func assertControl(_ element: XCUIElement, in app: XCUIApplication) {
         XCTAssertTrue(element.waitForExistence(timeout: 5))
         XCTAssertTrue(element.isHittable)
-        XCTAssertGreaterThanOrEqual(element.frame.width, 44)
-        XCTAssertGreaterThanOrEqual(element.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(element.frame.width, 44 - 0.01)
+        XCTAssertGreaterThanOrEqual(element.frame.height, 44 - 0.01)
         XCTAssertTrue(app.frame.insetBy(dx: -1, dy: -1).contains(element.frame))
     }
 

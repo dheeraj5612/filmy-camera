@@ -570,9 +570,10 @@ struct CameraScreen: View {
             originalPreviewOverride = nil
             smartRecipes.reconcileSelection(currentID: selected, availableIDs: Set(viewModel.recipes.map(\.id)))
         }
-        .sheet(isPresented: $isShowingSmartRecipes, onDismiss: { smartPresentation = nil }) {
+        .sheet(isPresented: $isShowingSmartRecipes, onDismiss: { smartPresentation = nil }) { [snapshot = smartPresentation] in
+            // The body must read the snapshot, or the sheet keeps a stale nil.
             SmartRecipeSheet(
-                store: smartRecipes, snapshot: smartPresentation,
+                store: smartRecipes, snapshot: snapshot,
                 selectedID: viewModel.selectedRecipeID, canApply: canApplySmartRecipe,
                 onApply: applySmartRecipe, onClose: { isShowingSmartRecipes = false }
             )
@@ -746,8 +747,9 @@ struct CameraScreen: View {
             .presentationBackground(FilmyTheme.background)
             .presentationCornerRadius(30)
         }
-        .sheet(isPresented: $isShowingManualControls) {
-            PremiumFeatureGate(feature: .manualControls) { ManualCameraControlsView(camera: camera, initialSection: proControlsOpeningSection) }
+        .sheet(isPresented: $isShowingManualControls) { [opening = proControlsOpeningSection] in
+            // The body must read the section, or the sheet keeps a stale .top.
+            PremiumFeatureGate(feature: .manualControls) { ManualCameraControlsView(camera: camera, initialSection: opening) }
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(FilmyTheme.background)
@@ -2386,8 +2388,13 @@ struct CameraScreen: View {
                 .allowsHitTesting(false)
         }
         .shadow(color: .black.opacity(0.38), radius: 18, y: 8)
-        .frame(maxHeight: maxHeight)
         .background { lookStripHeightReader }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Look picker")
+        .accessibilityIdentifier("recipe-drawer")
+        .accessibilityAction(.escape) { closeLookDrawer() }
+        // A flexible frame takes the whole cap, so the panel docks to the slot edge instead of floating mid-viewfinder.
+        .frame(maxHeight: maxHeight, alignment: isLookSearchFocused ? .top : .bottom)
         .onAppear {
             lookStripActive = viewModel.quickRecipes
             if favoritesOnly { loadLookCatalog() }
@@ -2400,10 +2407,6 @@ struct CameraScreen: View {
             lookSearchResults = []
             lookStripRecent = []
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Look picker")
-        .accessibilityIdentifier("recipe-drawer")
-        .accessibilityAction(.escape) { closeLookDrawer() }
     }
 
     /// Measures the docked panel so the histogram and level assists can clear it.

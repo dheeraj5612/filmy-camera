@@ -31,7 +31,8 @@ final class RecipeLibraryUITests: XCTestCase {
         menu.tap()
         let drawer = app.descendants(matching: .any)["recipe-drawer"]
         XCTAssertTrue(drawer.waitForExistence(timeout: 5))
-        let preview = app.descendants(matching: .any)["camera-preview"]
+        // Chrome preview on a simulator has no running camera, so the viewfinder is the placeholder.
+        let preview = app.descendants(matching: .any).matching(NSPredicate(format: "identifier IN %@", ["camera-preview", "camera-placeholder"])).firstMatch
         XCTAssertTrue(preview.waitForExistence(timeout: 5))
         XCTAssertGreaterThanOrEqual(
             drawer.frame.minY - preview.frame.minY,
