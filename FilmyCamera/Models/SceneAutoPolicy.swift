@@ -301,13 +301,17 @@ struct SceneAutoPolicy {
     private mutating func updateScene(_ o: SceneAutoObservation, _ s: SceneAutoSensor, at now: Double) {
         var next: SceneAutoScene
         // Separate entry/exit thresholds avoid flapping at every boundary.
+        let inBacklit = scene == .backlit
+        let backlitHighlights: Double = inBacklit ? 0.025 : 0.05
+        let backlitCenter: Double = inBacklit ? 0.34 : 0.28
+        let backlitShadows: Double = inBacklit ? 0.14 : 0.18
         if filteredMotion > (scene == .action ? 0.045 : 0.085) {
             next = .action
         } else if o.face != nil && o.faceConfidence >= 0.75 {
             next = .portrait
         } else if s.meteredEV100 < (scene == .lowLight ? 6.5 : 5.5) {
             next = .lowLight
-        } else if o.highlights > (scene == .backlit ? 0.025 : 0.05) && o.center < 0.28 && o.shadows > 0.18 {
+        } else if o.highlights > backlitHighlights && o.center < backlitCenter && o.shadows > backlitShadows {
             next = .backlit
         } else if o.highlights > (scene == .highContrast ? 0.035 : 0.07) && o.shadows > 0.10 {
             next = .highContrast

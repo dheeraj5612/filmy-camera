@@ -156,8 +156,10 @@ final class RecipeInvariantsTests: XCTestCase {
     }
 
     func testBuiltInGrainDefaultsMatchTheReferenceCatalog() throws {
+        var compared = 0
         for entry in FilmRecipeReferenceCatalog.entries {
             guard let controls = entry.publicControls else { continue }
+            compared += 1
             let recipe = try XCTUnwrap(entry.currentRecipe, entry.currentRecipeID)
 
             XCTAssertEqual(
@@ -171,6 +173,7 @@ final class RecipeInvariantsTests: XCTestCase {
                 "\(recipe.id) grain size drifted from its documented reference"
             )
         }
+        XCTAssertEqual(compared, 15)
     }
 
     func testBuiltInRecipeControlsAreFinite() {

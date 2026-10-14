@@ -400,11 +400,40 @@ final class SceneAutoPolicyTests: XCTestCase {
         XCTAssertEqual(neutral.meteredEV100, overexposed.meteredEV100, accuracy: 0.000001)
     }
 
-    func testManualFocusTapGetsSixSecondGrace() {
+    func testManualFocusTapGetsSixSecondGrace() throws {
         var policy = SceneAutoPolicy()
-        for tick in 0..<15 {
-            XCTAssertNil(advance(&policy, to: Double(tick) * 0.4, lastTap: 0).focus)
+        var firstFocus: Double?
+        for tick in 0..<25 {
+            let time = Double(tick) * 0.4
+            if advance(&policy, to: time, lastTap: 0).focus != nil, firstFocus == nil { firstFocus = time }
         }
+        // Grace 6.0 s, then the 0.8 s candidate hold: first refocus lands near 6.8 to 7.2 s.
+        let focusTime = try XCTUnwrap(firstFocus)
+        XCTAssertGreaterThanOrEqual(focusTime, 6.7)
+        XCTAssertLessThanOrEqual(focusTime, 7.4)
+    }
+
+    func testBacklitDoesNotFlapWithHighContrastWhenItsBiasMovesTheCentre() {
+        var policy = SceneAutoPolicy()
+        var hardware = sensor()
+        var changes = 0
+        var lastScene = SceneAutoScene.balanced
+        for tick in 0..<300 {
+            var sample = observation(Double(tick) * 0.4)
+            sample.highlights = 0.12
+            sample.shadows = 0.25
+            sample.center = 0.30 * pow(2, hardware.targetOffset / 2.2)
+            let decision = advance(&policy, to: sample.timestamp, observation: sample, sensor: hardware)
+            if decision.scene != lastScene { changes += 1; lastScene = decision.scene }
+            if let value = decision.exposure {
+                let ratio = (value.iso * value.duration) / (hardware.iso * hardware.duration)
+                hardware.targetOffset += log2(ratio)
+                hardware.iso = value.iso
+                hardware.duration = value.duration
+            }
+        }
+        XCTAssertLessThanOrEqual(changes, 3)
+        XCTAssertEqual(lastScene, .backlit)
     }
 
     func testTinyFaceJitterDoesNotRefocus() {

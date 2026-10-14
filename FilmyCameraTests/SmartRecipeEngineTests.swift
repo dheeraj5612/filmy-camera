@@ -102,6 +102,10 @@ final class SmartRecipeEngineTests: XCTestCase {
     }
     func testFavoriteBonusIsSmallAndCannotOverrideBadFit() {
         XCTAssertEqual(SmartRecipeEngine.rank(scene: scene(.people, faces: true), profiles: profiles, favoriteIDs: ["vivid"]).first?.id, "portrait")
+        let a = SmartRecipeProfile(id: "a", family: "provia")
+        let b = SmartRecipeProfile(id: "b", family: "provia")
+        XCTAssertEqual(SmartRecipeEngine.rank(scene: scene(.everyday), profiles: [a, b]).first?.id, "a")
+        XCTAssertEqual(SmartRecipeEngine.rank(scene: scene(.everyday), profiles: [a, b], favoriteIDs: ["b"]).first?.id, "b")
     }
     func testNonfiniteControlsAndOverflowScoresAreExcluded() {
         let invalid = [SmartRecipeProfile(id: "nan", family: "astia", contrast: .nan),
