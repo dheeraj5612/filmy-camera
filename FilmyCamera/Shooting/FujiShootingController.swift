@@ -212,6 +212,18 @@ final class FujiShootingController: ObservableObject {
         status = "Saved C\(index). Changes are not written back until you save again."
     }
 
+    /// Renames a saved bank in place. Only the name changes; setup, look, camera preset and save date stay as saved.
+    func renameBank(_ index: Int, name: String) {
+        guard (1...7).contains(index), !settingsLocked else { return }
+        guard let position = preferences.banks.firstIndex(where: { $0.id == index }) else { return }
+        let trimmed = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(32))
+        let resolved: String = trimmed.isEmpty ? "Custom \(index)" : trimmed
+        if preferences.banks[position].name == resolved { return }
+        var updated = preferences
+        updated.banks[position].name = resolved
+        preferences = updated
+    }
+
     func recallBank(_ bank: FujiShootingBank) {
         guard !settingsLocked, let camera, let viewModel else { return }
         isBusy = true; status = "Recalling C\(bank.id)…"; errorMessage = nil

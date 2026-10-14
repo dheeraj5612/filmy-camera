@@ -725,6 +725,54 @@ final class FujiShootingTests: XCTestCase {
         focus.focusNear = 0.5
         focus.focusFar = 0.5
         XCTAssertEqual(FujiViewfinderState.make(settings: focus, activeBank: nil)?.isBlocked, true)
+
+        var single = FujiShootingSettings()
+        single.preShotSeconds = 0.5
+        single.captureRAW = true
+        let refused = FujiViewfinderState.make(settings: single, activeBank: nil)
+        XCTAssertEqual(refused?.isBlocked, true)
+        XCTAssertEqual(refused?.text, "CHECK Q")
+        XCTAssertEqual(refused?.spoken, "Single frame, cannot shoot, open Q")
+        single.captureRAW = false
+        XCTAssertNil(FujiViewfinderState.make(settings: single, activeBank: nil))
+    }
+
+    func testRenameSavedBankKeepsItsSetup() throws {
+        let suite = "FujiShootingTests.Rename.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let controller = FujiShootingController(defaults: defaults)
+        var seeded = FujiPreferences()
+        var drive = FujiShootingSettings()
+        drive.drive = .aeBracket
+        seeded.banks = [FujiShootingBank(id: 2, name: "Old", recipe: recipe, settings: drive, camera: .init(),
+                                         savedAt: Date(timeIntervalSince1970: 100))]
+        seeded.selectedBank = 2
+        controller.preferences = seeded
+        let before = controller.preferences
+
+        controller.renameBank(2, name: "  Night walk  ")
+        let renamed = try XCTUnwrap(controller.preferences.banks.first)
+        let original = try XCTUnwrap(before.banks.first)
+        XCTAssertEqual(renamed.name, "Night walk")
+        XCTAssertEqual(renamed.recipe, original.recipe)
+        XCTAssertEqual(renamed.settings, original.settings)
+        XCTAssertEqual(renamed.camera, original.camera)
+        XCTAssertEqual(renamed.savedAt, original.savedAt)
+        XCTAssertEqual(controller.preferences.selectedBank, 2)
+        let stored = try XCTUnwrap(defaults.data(forKey: "fuji.shooting.v1"))
+        XCTAssertEqual(try JSONDecoder().decode(FujiPreferences.self, from: stored), controller.preferences)
+
+        controller.renameBank(2, name: "   ")
+        XCTAssertEqual(controller.preferences.banks.first?.name, "Custom 2")
+        controller.renameBank(2, name: String(repeating: "x", count: 40))
+        XCTAssertEqual(controller.preferences.banks.first?.name.count, 32)
+
+        let unchanged = controller.preferences
+        controller.renameBank(5, name: "Nope")
+        controller.renameBank(0, name: "Nope")
+        controller.renameBank(8, name: "Nope")
+        XCTAssertEqual(controller.preferences, unchanged)
     }
 
     func testUseDriveChangeIsReflectedInViewfinderState() throws {

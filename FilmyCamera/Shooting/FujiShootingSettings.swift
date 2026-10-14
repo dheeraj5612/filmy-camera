@@ -351,8 +351,8 @@ struct FujiCapturePlan: Equatable, Sendable {
 struct FujiViewfinderState: Equatable, Sendable {
     let text: String
     let spoken: String
-    /// True when FujiCapturePlan.make refuses the current setup (the shutter is disabled then). Known gap: no chip
-    /// is shown for a refused Single setup (e.g. pre-shot with RAW or DR200/400); the Q tile carries that state.
+    /// True when FujiCapturePlan.make refuses the current setup (the shutter is disabled then). A refused Single
+    /// setup with no active bank (e.g. pre-shot with RAW or DR200/400) shows CHECK Q.
     let isBlocked: Bool
 
     /// A bank is named only while the live setup still equals what it saved.
@@ -362,7 +362,8 @@ struct FujiViewfinderState: Equatable, Sendable {
     }
 
     static func make(settings: FujiShootingSettings, activeBank: Int?) -> FujiViewfinderState? {
-        if activeBank == nil && settings.drive == .single { return nil }
+        let blocked: Bool = (try? FujiCapturePlan.make(settings)) == nil
+        if activeBank == nil && settings.drive == .single && !blocked { return nil }
         let shown = settings.normalized()
         var texts: [String] = []
         var spokens: [String] = []
@@ -374,7 +375,10 @@ struct FujiViewfinderState: Equatable, Sendable {
             texts.append(drive.text)
             spokens.append(drive.spoken)
         }
-        let blocked = (try? FujiCapturePlan.make(settings)) == nil
+        if texts.isEmpty {
+            texts.append("CHECK Q")
+            spokens.append("Single frame")
+        }
         var spoken = spokens.joined(separator: ", ")
         if blocked { spoken += ", cannot shoot, open Q" }
         return FujiViewfinderState(text: texts.joined(separator: " · "), spoken: spoken, isBlocked: blocked)

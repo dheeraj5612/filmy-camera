@@ -118,16 +118,24 @@ private struct FujiQEditor: View {
     var body: some View {
         List {
             Section("Visible controls · drag to reorder") {
-                ForEach(controller.preferences.quickControls) { control in Text(control.title).frame(minHeight: 36) }
+                ForEach(controller.preferences.quickControls) { control in
+                    Text(control.title).frame(minHeight: 44)
+                        .deleteDisabled(controller.preferences.quickControls.count <= 1)
+                }
                     .onMove { controller.preferences.quickControls.move(fromOffsets: $0, toOffset: $1) }
-                    .onDelete { controller.preferences.quickControls.remove(atOffsets: $0) }
+                    .onDelete { (offsets: IndexSet) in
+                        let remaining: Int = controller.preferences.quickControls.count - offsets.count
+                        if remaining < 1 { return }
+                        controller.preferences.quickControls.remove(atOffsets: offsets)
+                    }
             }
             Section("Available controls") {
                 ForEach(FujiQuickControl.allCases.filter { !controller.preferences.quickControls.contains($0) }) { control in
                     Button("Add \(control.title)") { controller.preferences.quickControls.append(control) }.frame(minHeight: 44)
                 }
             }
-            Button("Restore the 16-control layout") { controller.preferences.quickControls = FujiQuickControl.allCases }
+            Button("Restore all \(FujiQuickControl.allCases.count) controls") { controller.preferences.quickControls = FujiQuickControl.allCases }
+                .frame(minHeight: 44)
         }
         .navigationTitle("Customize Q").toolbar { EditButton() }
         .disabled(controller.settingsLocked)
@@ -196,6 +204,7 @@ private struct FujiBanksView: View {
         ScrollViewReader { proxy in
             banksForm
                 .onAppear { scrollToActiveBank(proxy) }
+                .onDisappear { commitPendingNames() }
         }
     }
 
@@ -286,6 +295,8 @@ private struct FujiBanksView: View {
             recallRow(index, bank)
             TextField("Name", text: nameBinding(index, bank), prompt: Text("Custom \(index)"))
                 .accessibilityLabel("C\(index) name")
+                .submitLabel(.done)
+                .onSubmit { commitName(index) }
             Button("Replace with current setup") { pendingOverwrite = index }
                 .frame(minHeight: 44)
                 .accessibilityLabel("Replace C\(index) with current setup")
@@ -306,6 +317,28 @@ private struct FujiBanksView: View {
                 }.font(.caption.weight(.semibold))
             }
         }
+    }
+
+    private func storedName(_ index: Int) -> String? {
+        controller.preferences.banks.first(where: { $0.id == index })?.name
+    }
+
+    /// Commits a typed name for a saved bank. Returns true when the stored name changed.
+    @discardableResult private func applyName(_ index: Int) -> Bool {
+        guard let pending: String = names[index], let before: String = storedName(index) else { return false }
+        controller.renameBank(index, name: pending)
+        let after: String? = storedName(index)
+        return after != before
+    }
+
+    private func commitName(_ index: Int) {
+        if applyName(index) {
+            UIAccessibility.post(notification: .announcement, argument: "Renamed C\(index)")
+        }
+    }
+
+    private func commitPendingNames() {
+        for index in names.keys.sorted() { applyName(index) }
     }
 
     private func save(_ index: Int) {
