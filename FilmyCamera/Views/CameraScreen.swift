@@ -297,6 +297,10 @@ struct CameraScreen: View {
     @FocusState private var isLookSearchFocused: Bool
     @State private var lookStripHeight: CGFloat = 0
     @State private var lookStripActive: [FilmRecipe] = []
+    /// Whole catalog for the Favorites segment and search. Loaded on demand, cleared when the drawer closes.
+    @State private var lookStripCatalog: [FilmRecipe] = []
+    @State private var lookSearchResults: [FilmRecipe] = []
+    @State private var lookStripRecent: [FilmRecipe] = []
     @State private var focusPoint: CGPoint?
     @State private var focusNormalizedPoint: CGPoint?
     /// Measured from the open tool strip (taller than two controls means two rows). Kept across hides.
@@ -583,10 +587,10 @@ struct CameraScreen: View {
             }
         }
         .onChange(of: isShowingLookLibrary) { _, showing in
-            if !showing { lookStripActive = viewModel.quickRecipes }
+            if !showing { refreshLookStripAfterSheet() }
         }
         .onChange(of: isShowingRecipeManager) { _, showing in
-            if !showing { lookStripActive = viewModel.quickRecipes }
+            if !showing { refreshLookStripAfterSheet() }
         }
         .onChange(of: isHoldingOriginalPreview) { _, holding in noteOriginalHold(holding) }
         .onChange(of: isPreviewDragActive) { _, active in
@@ -2140,15 +2144,16 @@ struct CameraScreen: View {
     }
 
     private func lookDrawer(maxHeight: CGFloat) -> some View {
-        let isFiltering: Bool = isSearchingLooks && !quickRecipeQuery.isEmpty
-        let visible: [FilmRecipe] = lookStripVisible(isFiltering: isFiltering)
+        let isFiltering: Bool = isSearchingLooks && !quickRecipeQuery.trimmingCharacters(in: .whitespaces).isEmpty
+        let mode: LookStripMode = lookStripMode(isFiltering: isFiltering)
+        let visible: [FilmRecipe] = lookStripVisible(mode: mode)
         let shown: [FilmRecipe] = lookStripShown(visible: visible)
 
         return VStack(spacing: 0) {
             lookStripHeader(activeCount: lookStripActive.count)
                 .contentShape(Rectangle())
                 .simultaneousGesture(lookStripDismissDrag)
-            lookStripContent(visible: visible, shown: shown, isFiltering: isFiltering)
+            lookStripContent(visible: visible, shown: shown, mode: mode)
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 3)
@@ -2169,11 +2174,17 @@ struct CameraScreen: View {
         .shadow(color: .black.opacity(0.38), radius: 18, y: 8)
         .frame(maxHeight: maxHeight)
         .background { lookStripHeightReader }
-        .onAppear { lookStripActive = viewModel.quickRecipes }
+        .onAppear {
+            lookStripActive = viewModel.quickRecipes
+            if favoritesOnly { loadLookCatalog() }
+        }
         .onDisappear {
             isSearchingLooks = false
             isLookSearchFocused = false
             quickRecipeQuery = ""
+            lookStripCatalog = []
+            lookSearchResults = []
+            lookStripRecent = []
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Look picker")
@@ -2190,21 +2201,50 @@ struct CameraScreen: View {
         }
     }
 
-    /// Active looks narrowed by Favorites and by the search text. Reads the
-    /// cached active list, never the whole catalog.
-    private func lookStripVisible(isFiltering: Bool) -> [FilmRecipe] {
-        var list: [FilmRecipe] = lookStripActive
-        if favoritesOnly {
+    private enum LookStripMode: String { case active, favorites, recent, results }
+
+    private func lookStripMode(isFiltering: Bool) -> LookStripMode {
+        if isSearchingLooks {
+            if isFiltering { return .results }
+            return lookStripRecent.isEmpty ? .active : .recent
+        }
+        return favoritesOnly ? .favorites : .active
+    }
+
+    private func loadLookCatalog() {
+        lookStripCatalog = viewModel.recipes
+    }
+
+    private func refreshLookCatalogIfShown() {
+        if favoritesOnly || isSearchingLooks { loadLookCatalog() }
+    }
+
+    /// The loaded catalog, or the live one before the first load is visible.
+    private var lookSearchCatalog: [FilmRecipe] {
+        lookStripCatalog.isEmpty ? viewModel.recipes : lookStripCatalog
+    }
+
+    /// Re-reads the quick menu and, when Favorites or search is on, the catalog after the library or Packs sheet closes.
+    private func refreshLookStripAfterSheet() {
+        lookStripActive = viewModel.quickRecipes
+        refreshLookCatalogIfShown()
+    }
+
+    /// The list for the current mode. Favorites and search read the whole
+    /// catalog; Active reads the cached quick menu.
+    private func lookStripVisible(mode: LookStripMode) -> [FilmRecipe] {
+        switch mode {
+        case .results:
+            return lookSearchResults
+        case .recent:
+            return lookStripRecent
+        case .favorites:
             let favorites: Set<String> = favoriteIDs
-            list = list.filter { (recipe: FilmRecipe) -> Bool in favorites.contains(recipe.id) }
+            let source: [FilmRecipe] = lookSearchCatalog
+            return source.filter { (recipe: FilmRecipe) -> Bool in favorites.contains(recipe.id) }
+        case .active:
+            return lookStripActive
         }
-        if isFiltering {
-            let query: String = quickRecipeQuery
-            list = list.filter { (recipe: FilmRecipe) -> Bool in
-                RecipeCatalog.searchText(for: recipe).localizedStandardContains(query)
-            }
-        }
-        return list
     }
 
     /// The current look stays ringed at the start when the filters hide it.
@@ -2216,15 +2256,15 @@ struct CameraScreen: View {
     }
 
     @ViewBuilder
-    private func lookStripContent(visible: [FilmRecipe], shown: [FilmRecipe], isFiltering: Bool) -> some View {
+    private func lookStripContent(visible: [FilmRecipe], shown: [FilmRecipe], mode: LookStripMode) -> some View {
         if visible.isEmpty {
-            Text(lookStripEmptyText)
+            Text(lookStripEmptyText(mode: mode))
                 .font(.caption)
                 .foregroundStyle(FilmyTheme.secondary)
                 .multilineTextAlignment(.center)
-                .lineLimit(3)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 5 : 3)
                 .frame(maxWidth: .infinity, minHeight: 76)
-                .accessibilityIdentifier(favoritesOnly ? "camera-favorites-empty" : "camera-looks-empty")
+                .accessibilityIdentifier(mode == .favorites ? "camera-favorites-empty" : "camera-looks-empty")
         } else {
             RecipePickerView(
                 recipes: shown,
@@ -2232,16 +2272,46 @@ struct CameraScreen: View {
                     selectDrawerLook(id: id, among: visible)
                 }),
                 onOpenDetail: openRecipeDetail,
-                compact: !favoritesOnly && !isFiltering
+                compact: mode == .active,
+                favoriteIDs: favoriteIDs,
+                showsFavoriteBadges: mode != .favorites,
+                onToggleFavorite: toggleDrawerFavorite,
+                keepsOrder: mode == .recent || mode == .results,
+                listMarker: lookStripMarker(mode: mode, shownCount: shown.count)
             )
-            .id(favoritesOnly)
+            .id(mode.rawValue)
         }
     }
 
-    private var lookStripEmptyText: String {
-        if lookStripActive.isEmpty { return "Your quick menu is empty. Open Packs to add looks." }
-        if favoritesOnly { return "No active favorites match. Manage them in Packs." }
-        return "No active looks match your search."
+    private func lookStripMarker(mode: LookStripMode, shownCount: Int) -> RecipePickerView.ListMarker? {
+        switch mode {
+        case .results:
+            return RecipePickerView.ListMarker(title: "Results", systemImage: "magnifyingglass", count: shownCount)
+        case .recent:
+            return RecipePickerView.ListMarker(title: "Recent", systemImage: "clock.arrow.circlepath", count: shownCount)
+        case .favorites, .active:
+            return nil
+        }
+    }
+
+    private func lookStripEmptyText(mode: LookStripMode) -> String {
+        switch mode {
+        case .results: return "No looks match your search."
+        case .favorites: return "No favorites yet. Tap the heart on the camera."
+        case .active, .recent: return "Your quick menu is empty. Open Packs to add looks."
+        }
+    }
+
+    /// Hearts or unhearts a drawer tile with the same key and encoder as the
+    /// camera heart. Never selects the look and never closes the drawer.
+    private func toggleDrawerFavorite(_ recipe: FilmRecipe) {
+        var updated = favoriteIDs
+        let removing = updated.contains(recipe.id)
+        if removing { updated.remove(recipe.id) } else { updated.insert(recipe.id) }
+        favoriteData = LookLibraryIndex.encodeFavorites(updated)
+        HapticFeedback.play(.selection)
+        UIAccessibility.post(notification: .announcement,
+                             argument: removing ? "Removed from favorites" : "Added to favorites")
     }
 
     /// Swipe down on the header closes the picker. The look row scrolls
@@ -2323,6 +2393,7 @@ struct CameraScreen: View {
             .accessibilityLabel("Active looks, \(activeCount)")
             .accessibilityAddTraits(!favoritesOnly ? .isSelected : [])
             Button {
+                loadLookCatalog()
                 favoritesOnly = true
                 HapticFeedback.play(.selection)
             } label: {
@@ -2356,9 +2427,11 @@ struct CameraScreen: View {
         lookHeaderIconButton(
             systemImage: "magnifyingglass",
             identifier: "camera-looks-search-toggle",
-            label: "Search looks",
-            hint: "Filters the active looks by name"
+            label: "Search all looks",
+            hint: "Shows your recent looks. Type to search every look."
         ) {
+            loadLookCatalog()
+            lookStripRecent = recentLookList()
             isSearchingLooks = true
         }
     }
@@ -2449,6 +2522,37 @@ struct CameraScreen: View {
         isLookSearchFocused = false
         isSearchingLooks = false
         quickRecipeQuery = ""
+        lookSearchResults = []
+    }
+
+    /// Looks switched to recently, newest first. Unknown or removed ids are dropped.
+    private func recentLookList() -> [FilmRecipe] {
+        let catalog: [FilmRecipe] = lookSearchCatalog
+        return viewModel.recentRecipeIDs.compactMap { (id: String) -> FilmRecipe? in
+            catalog.first { (recipe: FilmRecipe) -> Bool in recipe.id == id }
+        }
+    }
+
+    private var lookSearchQuery: Binding<String> {
+        Binding<String>(
+            get: { quickRecipeQuery },
+            set: { (query: String) in
+                quickRecipeQuery = query
+                updateLookSearchResults(query)
+            }
+        )
+    }
+
+    /// Runs in the field's setter so no frame shows stale or empty results.
+    private func updateLookSearchResults(_ query: String) {
+        let trimmed: String = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else {
+            lookSearchResults = []
+            lookStripRecent = recentLookList()
+            return
+        }
+        let found: [FilmRecipe] = LookLibraryIndex.results(in: lookSearchCatalog, query: trimmed, filter: .all, favorites: [])
+        lookSearchResults = LookLibraryIndex.nameMatchesFirst(found, query: trimmed)
     }
 
     private var lookSearchRow: some View {
@@ -2476,23 +2580,25 @@ struct CameraScreen: View {
     private var lookSearchField: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass").foregroundStyle(FilmyTheme.secondary)
-            TextField("Search active looks", text: $quickRecipeQuery)
+            TextField("Search all looks", text: lookSearchQuery)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .submitLabel(.search)
                 .focused($isLookSearchFocused)
-                .onAppear { isLookSearchFocused = true }
                 .onSubmit { isLookSearchFocused = false }
                 .accessibilityIdentifier("camera-looks-search")
             if !quickRecipeQuery.isEmpty {
                 Button {
-                    quickRecipeQuery = ""
+                    lookSearchQuery.wrappedValue = ""
                 } label: {
                     Label("Clear", systemImage: "xmark.circle.fill")
                         .labelStyle(.iconOnly)
                         .frame(minWidth: 44, minHeight: 44)
                         .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("camera-looks-search-clear")
+                .accessibilityLabel("Clear search")
             }
         }
         .font(.subheadline)

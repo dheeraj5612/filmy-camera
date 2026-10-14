@@ -182,6 +182,68 @@ final class RecipeLibraryTests: XCTestCase {
         let recipe = try XCTUnwrap(FilmRecipe.builtIns.first { $0.id == record.id })
         XCTAssertFalse(RecipeCatalog.searchText(for: recipe).contains(record.source.url))
     }
+
+    func testDrawerSearchReachesHiddenLooksAndRanksNameMatchesFirst() throws {
+        XCTAssertFalse(RecipeLibraryPreferences().isEnabled("camera-velvia"))
+        let words = LookLibraryIndex.results(in: FilmRecipe.builtIns, query: "velvia camera base", filter: .all, favorites: [])
+        XCTAssertTrue(words.contains { $0.id == "camera-velvia" })
+
+        let exact = "Velvia/VIVID / Camera Base"
+        let found = LookLibraryIndex.results(in: FilmRecipe.builtIns, query: exact, filter: .all, favorites: [])
+        let ranked = LookLibraryIndex.nameMatchesFirst(found, query: exact)
+        XCTAssertEqual(ranked.first?.id, "camera-velvia")
+
+        let classic = LookLibraryIndex.results(in: FilmRecipe.builtIns, query: "classic", filter: .all, favorites: [])
+        let options: String.CompareOptions = [.anchored, .caseInsensitive, .diacriticInsensitive]
+        let rankedClassic = LookLibraryIndex.nameMatchesFirst(classic, query: "classic")
+        let isPrefix: (FilmRecipe) -> Bool = { $0.name.range(of: "classic", options: options) != nil }
+        let prefixed = classic.filter(isPrefix)
+        let others = classic.filter { !isPrefix($0) }
+        XCTAssertEqual(rankedClassic.count, classic.count)
+        XCTAssertEqual(rankedClassic.map(\.id), (prefixed + others).map(\.id))
+    }
+
+    func testRecentLooksDedupesCapsAndKeepsNewestFirst() {
+        var list = RecentLooks.recording("a", previous: nil, into: [])
+        XCTAssertEqual(list, ["a"])
+        list = RecentLooks.recording("b", previous: "a", into: list)
+        list = RecentLooks.recording("c", previous: "b", into: list)
+        list = RecentLooks.recording("b", previous: "c", into: list)
+        XCTAssertEqual(list, ["b", "c", "a"])
+        XCTAssertEqual(RecentLooks.recording("b", previous: "a", into: []), ["b", "a"])
+
+        var many: [String] = []
+        for index in 0..<20 {
+            many = RecentLooks.recording("look-\(index)", previous: nil, into: many)
+        }
+        XCTAssertEqual(many.count, RecentLooks.limit)
+        XCTAssertEqual(many.first, "look-19")
+        XCTAssertEqual(many.last, "look-8")
+
+        let longID = String(repeating: "x", count: 300)
+        XCTAssertEqual(RecentLooks.sanitized(["", longID, "a", "b", "a"]), ["a", "b"])
+    }
+
+    @MainActor func testRecentLooksPersistAcrossViewModelsAndSkipLaunchRestore() throws {
+        let suite = "RecipeLibraryRecents.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = CameraViewModel(defaults: defaults)
+        XCTAssertEqual(model.recentRecipeIDs, [])
+        let start = model.selectedRecipeID
+        let picks = MembershipPolicy.freeRecipeIDs.subtracting([start]).sorted()
+        XCTAssertGreaterThanOrEqual(picks.count, 2)
+        let x = picks[0]
+        let y = picks[1]
+        model.selectedRecipeID = x
+        model.selectedRecipeID = y
+        model.selectedRecipeID = x
+        XCTAssertEqual(model.selectedRecipeID, x)
+        let expected: [String] = [x, y, start]
+        XCTAssertEqual(model.recentRecipeIDs, expected)
+        XCTAssertEqual(defaults.stringArray(forKey: "recentRecipeIDs.v1"), expected)
+        XCTAssertEqual(CameraViewModel(defaults: defaults).recentRecipeIDs, expected)
+    }
 }
 
 @MainActor

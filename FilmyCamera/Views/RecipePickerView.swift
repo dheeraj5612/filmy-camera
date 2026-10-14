@@ -9,6 +9,11 @@ struct RecipePickerView: View {
     @Binding var selectedRecipeID: String
     let onOpenDetail: (FilmRecipe) -> Void
     let compact: Bool
+    let favoriteIDs: Set<String>
+    let showsFavoriteBadges: Bool
+    let onToggleFavorite: ((FilmRecipe) -> Void)?
+    let keepsOrder: Bool
+    let listMarker: ListMarker?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -17,12 +22,29 @@ struct RecipePickerView: View {
         recipes: [FilmRecipe],
         selectedRecipeID: Binding<String>,
         onOpenDetail: @escaping (FilmRecipe) -> Void,
-        compact: Bool = false
+        compact: Bool = false,
+        favoriteIDs: Set<String> = [],
+        showsFavoriteBadges: Bool = true,
+        onToggleFavorite: ((FilmRecipe) -> Void)? = nil,
+        keepsOrder: Bool = false,
+        listMarker: ListMarker? = nil
     ) {
         self.recipes = recipes
         _selectedRecipeID = selectedRecipeID
         self.onOpenDetail = onOpenDetail
         self.compact = compact
+        self.favoriteIDs = favoriteIDs
+        self.showsFavoriteBadges = showsFavoriteBadges
+        self.onToggleFavorite = onToggleFavorite
+        self.keepsOrder = keepsOrder
+        self.listMarker = listMarker
+    }
+
+    /// Names a flat, ordered list (Recent or Results) in the drawer.
+    struct ListMarker: Equatable {
+        let title: String
+        let systemImage: String
+        let count: Int
     }
 
     /// AX grid tiles stretch to the column width; the width here is the floor.
@@ -46,7 +68,7 @@ struct RecipePickerView: View {
     /// compare the G7 X option with film recipes without a long horizontal
     /// hunt. IDs and the relative order of every other recipe stay intact.
     private var presentationRecipes: [FilmRecipe] {
-        guard let compactProfile = recipes.first(where: { $0.filmBase == .compactDigital }) else {
+        guard !keepsOrder, let compactProfile = recipes.first(where: { $0.filmBase == .compactDigital }) else {
             return recipes
         }
         return [compactProfile] + recipes.filter { $0.id != compactProfile.id }
@@ -114,6 +136,11 @@ struct RecipePickerView: View {
             accessibleGrid
         } else if compact {
             groupPager
+        } else if let listMarker {
+            HStack(spacing: 4) {
+                listMarkerView(listMarker)
+                standardRail
+            }
         } else {
             standardRail
         }
@@ -271,9 +298,14 @@ struct RecipePickerView: View {
         ScrollViewReader { proxy in
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 14) {
-                    ForEach(groupedRecipes) { section in
-                        gridSection(section, proxy: proxy)
-                            .id(section.id)
+                    if keepsOrder, let listMarker {
+                        listHeaderView(listMarker)
+                        flatGrid
+                    } else {
+                        ForEach(groupedRecipes) { section in
+                            gridSection(section, proxy: proxy)
+                                .id(section.id)
+                        }
                     }
                 }
                 .padding(.horizontal, 4)
@@ -286,6 +318,15 @@ struct RecipePickerView: View {
             }
             .onChange(of: selectedRecipeID) { _, newValue in
                 scroll(proxy, to: newValue, anchor: .center)
+            }
+        }
+    }
+
+    private var flatGrid: some View {
+        LazyVGrid(columns: gridColumns, spacing: 12) {
+            ForEach(presentationRecipes) { recipe in
+                recipeButton(for: recipe, inGrid: true)
+                    .id(recipe.id)
             }
         }
     }
@@ -376,6 +417,51 @@ struct RecipePickerView: View {
         .contentShape(Rectangle())
     }
 
+    private func listMarkerView(_ marker: ListMarker) -> some View {
+        VStack(spacing: 2) {
+            Image(systemName: marker.systemImage)
+                .font(.system(.caption, weight: .bold))
+                .foregroundStyle(FilmyTheme.accent)
+            Text(marker.title)
+                .font(.system(.caption2, design: .rounded).weight(.bold))
+                .foregroundStyle(FilmyTheme.accent)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Text("\(marker.count)")
+                .font(.system(.caption2, design: .monospaced).weight(.bold))
+                .foregroundStyle(FilmyTheme.tertiary)
+        }
+        .dynamicTypeSize(...DynamicTypeSize.xLarge)
+        .frame(width: 52, height: rowHeight)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(listMarkerAccessibilityLabel(marker))
+        .accessibilityIdentifier("recipe-list-marker")
+    }
+
+    private func listHeaderView(_ marker: ListMarker) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: marker.systemImage)
+                .font(.system(.caption, weight: .bold))
+                .foregroundStyle(FilmyTheme.accent)
+            Text(marker.title.uppercased())
+                .font(.system(.caption, design: .rounded).weight(.bold))
+                .tracking(0.8)
+                .foregroundStyle(FilmyTheme.accent)
+            Text("\(marker.count)")
+                .font(.system(.caption2, design: .monospaced).weight(.bold))
+                .foregroundStyle(FilmyTheme.tertiary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(listMarkerAccessibilityLabel(marker))
+        .accessibilityIdentifier("recipe-list-marker")
+    }
+
+    private func listMarkerAccessibilityLabel(_ marker: ListMarker) -> String {
+        let looks: String = marker.count == 1 ? "1 look" : "\(marker.count) looks"
+        return "\(marker.title), \(looks)"
+    }
+
     private func groupAccent(_ group: RecipeGroup) -> Color {
         switch group {
         case .compact: return FilmyTheme.accent
@@ -388,6 +474,9 @@ struct RecipePickerView: View {
 
     private func recipeButton(for recipe: FilmRecipe, inGrid: Bool) -> some View {
         let isSelected = selectedRecipeID == recipe.id
+        let isFavorite = favoriteIDs.contains(recipe.id)
+        let favoriteTitle: String = isFavorite ? "Remove from favorites" : "Add to favorites"
+        let baseLabel: String = "\(recipe.name), \(recipe.descriptor)"
 
         return Button {
             withAnimation(reduceMotion ? nil : .snappy(duration: 0.22)) {
@@ -398,14 +487,26 @@ struct RecipePickerView: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("recipe-\(recipe.id)")
-        .accessibilityLabel("\(recipe.name), \(recipe.descriptor)")
+        .accessibilityLabel(isFavorite ? "\(baseLabel), Favorite" : baseLabel)
         .accessibilityValue(isSelected ? "Selected" : "Not selected")
         .accessibilityHint("Selects this look. The picker stays open.")
         .accessibilityAction(named: "View recipe details") {
             onOpenDetail(recipe)
         }
+        .accessibilityActions {
+            if let onToggleFavorite {
+                Button(favoriteTitle) { onToggleFavorite(recipe) }
+            }
+        }
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .contextMenu {
+            if let onToggleFavorite {
+                Button {
+                    onToggleFavorite(recipe)
+                } label: {
+                    Label(favoriteTitle, systemImage: isFavorite ? "heart.slash" : "heart")
+                }
+            }
             Button {
                 onOpenDetail(recipe)
             } label: {
@@ -436,7 +537,19 @@ struct RecipePickerView: View {
     }
 
     @ViewBuilder
-    private func tileSwatch(_ recipe: FilmRecipe, isSelected: Bool, inGrid: Bool) -> some View {
+    private func favoriteBadge(isFavorite: Bool) -> some View {
+        if isFavorite {
+            Image(systemName: "heart.circle.fill")
+                .font(.caption2)
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(Color.white, Color.black.opacity(0.6))
+                .padding(2)
+                .accessibilityHidden(true)
+        }
+    }
+
+    @ViewBuilder
+    private func tileSwatch(_ recipe: FilmRecipe, isSelected: Bool, isFavorite: Bool, inGrid: Bool) -> some View {
         let swatch = RecipeSwatch(
             recipe: recipe,
             isSelected: isSelected,
@@ -449,11 +562,13 @@ struct RecipePickerView: View {
                 .frame(height: swatchSize.height)
                 .clipShape(Rectangle())
                 .overlay(alignment: .topTrailing) { selectedBadge(isSelected: isSelected) }
+                .overlay(alignment: .topLeading) { favoriteBadge(isFavorite: isFavorite) }
         } else {
             swatch
                 .frame(width: swatchSize.width, height: swatchSize.height)
                 .clipShape(Rectangle())
                 .overlay(alignment: .topTrailing) { selectedBadge(isSelected: isSelected) }
+                .overlay(alignment: .topLeading) { favoriteBadge(isFavorite: isFavorite) }
         }
     }
 
@@ -481,9 +596,10 @@ struct RecipePickerView: View {
 
     private func recipeTile(_ recipe: FilmRecipe, inGrid: Bool) -> some View {
         let isSelected = selectedRecipeID == recipe.id
+        let showsBadge: Bool = showsFavoriteBadges && favoriteIDs.contains(recipe.id)
 
         return VStack(spacing: 3) {
-            tileSwatch(recipe, isSelected: isSelected, inGrid: inGrid)
+            tileSwatch(recipe, isSelected: isSelected, isFavorite: showsBadge, inGrid: inGrid)
             tileName(recipe, isSelected: isSelected, inGrid: inGrid)
         }
         // Do not dim unselected photographs: their colors are the decision.
@@ -1653,6 +1769,23 @@ enum LookLibraryIndex {
         return (try? JSONEncoder().encode(Array(normalized))) ?? Data()
     }
 
+    /// Stable partition: names that start with the query first, then the rest.
+    static func nameMatchesFirst(_ recipes: [FilmRecipe], query: String) -> [FilmRecipe] {
+        let trimmed: String = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return recipes }
+        let options: String.CompareOptions = [.anchored, .caseInsensitive, .diacriticInsensitive]
+        var prefixed: [FilmRecipe] = []
+        var others: [FilmRecipe] = []
+        for recipe in recipes {
+            if recipe.name.range(of: trimmed, options: options) != nil {
+                prefixed.append(recipe)
+            } else {
+                others.append(recipe)
+            }
+        }
+        return prefixed + others
+    }
+
     static func results(
         in recipes: [FilmRecipe],
         query: String,
@@ -1682,6 +1815,29 @@ enum LookLibraryIndex {
             let searchable = RecipeCatalog.searchText(for: recipe)
             return words.allSatisfy { searchable.localizedStandardContains($0) }
         }
+    }
+}
+
+/// Looks the user switched to, newest first. UI state only: never a photo, recipe or settings value.
+enum RecentLooks {
+    static let storageKey = "recentRecipeIDs.v1"
+    static let limit = 12
+
+    static func sanitized(_ ids: [String]) -> [String] {
+        var seen = Set<String>()
+        var kept: [String] = []
+        for id in ids where !id.isEmpty && id.utf8.count <= 256 && !seen.contains(id) {
+            seen.insert(id)
+            kept.append(id)
+            if kept.count == limit { break }
+        }
+        return kept
+    }
+
+    static func recording(_ id: String, previous: String?, into list: [String]) -> [String] {
+        var base = list
+        if base.isEmpty, let previous, previous != id { base = [previous] }
+        return sanitized([id] + base)
     }
 }
 

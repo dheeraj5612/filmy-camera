@@ -314,8 +314,15 @@ final class CameraViewModel: ObservableObject {
                 return
             }
             defaults.set(selectedRecipeID, forKey: Self.selectedRecipeIDKey)
+            recordRecentLook(previous: oldValue)
             HapticFeedback.play(.selection)
         }
+    }
+    private func recordRecentLook(previous: String) {
+        let updated: [String] = RecentLooks.recording(selectedRecipeID, previous: previous, into: recentRecipeIDs)
+        guard updated != recentRecipeIDs else { return }
+        recentRecipeIDs = updated
+        defaults.set(updated, forKey: RecentLooks.storageKey)
     }
     @Published private(set) var isCapturing = false {
         didSet { endCaptureLeaseIfIdle() }
@@ -392,6 +399,8 @@ final class CameraViewModel: ObservableObject {
             defaults.set(libraryPreferences.encoded(), forKey: RecipeLibraryPreferences.storageKey)
         }
     }
+    /// Looks the user switched to, newest first. UI state only; a launch restore never records.
+    @Published private(set) var recentRecipeIDs: [String] = []
 
     private var toastTask: Task<Void, Never>?
     private var reviewImageData: Data?
@@ -421,6 +430,7 @@ final class CameraViewModel: ObservableObject {
         self.defaults = defaults
         self.photoStore = photoStore
         libraryPreferences = .decode(defaults.data(forKey: RecipeLibraryPreferences.storageKey))
+        recentRecipeIDs = RecentLooks.sanitized(defaults.stringArray(forKey: RecentLooks.storageKey) ?? [])
         self.reviewPreviewRenderer = reviewPreviewRenderer ?? { source, recipe, finish in
             Self.renderReviewPreview(source: source, recipe: recipe, finish: finish)
         }
