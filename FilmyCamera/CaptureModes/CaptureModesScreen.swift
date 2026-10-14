@@ -11,6 +11,7 @@ struct CaptureModesScreen: View {
     @State private var releasedLegacyCamera = false
     @State private var showingCaptures = false
     @State private var showingReferencePicker = false
+    @State private var showingFilmPicker = false
     @State private var referenceItem: PhotosPickerItem?
     @State private var referenceImage: UIImage?
     @State private var referenceBusy = false
@@ -29,7 +30,7 @@ struct CaptureModesScreen: View {
     }
 
     private var interactionBlocked: Bool {
-        showingCaptures || showingReferencePicker || referenceBusy || model.analysis != nil
+        showingCaptures || showingReferencePicker || showingFilmPicker || referenceBusy || model.analysis != nil
             || model.errorMessage != nil || model.requestingPermission || closing
     }
 
@@ -42,8 +43,9 @@ struct CaptureModesScreen: View {
                         VStack(alignment: .leading, spacing: 5) {
                             Text(model.state.message).font(.subheadline)
                             if let warning = model.state.warning { Text(warning).font(.caption).foregroundStyle(.orange) }
-                            Text("Optical preview · Film applied after capture · Originals retained")
-                                .font(.caption2).foregroundStyle(.secondary)
+                            if let note = filmLookNote {
+                                Text(note).font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("capture-modes-film-note")
+                            }
                         }.frame(maxWidth: .infinity, alignment: .leading)
                         modePicker
                         captureOptions
@@ -78,6 +80,11 @@ struct CaptureModesScreen: View {
             .photosPicker(isPresented: $showingReferencePicker, selection: $referenceItem, matching: .images,
                           preferredItemEncoding: .current)
             .sheet(isPresented: $showingCaptures) { CaptureModesLibrary(model: model) }
+            .sheet(isPresented: $showingFilmPicker) {
+                CaptureFilmPicker(recipes: model.recipes, currentName: model.state.recipeName, canSelect: model.canConfigure) { index in
+                    model.engine.selectRecipe(index)
+                }
+            }
             .sheet(isPresented: Binding(get: { model.analysis != nil }, set: { if !$0 { model.analysis = nil } })) {
                 if let analysis = model.analysis { CaptureSceneResults(analysis: analysis) }
             }
@@ -158,22 +165,48 @@ struct CaptureModesScreen: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(alignment: .topLeading) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(model.state.format).font(.caption.monospacedDigit())
-                Text(model.state.mode == .spatialVideo ? "Native stereo" : model.state.recipeName).font(.caption.weight(.semibold))
-                if model.state.mode.isVideo { Text(model.state.microphoneEnabled ? "Audio on" : "Silent video").font(.caption2) }
-                if model.state.focusLocked { Text("AE / AF / WB locked").font(.caption2) }
-            }.dynamicTypeSize(...DynamicTypeSize.accessibility1).padding(10).background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 10)).padding(8)
-        }
+        .overlay(alignment: .topLeading) { if showsFilmChip { filmChip } }
         .accessibilityIdentifier("capture-modes-viewfinder")
     }
 
+    private var showsFilmChip: Bool {
+        model.state.mode == .spatialVideo || !model.state.recipeName.isEmpty
+    }
+
+    private var filmChip: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            if !model.state.format.isEmpty { Text(model.state.format).font(.caption.monospacedDigit()) }
+            Text(model.state.mode == .spatialVideo ? "Native stereo" : "Film: \(model.state.recipeName)")
+                .font(.caption.weight(.semibold)).lineLimit(2)
+                .accessibilityIdentifier("capture-modes-film-chip")
+            if model.state.mode.isVideo { Text(model.state.microphoneEnabled ? "Audio on" : "Silent video").font(.caption2) }
+            if model.state.focusLocked { Text("AE / AF / WB locked").font(.caption2) }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+        .padding(10)
+        .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
+        .padding(8)
+    }
+
     private var modePicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            modeChips
+            unavailableModesNote
+        }
+        .opacity(model.state.controlsExpanded ? 0 : 1)
+        .allowsHitTesting(!model.state.controlsExpanded)
+        .accessibilityHidden(model.state.controlsExpanded)
+    }
+
+    private var modeChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 10) {
                 ForEach(CaptureMode.allCases) { mode in
-                    Button { model.open(mode) } label: {
+                    Button {
+                        if model.requestedMode != mode { HapticFeedback.play(.selection) }
+                        model.open(mode)
+                    } label: {
                         Label(mode.title, systemImage: mode.symbol)
                             .font(.subheadline.weight(.semibold))
                             .padding(.horizontal, 14).frame(minHeight: 44)
@@ -183,22 +216,60 @@ struct CaptureModesScreen: View {
                     .disabled(!model.canConfigure || !CaptureModesEngine.supportedModes.contains(mode))
                     .accessibilityIdentifier("capture-mode-\(mode.rawValue)")
                     .accessibilityAddTraits(model.requestedMode == mode ? .isSelected : [])
+                    .accessibilityHint(unavailableHint(for: mode))
                 }
             }
-        }.opacity(model.state.controlsExpanded ? 0 : 1)
-            .allowsHitTesting(!model.state.controlsExpanded)
-            .accessibilityHidden(model.state.controlsExpanded)
+        }
+    }
+
+    private var unavailableModes: [CaptureMode] {
+        CaptureMode.allCases.filter { mode in
+            !CaptureModesEngine.supportedModes.contains(mode) && CaptureModesPolicy.unavailableReason(for: mode) != nil
+        }
+    }
+
+    private func unavailableHint(for mode: CaptureMode) -> String {
+        guard !CaptureModesEngine.supportedModes.contains(mode) else { return "" }
+        return CaptureModesPolicy.unavailableReason(for: mode) ?? ""
+    }
+
+    @ViewBuilder private var unavailableModesNote: some View {
+        let modes = unavailableModes
+        if !modes.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Not on this device").font(.footnote.weight(.semibold))
+                ForEach(modes) { mode in
+                    Text(CaptureModesPolicy.unavailableReason(for: mode) ?? "").font(.footnote)
+                }
+            }
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("capture-modes-unavailable-note")
+        }
+    }
+
+    private var filmPickerButton: some View {
+        Button { showingFilmPicker = true } label: {
+            HStack(spacing: 8) {
+                Label(model.state.recipeName.isEmpty ? "Choose film" : "Film: \(model.state.recipeName)", systemImage: "film")
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.secondary).accessibilityHidden(true)
+            }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .accessibilityHint("Opens the film list")
+        .accessibilityIdentifier("capture-modes-film-picker-open")
     }
 
     private var captureOptions: some View {
         DisclosureGroup("Camera and film") {
             VStack(alignment: .leading, spacing: 14) {
                 if model.state.mode != .spatialVideo {
-                    Menu("Film: \(model.state.recipeName)") {
-                        ForEach(Array(model.recipes.enumerated()), id: \.offset) { index, recipe in
-                            Button(recipe.name) { model.engine.selectRecipe(index) }
-                        }
-                    }
+                    filmPickerButton
                     if model.state.maximumZoom > 1 {
                         Text("Zoom \(model.state.zoom, specifier: "%.1f")×").accessibilityHidden(true)
                         Slider(value: Binding(get: { model.state.zoom }, set: model.engine.setZoom), in: 1...max(1.01, model.state.maximumZoom))
@@ -268,6 +339,25 @@ struct CaptureModesScreen: View {
         CaptureModesPolicy.isStoppable(phase: model.state.phase, scanning: model.state.scanning)
     }
 
+    private var filmLookNote: String? {
+        CaptureModesPolicy.filmLookNote(mode: model.state.mode, showingGuidance: model.state.message == model.state.mode.guidance)
+    }
+
+    private func shutterTapped() {
+        if model.canShoot, CaptureModesPolicy.playsShutterHaptic(mode: model.state.mode, phase: model.state.phase) {
+            HapticFeedback.play(.capture)
+        }
+        model.shutter()
+    }
+
+    private func burstHoldBegan() {
+        let burst = model.state.mode == .burst
+        if burst, model.canShoot, CaptureModesPolicy.playsShutterHaptic(mode: model.state.mode, phase: model.state.phase) {
+            HapticFeedback.play(.capture)
+        }
+        model.beginBurstHold()
+    }
+
     private func updateIdleTimer(sceneActive: Bool) {
         UIApplication.shared.isIdleTimerDisabled = CaptureModesPolicy.keepsScreenAwake(
             sceneActive: sceneActive, cameraReleased: releasedLegacyCamera, closing: closing, phase: model.state.phase)
@@ -294,27 +384,37 @@ struct CaptureModesScreen: View {
                 canHold: model.state.mode == .burst && model.state.phase == .ready,
                 isRecording: stoppable,
                 label: stoppable ? "Stop capture" : "Capture \(model.state.mode.title)",
-                tap: model.shutter, beginHold: model.beginBurstHold, endHold: model.endBurstHold)
+                tap: { shutterTapped() }, beginHold: { burstHoldBegan() }, endHold: model.endBurstHold)
                 .frame(width: 76, height: 76)
             VStack(spacing: 4) {
                 if model.state.phase == .processing {
                     ProgressView()
-                    Button("Pause") { model.engine.pause(reason: model.state.scanning ? "Scene reading stopped. Reopen the mode to read the scene again." : "Processing paused. Retry it from Captures.") }.font(.caption)
-                        .accessibilityLabel("Pause processing")
+                    Button { model.engine.pause(reason: model.state.scanning ? "Scene reading stopped. Reopen the mode to read the scene again." : "Processing paused. Retry it from Captures.") } label: {
+                        Text("Pause").font(.caption).frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("Pause processing")
+                    .accessibilityIdentifier("capture-modes-pause-processing")
                 } else if model.state.phase == .unavailable || model.state.phase == .stopped {
                     if cameraDenied {
-                        Button("Open Settings") {
+                        Button {
                             if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
-                        }.font(.caption).frame(minHeight: 44).accessibilityIdentifier("capture-modes-open-settings")
+                        } label: {
+                            Text("Open Settings").font(.caption.weight(.semibold)).multilineTextAlignment(.center)
+                                .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                        }.accessibilityIdentifier("capture-modes-open-settings")
                     } else {
-                        Button("Reopen mode") { model.open(model.requestedMode) }.font(.caption)
+                        Button { model.open(model.requestedMode) } label: {
+                            Text("Reopen mode").font(.caption.weight(.semibold)).multilineTextAlignment(.center)
+                                .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                        }.accessibilityIdentifier("capture-modes-reopen-mode")
                     }
                 } else {
-                    Button { model.engine.inspectScene() } label: { Label("Read scene", systemImage: "text.viewfinder").font(.caption) }
+                    Button { model.engine.inspectScene() } label: { Label("Read scene", systemImage: "text.viewfinder").font(.caption).multilineTextAlignment(.center)
+                        .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle()) }
                         .disabled(!model.canConfigure || model.state.mode.isVideo)
                         .accessibilityIdentifier("read-camera-scene")
                 }
-            }.frame(maxWidth: .infinity)
+            }.frame(maxWidth: .infinity, minHeight: 44).dynamicTypeSize(...DynamicTypeSize.accessibility1)
         }.padding(.horizontal, 16).padding(.vertical, 10).background(.black)
     }
 
@@ -373,5 +473,84 @@ struct CaptureModesScreen: View {
                 referenceImage = UIImage(cgImage: result.image)
             } catch { if !Task.isCancelled { model.errorMessage = error.localizedDescription } }
         }
+    }
+}
+
+/// Searchable film list. The current film comes from the model, not screen state: the Camera Control picker can change it.
+private struct CaptureFilmPicker: View {
+    let recipes: [FilmRecipe]
+    let currentName: String
+    let canSelect: Bool
+    let select: (Int) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    @State private var detent: PresentationDetent = .large
+
+    private var currentIndex: Int? { recipes.firstIndex { $0.name == currentName } }
+
+    private func rows(current: Int?) -> [(offset: Int, element: FilmRecipe)] {
+        let words = query.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        let matches = recipes.map { recipe -> Bool in
+            if words.isEmpty { return true }
+            let text = RecipeCatalog.searchText(for: recipe)
+            return words.allSatisfy { text.localizedStandardContains($0) }
+        }
+        return CaptureModesPolicy.filmPickerOrder(matches: matches, current: current).map { (offset: $0, element: recipes[$0]) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            content
+                .navigationTitle("Choose film")
+                .navigationBarTitleDisplayMode(.inline)
+                .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search films")
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { dismiss() }.accessibilityIdentifier("capture-film-picker-done")
+                    }
+                }
+        }
+        .preferredColorScheme(.dark)
+        .presentationDetents([.medium, .large], selection: $detent)
+    }
+
+    @ViewBuilder private var content: some View {
+        let current = currentIndex
+        let listed = rows(current: current)
+        if listed.isEmpty {
+            ContentUnavailableView("No film matches", systemImage: "magnifyingglass",
+                                   description: Text("Nothing matches \(query.trimmingCharacters(in: .whitespacesAndNewlines)). Try a shorter word."))
+                .accessibilityIdentifier("capture-film-picker-empty")
+        } else {
+            List {
+                Section {
+                    ForEach(listed, id: \.offset) { row in
+                        filmRow(index: row.offset, recipe: row.element, isCurrent: row.offset == current)
+                    }
+                } header: {
+                    Text(canSelect ? "Used for shots taken here." : "Film changes are unavailable right now.")
+                        .font(.footnote).textCase(nil)
+                }
+            }
+        }
+    }
+
+    private func filmRow(index: Int, recipe: FilmRecipe, isCurrent: Bool) -> some View {
+        Button {
+            if !isCurrent { HapticFeedback.play(.selection) }
+            select(index)
+            dismiss()
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(recipe.name).font(.body).foregroundStyle(.primary)
+                if !recipe.subtitle.isEmpty { Text(recipe.subtitle).font(.footnote).foregroundStyle(.secondary) }
+                if isCurrent { Label("Current", systemImage: "checkmark").font(.footnote.weight(.semibold)).foregroundStyle(.secondary) }
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .disabled(!canSelect)
+        .accessibilityIdentifier("capture-film-\(recipe.id)")
+        .accessibilityAddTraits(isCurrent ? .isSelected : [])
     }
 }

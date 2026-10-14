@@ -54,6 +54,7 @@ class SuiteRoutingTests(unittest.TestCase):
             "FilmyCameraUITests/FilmyCameraUITests/testViewfinderFirstChromePreviewKeepsCameraQuiet",
             "FilmyCameraUITests/SmartRecipeUITests/testSmartLooksIsDiscoverableAndUnavailableSceneHasNoApplyAction",
             "FilmyCameraUITests/SmartRecipeUITests/testDisablingSuggestionsPersistsAcrossRelaunch",
+            "FilmyCameraUITests/SignalFrameUITests/testCaptureModesOpensWithoutACameraAndPicksAFilm",
         }
         self.assertEqual({test for test, group in tests.items() if group == "simulator-e2e"}, expected)
         e2e = set(run.phases("e2e", tests)[0][1])

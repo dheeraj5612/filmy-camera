@@ -112,6 +112,49 @@ final class CaptureModesPolicyTests: XCTestCase {
         }
     }
 
+    func testFilmLookNoteSaysWhenTheLookIsAddedAndThatOriginalsAreKept() {
+        let still = "Film look is added after you shoot. Originals are kept."
+        for mode in [CaptureMode.photo, .burst, .macro, .portrait, .night, .panorama] {
+            XCTAssertEqual(CaptureModesPolicy.filmLookNote(mode: mode, showingGuidance: true), still)
+            XCTAssertEqual(CaptureModesPolicy.filmLookNote(mode: mode, showingGuidance: false), still)
+        }
+        XCTAssertNil(CaptureModesPolicy.filmLookNote(mode: .filmVideo, showingGuidance: true))
+        XCTAssertEqual(CaptureModesPolicy.filmLookNote(mode: .filmVideo, showingGuidance: false),
+                       "Film look is added after you stop recording. Originals are kept.")
+        XCTAssertNil(CaptureModesPolicy.filmLookNote(mode: .spatialVideo, showingGuidance: true))
+        XCTAssertNil(CaptureModesPolicy.filmLookNote(mode: .spatialVideo, showingGuidance: false))
+    }
+
+    func testFilmPickerListsOnlyMatchesWithTheCurrentFilmFirst() {
+        XCTAssertEqual(CaptureModesPolicy.filmPickerOrder(matches: [true, true, true, true], current: 2), [2, 0, 1, 3])
+        XCTAssertEqual(CaptureModesPolicy.filmPickerOrder(matches: [true, true, true], current: 0), [0, 1, 2])
+        XCTAssertEqual(CaptureModesPolicy.filmPickerOrder(matches: [false, true, false, true], current: 3), [3, 1])
+        XCTAssertEqual(CaptureModesPolicy.filmPickerOrder(matches: [false, true, false, true], current: 2), [1, 3])
+        XCTAssertEqual(CaptureModesPolicy.filmPickerOrder(matches: [true, true], current: nil), [0, 1])
+        XCTAssertEqual(CaptureModesPolicy.filmPickerOrder(matches: [true, true], current: 9), [0, 1])
+        XCTAssertEqual(CaptureModesPolicy.filmPickerOrder(matches: [false, false], current: 0), [])
+        XCTAssertEqual(CaptureModesPolicy.filmPickerOrder(matches: [], current: nil), [])
+    }
+
+    func testShutterHapticIsLimitedToStillsThatStartFromReady() {
+        for mode in CaptureMode.allCases {
+            XCTAssertEqual(CaptureModesPolicy.playsShutterHaptic(mode: mode, phase: .ready),
+                           [CaptureMode.photo, .burst, .macro, .portrait].contains(mode), mode.rawValue)
+            for phase in [CaptureModesPhase.stopped, .configuring, .capturing, .recording, .processing, .unavailable] {
+                XCTAssertFalse(CaptureModesPolicy.playsShutterHaptic(mode: mode, phase: phase), "\(mode.rawValue) \(phase.rawValue)")
+            }
+        }
+    }
+
+    func testUnavailableReasonExistsOnlyForHardwareGatedModes() {
+        XCTAssertEqual(CaptureModesPolicy.unavailableReason(for: .macro), "Macro needs an ultra-wide camera that focuses up close.")
+        XCTAssertEqual(CaptureModesPolicy.unavailableReason(for: .portrait), "Portrait needs a dual, triple or depth camera.")
+        XCTAssertEqual(CaptureModesPolicy.unavailableReason(for: .spatialVideo), "Spatial video needs a device that records spatial video.")
+        for mode in [CaptureMode.photo, .burst, .filmVideo, .night, .panorama] {
+            XCTAssertNil(CaptureModesPolicy.unavailableReason(for: mode), mode.rawValue)
+        }
+    }
+
     func testScreenStaysAwakeOnlyWhileTheWorkspaceIsUsable() {
         for usable in [CaptureModesPhase.configuring, .ready, .capturing, .recording, .processing] {
             XCTAssertTrue(CaptureModesPolicy.keepsScreenAwake(sceneActive: true, cameraReleased: true, closing: false, phase: usable))

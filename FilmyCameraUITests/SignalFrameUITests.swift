@@ -291,6 +291,147 @@ final class SignalFrameUITests: XCTestCase {
         toggleFavorite(app, expected: "Not favorite")
     }
 
+    func testCaptureModesOpensWithoutACameraAndPicksAFilm() throws {
+        #if !targetEnvironment(simulator)
+        throw XCTSkip("Simulator only: checks Capture modes with no camera.")
+        #else
+        continueAfterFailure = false
+        let app = makeApp()
+        app.launch()
+        defer { app.terminate() }
+        guard openCaptureModesWithoutACamera(app) else { return }
+
+        // Queries the device lane relies on, checked here on a simulator.
+        let finder = app.otherElements["capture-modes-viewfinder"]
+        XCTAssertTrue(finder.exists)
+        XCTAssertGreaterThanOrEqual(finder.frame.height, 200, "The preview, not the chip, carries the viewfinder identifier")
+        for mode in ["photo", "burst", "macro", "portrait", "filmVideo", "night", "panorama", "spatialVideo"] {
+            XCTAssertTrue(app.buttons["capture-mode-\(mode)"].exists, mode)
+        }
+        XCTAssertTrue(app.buttons["open-mode-captures"].exists)
+        XCTAssertTrue(app.buttons["Back"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["capture-modes-shutter"].exists)
+        assertReachable(app.buttons["capture-mode-photo"], in: app)
+
+        // The film look is said to arrive after the shot.
+        let chip = filmChip(in: app)
+        XCTAssertEqual(chip.label, "Film: G7 X Compact")
+        XCTAssertEqual(app.staticTexts["capture-modes-film-note"].label,
+                       "Film look is added after you shoot. Originals are kept.")
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Optical preview'")).firstMatch.exists)
+
+        // A simulator supports every mode, so nothing is dimmed or explained.
+        XCTAssertFalse(app.descendants(matching: .any)["capture-modes-unavailable-note"].exists)
+
+        assertReachable(app.buttons["capture-modes-reopen-mode"], in: app)
+        snapshot("capture-modes-no-camera")
+
+        // The film list is searchable and marks the current film.
+        let open = openFilmPicker(app)
+        XCTAssertTrue(open.label.contains("Film: G7 X Compact"))
+        open.tap()
+        XCTAssertTrue(app.navigationBars["Choose film"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Used for shots taken here."].exists)
+        let current = app.buttons["capture-film-g7x-compact"]
+        XCTAssertTrue(current.waitForExistence(timeout: 5))
+        XCTAssertTrue(current.isSelected)
+        XCTAssertTrue(current.label.contains("Current"))
+        assertReachable(current, in: app)
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("Muted Color")
+        let muted = app.buttons["capture-film-classic-chrome"]
+        XCTAssertTrue(muted.waitForExistence(timeout: 8))
+        XCTAssertFalse(app.buttons["capture-film-g7x-compact"].exists, "The current film is not listed when it does not match")
+        snapshot("capture-modes-film-picker-search")
+        muted.tap()
+        let picked = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            !app.navigationBars["Choose film"].exists && chip.label == "Film: Muted Color"
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter().wait(for: [picked], timeout: 8), .completed)
+        snapshot("capture-modes-film-picked")
+
+        app.terminate()
+        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        guard openCaptureModesWithoutACamera(app) else { return }
+        assertReachable(app.buttons["capture-modes-reopen-mode"], in: app)
+        XCTAssertTrue(app.frame.contains(app.descendants(matching: .any)["capture-modes-shutter"].frame),
+                      "The shutter must stay on screen at the largest text size")
+        XCTAssertTrue(filmChip(in: app).exists)
+        snapshot("capture-modes-no-camera-largest-text")
+        openFilmPicker(app).tap()
+        XCTAssertTrue(app.navigationBars["Choose film"].waitForExistence(timeout: 5))
+        let done = app.buttons["capture-film-picker-done"]
+        XCTAssertTrue(done.waitForExistence(timeout: 5))
+        XCTAssertTrue(done.isHittable)
+        snapshot("capture-modes-film-picker-largest-text")
+        done.tap()
+        #endif
+    }
+
+    /// Opens the "Camera and film" disclosure and returns the reachable film list button.
+    private func openFilmPicker(_ app: XCUIApplication) -> XCUIElement {
+        let header = app.buttons["Camera and film"]
+        revealInPage(header, in: app)
+        header.tap()
+        let open = app.buttons["capture-modes-film-picker-open"]
+        revealInPage(open, in: app)
+        assertReachable(open, in: app)
+        return open
+    }
+
+    /// The container's `capture-modes-viewfinder` identifier wins over the chip's own, so find the chip by its text.
+    private func filmChip(in app: XCUIApplication) -> XCUIElement {
+        app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Film: '")).firstMatch
+    }
+
+    /// Opens Capture modes on a simulator, allows the system camera prompt, dismisses the no-camera alert and
+    /// waits for the settled screen. "Reopen mode" alone is no signal: it shows from the first frame.
+    private func openCaptureModesWithoutACamera(_ app: XCUIApplication) -> Bool {
+        waitForCamera(app)
+        tapWhenStable(app.buttons["open-capture-modes"], in: app)
+        var sawFailureAlert = false
+        var settledSamples = 0
+        let deadline = Date(timeIntervalSinceNow: 40)
+        while Date() < deadline {
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.25))
+            let prompt = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch
+            if prompt.exists {
+                if prompt.buttons["Allow"].exists { prompt.buttons["Allow"].tap() }
+                else if prompt.buttons["OK"].exists { prompt.buttons["OK"].tap() }
+                settledSamples = 0
+                continue
+            }
+            let failure = app.alerts["Capture modes"]
+            if failure.exists {
+                if failure.buttons["OK"].exists { failure.buttons["OK"].tap() }
+                sawFailureAlert = true
+                settledSamples = 0
+                continue
+            }
+            if app.buttons["capture-modes-open-settings"].exists {
+                failureEvidence("capture-modes-camera-denied", app: app)
+                XCTFail("Camera access is denied on this simulator. Reset the camera permission for Filmy Camera and run again.")
+                return false
+            }
+            let chip = filmChip(in: app)
+            let reopen = app.buttons["capture-modes-reopen-mode"]
+            let settled = sawFailureAlert
+                && !app.alerts.firstMatch.exists
+                && app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'needs camera hardware'")).firstMatch.exists
+                && chip.exists && chip.label.hasPrefix("Film: ")
+                && !app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Preparing camera'")).firstMatch.exists
+                && reopen.exists && reopen.isHittable
+            settledSamples = settled ? settledSamples + 1 : 0
+            if settledSamples >= 2 { return true }
+        }
+        failureEvidence("capture-modes-not-settled", app: app)
+        XCTFail("Capture modes did not settle without a camera within 40 s")
+        return false
+    }
+
     private func waitForCamera(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             app.state == .runningForeground && app.buttons["recipe-menu"].exists

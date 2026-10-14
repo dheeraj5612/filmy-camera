@@ -96,6 +96,7 @@
     "FilmyCameraUITests/ComprehensiveSettingsTests/testPhysicalEveryAspectAndTimerCapturesThenFrontCameraReturnsLive": "device",
     "FilmyCameraUITests/SmartRecipeUITests/testSmartLooksIsDiscoverableAndUnavailableSceneHasNoApplyAction": "simulator-e2e",
     "FilmyCameraUITests/SmartRecipeUITests/testDisablingSuggestionsPersistsAcrossRelaunch": "simulator-e2e",
+    "FilmyCameraUITests/SignalFrameUITests/testCaptureModesOpensWithoutACameraAndPicksAFilm": "simulator-e2e",
     "FilmyCameraTests/CameraViewModelRenderingTests/testCaptureDiagnosticsRequiresExplicitOptIn": "unit",
     "FilmyCameraTests/CameraViewModelRenderingTests/testCaptureDiagnosticsReplacesTheLatestSourceAndFinalPair": "unit"
   }

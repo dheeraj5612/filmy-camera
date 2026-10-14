@@ -183,6 +183,34 @@ enum CaptureModesPolicy {
         phase == .recording || (phase == .capturing && !scanning)
     }
 
+    /// Line under the viewfinder. The preview is always optical: this says when the film look reaches the picture.
+    /// Nil for Spatial video (no film look) and while Film video shows its guidance, which already says it.
+    static func filmLookNote(mode: CaptureMode, showingGuidance: Bool) -> String? {
+        switch mode {
+        case .spatialVideo: return nil
+        case .filmVideo: return showingGuidance ? nil : "Film look is added after you stop recording. Originals are kept."
+        case .photo, .burst, .macro, .portrait, .night, .panorama: return "Film look is added after you shoot. Originals are kept."
+        }
+    }
+
+    /// Indexes the film list shows, in order. `matches[i]` says whether film `i` fits the search. Only matching films are
+    /// listed, catalog order kept, except the current film, which comes first when it matches.
+    static func filmPickerOrder(matches: [Bool], current: Int?) -> [Int] {
+        let listed = matches.indices.filter { matches[$0] }
+        guard let current, listed.contains(current) else { return listed }
+        return [current] + listed.filter { $0 != current }
+    }
+
+    /// The shutter vibrates only when a tap starts a single still or a burst. Video, spatial video, Filmy Night
+    /// and Panorama stay silent: the motor would reach the microphone or the frames held still. Stop taps never vibrate.
+    static func playsShutterHaptic(mode: CaptureMode, phase: CaptureModesPhase) -> Bool {
+        guard phase == .ready else { return false }
+        switch mode {
+        case .photo, .burst, .macro, .portrait: return true
+        case .filmVideo, .night, .panorama, .spatialVideo: return false
+        }
+    }
+
     /// The display stays awake only while the workspace is usable; a denied or paused camera lets it sleep.
     static func keepsScreenAwake(sceneActive: Bool, cameraReleased: Bool, closing: Bool, phase: CaptureModesPhase) -> Bool {
         sceneActive && cameraReleased && !closing && phase != .unavailable && phase != .stopped
@@ -190,6 +218,16 @@ enum CaptureModesPolicy {
 
     static func supportsMacro(minimumFocusDistance: Int, autofocus: Bool) -> Bool {
         autofocus && minimumFocusDistance > 0 && minimumFocusDistance <= 50
+    }
+
+    /// Why a mode can be missing on some hardware, as a full sentence. Nil for modes every supported device offers.
+    static func unavailableReason(for mode: CaptureMode) -> String? {
+        switch mode {
+        case .macro: return "Macro needs an ultra-wide camera that focuses up close."
+        case .portrait: return "Portrait needs a dual, triple or depth camera."
+        case .spatialVideo: return "Spatial video needs a device that records spatial video."
+        case .photo, .burst, .filmVideo, .night, .panorama: return nil
+        }
     }
 
     static func acceptableNightTranslation(x: Double, y: Double, width: Double, height: Double) -> Bool {
