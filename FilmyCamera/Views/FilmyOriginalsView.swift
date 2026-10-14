@@ -108,6 +108,7 @@ struct FilmyPhotoEditorView: View {
     var savesAsNewFrame = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var document: FilmyPhotoDocument?
     @State private var recipe: FilmRecipe?
     @State private var finish: PhotoFinish = .photo
@@ -117,7 +118,9 @@ struct FilmyPhotoEditorView: View {
     @State private var originalURL: URL?
     @State private var rawURL: URL?
     @State private var liveURL: URL?
-    @State private var showingOriginal = false
+    @State private var comparison = ReviewComparisonState()
+    /// True while a touch holds the still photo; view state only.
+    @GestureState private var isPeekingOriginal = false
     /// True while a look or finish pick renders its preview.
     @State private var developingPreview = false
     @State private var showingLookLibrary = false
@@ -147,7 +150,7 @@ struct FilmyPhotoEditorView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .toolbar { editLookToolbar }
-        .interactiveDismissDisabled(savesAsNewFrame && busy)
+        .interactiveDismissDisabled(savesAsNewFrame && (busy || isPeekingOriginal))
         .disabled(busy)
         .sheet(isPresented: $showingLookLibrary) { lookLibrarySheet() }
         .task { await load() }
@@ -190,14 +193,55 @@ struct FilmyPhotoEditorView: View {
     }
 
     private func photoArea(maxBox: CGSize) -> some View {
-        imagePreview(maxBox: maxBox)
+        let title: String? = progressTitle
+        return imagePreview(maxBox: maxBox)
             .frame(maxWidth: .infinity)
             .padding(.top, 4)
+            .overlay(alignment: .topLeading) { progressOverlay(title) }
+            .accessibilityElement(children: .contain)
+            .accessibilityValue(title ?? "")
+            .accessibilityIdentifier("filmy-edit-photo")
+    }
+
+    /// Names the work in flight over the kept frame; nil when idle.
+    private var progressTitle: String? {
+        if busy && !developingPreview { return "Processing photo" }
+        if developingPreview || (loadingRendition && preview != nil) { return "Developing" }
+        return nil
+    }
+
+    @ViewBuilder
+    private func progressOverlay(_ title: String?) -> some View {
+        if let title { progressPill(title) }
+    }
+
+    private func progressPill(_ title: String) -> some View {
+        HStack(spacing: 6) {
+            progressIndicator
+            Text(title).lineLimit(1)
+        }
+        .font(.caption.weight(.bold))
+        .foregroundStyle(FilmyTheme.primary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(FilmyTheme.chromeFill, in: Capsule())
+        .overlay { Capsule().strokeBorder(FilmyTheme.chromeStroke, lineWidth: 1) }
+        .padding(8)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private var progressIndicator: some View {
+        if reduceMotion {
+            Image(systemName: "hourglass")
+        } else {
+            ProgressView().controlSize(.small).tint(FilmyTheme.primary)
+        }
     }
 
     private var secondaryControls: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if busy { ProgressView("Processing photo").frame(maxWidth: .infinity) }
             if let document, let editing = document.revisionForEditing(selectedRevisionID) {
                 editingControls(document, editing)
             }
@@ -212,7 +256,7 @@ struct FilmyPhotoEditorView: View {
     @ViewBuilder
     private func editingControls(_ document: FilmyPhotoDocument, _ editing: FilmyPhotoRevision) -> some View {
         if let recipe { lookRow(recipe) }
-        Toggle("Compare original", isOn: $showingOriginal).accessibilityIdentifier("filmy-compare-original")
+        compareControl
         finishRow(document)
         revisionPicker(document)
         detailsGroup(document, editing)
@@ -247,6 +291,7 @@ struct FilmyPhotoEditorView: View {
             .contentShape(shape)
         }
         .buttonStyle(.pressable)
+        .disabled(loadingRendition)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Film look")
         .accessibilityValue(recipe.name)
@@ -292,7 +337,7 @@ struct FilmyPhotoEditorView: View {
     }
 
     private func selectLook(_ candidate: FilmRecipe) {
-        guard !busy else { return }
+        guard !busy, !loadingRendition else { return }
         showingLookLibrary = false
         guard candidate.id != recipe?.id else { return }
         recipe = candidate
@@ -351,7 +396,7 @@ struct FilmyPhotoEditorView: View {
             trackSegmentLabel(title, isSelected: isSelected).frame(maxWidth: .infinity)
         }
         .buttonStyle(.pressable)
-        .disabled(isDisabled)
+        .disabled(isDisabled || loadingRendition)
         .opacity(isDisabled ? 0.4 : 1)
         .accessibilityLabel("Finish, \(title)")
         .accessibilityAddTraits(traits)
@@ -376,7 +421,7 @@ struct FilmyPhotoEditorView: View {
     }
 
     private func selectFinish(_ new: PhotoFinish) {
-        guard new != finish else { return }
+        guard !loadingRendition, new != finish else { return }
         finish = new
         startPreview()
     }
@@ -424,13 +469,13 @@ struct FilmyPhotoEditorView: View {
         if savesAsNewFrame {
             Button("Save as new frame") { Task { await saveAsNewFrame() } }
                 .buttonStyle(.filmyPrimary)
-                .disabled(document == nil)
+                .disabled(document == nil || loadingRendition)
                 .accessibilityHint("Saves this look as a new version and adds it to your Roll as a new frame. This frame is kept.")
                 .accessibilityIdentifier("filmy-save-new-frame")
         } else {
             Button("Save version") { Task { await develop(save: true) } }
                 .buttonStyle(.filmyPrimary)
-                .disabled(document == nil)
+                .disabled(document == nil || loadingRendition)
                 .accessibilityIdentifier("filmy-save-version")
         }
     }
@@ -465,7 +510,164 @@ struct FilmyPhotoEditorView: View {
         }
     }
 
-    private var displayedImage: UIImage? { showingOriginal ? originalPreview : preview }
+    // MARK: Compare original
+
+    private var canPeek: Bool {
+        !showingLive && comparison.mode == .look && originalPreview != nil && !busy
+    }
+
+    private var showsOriginalFrame: Bool {
+        comparison.mode == .original || (isPeekingOriginal && canPeek)
+    }
+
+    private var compareUnavailable: Bool { originalPreview == nil || showingLive }
+
+    /// Hold the photo for about 0.3 s to see the original while the finger is
+    /// down. View state only: it never selects a comparison mode.
+    private var peekGesture: some Gesture {
+        LongPressGesture(minimumDuration: 0.3, maximumDistance: 12)
+            .sequenced(before: DragGesture(minimumDistance: 0))
+            .updating($isPeekingOriginal) {
+                (value: SequenceGesture<LongPressGesture, DragGesture>.Value, state: inout Bool, _: inout Transaction) in
+                if case .second(true, _) = value { state = true }
+            }
+    }
+
+    private func photoStack(image: UIImage, fitted: CGSize) -> some View {
+        let hint: String = canPeek ? "Touch and hold to see the original" : ""
+        return photoLayers(image: image, fitted: fitted)
+            .overlay(alignment: .bottomLeading) { originalBadge }
+            .contentShape(Rectangle())
+            .simultaneousGesture(peekGesture, including: canPeek ? .all : .subviews)
+            .onChange(of: isPeekingOriginal) { _, peeking in
+                if peeking { HapticFeedback.play(.selection) }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(photoAccessibilityLabel)
+            .accessibilityHint(hint)
+    }
+
+    private var photoAccessibilityLabel: String {
+        if showsOriginalFrame { return "Original photo, without the look" }
+        return "Photo with \(recipe?.name ?? "the selected look")"
+    }
+
+    private func photoLayers(image: UIImage, fitted: CGSize) -> some View {
+        let shown: UIImage = showsOriginalFrame ? (originalPreview ?? image) : image
+        let shape = RoundedRectangle(cornerRadius: FilmyTheme.viewfinderCornerRadius)
+        return Image(uiImage: shown)
+            .resizable()
+            .scaledToFit()
+            .allowedDynamicRange(.high)
+            .frame(width: fitted.width, height: fitted.height)
+            .clipShape(shape)
+    }
+
+    @ViewBuilder
+    private var originalBadge: some View {
+        if showsOriginalFrame {
+            Text("Original")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(FilmyTheme.background)
+                .lineLimit(1)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(FilmyTheme.primary, in: Capsule())
+                .overlay { Capsule().strokeBorder(.black, lineWidth: 1) }
+                .padding(8)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private var compareControl: some View {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                comparePills
+            } else {
+                compareTrack
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("filmy-compare-picker")
+    }
+
+    private var compareTrack: some View {
+        HStack(spacing: 0) {
+            lookSegment
+            originalButton(segmented: true)
+        }
+        .frame(maxWidth: .infinity)
+        .background(FilmyTheme.panel, in: Capsule())
+        .overlay { Capsule().strokeBorder(FilmyTheme.line, lineWidth: 1) }
+    }
+
+    private var comparePills: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            originalButton(segmented: false)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func pillLabel(_ title: String, icon: String, isSelected: Bool) -> some View {
+        let fill: Color = isSelected ? FilmyTheme.accent : FilmyTheme.panel
+        let symbol: String = isSelected ? "checkmark" : icon
+        return HStack(spacing: 7) {
+            Image(systemName: symbol)
+            Text(title).lineLimit(1)
+        }
+        .font(.caption.weight(.bold))
+        .foregroundStyle(isSelected ? FilmyTheme.background : FilmyTheme.primary)
+        .padding(.horizontal, 12)
+        .frame(minHeight: 48)
+        .background(fill, in: Capsule())
+        .contentShape(Capsule())
+    }
+
+    private var lookSegment: some View {
+        let isSelected: Bool = comparison.mode == .look
+        let traits: AccessibilityTraits = isSelected ? .isSelected : []
+        return Button {
+            guard comparison.mode != .look else { return }
+            requestComparison(.look)
+        } label: {
+            trackSegmentLabel("Look", isSelected: isSelected).frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.pressable)
+        .accessibilityIdentifier("filmy-compare-look")
+        .accessibilityLabel("Look")
+        .accessibilityInputLabels(["Look", "Show look"])
+        .accessibilityAddTraits(traits)
+        .accessibilityHint("Shows the photo with the applied look")
+    }
+
+    private func originalButton(segmented: Bool) -> some View {
+        let isSelected: Bool = comparison.mode == .original
+        let traits: AccessibilityTraits = isSelected ? .isSelected : []
+        return Button {
+            requestComparison(isSelected ? .look : .original)
+        } label: {
+            if segmented {
+                trackSegmentLabel("Original", isSelected: isSelected).frame(maxWidth: .infinity)
+            } else {
+                pillLabel("Original", icon: "circle.lefthalf.filled", isSelected: isSelected)
+            }
+        }
+        .buttonStyle(.pressable)
+        .disabled(compareUnavailable)
+        .opacity(compareUnavailable ? 0.4 : 1)
+        .accessibilityIdentifier("filmy-compare-original")
+        .accessibilityLabel("Compare with original")
+        .accessibilityValue(isSelected ? "Original" : "Look")
+        .accessibilityInputLabels(["Original", "Compare with original"])
+        .accessibilityAddTraits(traits)
+        .accessibilityHint("Switches between the original photo and the applied look")
+    }
+
+    private func requestComparison(_ mode: ReviewComparisonState.Mode) {
+        HapticFeedback.play(.selection)
+        comparison.select(mode, originalAvailable: originalPreview != nil, splitSupported: false)
+    }
 
     @ViewBuilder
     private func imagePreview(maxBox: CGSize) -> some View {
@@ -473,11 +675,9 @@ struct FilmyPhotoEditorView: View {
             OriginalLivePhotoView(photoURL: originalURL, movieURL: liveURL)
                 .frame(width: maxBox.width, height: maxBox.height)
                 .accessibilityLabel("Original Live Photo. Touch and hold to play.")
-        } else if let image = displayedImage {
-            let fitted = CaptureReviewView.fittedSize(for: image.size, within: maxBox)
-            Image(uiImage: image).resizable().scaledToFit().allowedDynamicRange(.high)
-                .frame(width: fitted.width, height: fitted.height)
-                .clipShape(RoundedRectangle(cornerRadius: FilmyTheme.viewfinderCornerRadius))
+        } else if let image = preview {
+            let fitted: CGSize = CaptureReviewView.fittedSize(for: image.size, within: maxBox)
+            photoStack(image: image, fitted: fitted)
         } else if loadingRendition {
             ProgressView("Loading version").frame(width: maxBox.width, height: min(maxBox.height, 240))
         } else {
@@ -553,7 +753,6 @@ struct FilmyPhotoEditorView: View {
             loadingRendition = false
             return
         }
-        preview = nil
         loadingRendition = true
         let image: UIImage?
         if let url = try? await FilmyPhotoStore.shared.renditionURL(documentID, revisionID: revisionID) {
@@ -639,7 +838,7 @@ struct FilmyPhotoEditorView: View {
             }.value
             guard let rendered else { throw FilmyPhotoStore.StoreError.missingRendition }
             preview = rendered.image
-            showingOriginal = false
+            comparison.reset()
             showingLive = false
             if save {
                 let updated = try await FilmyPhotoStore.shared.addRevision(

@@ -138,6 +138,36 @@ final class GalleryPagingUITests: XCTestCase {
         XCTAssertFalse(app.buttons["filmy-export-photos"].exists)
         XCTAssertTrue(app.navigationBars["Edit look"].exists)
         attach("roll-paging-edit-look")
+        let done = app.buttons["gallery-edit-look-done"]
+        XCTAssertEqual(done.label, "Done")
+        let editPhoto = app.descendants(matching: .any)["filmy-edit-photo"]
+        XCTAssertTrue(editPhoto.exists)
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            // Photo-first: at least 55% of the screen, or as wide as the content allows.
+            XCTAssertTrue(editPhoto.frame.height >= app.frame.height * 0.55
+                          || editPhoto.frame.width >= app.frame.width - 21, "The photo leads the editor")
+        }
+        let save = app.buttons["filmy-save-new-frame"]
+        XCTAssertTrue(save.isHittable && save.frame.maxY <= app.frame.maxY, "Save stays pinned on screen")
+        XCTAssertTrue(app.descendants(matching: .any)["filmy-edit-recipe"].isHittable, "Look row is above the fold")
+        XCTAssertTrue(app.buttons["filmy-compare-original"].isHittable, "Compare is above the fold")
+        // The look row is disabled until the saved version shows; the loaded photo is the signal.
+        let loadedPhoto = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Photo with")).firstMatch
+        XCTAssertTrue(loadedPhoto.waitForExistence(timeout: 10), "The saved version loads before a look is picked")
+        XCTAssertTrue(waitUntil(timeout: 10) { app.descendants(matching: .any)["filmy-edit-recipe"].isEnabled }, "Look row unlocks once the saved version loads")
+        app.descendants(matching: .any)["filmy-edit-recipe"].tap()
+        let search = app.textFields["look-library-search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap(); search.typeText("Vivid Slide\n")
+        let vivid = app.buttons["filmy-look-velvia-vivid"]
+        XCTAssertTrue(vivid.waitForExistence(timeout: 5))
+        attach("roll-paging-edit-look-library")
+        vivid.tap()
+        XCTAssertTrue(waitUntil(timeout: 20) { done.label == "Cancel" && done.isEnabled }, "An unsaved look turns Done into Cancel")
+        XCTAssertEqual(app.descendants(matching: .any)["filmy-edit-recipe"].value as? String, "Vivid Slide")
+        XCTAssertTrue(app.descendants(matching: .any)["filmy-document-message"].waitForExistence(timeout: 20), "Result message appears")
+        XCTAssertTrue(app.descendants(matching: .any)["filmy-document-message"].isHittable, "Result message sits by Save")
+        attach("roll-paging-edit-look-changed")
         app.buttons["gallery-edit-look-done"].tap()
         assertFrame(2, recipe: "Fine Monochrome")
         app.buttons["frame-back-to-camera"].tap()
