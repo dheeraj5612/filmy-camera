@@ -22,6 +22,7 @@ struct CaptureModesScreen: View {
     @AppStorage("FilmyCaptureReferenceSplit") private var referenceSplit = false
     @State private var referenceScale = 1.0
     @State private var closing = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     init(camera: CameraService, recipe: FilmRecipe, recipes: [FilmRecipe], mode: CaptureMode, onClose: @escaping () -> Void) {
         self.camera = camera
@@ -38,44 +39,17 @@ struct CaptureModesScreen: View {
         NavigationStack {
             GeometryReader { geometry in
                 ScrollView {
-                    VStack(spacing: 16) {
-                        viewfinder.frame(height: max(240, geometry.size.height * 0.53))
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(model.state.message).font(.subheadline)
-                            if let warning = model.state.warning { Text(warning).font(.caption).foregroundStyle(.orange) }
-                            if let note = filmLookNote {
-                                Text(note).font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("capture-modes-film-note")
-                            }
-                        }.frame(maxWidth: .infinity, alignment: .leading)
-                        modePicker
-                        captureOptions
-                        referenceOptions
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 12)
+                    page(geometry)
+                        .frame(maxWidth: .infinity, minHeight: geometry.size.height)
                 }
+                // Controls stay reachable when the page is taller than the viewport.
+                .scrollBounceBehavior(.basedOnSize)
+                .accessibilityIdentifier("capture-modes-scroll")
             }
             .background(.black)
             .foregroundStyle(.white)
-            .navigationTitle("Capture modes")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Back") {
-                        closing = true
-                        Task {
-                            await model.close()
-                            UIApplication.shared.isIdleTimerDisabled = false
-                            onClose()
-                        }
-                    }.disabled(!releasedLegacyCamera || !model.canClose || closing)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Captures") { model.refresh(); showingCaptures = true }
-                        .disabled(model.state.phase.isBusy || model.requestingPermission)
-                        .accessibilityIdentifier("open-mode-captures")
-                }
-            }
+            .toolbar(.hidden, for: .navigationBar)
+            .safeAreaInset(edge: .top, spacing: 0) { topBar }
             .safeAreaInset(edge: .bottom, spacing: 0) { shutterBar }
             .photosPicker(isPresented: $showingReferencePicker, selection: $referenceItem, matching: .images,
                           preferredItemEncoding: .current)
@@ -140,33 +114,139 @@ struct CaptureModesScreen: View {
         }.preferredColorScheme(.dark)
     }
 
+    private var pageScrolls: Bool { dynamicTypeSize.isAccessibilitySize }
+
+    private func page(_ geometry: GeometryProxy) -> some View {
+        VStack(spacing: 12) {
+            sizedViewfinder(geometry)
+            statusBlock
+            modePicker
+            captureOptions
+            referenceOptions
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 4)
+        .padding(.bottom, 12)
+    }
+
+    /// Fills spare height with a 200 pt floor; at accessibility text sizes the page scrolls around a fixed viewfinder.
+    private func sizedViewfinder(_ geometry: GeometryProxy) -> some View {
+        // One frame for both modes keeps the preview's identity stable when text size crosses the threshold.
+        let fixedHeight: CGFloat = max(240, geometry.size.height * 0.53)
+        let minHeight: CGFloat = pageScrolls ? fixedHeight : 200
+        let maxHeight: CGFloat = pageScrolls ? fixedHeight : .infinity
+        return viewfinder.frame(maxWidth: .infinity, minHeight: minHeight, maxHeight: maxHeight)
+    }
+
+    private var statusBlock: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(model.state.message).font(.subheadline)
+            if let warning = model.state.warning { Text(warning).font(.caption).foregroundStyle(.orange) }
+            if let note = filmLookNote {
+                Text(note).font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("capture-modes-film-note")
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// A 44 pt bar without a title: the mode is already named by the mode chips and the shutter bar.
+    private var topBar: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                backButton
+                Spacer(minLength: 8)
+                capturesButton
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                backButton
+                capturesButton
+            }
+        }
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+        .padding(.horizontal, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.black)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Capture modes")
+    }
+
+    private var backDisabled: Bool { !releasedLegacyCamera || !model.canClose || closing }
+
+    private var backButton: some View {
+        let handingOff = !releasedLegacyCamera || closing
+        return Button {
+            closing = true
+            Task {
+                await model.close()
+                UIApplication.shared.isIdleTimerDisabled = false
+                onClose()
+            }
+        } label: {
+            Label {
+                Text("Back")
+            } icon: {
+                if handingOff { ProgressView().controlSize(.small) } else { Image(systemName: "chevron.left") }
+            }
+            .modifier(CaptureModesCapsuleStyle())
+        }
+        .buttonStyle(.plain)
+        .disabled(backDisabled)
+        .accessibilityLabel("Back")
+        .accessibilityHint(releasedLegacyCamera ? "" : "Getting the camera ready")
+        .accessibilityIdentifier("capture-modes-back")
+    }
+
+    private var capturesDisabled: Bool { model.state.phase.isBusy || model.requestingPermission }
+
+    private var capturesButton: some View {
+        Button { model.refresh(); showingCaptures = true } label: {
+            Label("Captures", systemImage: "photo.on.rectangle")
+                .modifier(CaptureModesCapsuleStyle())
+        }
+        .buttonStyle(.plain)
+        .disabled(capturesDisabled)
+        .accessibilityIdentifier("open-mode-captures")
+    }
+
     private var viewfinder: some View {
         HStack(spacing: referenceSplit && referenceImage != nil ? 8 : 0) {
-            ZStack {
-                CaptureModesPreview(session: model.engine.session, enabled: model.canShoot,
-                                    focus: model.engine.focus, hardware: model.hardwareEvent)
-                if let referenceImage, !referenceSplit {
-                    Image(uiImage: referenceImage).resizable().scaledToFit()
-                        .scaleEffect(x: referenceMirror ? -referenceScale : referenceScale, y: referenceScale)
-                        .opacity(min(max(referenceOpacity, 0), 1))
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                }
-                if model.state.phase == .configuring || model.requestingPermission {
-                    ProgressView("Preparing camera").padding().background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                }
-            }
-            .clipped()
+            // The preview is the sizing base: reference images are overlays so their aspect-fit height
+            // never inflates the flexible viewfinder.
+            CaptureModesPreview(session: model.engine.session, enabled: model.canShoot,
+                                focus: model.engine.focus, hardware: model.hardwareEvent)
+                .overlay { referenceOverlay }
+                .overlay { preparingOverlay }
+                .clipped()
             if let referenceImage, referenceSplit {
-                Image(uiImage: referenceImage).resizable().scaledToFit()
-                    .scaleEffect(x: referenceMirror ? -1 : 1, y: 1)
+                Color.clear
+                    .overlay {
+                        Image(uiImage: referenceImage).resizable().scaledToFit()
+                            .scaleEffect(x: referenceMirror ? -1 : 1, y: 1)
+                            .accessibilityLabel("Reference image, not included in captures")
+                    }
                     .frame(maxWidth: .infinity)
-                    .accessibilityLabel("Reference image, not included in captures")
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(alignment: .topLeading) { if showsFilmChip { filmChip } }
         .accessibilityIdentifier("capture-modes-viewfinder")
+    }
+
+    @ViewBuilder private var referenceOverlay: some View {
+        if let referenceImage, !referenceSplit {
+            Image(uiImage: referenceImage).resizable().scaledToFit()
+                .scaleEffect(x: referenceMirror ? -referenceScale : referenceScale, y: referenceScale)
+                .opacity(min(max(referenceOpacity, 0), 1))
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+    }
+
+    @ViewBuilder private var preparingOverlay: some View {
+        if model.state.phase == .configuring || model.requestingPermission {
+            ProgressView("Preparing camera").padding().background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        }
     }
 
     private var showsFilmChip: Bool {
@@ -476,7 +556,26 @@ struct CaptureModesScreen: View {
     }
 }
 
+/// Capsule look shared by the top bar buttons: 44 pt minimum target, one line, no truncation.
+private struct CaptureModesCapsuleStyle: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .font(.system(.subheadline, design: .rounded).weight(.bold))
+            .foregroundStyle(FilmyTheme.primary)
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, 12)
+            .frame(minWidth: FilmyTheme.minimumHitTarget, minHeight: FilmyTheme.minimumHitTarget)
+            .background(FilmyTheme.panel.opacity(0.94), in: Capsule())
+            .overlay(Capsule().stroke(FilmyTheme.lineStrong, lineWidth: 1))
+            .contentShape(Capsule())
+    }
+}
+
 /// Searchable film list. The current film comes from the model, not screen state: the Camera Control picker can change it.
+/// The current mark matches by name: CaptureModesEngine publishes only `state.recipeName` (no id or index), and
+/// built-in names are unique (RecipeInvariantsTests). A screen-local picked index would desync, because
+/// `selectRecipe` silently ignores picks while the engine is busy.
 private struct CaptureFilmPicker: View {
     let recipes: [FilmRecipe]
     let currentName: String
