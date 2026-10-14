@@ -1444,20 +1444,47 @@ final class RendererOutputBoundsTests: XCTestCase {
         )
         XCTAssertLessThan(framed.extent.width, extent.width)
         let context = CIContext(options: FilmRenderer.testContextOptions)
-        let width = Int(framed.extent.width)
-        let height = Int(framed.extent.height)
-        let pixels = renderFloatPixels(framed, extent: framed.extent, context: context)
-        let centre = pixel(pixels, width: width, x: width / 2, y: height / 2)
-        let edges = [
-            pixel(pixels, width: width, x: 0, y: height / 2),
-            pixel(pixels, width: width, x: width - 1, y: height / 2),
-            pixel(pixels, width: width, x: width / 2, y: 0),
-            pixel(pixels, width: width, x: width / 2, y: height - 1)
+        assertEdgesOpaqueAndMatchCentre(framed, context: context)
+    }
+
+    func testProEncoderSizedKeepsEdgesOpaqueWhenDownscaled() {
+        let extent = CGRect(x: 0, y: 0, width: 4200, height: 3150)
+        let image = CIImage(color: CIColor(red: 0.6, green: 0.5, blue: 0.4, alpha: 1)).cropped(to: extent)
+        let scale = ProCapturePolicy.outputScale(width: extent.width, height: extent.height, resolution: .mp12)
+        XCTAssertLessThan(scale, 1)
+        let sized = ProPhotoEncoder.sized(image, resolution: .mp12)
+        XCTAssertEqual(sized.extent.width, floor(extent.width * scale))
+        XCTAssertEqual(sized.extent.height, floor(extent.height * scale))
+        XCTAssertLessThan(sized.extent.width, extent.width)
+        let context = CIContext(options: FilmRenderer.testContextOptions)
+        assertEdgesOpaqueAndMatchCentre(sized, context: context)
+    }
+
+    /// Reads small probe rects only (left and right 3x1, top and bottom 1x3,
+    /// centre 1x1), never the whole frame.
+    private func assertEdgesOpaqueAndMatchCentre(
+        _ image: CIImage,
+        context: CIContext,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let extent = image.extent
+        let midX = extent.minX + (extent.width / 2).rounded(.down)
+        let midY = extent.minY + (extent.height / 2).rounded(.down)
+        let centre = renderFloatPixels(image, extent: CGRect(x: midX, y: midY, width: 1, height: 1), context: context)
+        let probes = [
+            CGRect(x: extent.minX, y: midY, width: 3, height: 1),
+            CGRect(x: extent.maxX - 3, y: midY, width: 3, height: 1),
+            CGRect(x: midX, y: extent.minY, width: 1, height: 3),
+            CGRect(x: midX, y: extent.maxY - 3, width: 1, height: 3)
         ]
-        for edge in edges {
-            XCTAssertEqual(edge[3], 1, accuracy: 0.002)
-            for channel in 0..<3 {
-                XCTAssertEqual(edge[channel], centre[channel], accuracy: 0.002)
+        for probe in probes {
+            let pixels = renderFloatPixels(image, extent: probe, context: context)
+            for offset in stride(from: 0, to: pixels.count, by: 4) {
+                XCTAssertEqual(pixels[offset + 3], 1, accuracy: 0.002, "Alpha must stay opaque at \(probe)", file: file, line: line)
+                for channel in 0..<3 {
+                    XCTAssertEqual(pixels[offset + channel], centre[channel], accuracy: 0.002, "Edge colour must match centre at \(probe)", file: file, line: line)
+                }
             }
         }
     }

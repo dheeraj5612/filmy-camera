@@ -170,6 +170,50 @@ final class CameraViewModelRenderingTests: XCTestCase {
         }
     }
 
+    func testReviewPreviewDownscaleKeepsEdgesOpaque() {
+        let extent = CGRect(x: 0, y: 0, width: 2400, height: 1800)
+        let source = CIImage(color: CIColor(red: 0.6, green: 0.5, blue: 0.4, alpha: 1)).cropped(to: extent)
+        let bounded = CameraViewModel.boundedReviewPreviewInput(source)
+        XCTAssertEqual(bounded.extent.width, 1800)
+        XCTAssertEqual(bounded.extent.height, 1350)
+        let context = CIContext(options: FilmRenderer.testContextOptions)
+        let midX = (bounded.extent.width / 2).rounded(.down)
+        let midY = (bounded.extent.height / 2).rounded(.down)
+        let centre = probePixels(bounded, CGRect(x: midX, y: midY, width: 1, height: 1), context: context)
+        let probes = [
+            CGRect(x: 0, y: midY, width: 3, height: 1),
+            CGRect(x: bounded.extent.width - 3, y: midY, width: 3, height: 1),
+            CGRect(x: midX, y: 0, width: 1, height: 3),
+            CGRect(x: midX, y: bounded.extent.height - 3, width: 1, height: 3)
+        ]
+        for probe in probes {
+            let pixels = probePixels(bounded, probe, context: context)
+            for offset in stride(from: 0, to: pixels.count, by: 4) {
+                XCTAssertEqual(pixels[offset + 3], 1, accuracy: 0.002, "Alpha must stay opaque at \(probe)")
+                for channel in 0..<3 {
+                    XCTAssertEqual(pixels[offset + channel], centre[channel], accuracy: 0.002, "Edge colour must match centre at \(probe)")
+                }
+            }
+        }
+    }
+
+    private func probePixels(_ image: CIImage, _ rect: CGRect, context: CIContext) -> [Float] {
+        let width = Int(rect.width)
+        let height = Int(rect.height)
+        var pixels = [Float](repeating: 0, count: width * height * 4)
+        pixels.withUnsafeMutableBytes { buffer in
+            context.render(
+                image,
+                toBitmap: buffer.baseAddress!,
+                rowBytes: width * 4 * MemoryLayout<Float>.stride,
+                bounds: rect,
+                format: .RGBAf,
+                colorSpace: CGColorSpace(name: CGColorSpace.sRGB)
+            )
+        }
+        return pixels
+    }
+
     func testScaledGrainPhasePreservesValuesBeyondSeedBitRange() {
         let seed = UInt32(0x1FF) | (UInt32(0x1FF) << 9)
         let phase = CameraViewModel.scaledGrainPhase(

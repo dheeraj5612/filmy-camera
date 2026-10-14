@@ -167,6 +167,8 @@ struct ProCaptureAccumulator {
     var raw: Data?
     var movie: CaptureMovieResource?
     var processingFailed = false
+    /// Live Photo movie errored; the still is delivered without a movie.
+    var liveMovieFailed = false
     var dimensions = ProPhotoDimensions(width: 0, height: 0)
     var flashFired = false
     mutating func accept(data: Data?, isRaw: Bool, id: Int64) {
@@ -176,7 +178,7 @@ struct ProCaptureAccumulator {
     }
     var isComplete: Bool {
         !processingFailed && processed != nil && (options.raw == .off || raw != nil)
-            && (!options.livePhoto || movie != nil)
+            && (!options.livePhoto || movie != nil || liveMovieFailed)
     }
 }
 

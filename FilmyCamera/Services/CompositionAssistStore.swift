@@ -92,7 +92,8 @@ final class CompositionAssistStore: ObservableObject {
                 let x = motion?.gravity.x, y = motion?.gravity.y
                 MainActor.assumeIsolated {
                     guard let self, self.rendering.generation == current else { return }
-                    self.horizon = x.flatMap { x in y.flatMap { PreviewAnalysisMath.horizonDegrees(x: x, y: $0) } }
+                    let wasShowing = self.horizon != nil
+                    self.horizon = x.flatMap { x in y.flatMap { PreviewAnalysisMath.horizonDegrees(x: x, y: $0, wasShowing: wasShowing) } }
                 }
             }
         }

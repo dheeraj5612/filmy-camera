@@ -1837,7 +1837,7 @@ final class CameraViewModel: ObservableObject {
         }
     }
 
-    private nonisolated static func boundedReviewPreviewInput(_ image: CIImage) -> CIImage {
+    nonisolated static func boundedReviewPreviewInput(_ image: CIImage) -> CIImage {
         let extent = image.extent
         let maximumDimension = max(extent.width, extent.height)
         guard maximumDimension.isFinite, maximumDimension > 1_800,
@@ -1848,9 +1848,14 @@ final class CameraViewModel: ObservableObject {
         lanczos.setValue(image, forKey: kCIInputImageKey)
         lanczos.setValue(scale, forKey: kCIInputScaleKey)
         lanczos.setValue(1.0, forKey: kCIInputAspectRatioKey)
+        // Take the origin from the real scaled extent, as ProPhotoOutput does.
+        let scaledOrigin = lanczos.outputImage?.extent.origin ?? .zero
+        // Clamp so edge samples do not blend with the transparent area outside
+        // the extent; the scaled result is infinite, so crop it back below.
+        lanczos.setValue(image.clampedToExtent(), forKey: kCIInputImageKey)
         let boundedExtent = CGRect(
-            x: 0,
-            y: 0,
+            x: scaledOrigin.x,
+            y: scaledOrigin.y,
             width: max((extent.width * scale).rounded(.down), 1),
             height: max((extent.height * scale).rounded(.down), 1)
         )

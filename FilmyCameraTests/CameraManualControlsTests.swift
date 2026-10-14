@@ -462,6 +462,18 @@ final class CaptureWorkflowPolicyTests: XCTestCase {
         XCTAssertNil(PreviewAnalysisMath.horizonDegrees(x: .nan, y: -1))
         XCTAssertNil(PreviewAnalysisMath.horizonDegrees(x: .infinity, y: 0))
     }
+    func testLevelHysteresisKeepsPillThroughEntryThreshold() {
+        // Magnitude-squared 0.03 sits between the exit (0.0225) and entry (0.04) cut-offs.
+        let between = 0.03.squareRoot()
+        XCTAssertNil(PreviewAnalysisMath.horizonDegrees(x: between, y: 0))
+        XCTAssertNotNil(PreviewAnalysisMath.horizonDegrees(x: between, y: 0, wasShowing: true))
+        let below = 0.02.squareRoot()
+        XCTAssertNil(PreviewAnalysisMath.horizonDegrees(x: below, y: 0))
+        XCTAssertNil(PreviewAnalysisMath.horizonDegrees(x: below, y: 0, wasShowing: true))
+        let above = 0.05.squareRoot()
+        XCTAssertNotNil(PreviewAnalysisMath.horizonDegrees(x: above, y: 0))
+        XCTAssertNotNil(PreviewAnalysisMath.horizonDegrees(x: above, y: 0, wasShowing: true))
+    }
     func testExactAspectFramesFitPortraitLandscapeAndTinyWindows() {
         for size in [CGSize(width: 390,height: 500), CGSize(width: 700,height: 250), CGSize(width: 800,height: 1100)] {
             for aspect in CaptureAspect.allCases where aspect != .viewfinder {

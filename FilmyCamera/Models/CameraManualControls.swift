@@ -324,8 +324,11 @@ enum PreviewAnalysisMath {
         return Result(histogram: histogram, clippedPixels: clipped, pixelCount: count, overlayRGBA: overlay)
     }
 
-    static func horizonDegrees(x: Double, y: Double) -> Double? {
-        guard x.isFinite, y.isFinite, x * x + y * y > 0.04 else { return nil }
+    /// `wasShowing` applies hysteresis: once the level is visible it stays until
+    /// tilt from flat drops under about 8.6 degrees (entry is about 11.5 degrees).
+    static func horizonDegrees(x: Double, y: Double, wasShowing: Bool = false) -> Double? {
+        let cutoff = wasShowing ? 0.0225 : 0.04
+        guard x.isFinite, y.isFinite, x * x + y * y > cutoff else { return nil }
         let degrees = atan2(x, -y) * 180 / .pi
         // The nearest portrait/landscape axis is level in any orientation.
         return degrees - (degrees / 90).rounded() * 90

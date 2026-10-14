@@ -57,9 +57,15 @@ enum ProPhotoEncoder {
     static func sized(_ image: CIImage, resolution: ProCaptureOptions.Resolution) -> CIImage {
         let scale = ProCapturePolicy.outputScale(width: image.extent.width, height: image.extent.height, resolution: resolution)
         guard scale < 0.9999 else { return image }
-        let resized = image.applyingFilter("CILanczosScaleTransform", parameters: [kCIInputScaleKey: scale, kCIInputAspectRatioKey: 1])
+        let extent = image.extent
+        // Clamp so edge samples do not blend with the transparent area outside
+        // the extent; the clamped result is infinite, so crop it at the
+        // unclamped result's origin to the floored size.
+        let parameters: [String: Any] = [kCIInputScaleKey: scale, kCIInputAspectRatioKey: 1]
+        let origin = image.applyingFilter("CILanczosScaleTransform", parameters: parameters).extent.origin
+        let resized = image.clampedToExtent().applyingFilter("CILanczosScaleTransform", parameters: parameters)
         // Fractional extents can cause a one-pixel encoder disagreement.
-        return resized.cropped(to: CGRect(x: resized.extent.minX, y: resized.extent.minY, width: max(1, floor(image.extent.width * scale)), height: max(1, floor(image.extent.height * scale))))
+        return resized.cropped(to: CGRect(x: origin.x, y: origin.y, width: max(1, floor(extent.width * scale)), height: max(1, floor(extent.height * scale))))
     }
 
     static func heifData(image: CIImage, sourceSDR: CIImage, sourceHDR: CIImage?, sourceData: Data,

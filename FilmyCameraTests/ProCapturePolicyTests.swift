@@ -146,6 +146,16 @@ final class ProCapturePolicyTests: XCTestCase {
         XCTAssertTrue(assembly.isComplete)
         XCTAssertFalse(assembly.failed)
     }
+    func testAccumulatorDeliversStillWhenLiveMovieFails() {
+        var options = ProCaptureOptions(); options.livePhoto = true
+        var capture = ProCaptureAccumulator(id: 3, options: options)
+        capture.accept(data: Data([1]), isRaw: false, id: 3)
+        XCTAssertFalse(capture.isComplete)
+        capture.liveMovieFailed = true
+        XCTAssertTrue(capture.isComplete)
+        capture.processingFailed = true
+        XCTAssertFalse(capture.isComplete)
+    }
     func testCaptureFailureDoesNotReportPartialRAWAsComplete() {
         var options = ProCaptureOptions(); options.raw = .appleProRAW
         var capture = ProCaptureAccumulator(id: 7, options: options)
