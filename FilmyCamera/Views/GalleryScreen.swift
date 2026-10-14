@@ -1474,9 +1474,15 @@ private final class GalleryOriginalsIndex: ObservableObject {
     private var hasLoaded = false
     private var isLoading = false
     private var reloadPending = false
+    private var loadWasSkipped = false
 
     func loadIfNeeded() {
+        // Pages appearing during the first scan wait for it instead of queuing a rescan.
         guard !hasLoaded else { return }
+        guard !isLoading else {
+            loadWasSkipped = true
+            return
+        }
         reload()
     }
 
@@ -1499,8 +1505,13 @@ private final class GalleryOriginalsIndex: ObservableObject {
                 }
                 self.documentIDs.merge(found) { _, new in new }
             }
+            let skipped = self.loadWasSkipped
+            self.loadWasSkipped = false
             if self.reloadPending {
                 self.reloadPending = false
+                self.reload()
+            } else if inventory == nil, skipped, !self.hasLoaded {
+                // The first scan failed while a page was waiting on it: retry once.
                 self.reload()
             }
         }

@@ -115,6 +115,8 @@ struct FilmyPhotoEditorView: View {
     @State private var message: String?
     @State private var confirmDelete = false
     @State private var selectedRevisionID: UUID?
+    /// Version saved by Save as new frame whose Photos export has not succeeded yet.
+    @State private var newFrameAwaitingExport: UUID?
 
     init(documentID: UUID, photoLibrary: PhotoLibraryService, savesAsNewFrame: Bool = false) {
         self.documentID = documentID
@@ -252,17 +254,20 @@ struct FilmyPhotoEditorView: View {
     private func exportControls(_ document: FilmyPhotoDocument) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Divider()
-            Text("Export saved version").font(.headline)
-            if !savesAsNewFrame {
+            // Edit look saves and exports in one step (Save as new frame), so it shows no export buttons.
+            if savesAsNewFrame {
+                Text("Original files").font(.headline)
+            } else {
+                Text("Export saved version").font(.headline)
                 Button(document.photosAssetIdentifier == nil ? "Save to Photos" : "Update linked Photos asset") {
                     Task { await export(asNewCopy: false) }
                 }.buttonStyle(.borderedProminent).accessibilityIdentifier("filmy-export-photos")
+                if document.photosAssetIdentifier != nil {
+                    Button("Export a new Photos copy") { Task { await export(asNewCopy: true) } }.buttonStyle(.bordered)
+                }
+                Text("Exports use the most recently saved version. Existing Photos edits from another app are not overwritten.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
-            if document.photosAssetIdentifier != nil {
-                Button("Export a new Photos copy") { Task { await export(asNewCopy: true) } }.buttonStyle(.bordered)
-            }
-            Text("Exports use the most recently saved version. Existing Photos edits from another app are not overwritten.")
-                .font(.caption).foregroundStyle(.secondary)
             if let originalURL { ShareLink("Share processed original", item: originalURL) }
             if let rawURL { ShareLink("Share original DNG", item: rawURL) }
             if let liveURL { ShareLink("Share original Live movie", item: liveURL) }
@@ -316,10 +321,19 @@ struct FilmyPhotoEditorView: View {
     /// Edit look: keep the look as a new version, then add it to Photos as a
     /// new asset. The original and the linked Photos asset are never touched.
     private func saveAsNewFrame() async {
+        // Retry after a failed export: the version from the last tap is still
+        // current and unchanged, so export it instead of saving a duplicate.
+        if let pending = newFrameAwaitingExport, let current = document?.currentRevision,
+           current.id == pending, selectedRevisionID == pending,
+           recipe?.id == current.recipe.id, finish == current.finish {
+            if await export(asNewCopy: true) { newFrameAwaitingExport = nil }
+            return
+        }
         let before = document?.currentRevision?.id
         await develop(save: true)
         guard let after = document?.currentRevision?.id, after != before else { return }
-        await export(asNewCopy: true)
+        newFrameAwaitingExport = after
+        if await export(asNewCopy: true) { newFrameAwaitingExport = nil }
     }
 
     private func develop(save: Bool) async {
@@ -372,8 +386,9 @@ struct FilmyPhotoEditorView: View {
         } catch { message = error.localizedDescription }
     }
 
-    private func export(asNewCopy: Bool) async {
-        guard !busy else { return }
+    @discardableResult
+    private func export(asNewCopy: Bool) async -> Bool {
+        guard !busy else { return false }
         message = nil
         busy = true
         defer { busy = false }
@@ -389,7 +404,11 @@ struct FilmyPhotoEditorView: View {
             }
             await load()
             message = "Saved to Photos with original resources and reversible Filmy edits."
-        } catch { message = error.localizedDescription }
+            return true
+        } catch {
+            message = error.localizedDescription
+            return false
+        }
     }
 
     nonisolated private static func thumbnail(_ data: Data) -> UIImage? {
